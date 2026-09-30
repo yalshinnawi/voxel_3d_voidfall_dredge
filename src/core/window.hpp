@@ -44,6 +44,9 @@ public:
     using ResizeCallback = std::function<void(int, int)>;
     void set_resize_callback(ResizeCallback cb) { m_resize_cb = std::move(cb); }
 
+    using KeyCallback = std::function<void(int key, int action)>;
+    void set_key_callback(KeyCallback cb) { m_key_cb = std::move(cb); }
+
 private:
     static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
     static void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -66,6 +69,7 @@ private:
     std::bitset<16> m_mouse_down;
 
     ResizeCallback m_resize_cb;
+    KeyCallback m_key_cb;
 };
 
 } // namespace Voidfall

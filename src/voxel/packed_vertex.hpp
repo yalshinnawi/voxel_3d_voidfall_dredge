@@ -15,6 +15,8 @@ enum MaterialID : uint8_t {
     MAT_THERMITE_SLAG = 6,         // Heated molten slag from demolition charges
     MAT_RADIOACTIVE_ORE = 7,       // Glowing green toxic mineral
     MAT_DREDGE_BEDROCK = 8,        // Deep planetary crust
+    MAT_GAS = 9,
+    MAT_VOLATILE_SMOKE = 10,
     MAT_COUNT
 };
 
@@ -27,26 +29,39 @@ constexpr uint8_t MAT_RADIOACTIVE = MAT_RADIOACTIVE_ORE;
 constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
 constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
 
+// Voxel bit flags
+constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;
+constexpr uint8_t VOXEL_FLAG_EMISSIVE      = 0x20;
+constexpr uint8_t VOXEL_FLAG_SURVEYED      = 0x40;
+constexpr uint8_t VOXEL_FLAG_PLAYER_PLACED = 0x80;
+
 // 16-bit packed voxel state
 #pragma pack(push, 1)
 struct Voxel {
     uint8_t material_id{MAT_AIR};
     // Flags:
     // bit 0-3: Damage tier (0..15)
-    // bit 4:   Anchored / structural node
-    // bit 5:   Active emissive
-    // bit 6:   Surveyed / pinged highlight
-    // bit 7:   Reserved
+    // bit 4:   Anchored / structural node (0x10)
+    // bit 5:   Active emissive (0x20)
+    // bit 6:   Surveyed / pinged highlight (0x40)
+    // bit 7:   Player-placed block metadata (0x80)
     uint8_t flags_and_damage{0};
 
-    inline bool is_solid() const { return material_id != MAT_AIR; }
-    inline bool is_anchored() const { return (flags_and_damage & 0x10) != 0 || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
+    inline bool is_solid() const {
+        return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE;
+    }
+    inline bool is_anchored() const { return (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0 || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
     inline uint8_t damage() const { return flags_and_damage & 0x0F; }
     inline void set_damage(uint8_t d) { flags_and_damage = (flags_and_damage & 0xF0) | (d & 0x0F); }
-    inline bool is_highlighted() const { return (flags_and_damage & 0x40) != 0; }
+    inline bool is_highlighted() const { return (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
     inline void set_highlighted(bool h) {
-        if (h) flags_and_damage |= 0x40;
-        else   flags_and_damage &= ~0x40;
+        if (h) flags_and_damage |= VOXEL_FLAG_SURVEYED;
+        else   flags_and_damage &= ~VOXEL_FLAG_SURVEYED;
+    }
+    inline bool is_player_placed() const { return (flags_and_damage & VOXEL_FLAG_PLAYER_PLACED) != 0; }
+    inline void set_player_placed(bool p) {
+        if (p) flags_and_damage |= VOXEL_FLAG_PLAYER_PLACED;
+        else   flags_and_damage &= ~VOXEL_FLAG_PLAYER_PLACED;
     }
 };
 #pragma pack(pop)

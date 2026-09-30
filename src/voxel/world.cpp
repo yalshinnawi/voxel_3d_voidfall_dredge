@@ -141,6 +141,32 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
     return true;
 }
 
+bool World::set_block_with_flags(const glm::ivec3& pos, uint8_t mat, uint8_t flags) {
+    return set_voxel(pos.x, pos.y, pos.z, Voxel{mat, flags}, true);
+}
+
+bool World::is_solid(const glm::ivec3& pos) const {
+    return is_solid(pos.x, pos.y, pos.z);
+}
+
+bool World::is_solid(int world_x, int world_y, int world_z) const {
+    if (world_y <= 0) return true; // Bedrock base layer is always solid
+
+    int cx = (world_x < 0) ? ((world_x - 31) / 32) : (world_x / 32);
+    int cy = (world_y < 0) ? ((world_y - 31) / 32) : (world_y / 32);
+    int cz = (world_z < 0) ? ((world_z - 31) / 32) : (world_z / 32);
+
+    const Chunk* chunk = get_chunk(ChunkPos{cx, cy, cz});
+    if (!chunk) return false;
+
+    int lx = floor_mod(world_x, CHUNK_SIZE);
+    int ly = floor_mod(world_y, CHUNK_SIZE);
+    int lz = floor_mod(world_z, CHUNK_SIZE);
+
+    Voxel v = chunk->get_voxel(lx, ly, lz);
+    return v.is_solid();
+}
+
 // 3D procedural noise synthesis for subterranean caverns
 float World::sample_cavern_noise(float x, float y, float z) const {
     float ox = x + m_noise_offset.x;

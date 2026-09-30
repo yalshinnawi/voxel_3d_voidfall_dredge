@@ -44,6 +44,10 @@ public:
 
     Voxel get_voxel(int world_x, int world_y, int world_z) const;
     bool set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_neighbors = true);
+    bool set_block_with_flags(const glm::ivec3& pos, uint8_t mat, uint8_t flags);
+
+    bool is_solid(const glm::ivec3& pos) const;
+    bool is_solid(int world_x, int world_y, int world_z) const;
 
     // Raycast through voxel grid (DDA algorithm)
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance = 12.0f) const;

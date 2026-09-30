@@ -211,12 +211,14 @@ void PlayerController::update_physics(float dt, World& world) {
             m_target_time_to_break = base_time / std::max(0.2f, m_drill_speed_multiplier);
 
             if (m_mine_timer >= m_target_time_to_break) {
-                uint8_t old_mat = hit.voxel.material_id;
+                Voxel target_vox = world.get_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
+                uint8_t old_mat = target_vox.material_id;
+                uint8_t old_flags = target_vox.flags_and_damage;
                 glm::ivec3 break_pos = hit.block_pos;
                 glm::ivec3 break_norm = hit.normal;
                 world.set_voxel(break_pos.x, break_pos.y, break_pos.z, Voxel{MAT_AIR, 0}, true);
                 if (m_on_block_break) {
-                    m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat);
+                    m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
                 }
                 m_mine_timer = 0.0f;
                 m_target_block = glm::ivec3(-1);
@@ -317,8 +319,8 @@ void PlayerController::update_physics(float dt, World& world) {
                                      player_min.z < block_max.z && player_max.z > block_min.z);
 
                     if (!overlaps) {
-                        // Guarantee: face normal placement ONLY, NEVER breaks hit.block_pos
-                        world.set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, 0}, true);
+                        // Guarantee: face normal placement ONLY with VOXEL_FLAG_PLAYER_PLACED metadata
+                        world.set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED}, true);
                         if (m_on_block_place) {
                             m_on_block_place(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
                         }
@@ -329,117 +331,144 @@ void PlayerController::update_physics(float dt, World& world) {
     }
 }
 
+void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_extents, World& world) {
+    // Player extents: width 0.6m (radius 0.3m), height 1.8m
+    // m_position is eye level (1.6m above feet, 0.2m below head)
+    glm::vec3 center = m_position + glm::vec3(0.0f, -0.7f, 0.0f);
+    glm::vec3 box_min = center - half_extents;
+    glm::vec3 box_max = center + half_extents;
+
+    int min_bx = static_cast<int>(std::floor(box_min.x + 0.001f));
+    int max_bx = static_cast<int>(std::floor(box_max.x - 0.001f));
+    int min_by = static_cast<int>(std::floor(box_min.y + 0.001f));
+    int max_by = static_cast<int>(std::floor(box_max.y - 0.001f));
+    int min_bz = static_cast<int>(std::floor(box_min.z + 0.001f));
+    int max_bz = static_cast<int>(std::floor(box_max.z - 0.001f));
+
+    if (axis == 1) { // 1. Y Axis (Gravity, jumping, floors, ceilings)
+        if (m_velocity.y < 0.0f) {
+            for (int x = min_bx; x <= max_bx; ++x) {
+                for (int z = min_bz; z <= max_bz; ++z) {
+                    for (int y = min_by; y <= max_by; ++y) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            // If hit downward, land on top of block (y + 1.0f)
+                            float target_feet = static_cast<float>(y + 1);
+                            m_position.y = target_feet + 1.6f;
+                            m_velocity.y = 0.0f;
+                            m_on_ground = true;
+                            return;
+                        }
+                    }
+                }
+            }
+        } else if (m_velocity.y > 0.0f) {
+            for (int x = min_bx; x <= max_bx; ++x) {
+                for (int z = min_bz; z <= max_bz; ++z) {
+                    for (int y = max_by; y >= min_by; --y) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            // Hit ceiling
+                            float target_head = static_cast<float>(y);
+                            m_position.y = target_head - 0.2f - 0.001f;
+                            m_velocity.y = 0.0f;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    } else if (axis == 0) { // 2. X Axis (Walls)
+        if (m_velocity.x > 0.0f) {
+            for (int y = min_by; y <= max_by; ++y) {
+                for (int z = min_bz; z <= max_bz; ++z) {
+                    for (int x = max_bx; x >= min_bx; --x) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            m_position.x = static_cast<float>(x) - half_extents.x - 0.001f;
+                            m_velocity.x = 0.0f;
+                            return;
+                        }
+                    }
+                }
+            }
+        } else if (m_velocity.x < 0.0f) {
+            for (int y = min_by; y <= max_by; ++y) {
+                for (int z = min_bz; z <= max_bz; ++z) {
+                    for (int x = min_bx; x <= max_bx; ++x) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            m_position.x = static_cast<float>(x + 1) + half_extents.x + 0.001f;
+                            m_velocity.x = 0.0f;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    } else if (axis == 2) { // 3. Z Axis (Walls)
+        if (m_velocity.z > 0.0f) {
+            for (int y = min_by; y <= max_by; ++y) {
+                for (int x = min_bx; x <= max_bx; ++x) {
+                    for (int z = max_bz; z >= min_bz; --z) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            m_position.z = static_cast<float>(z) - half_extents.z - 0.001f;
+                            m_velocity.z = 0.0f;
+                            return;
+                        }
+                    }
+                }
+            }
+        } else if (m_velocity.z < 0.0f) {
+            for (int y = min_by; y <= max_by; ++y) {
+                for (int x = min_bx; x <= max_bx; ++x) {
+                    for (int z = min_bz; z <= max_bz; ++z) {
+                        if (world.is_solid(glm::ivec3(x, y, z))) {
+                            m_position.z = static_cast<float>(z + 1) + half_extents.z + 0.001f;
+                            m_velocity.z = 0.0f;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt) {
-    const float radius = 0.35f;
-    const float feet_offset = 1.6f;
-    const float head_offset = 0.2f;
     m_on_ground = false;
+    glm::vec3 half_extents(0.3f, 0.9f, 0.3f);
 
-    // 1. Move & Resolve X
-    pos.x += vel.x * dt;
-    {
-        int min_x = static_cast<int>(std::floor(pos.x - radius));
-        int max_x = static_cast<int>(std::floor(pos.x + radius));
-        int min_y = static_cast<int>(std::floor(pos.y - feet_offset + 0.05f));
-        int max_y = static_cast<int>(std::floor(pos.y + head_offset - 0.05f));
-        int min_z = static_cast<int>(std::floor(pos.z - radius));
-        int max_z = static_cast<int>(std::floor(pos.z + radius));
+    // 1. Resolve Y Axis (Gravity, jumping, floors, ceilings)
+    m_position.y += m_velocity.y * dt;
+    resolve_axis_collision(1, half_extents, world);
 
-        if (vel.x > 0.0f) {
-            for (int y = min_y; y <= max_y; ++y) {
-                for (int z = min_z; z <= max_z; ++z) {
-                    if (world.get_voxel(max_x, y, z).is_solid()) {
-                        pos.x = static_cast<float>(max_x) - radius - 0.001f;
-                        vel.x = 0.0f;
-                        goto resolved_x;
-                    }
+    // 2. Resolve X Axis (Walls)
+    m_position.x += m_velocity.x * dt;
+    resolve_axis_collision(0, half_extents, world);
+
+    // 3. Resolve Z Axis (Walls)
+    m_position.z += m_velocity.z * dt;
+    resolve_axis_collision(2, half_extents, world);
+
+    // Ground support probe: ensure m_on_ground stays true while standing or walking on floor
+    if (m_velocity.y <= 0.05f) {
+        int ground_y = static_cast<int>(std::floor(m_position.y - 1.6f - 0.05f));
+        int min_x = static_cast<int>(std::floor(m_position.x - 0.28f));
+        int max_x = static_cast<int>(std::floor(m_position.x + 0.28f));
+        int min_z = static_cast<int>(std::floor(m_position.z - 0.28f));
+        int max_z = static_cast<int>(std::floor(m_position.z + 0.28f));
+
+        for (int x = min_x; x <= max_x; ++x) {
+            for (int z = min_z; z <= max_z; ++z) {
+                if (world.is_solid(glm::ivec3(x, ground_y, z))) {
+                    m_on_ground = true;
+                    m_velocity.y = 0.0f;
+                    break;
                 }
             }
-        } else if (vel.x < 0.0f) {
-            for (int y = min_y; y <= max_y; ++y) {
-                for (int z = min_z; z <= max_z; ++z) {
-                    if (world.get_voxel(min_x, y, z).is_solid()) {
-                        pos.x = static_cast<float>(min_x + 1) + radius + 0.001f;
-                        vel.x = 0.0f;
-                        goto resolved_x;
-                    }
-                }
-            }
+            if (m_on_ground) break;
         }
     }
-resolved_x:
 
-    // 2. Move & Resolve Z
-    pos.z += vel.z * dt;
-    {
-        int min_x = static_cast<int>(std::floor(pos.x - radius));
-        int max_x = static_cast<int>(std::floor(pos.x + radius));
-        int min_y = static_cast<int>(std::floor(pos.y - feet_offset + 0.05f));
-        int max_y = static_cast<int>(std::floor(pos.y + head_offset - 0.05f));
-        int min_z = static_cast<int>(std::floor(pos.z - radius));
-        int max_z = static_cast<int>(std::floor(pos.z + radius));
-
-        if (vel.z > 0.0f) {
-            for (int y = min_y; y <= max_y; ++y) {
-                for (int x = min_x; x <= max_x; ++x) {
-                    if (world.get_voxel(x, y, max_z).is_solid()) {
-                        pos.z = static_cast<float>(max_z) - radius - 0.001f;
-                        vel.z = 0.0f;
-                        goto resolved_z;
-                    }
-                }
-            }
-        } else if (vel.z < 0.0f) {
-            for (int y = min_y; y <= max_y; ++y) {
-                for (int x = min_x; x <= max_x; ++x) {
-                    if (world.get_voxel(x, y, min_z).is_solid()) {
-                        pos.z = static_cast<float>(min_z + 1) + radius + 0.001f;
-                        vel.z = 0.0f;
-                        goto resolved_z;
-                    }
-                }
-            }
-        }
-    }
-resolved_z:
-
-    // 3. Move & Resolve Y (Ceiling and Floor)
-    pos.y += vel.y * dt;
-    {
-        int min_x = static_cast<int>(std::floor(pos.x - radius + 0.05f));
-        int max_x = static_cast<int>(std::floor(pos.x + radius - 0.05f));
-        int min_y = static_cast<int>(std::floor(pos.y - feet_offset));
-        int max_y = static_cast<int>(std::floor(pos.y + head_offset));
-        int min_z = static_cast<int>(std::floor(pos.z - radius + 0.05f));
-        int max_z = static_cast<int>(std::floor(pos.z + radius - 0.05f));
-
-        if (vel.y > 0.0f) {
-            // Moving UP (Jetpack / Jump): check top ceiling blocks
-            for (int x = min_x; x <= max_x; ++x) {
-                for (int z = min_z; z <= max_z; ++z) {
-                    if (world.get_voxel(x, max_y, z).is_solid()) {
-                        pos.y = static_cast<float>(max_y) - head_offset - 0.001f;
-                        vel.y = 0.0f;
-                        goto resolved_y;
-                    }
-                }
-            }
-        } else if (vel.y <= 0.0f) {
-            // Moving DOWN (Gravity): check bottom feet floor blocks
-            for (int x = min_x; x <= max_x; ++x) {
-                for (int z = min_z; z <= max_z; ++z) {
-                    if (world.get_voxel(x, min_y, z).is_solid()) {
-                        pos.y = static_cast<float>(min_y + 1) + feet_offset;
-                        vel.y = 0.0f;
-                        m_on_ground = true;
-                        goto resolved_y;
-                    }
-                }
-            }
-        }
-    }
-resolved_y:
-    ;
+    pos = m_position;
+    vel = m_velocity;
 }
 
 PlayerInputPacket PlayerController::build_input_packet(uint32_t tick, float dt) const {

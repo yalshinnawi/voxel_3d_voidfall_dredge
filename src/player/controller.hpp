@@ -75,7 +75,7 @@ public:
     PlayerInputPacket build_input_packet(uint32_t tick, float dt) const;
 
     // Callbacks for gameplay actions
-    using BlockBreakCallback = std::function<void(int x, int y, int z, const glm::ivec3& normal, uint8_t mat)>;
+    using BlockBreakCallback = std::function<void(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags)>;
     using BlockPlaceCallback = std::function<void(int x, int y, int z, uint8_t mat)>;
     using BulkheadDismantleCallback = std::function<void(int x, int y, int z)>;
     using SonarCastCallback = std::function<void(const glm::vec3& origin)>;
@@ -94,6 +94,7 @@ public:
 private:
     void update_camera_vectors();
     void resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt);
+    void resolve_axis_collision(int axis, const glm::vec3& half_extents, World& world);
 
     glm::vec3 m_position;
     glm::vec3 m_velocity{0.0f};

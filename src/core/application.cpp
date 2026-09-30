@@ -49,8 +49,12 @@ void Application::init_systems() {
     // 4. Player Controller
     m_player = std::make_unique<PlayerController>(glm::vec3(16.0f, 22.0f, 16.0f));
 
-    m_player->set_on_block_break([this](int x, int y, int z, const glm::ivec3& normal, uint8_t mat) {
-        on_block_broken(x, y, z, normal, mat);
+    m_player->set_on_block_break([this](int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags) {
+        on_block_broken(x, y, z, normal, mat, flags);
+    });
+
+    m_window->set_key_callback([this](int key, int action) {
+        process_input(key, action);
     });
 
     m_player->set_on_block_place([this](int x, int y, int z, uint8_t mat) {
@@ -83,6 +87,7 @@ void Application::init_systems() {
     m_extraction = std::make_unique<ExtractionSystem>();
     m_extraction->set_on_complete([this]() {
         m_expedition_success = true;
+        m_inventory.finalize_run(m_selected_level, true);
         m_state = GameState::Debrief;
         m_window->set_cursor_locked(false);
         std::cout << "[Extraction] Delver extraction complete! Returning to debrief." << std::endl;
@@ -177,7 +182,7 @@ void Application::start_expedition(int level) {
     m_state = GameState::Gameplay;
 }
 
-void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat) {
+void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags) {
     if (m_host) {
         int cx = (x >= 0) ? (x / CHUNK_SIZE) : ((x - CHUNK_SIZE + 1) / CHUNK_SIZE);
         int cy = (y >= 0) ? (y / CHUNK_SIZE) : ((y - CHUNK_SIZE + 1) / CHUNK_SIZE);
@@ -207,6 +212,18 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
 
     // Update inventory, floating text, and award Demolitions XP
     glm::vec3 popup_pos(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.8f, static_cast<float>(z) + 0.5f);
+
+    // Anti-exploit check: Player-placed voxels
+    bool is_player_placed = (flags & VOXEL_FLAG_PLAYER_PLACED) != 0;
+    if (is_player_placed) {
+        // Award 0 score, 0 XP, and 0 rare loot drops for player-placed voxels.
+        // Only refund the base 1 Bulkhead plate if dismantled/broken with tool.
+        if (mat == MAT_INDUSTRIAL_BULKHEAD) {
+            m_inventory.refund_bulkhead();
+            m_hud->add_floating_loot(popup_pos, "+1 BULKHEAD REFUNDED", glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
+        }
+        return;
+    }
 
     if (mat == MAT_VOIDITE_CRYSTAL) {
         m_inventory.add_voidite(10);
@@ -356,7 +373,7 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                 // Do not destroy adjacent voidite ore surgically
                 if (v.material_id != MAT_VOIDITE_CRYSTAL) {
                     m_world->set_voxel(bpos.x, bpos.y, bpos.z, Voxel{MAT_AIR, 0}, true);
-                    on_block_broken(bpos.x, bpos.y, bpos.z, -forward_step, v.material_id);
+                    on_block_broken(bpos.x, bpos.y, bpos.z, -forward_step, v.material_id, v.flags_and_damage);
                 }
             }
         }
@@ -373,7 +390,7 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                     Voxel v = m_world->get_voxel(bpos.x, bpos.y, bpos.z);
                     if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK) {
                         m_world->set_voxel(bpos.x, bpos.y, bpos.z, Voxel{MAT_AIR, 0}, true);
-                        on_block_broken(bpos.x, bpos.y, bpos.z, glm::ivec3(0, 1, 0), v.material_id);
+                        on_block_broken(bpos.x, bpos.y, bpos.z, glm::ivec3(0, 1, 0), v.material_id, v.flags_and_damage);
                     }
                 }
             }
@@ -421,7 +438,7 @@ void Application::setup_hazard_system() {
         for (const auto& b : detach_blocks) {
             Voxel v = m_world->get_voxel(b.x, b.y, b.z);
             m_world->set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, true);
-            on_block_broken(b.x, b.y, b.z, glm::ivec3(0, -1, 0), v.material_id);
+            on_block_broken(b.x, b.y, b.z, glm::ivec3(0, -1, 0), v.material_id, v.flags_and_damage);
 
             uint32_t did = m_next_debris_id++;
             float rvx = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 1.5f;
@@ -434,6 +451,26 @@ void Application::setup_hazard_system() {
             }
         }
     });
+}
+
+void Application::process_input(int key, int action) {
+    if (action != GLFW_PRESS) return;
+
+    if (key == GLFW_KEY_ESCAPE) {
+        if (m_state == GameState::Gameplay) {
+            m_state = GameState::Paused;
+            m_window->set_cursor_locked(false);
+        } else if (m_state == GameState::Paused) {
+            m_state = GameState::Gameplay;
+            m_window->set_cursor_locked(true);
+        } else if (m_state == GameState::OrbitalHub) {
+            m_state = GameState::MainMenu;
+        } else if (m_state == GameState::Debrief) {
+            m_state = GameState::OrbitalHub;
+        } else if (m_state == GameState::MainMenu) {
+            glfwSetWindowShouldClose(m_window->handle(), GLFW_TRUE);
+        }
+    }
 }
 
 void Application::fixed_tick(float dt) {
@@ -768,7 +805,7 @@ void Application::run() {
             launch_down_last = launch_now;
 
             static bool hub_back_down_last = false;
-            bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE);
+            bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB);
             if (hub_back_now && !hub_back_down_last) {
                 m_state = GameState::MainMenu;
             }
@@ -787,7 +824,7 @@ void Application::run() {
             debrief_down_last = debrief_now;
 
             static bool hub_back_down_last = false;
-            bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE);
+            bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB);
             if (hub_back_now && !hub_back_down_last) {
                 m_state = GameState::OrbitalHub;
             }
@@ -821,28 +858,8 @@ void Application::run() {
             if (tab_now && !tab_down_last) {
                 m_window->set_cursor_locked(!m_window->is_cursor_locked());
             }
-            tab_down_last = tab_now;
-
-            static bool esc_down_last_play = false;
-            bool esc_now_play = m_window->is_key_down(GLFW_KEY_ESCAPE);
-            if (esc_now_play && !esc_down_last_play) {
-                m_state = GameState::Paused;
-                m_window->set_cursor_locked(false);
-            }
-            esc_down_last_play = esc_now_play;
-
             m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
             m_player->handle_input(*m_window, static_cast<float>(frame_time));
-        }
-        // 5. PAUSED INPUTS
-        else if (m_state == GameState::Paused) {
-            static bool esc_down_last_pause = false;
-            bool esc_now_pause = m_window->is_key_down(GLFW_KEY_ESCAPE);
-            if (esc_now_pause && !esc_down_last_pause) {
-                m_state = GameState::Gameplay;
-                m_window->set_cursor_locked(true);
-            }
-            esc_down_last_pause = esc_now_pause;
         }
 
         while (accumulator >= fixed_dt) {

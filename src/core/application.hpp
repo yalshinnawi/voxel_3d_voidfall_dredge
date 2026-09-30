@@ -29,6 +29,12 @@ struct AppConfig {
     std::string player_name{"Delver"};
 };
 
+constexpr GameState STATE_MAIN_MENU   = GameState::MainMenu;
+constexpr GameState STATE_ORBITAL_HUB = GameState::OrbitalHub;
+constexpr GameState STATE_GAMEPLAY    = GameState::Gameplay;
+constexpr GameState STATE_PAUSED      = GameState::Paused;
+constexpr GameState STATE_DEBRIEF     = GameState::Debrief;
+
 class Application {
 public:
     explicit Application(const AppConfig& config);
@@ -44,8 +50,9 @@ private:
     void start_expedition(int level);
     void fixed_tick(float dt);
     void render(float dt);
+    void process_input(int key, int action);
 
-    void on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat);
+    void on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags);
     void on_block_placed(int x, int y, int z, uint8_t mat);
     void on_bulkhead_dismantled(int x, int y, int z);
     void on_sonar_cast(const glm::vec3& origin);

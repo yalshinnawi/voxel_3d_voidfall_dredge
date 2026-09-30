@@ -192,8 +192,8 @@ PauseMenuAction PauseMenu::render(
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
 
-    // 1. Dark tinted modal backdrop over frozen game frame
-    draw_rect(0.0f, 0.0f, w, h, glm::vec4(0.015f, 0.022f, 0.035f, 0.88f));
+    // 1. Dark tinted frosted modal backdrop over frozen game frame: rgba(8, 12, 18, 0.82)
+    draw_rect(0.0f, 0.0f, w, h, glm::vec4(8.0f / 255.0f, 12.0f / 255.0f, 18.0f / 255.0f, 0.82f));
 
     // 2. Central Modal Dialog Window
     float panel_w = std::min(w * 0.72f, 760.0f);
@@ -209,8 +209,11 @@ PauseMenuAction PauseMenu::render(
     draw_rect(panel_x, panel_y + panel_h - 3.0f, panel_w, 3.0f, glm::vec4(0.2f, 0.4f, 0.55f, 0.5f));
 
     // Header Title
-    std::string header = "EXPEDITION PAUSED -- SECTOR " + std::to_string(sector);
-    draw_text(header, panel_x + 28.0f, panel_y + 22.0f, 2.2f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    std::string sec_name = (sector == 1) ? "CRYSTALLINE CAVERNS" :
+                           (sector == 2) ? "SUBTERRANEAN VAULT" :
+                                           "FAULT-LINE COLLAPSE";
+    std::string header = "// EXPEDITION PAUSED: " + sec_name;
+    draw_text(header, panel_x + 28.0f, panel_y + 22.0f, 2.0f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
     draw_text("TACTICAL DELVER TELEMETRY // OPERATIONS SUSPENDED", panel_x + 28.0f, panel_y + 48.0f, 1.25f, glm::vec4(0.6f, 0.75f, 0.85f, 0.85f));
     draw_rect(panel_x + 28.0f, panel_y + 68.0f, panel_w - 56.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.55f, 0.6f));
 
@@ -303,18 +306,18 @@ PauseMenuAction PauseMenu::render(
                       mouse_y >= res_y && mouse_y <= res_y + btn_h);
     draw_rect(panel_x + 28.0f, res_y, btn_w, btn_h, res_hover ? glm::vec4(0.05f, 0.35f, 0.45f, 0.95f) : glm::vec4(0.04f, 0.18f, 0.26f, 0.9f));
     draw_rect(panel_x + 28.0f, res_y, 4.0f, btn_h, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
-    draw_text(">> [RESUME EXPEDITION] (ESC)", panel_x + 48.0f, res_y + 13.0f, 1.55f, res_hover ? glm::vec4(1.0f) : glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    draw_text(">> [RESUME EXPEDITION]", panel_x + 48.0f, res_y + 13.0f, 1.55f, res_hover ? glm::vec4(1.0f) : glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
     if (res_hover && mouse_clicked) {
         action = PauseMenuAction::Resume;
     }
 
-    // [ABANDON RUN] (Red warning)
+    // [ABANDON EXPEDITION] (Red warning)
     float abn_y = res_y + btn_h + 10.0f;
     bool abn_hover = (mouse_x >= panel_x + 28.0f && mouse_x <= panel_x + 28.0f + btn_w &&
                       mouse_y >= abn_y && mouse_y <= abn_y + btn_h);
     draw_rect(panel_x + 28.0f, abn_y, btn_w, btn_h, abn_hover ? glm::vec4(0.45f, 0.08f, 0.08f, 0.95f) : glm::vec4(0.25f, 0.04f, 0.04f, 0.85f));
     draw_rect(panel_x + 28.0f, abn_y, 4.0f, btn_h, glm::vec4(1.0f, 0.2f, 0.2f, 1.0f));
-    draw_text(">> [ABANDON RUN] -- 50% SALVAGE PENALTY", panel_x + 48.0f, abn_y + 13.0f, 1.5f, abn_hover ? glm::vec4(1.0f) : glm::vec4(1.0f, 0.35f, 0.35f, 1.0f));
+    draw_text(">> [ABANDON EXPEDITION] -- 50% SALVAGE PENALTY", panel_x + 48.0f, abn_y + 13.0f, 1.5f, abn_hover ? glm::vec4(1.0f) : glm::vec4(1.0f, 0.35f, 0.35f, 1.0f));
     if (abn_hover && mouse_clicked) {
         action = PauseMenuAction::Abandon;
     }

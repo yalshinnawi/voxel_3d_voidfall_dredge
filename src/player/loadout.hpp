@@ -122,10 +122,11 @@ struct PlayerInventory {
     }
 
     std::string evaluate_outcome_badge(bool safe_evac, int completion_rate) const {
-        if (is_abandoned) return "EXPEDITION ABANDONED";
+        if (is_abandoned) return "ABANDONED (<50%)";
         if (suit_failed) return "M.I.A. (SUIT FAILURE)";
-        if (safe_evac && completion_rate >= 100) return "SECTOR CLEARED (100%)";
-        if (safe_evac && completion_rate >= 50) return "PARTIAL EXTRACTION (" + std::to_string(completion_rate) + "%)";
+        if (safe_evac && completion_rate >= 100) return "CLEARED (100%)";
+        if (safe_evac && completion_rate >= 50) return "PARTIAL (" + std::to_string(completion_rate) + "%)";
+        if (completion_rate < 50) return "ABANDONED (<50%)";
         return "EXPEDITION FAILED";
     }
 
@@ -137,9 +138,9 @@ struct PlayerInventory {
             if (run_completion_rate > sector_records[sector].highest_completion_rate) {
                 sector_records[sector].highest_completion_rate = run_completion_rate;
             }
-            if (run_outcome_badge == "SECTOR CLEARED (100%)" || sector_records[sector].best_badge == "UNEXPLORED") {
+            if (run_outcome_badge == "CLEARED (100%)" || sector_records[sector].best_badge == "UNEXPLORED") {
                 sector_records[sector].best_badge = run_outcome_badge;
-            } else if (run_outcome_badge.find("PARTIAL") != std::string::npos && sector_records[sector].best_badge != "SECTOR CLEARED (100%)") {
+            } else if (run_outcome_badge.rfind("PARTIAL", 0) == 0 && sector_records[sector].best_badge != "CLEARED (100%)") {
                 sector_records[sector].best_badge = run_outcome_badge;
             } else if (sector_records[sector].best_badge == "UNEXPLORED") {
                 sector_records[sector].best_badge = run_outcome_badge;

@@ -282,9 +282,9 @@ bool OrbitalHubUI::render_main_menu(int& selected_level, const PlayerInventory& 
         std::string badge = inventory.sector_records[s_idx].best_badge;
         int comp_rate = inventory.sector_records[s_idx].highest_completion_rate;
 
-        glm::vec4 badge_col = (badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
+        glm::vec4 badge_col = (badge == "CLEARED (100%)" || badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
                               (badge.find("PARTIAL") != std::string::npos) ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) :
-                              (badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
+                              (badge.find("ABANDONED") != std::string::npos || badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
                                                                  glm::vec4(0.45f, 0.60f, 0.70f, 0.8f);
 
         std::string badge_str = (badge == "UNEXPLORED") ? "[UNEXPLORED]" : "[" + badge + "]";
@@ -366,9 +366,9 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
     std::string sec_badge = inventory.sector_records[selected_level].best_badge;
     int sec_rate = inventory.sector_records[selected_level].highest_completion_rate;
     std::string rec_str = "RECORD: [" + sec_badge + "] - BEST RATING: " + std::to_string(sec_rate) + "%";
-    glm::vec4 rec_col = (sec_badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
+    glm::vec4 rec_col = (sec_badge == "CLEARED (100%)" || sec_badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
                         (sec_badge.find("PARTIAL") != std::string::npos) ? glm::vec4(1.0f, 0.75f, 0.0f, 1.0f) :
-                        (sec_badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
+                        (sec_badge.find("ABANDONED") != std::string::npos || sec_badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
                                                                glm::vec4(0.5f, 0.7f, 0.8f, 0.85f);
     draw_text(rec_str, col1_x + 20.0f, col_y + 74.0f, 1.15f, rec_col);
 

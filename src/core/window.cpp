@@ -176,11 +176,16 @@ void Window::key_callback(GLFWwindow* window, int key, int scancode, int action,
     (void)scancode;
     (void)mods;
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
-    if (self && key >= 0 && key < 512) {
-        if (action == GLFW_PRESS) {
-            self->m_keys_down.set(key, true);
-        } else if (action == GLFW_RELEASE) {
-            self->m_keys_down.set(key, false);
+    if (self) {
+        if (key >= 0 && key < 512) {
+            if (action == GLFW_PRESS) {
+                self->m_keys_down.set(key, true);
+            } else if (action == GLFW_RELEASE) {
+                self->m_keys_down.set(key, false);
+            }
+        }
+        if (self->m_key_cb) {
+            self->m_key_cb(key, action);
         }
     }
 }
