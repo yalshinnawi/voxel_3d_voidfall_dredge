@@ -4,9 +4,13 @@
 #include "../voxel/world.hpp"
 #include "../voxel/structural_check.hpp"
 #include "../player/controller.hpp"
+#include "../player/loadout.hpp"
+#include "../skills/skill_matrix.hpp"
+#include "../skills/surveying.hpp"
 #include "../systems/hazard_clock.hpp"
 #include "../systems/extraction.hpp"
 #include "../ui/hud.hpp"
+#include "../ui/orbital_hub.hpp"
 #include "../net/net_host.hpp"
 #include "../net/net_client.hpp"
 #include "../entities/dynamic_debris.hpp"
@@ -36,12 +40,14 @@ public:
 
 private:
     void init_systems();
+    void start_expedition(int level);
     void fixed_tick(float dt);
     void render(float dt);
 
-    void on_block_broken(int x, int y, int z);
+    void on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat);
     void on_block_placed(int x, int y, int z, uint8_t mat);
     void on_sonar_cast(const glm::vec3& origin);
+    void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
 
     AppConfig m_config;
     std::unique_ptr<Window> m_window;
@@ -51,6 +57,7 @@ private:
     std::unique_ptr<HazardClock> m_hazard;
     std::unique_ptr<ExtractionSystem> m_extraction;
     std::unique_ptr<HUD> m_hud;
+    std::unique_ptr<OrbitalHubUI> m_hub_ui;
 
     std::unique_ptr<NetHost> m_host;
     std::unique_ptr<NetClient> m_client;
@@ -58,8 +65,20 @@ private:
     std::vector<DynamicDebris> m_debris;
     uint32_t m_next_debris_id{1};
 
+    // Game state machine & progression
+    GameState m_state{GameState::MainMenu};
+    int m_selected_level{1};
+    PlayerInventory m_inventory;
+    SkillMatrix m_skills;
+    SurveyingSystem m_surveying;
+
     uint32_t m_current_tick{0};
     float m_screen_shake{0.0f};
+    float m_trauma{0.0f};
+
+    // Level 3 collapse timer
+    float m_level3_timer{180.0f};
+    bool m_expedition_success{false};
 };
 
 } // namespace Voidfall

@@ -45,6 +45,8 @@ Window::Window(const WindowConfig& config)
 
     glfwSetFramebufferSizeCallback(m_window, framebuffer_size_callback);
     glfwSetCursorPosCallback(m_window, mouse_callback);
+    glfwSetKeyCallback(m_window, key_callback);
+    glfwSetMouseButtonCallback(m_window, mouse_button_callback);
 
     set_cursor_locked(true);
 
@@ -79,19 +81,28 @@ void Window::swap_buffers() {
 
 void Window::set_cursor_locked(bool locked) {
     m_cursor_locked = locked;
+    m_first_mouse = true;
+    m_mouse_delta_x = 0.0;
+    m_mouse_delta_y = 0.0;
+
     if (locked) {
         glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        m_first_mouse = true;
     } else {
         glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 }
 
 bool Window::is_key_down(int key) const {
+    if (key >= 0 && key < 512 && m_keys_down.test(key)) {
+        return true;
+    }
     return glfwGetKey(m_window, key) == GLFW_PRESS;
 }
 
 bool Window::is_mouse_button_down(int button) const {
+    if (button >= 0 && button < 16 && m_mouse_down.test(button)) {
+        return true;
+    }
     return glfwGetMouseButton(m_window, button) == GLFW_PRESS;
 }
 
@@ -102,6 +113,11 @@ glm::dvec2 Window::get_cursor_pos() const {
 }
 
 glm::dvec2 Window::get_cursor_delta() {
+    if (!m_cursor_locked) {
+        m_mouse_delta_x = 0.0;
+        m_mouse_delta_y = 0.0;
+        return glm::dvec2(0.0, 0.0);
+    }
     glm::dvec2 delta(m_mouse_delta_x, m_mouse_delta_y);
     m_mouse_delta_x = 0.0;
     m_mouse_delta_y = 0.0;
@@ -132,6 +148,31 @@ void Window::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
         self->m_mouse_delta_y += (self->m_last_mouse_y - ypos); // Invert Y for natural look
         self->m_last_mouse_x = xpos;
         self->m_last_mouse_y = ypos;
+    }
+}
+
+void Window::key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    (void)scancode;
+    (void)mods;
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (self && key >= 0 && key < 512) {
+        if (action == GLFW_PRESS) {
+            self->m_keys_down.set(key, true);
+        } else if (action == GLFW_RELEASE) {
+            self->m_keys_down.set(key, false);
+        }
+    }
+}
+
+void Window::mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    (void)mods;
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (self && button >= 0 && button < 16) {
+        if (action == GLFW_PRESS) {
+            self->m_mouse_down.set(button, true);
+        } else if (action == GLFW_RELEASE) {
+            self->m_mouse_down.set(button, false);
+        }
     }
 }
 

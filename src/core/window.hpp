@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <functional>
+#include <bitset>
 #include <glm/glm.hpp>
 
 struct GLFWwindow;
@@ -46,6 +47,8 @@ public:
 private:
     static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
     static void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+    static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 
     GLFWwindow* m_window{nullptr};
     int m_width{1600};
@@ -57,6 +60,10 @@ private:
     double m_mouse_delta_x{0.0};
     double m_mouse_delta_y{0.0};
     bool m_first_mouse{true};
+
+    // Continuous key and button bitsets to prevent sticking
+    std::bitset<512> m_keys_down;
+    std::bitset<16> m_mouse_down;
 
     ResizeCallback m_resize_cb;
 };

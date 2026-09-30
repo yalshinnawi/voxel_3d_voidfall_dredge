@@ -18,6 +18,12 @@ enum MaterialID : uint8_t {
     MAT_COUNT
 };
 
+// Aliases for gameplay and surveying systems
+constexpr uint8_t MAT_VOIDITE = MAT_VOIDITE_CRYSTAL;
+constexpr uint8_t MAT_TITANIUM = MAT_INDUSTRIAL_BULKHEAD;
+constexpr uint8_t MAT_VAULT_DOOR = MAT_REINFORCED_VAULT_DOOR;
+constexpr uint8_t MAT_RADIOACTIVE = MAT_RADIOACTIVE_ORE;
+
 // 16-bit packed voxel state
 #pragma pack(push, 1)
 struct Voxel {

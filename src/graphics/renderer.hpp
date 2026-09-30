@@ -2,6 +2,7 @@
 #include "shader.hpp"
 #include "texture_array.hpp"
 #include "../voxel/chunk.hpp"
+#include "../skills/surveying.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 #include <memory>
@@ -33,6 +34,15 @@ struct SonarPulseState {
     bool active{false};
 };
 
+struct BreakParticle {
+    glm::vec3 pos;
+    glm::vec3 vel;
+    glm::vec4 color;
+    float size{0.25f};
+    float life{0.8f};
+    float max_life{0.8f};
+};
+
 class Renderer {
 public:
     Renderer(int width, int height);
@@ -48,6 +58,11 @@ public:
     void end_frame(float delta_time, float radiation_level = 0.0f);
 
     void trigger_sonar_pulse(const glm::vec3& origin);
+    void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);
+
+    void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
+    void update_particles(float dt);
+    void render_particles();
 
     Headlamp& headlamp() { return m_headlamp; }
     const Headlamp& headlamp() const { return m_headlamp; }
@@ -55,10 +70,17 @@ public:
     void add_point_light(const PointLight& light);
     void clear_point_lights();
 
+    int width() const { return m_width; }
+    int height() const { return m_height; }
+    const glm::mat4& view_matrix() const { return m_view; }
+    const glm::mat4& proj_matrix() const { return m_proj; }
+
 private:
     void init_framebuffers();
     void cleanup_framebuffers();
     void render_quad();
+    void init_wireframe_cube();
+    void init_particle_buffers();
 
     int m_width{1600};
     int m_height{900};
@@ -78,6 +100,8 @@ private:
     Shader m_fog_compute_shader;
     Shader m_bloom_shader;
     Shader m_postprocess_shader;
+    Shader m_wireframe_shader;
+    Shader m_particle_shader;
 
     // Textures
     std::unique_ptr<TextureArray> m_texture_array;
@@ -100,6 +124,15 @@ private:
     // Fullscreen Quad
     unsigned int m_quad_vao{0};
     unsigned int m_quad_vbo{0};
+
+    // Wireframe unit cube for sonar X-ray
+    unsigned int m_wireframe_vao{0};
+    unsigned int m_wireframe_vbo{0};
+
+    // Break particles
+    unsigned int m_particle_vao{0};
+    unsigned int m_particle_vbo{0};
+    std::vector<BreakParticle> m_particles;
 
     float m_total_time{0.0f};
 };

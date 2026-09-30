@@ -25,6 +25,11 @@ glm::mat4 PlayerController::get_view_matrix() const {
     return glm::lookAt(m_position, m_position + m_front, m_up);
 }
 
+RaycastHit PlayerController::get_look_target(const World& world, float max_dist) const {
+    glm::vec3 ray_origin = m_position + m_front * 0.5f;
+    return world.raycast(ray_origin, m_front, max_dist);
+}
+
 void PlayerController::handle_input(const Window& window, float dt) {
     m_current_buttons = 0;
 
@@ -36,7 +41,12 @@ void PlayerController::handle_input(const Window& window, float dt) {
     m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
     update_camera_vectors();
 
-    // 2. Keyboard Movement
+    // Tool hotbar selection: 1, 2, 3
+    if (window.is_key_down(GLFW_KEY_1)) m_active_tool = ToolSlot::MiningDrill;
+    if (window.is_key_down(GLFW_KEY_2)) m_active_tool = ToolSlot::IndustrialBulkhead;
+    if (window.is_key_down(GLFW_KEY_3)) m_active_tool = ToolSlot::DemolitionCharge;
+
+    // 2. Keyboard Movement with continuous bitset polling
     glm::vec3 wish_dir(0.0f);
     glm::vec3 flat_front = glm::normalize(glm::vec3(m_front.x, 0.0f, m_front.z));
     glm::vec3 flat_right = glm::normalize(glm::vec3(m_right.x, 0.0f, m_right.z));
@@ -79,10 +89,11 @@ void PlayerController::handle_input(const Window& window, float dt) {
         }
     }
 
-    // Passive heat dissipation & power regeneration
+    // Passive heat dissipation & power regeneration with Kinetic Dynamo perk
     if (!(m_current_buttons & BTN_THRUSTER)) {
         m_exo.heat = std::max(0.0f, m_exo.heat - 18.0f * dt);
-        m_exo.power = std::min(m_exo.max_power, m_exo.power + 15.0f * dt);
+        float regen_rate = 15.0f * m_thruster_regen_multiplier;
+        m_exo.power = std::min(m_exo.max_power, m_exo.power + regen_rate * dt);
         if (m_exo.heat < 15.0f) {
             m_exo.overheated = false;
         }
@@ -100,7 +111,8 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (window.is_key_down(GLFW_KEY_E)) {
         m_current_buttons |= BTN_GRAPPLE_REEL;
         if (m_grapple.active) {
-            m_grapple.rest_length = std::max(2.0f, m_grapple.rest_length - m_grapple.reel_speed * dt);
+            float effective_reel = m_grapple.reel_speed * m_reel_speed_multiplier;
+            m_grapple.rest_length = std::max(2.0f, m_grapple.rest_length - effective_reel * dt);
         }
     }
 
@@ -109,23 +121,32 @@ void PlayerController::handle_input(const Window& window, float dt) {
         m_current_buttons |= BTN_MINE_DRILL;
     }
     if (window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT)) {
-        m_current_buttons |= BTN_PLACE_BLOCK;
+        if (m_allow_micro_charges || m_active_tool == ToolSlot::DemolitionCharge) {
+            m_current_buttons |= BTN_SKILL_DEMO;
+        } else {
+            m_current_buttons |= BTN_PLACE_BLOCK;
+        }
     }
 
     // 7. Surveying Sonar Pulse (Q key)
-    if (window.is_key_down(GLFW_KEY_Q)) {
+    static bool q_pressed_last = false;
+    bool q_down = window.is_key_down(GLFW_KEY_Q);
+    if (q_down && !q_pressed_last) {
         m_current_buttons |= BTN_SKILL_SONAR;
         if (m_on_sonar_cast) {
             m_on_sonar_cast(m_position);
         }
     }
+    q_pressed_last = q_down;
 }
 
 void PlayerController::update_physics(float dt, World& world) {
     // 1. Grapple Fire & Tension Cable Dynamics
+    // DDA raycast starts 0.5 units in front of the camera along the view vector to prevent self-collision
     if (m_current_buttons & BTN_GRAPPLE_FIRE) {
         if (!m_grapple.active) {
-            RaycastHit hit = world.raycast(m_position, m_front, m_grapple.max_length);
+            glm::vec3 ray_origin = m_position + m_front * 0.5f;
+            RaycastHit hit = world.raycast(ray_origin, m_front, m_grapple.max_length);
             if (hit.hit) {
                 m_grapple.active = true;
                 m_grapple.anchor_point = glm::vec3(hit.block_pos) + glm::vec3(0.5f);
@@ -159,52 +180,81 @@ void PlayerController::update_physics(float dt, World& world) {
 
     // 4. Mining / Drilling Handling
     if (m_current_buttons & BTN_MINE_DRILL) {
-        RaycastHit hit = world.raycast(m_position, m_front, 6.5f);
+        glm::vec3 ray_origin = m_position + m_front * 0.5f;
+        RaycastHit hit = world.raycast(ray_origin, m_front, 6.5f);
         if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
             if (hit.block_pos != m_target_block) {
                 m_target_block = hit.block_pos;
+                m_target_normal = hit.normal;
                 m_mine_timer = 0.0f;
             }
 
             m_mine_timer += dt;
-            float time_to_break = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
-                                  (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.2f : 0.6f;
+            m_target_time_to_break = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
+                                     (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) ? 2.5f :
+                                     (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.2f : 0.6f;
 
-            if (m_mine_timer >= time_to_break) {
-                world.set_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z, Voxel{MAT_AIR, 0}, true);
+            if (m_mine_timer >= m_target_time_to_break) {
+                uint8_t old_mat = hit.voxel.material_id;
+                glm::ivec3 break_pos = hit.block_pos;
+                glm::ivec3 break_norm = hit.normal;
+                world.set_voxel(break_pos.x, break_pos.y, break_pos.z, Voxel{MAT_AIR, 0}, true);
                 if (m_on_block_break) {
-                    m_on_block_break(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
+                    m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat);
                 }
                 m_mine_timer = 0.0f;
                 m_target_block = glm::ivec3(-1);
             }
+        } else {
+            m_mine_timer = 0.0f;
+            m_target_block = glm::ivec3(-1);
         }
     } else {
         m_mine_timer = 0.0f;
+        m_target_block = glm::ivec3(-1);
     }
 
-    // 5. Block Placement
-    if (m_current_buttons & BTN_PLACE_BLOCK) {
-        RaycastHit hit = world.raycast(m_position, m_front, 6.0f);
-        if (hit.hit) {
-            glm::ivec3 place_pos = hit.block_pos + hit.normal;
-            // Prevent placing inside player bounding box
-            glm::vec3 player_min = m_position - glm::vec3(0.35f, 1.6f, 0.35f);
-            glm::vec3 player_max = m_position + glm::vec3(0.35f, 0.2f, 0.35f);
-            glm::vec3 block_min(place_pos);
-            glm::vec3 block_max = block_min + glm::vec3(1.0f);
-
-            bool overlaps = (player_min.x < block_max.x && player_max.x > block_min.x &&
-                             player_min.y < block_max.y && player_max.y > block_min.y &&
-                             player_min.z < block_max.z && player_max.z > block_min.z);
-
-            if (!overlaps) {
-                world.set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, 0}, true);
-                if (m_on_block_place) {
-                    m_on_block_place(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
+    // 5. Block Placement or Demolitions Skill
+    static bool right_click_handled = false;
+    if (m_current_buttons & BTN_SKILL_DEMO) {
+        if (!right_click_handled) {
+            right_click_handled = true;
+            glm::vec3 ray_origin = m_position + m_front * 0.5f;
+            RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
+            if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
+                bool is_micro = m_allow_micro_charges;
+                if (m_on_explosive_blast) {
+                    m_on_explosive_blast(hit.block_pos, hit.normal, is_micro);
                 }
             }
         }
+    } else if (m_current_buttons & BTN_PLACE_BLOCK) {
+        if (!right_click_handled) {
+            right_click_handled = true;
+            glm::vec3 ray_origin = m_position + m_front * 0.5f;
+            RaycastHit hit = world.raycast(ray_origin, m_front, 6.0f);
+            if (hit.hit) {
+                glm::ivec3 place_pos = hit.block_pos + hit.normal;
+                // Prevent placing inside player bounding box
+                glm::vec3 player_min = m_position - glm::vec3(0.35f, 1.6f, 0.35f);
+                glm::vec3 player_max = m_position + glm::vec3(0.35f, 0.2f, 0.35f);
+                glm::vec3 block_min(place_pos);
+                glm::vec3 block_max = block_min + glm::vec3(1.0f);
+
+                bool overlaps = (player_min.x < block_max.x && player_max.x > block_min.x &&
+                                 player_min.y < block_max.y && player_max.y > block_min.y &&
+                                 player_min.z < block_max.z && player_max.z > block_min.z);
+
+                if (!overlaps) {
+                    world.set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, 0}, true);
+                    if (m_on_block_place) {
+                        m_on_block_place(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
+                    }
+                }
+            }
+        }
+    } else {
+        right_click_handled = false;
     }
 }
 

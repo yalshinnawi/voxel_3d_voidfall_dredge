@@ -64,7 +64,9 @@ set(SOURCES
     src/entities/dynamic_debris.cpp
     src/systems/hazard_clock.cpp
     src/systems/extraction.cpp
+    src/skills/surveying.cpp
     src/ui/hud.cpp
+    src/ui/orbital_hub.cpp
     src/net/net_host.cpp
     src/net/net_client.cpp
 )
