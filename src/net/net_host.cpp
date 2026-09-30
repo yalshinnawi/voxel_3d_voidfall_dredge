@@ -1,4 +1,5 @@
 #include "net_host.hpp"
+#include "../core/logger.hpp"
 #include <iostream>
 
 namespace Voidfall {
@@ -16,7 +17,7 @@ bool NetHost::start() {
 #ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "[NetHost] WSAStartup failed" << std::endl;
+        VF_LOG_ERROR("NetHost", "WSAStartup failed with error code: " << WSAGetLastError());
         return false;
     }
 #endif
@@ -24,7 +25,7 @@ bool NetHost::start() {
     m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 #ifdef _WIN32
     if (m_socket == INVALID_SOCKET) {
-        std::cerr << "[NetHost] Failed to create socket" << std::endl;
+        VF_LOG_ERROR("NetHost", "Failed to create UDP socket: " << WSAGetLastError());
         WSACleanup();
         return false;
     }
@@ -32,7 +33,7 @@ bool NetHost::start() {
     ioctlsocket(m_socket, FIONBIO, &non_blocking);
 #else
     if (m_socket < 0) {
-        std::cerr << "[NetHost] Failed to create socket" << std::endl;
+        VF_LOG_ERROR("NetHost", "Failed to create UDP socket");
         return false;
     }
     fcntl(m_socket, F_SETFL, O_NONBLOCK);
@@ -44,13 +45,13 @@ bool NetHost::start() {
     server_addr.sin_port = htons(m_port);
 
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
-        std::cerr << "[NetHost] Failed to bind socket to port " << m_port << std::endl;
+        VF_LOG_ERROR("NetHost", "Failed to bind socket to port " << m_port << " (already in use or permission denied)");
         stop();
         return false;
     }
 
     m_running = true;
-    std::cout << "[NetHost] Server listening on UDP port " << m_port << std::endl;
+    VF_LOG_INFO("NetHost", "Server listening on UDP port " << m_port);
     return true;
 }
 

@@ -12,9 +12,6 @@
  * For now, we use a lightweight implementation that loads essential GL functions.
  */
 
-#include <glad/glad.h>
-#include <string.h>
-
 #ifdef _WIN32
 #include <windows.h>
 static HMODULE libGL = NULL;
@@ -22,6 +19,9 @@ static HMODULE libGL = NULL;
 #include <dlfcn.h>
 static void* libGL = NULL;
 #endif
+
+#include <glad/glad.h>
+#include <string.h>
 
 static int glad_gl_version = 0;
 

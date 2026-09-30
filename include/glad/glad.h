@@ -178,6 +178,7 @@ typedef unsigned short GLhalf;
 #define GL_VENDOR                 0x1F00
 #define GL_EXTENSIONS             0x1F03
 #define GL_NUM_EXTENSIONS         0x821D
+#define GL_SHADING_LANGUAGE_VERSION 0x8B8C
 
 /* Misc */
 #define GL_MAX_TEXTURE_SIZE       0x0D33

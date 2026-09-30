@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "application.hpp"
+#include "logger.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -118,6 +119,10 @@ void Application::init_systems() {
 }
 
 void Application::start_expedition(int level) {
+    VF_LOG_INFO("Expedition", "Launching expedition into Sector " << level
+        << (level == 1 ? " [Crystalline Caverns - Surveying Sector]" :
+            level == 2 ? " [Derelict Station Core - Vault Breach]" :
+                         " [The Abyssal Vault - 3-Min Collapse Protocol]"));
     m_selected_level = level;
     m_inventory.reset(level == 3 ? 50 : 25);
     m_player->set_position(glm::vec3(16.0f, 22.0f, 16.0f));

@@ -33,3 +33,4 @@ external/
 *.sln.docstates
 .DS_Store
 Thumbs.db
+*.log

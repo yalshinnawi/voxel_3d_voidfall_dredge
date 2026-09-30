@@ -1,4 +1,5 @@
 #include "shader.hpp"
+#include "../core/logger.hpp"
 #include <glad/glad.h>
 #include <fstream>
 #include <sstream>
@@ -28,7 +29,7 @@ std::string Shader::read_file_to_string(const std::string& filepath) {
 
     std::ifstream file(p);
     if (!file.is_open()) {
-        std::cerr << "[Shader] Error opening shader file: " << filepath << " (resolved: " << p.string() << ")" << std::endl;
+        VF_LOG_ERROR("Shader", "Error opening shader file: " << filepath << " (attempted: " << p.string() << ")");
         return "";
     }
     std::stringstream ss;
@@ -49,7 +50,7 @@ unsigned int Shader::compile_stage(unsigned int type, const std::string& source,
     if (!success) {
         char info_log[1024];
         glGetShaderInfoLog(shader, sizeof(info_log), nullptr, info_log);
-        std::cerr << "[Shader] Compilation error in " << path << ":\n" << info_log << std::endl;
+        VF_LOG_ERROR("Shader", "Compilation error in " << path << ":\n" << info_log);
         glDeleteShader(shader);
         return 0;
     }
@@ -64,6 +65,7 @@ bool Shader::load_graphics(const std::string& vert_path, const std::string& frag
     unsigned int frag_shader = compile_stage(GL_FRAGMENT_SHADER, frag_src, frag_path);
 
     if (!vert_shader || !frag_shader) {
+        VF_LOG_ERROR("Shader", "Failed compiling shader stages for (" << vert_path << ", " << frag_path << ")");
         if (vert_shader) glDeleteShader(vert_shader);
         if (frag_shader) glDeleteShader(frag_shader);
         return false;
@@ -83,7 +85,7 @@ bool Shader::load_graphics(const std::string& vert_path, const std::string& frag
     if (!success) {
         char info_log[1024];
         glGetProgramInfoLog(m_program, sizeof(info_log), nullptr, info_log);
-        std::cerr << "[Shader] Linking error (" << vert_path << ", " << frag_path << "):\n" << info_log << std::endl;
+        VF_LOG_ERROR("Shader", "Linking error (" << vert_path << ", " << frag_path << "):\n" << info_log);
         glDeleteProgram(m_program);
         m_program = 0;
         glDeleteShader(vert_shader);
@@ -93,13 +95,17 @@ bool Shader::load_graphics(const std::string& vert_path, const std::string& frag
 
     glDeleteShader(vert_shader);
     glDeleteShader(frag_shader);
+    VF_LOG_INFO("Shader", "Successfully loaded & linked graphics shader: " << vert_path << " + " << frag_path);
     return true;
 }
 
 bool Shader::load_compute(const std::string& comp_path) {
     std::string comp_src = read_file_to_string(comp_path);
     unsigned int comp_shader = compile_stage(GL_COMPUTE_SHADER, comp_src, comp_path);
-    if (!comp_shader) return false;
+    if (!comp_shader) {
+        VF_LOG_ERROR("Shader", "Failed compiling compute shader stage for " << comp_path);
+        return false;
+    }
 
     if (m_program != 0) {
         glDeleteProgram(m_program);
@@ -114,7 +120,7 @@ bool Shader::load_compute(const std::string& comp_path) {
     if (!success) {
         char info_log[1024];
         glGetProgramInfoLog(m_program, sizeof(info_log), nullptr, info_log);
-        std::cerr << "[Shader] Compute linking error in " << comp_path << ":\n" << info_log << std::endl;
+        VF_LOG_ERROR("Shader", "Compute linking error in " << comp_path << ":\n" << info_log);
         glDeleteProgram(m_program);
         m_program = 0;
         glDeleteShader(comp_shader);
@@ -122,6 +128,7 @@ bool Shader::load_compute(const std::string& comp_path) {
     }
 
     glDeleteShader(comp_shader);
+    VF_LOG_INFO("Shader", "Successfully loaded & linked compute shader: " << comp_path);
     return true;
 }
 

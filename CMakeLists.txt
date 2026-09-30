@@ -50,6 +50,7 @@ endif()
 # ── Project Sources ──
 set(SOURCES
     src/main.cpp
+    src/core/logger.cpp
     src/core/glad/glad.c
     src/core/window.cpp
     src/core/application.cpp

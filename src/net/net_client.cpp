@@ -1,4 +1,5 @@
 #include "net_client.hpp"
+#include "../core/logger.hpp"
 #include <iostream>
 
 namespace Voidfall {
@@ -14,7 +15,7 @@ bool NetClient::connect_to_host(const std::string& host_ip, uint16_t port, const
 #ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "[NetClient] WSAStartup failed" << std::endl;
+        VF_LOG_ERROR("NetClient", "WSAStartup failed with error code: " << WSAGetLastError());
         return false;
     }
 #endif
@@ -22,7 +23,7 @@ bool NetClient::connect_to_host(const std::string& host_ip, uint16_t port, const
     m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 #ifdef _WIN32
     if (m_socket == INVALID_SOCKET) {
-        std::cerr << "[NetClient] Failed to create socket" << std::endl;
+        VF_LOG_ERROR("NetClient", "Failed to create UDP socket: " << WSAGetLastError());
         WSACleanup();
         return false;
     }
@@ -30,7 +31,7 @@ bool NetClient::connect_to_host(const std::string& host_ip, uint16_t port, const
     ioctlsocket(m_socket, FIONBIO, &non_blocking);
 #else
     if (m_socket < 0) {
-        std::cerr << "[NetClient] Failed to create socket" << std::endl;
+        VF_LOG_ERROR("NetClient", "Failed to create UDP socket");
         return false;
     }
     fcntl(m_socket, F_SETFL, O_NONBLOCK);
@@ -46,7 +47,7 @@ bool NetClient::connect_to_host(const std::string& host_ip, uint16_t port, const
 
     send_packet(PacketType::HandshakeRequest, &req, sizeof(req));
     m_connected = true;
-    std::cout << "[NetClient] Sent Handshake to " << host_ip << ":" << port << std::endl;
+    VF_LOG_INFO("NetClient", "Sent Handshake to " << host_ip << ":" << port);
     return true;
 }
 

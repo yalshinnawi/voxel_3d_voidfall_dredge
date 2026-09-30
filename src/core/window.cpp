@@ -1,4 +1,5 @@
 #include "window.hpp"
+#include "logger.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -10,7 +11,10 @@ Window::Window(const WindowConfig& config)
     : m_width(config.width)
     , m_height(config.height)
 {
+    Logger::setup_glfw_error_callback();
+
     if (!glfwInit()) {
+        VF_LOG_FATAL("Window", "Failed to initialize GLFW subsystem");
         throw std::runtime_error("Failed to initialize GLFW");
     }
 
@@ -19,15 +23,19 @@ Window::Window(const WindowConfig& config)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+#ifndef NDEBUG
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+#endif
 
     m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
     if (!m_window) {
-        // Fallback to OpenGL 4.3 if 4.5 is unavailable
+        VF_LOG_WARN("Window", "OpenGL 4.5 window creation failed, attempting fallback to OpenGL 4.3...");
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
         m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
         if (!m_window) {
             glfwTerminate();
+            VF_LOG_FATAL("Window", "Failed to create GLFW OpenGL 4.3+ window context");
             throw std::runtime_error("Failed to create GLFW OpenGL 4.3+ window");
         }
     }
@@ -38,8 +46,21 @@ Window::Window(const WindowConfig& config)
     if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
         glfwDestroyWindow(m_window);
         glfwTerminate();
+        VF_LOG_FATAL("Window", "Failed to initialize GLAD OpenGL loader");
         throw std::runtime_error("Failed to initialize GLAD OpenGL loader");
     }
+
+    const GLubyte* vendor = glGetString(GL_VENDOR);
+    const GLubyte* renderer = glGetString(GL_RENDERER);
+    const GLubyte* version = glGetString(GL_VERSION);
+    const GLubyte* glsl_version = glGetString(GL_SHADING_LANGUAGE_VERSION);
+
+    VF_LOG_INFO("Hardware", "GPU Vendor: " << (vendor ? reinterpret_cast<const char*>(vendor) : "Unknown"));
+    VF_LOG_INFO("Hardware", "GPU Renderer: " << (renderer ? reinterpret_cast<const char*>(renderer) : "Unknown"));
+    VF_LOG_INFO("Hardware", "OpenGL Version: " << (version ? reinterpret_cast<const char*>(version) : "Unknown"));
+    VF_LOG_INFO("Hardware", "GLSL Version: " << (glsl_version ? reinterpret_cast<const char*>(glsl_version) : "Unknown"));
+
+    Logger::setup_gl_debug();
 
     glfwSwapInterval(config.vsync ? 1 : 0);
 

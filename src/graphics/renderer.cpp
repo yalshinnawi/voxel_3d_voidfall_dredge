@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "../core/logger.hpp"
 #include <glad/glad.h>
 #include <iostream>
 #include <algorithm>
@@ -154,8 +155,11 @@ void Renderer::init_framebuffers() {
     unsigned int attachments[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
     glDrawBuffers(2, attachments);
 
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        std::cerr << "[Renderer] HDR Framebuffer is incomplete!" << std::endl;
+    GLenum fbo_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (fbo_status != GL_FRAMEBUFFER_COMPLETE) {
+        VF_LOG_ERROR("Renderer", "HDR Framebuffer is incomplete! Status: 0x" << std::hex << fbo_status);
+    } else {
+        VF_LOG_INFO("Renderer", "HDR Framebuffer created successfully (" << m_width << "x" << m_height << ")");
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -183,6 +187,11 @@ void Renderer::init_framebuffers() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_bloom_tex[i], 0);
+
+        GLenum bloom_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (bloom_status != GL_FRAMEBUFFER_COMPLETE) {
+            VF_LOG_ERROR("Renderer", "Bloom Ping-Pong FBO " << i << " is incomplete! Status: 0x" << std::hex << bloom_status);
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 }
