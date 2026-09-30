@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <functional>
 
 #ifdef _WIN32
 #include <winsock2.h>

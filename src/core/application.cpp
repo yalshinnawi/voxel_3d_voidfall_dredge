@@ -1,7 +1,12 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "application.hpp"
 #include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 
 namespace Voidfall {
 
@@ -207,7 +212,7 @@ void Application::render(float dt) {
         float shake_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * m_screen_shake;
         float shake_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * m_screen_shake;
         view = glm::translate(view, glm::vec3(shake_x, shake_y, 0.0f));
-        m_screen_shake = std::max(0.0f, m_screen_shake - dt * 0.8f);
+        m_screen_shake = (std::max)(0.0f, m_screen_shake - dt * 0.8f);
     }
 
     glm::mat4 proj = glm::perspective(

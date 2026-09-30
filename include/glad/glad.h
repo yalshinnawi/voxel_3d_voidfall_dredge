@@ -201,7 +201,6 @@ typedef unsigned short GLhalf;
 #define GL_R32F                   0x822E
 #define GL_RED                    0x1903
 #define GL_DEPTH_COMPONENT24      0x81A6
-#define GL_DEPTH_COMPONENT32F     0x8CAD
 #define GL_COLOR_ATTACHMENT1      0x8CE1
 #define GL_COLOR_ATTACHMENT2      0x8CE2
 #define GL_COLOR_ATTACHMENT3      0x8CE3
