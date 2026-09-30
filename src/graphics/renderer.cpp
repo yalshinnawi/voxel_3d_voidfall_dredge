@@ -13,8 +13,8 @@ Renderer::Renderer(int width, int height)
     // 1. Load Shaders
     m_voxel_shader.load_graphics("assets/shaders/voxel_pbr.vert", "assets/shaders/voxel_pbr.frag");
     m_fog_compute_shader.load_compute("assets/shaders/volumetric_fog.comp");
-    m_bloom_shader.load_graphics("assets/shaders/voxel_pbr.vert", "assets/shaders/bloom.frag"); // reuse vert or quad
-    m_postprocess_shader.load_graphics("assets/shaders/voxel_pbr.vert", "assets/shaders/postprocess.frag");
+    m_bloom_shader.load_graphics("assets/shaders/fullscreen_quad.vert", "assets/shaders/bloom.frag");
+    m_postprocess_shader.load_graphics("assets/shaders/fullscreen_quad.vert", "assets/shaders/postprocess.frag");
 
     // 2. Initialize Texture Array
     m_texture_array = std::make_unique<TextureArray>(64, 64, 9);

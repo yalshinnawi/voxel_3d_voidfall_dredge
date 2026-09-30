@@ -196,7 +196,7 @@ void main() {
     }
 
     // 4. Subterranean Ambient Lighting modulated by Baked Vertex AO
-    vec3 subterraneanAmbient = vec3(0.015, 0.018, 0.025); // Inky deep cavern ambient
+    vec3 subterraneanAmbient = vec3(0.12, 0.14, 0.18); // Rich atmospheric subterranean ambient
     vec3 ambient = subterraneanAmbient * albedo * vAO;
 
     vec3 finalColor = ambient + Lo + emissive;

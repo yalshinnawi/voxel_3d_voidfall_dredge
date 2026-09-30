@@ -37,13 +37,11 @@ void main() {
     vec3 scene = texture(uSceneColor, uv).rgb;
     vec3 bloom = texture(uBloomColor, uv).rgb;
     vec4 fog   = texture(uVolumetricFog, uv); // rgb = inscatter, a = fog factor
-    float ssao = texture(uSSAO, uv).r;
-
-    // Apply SSAO
-    scene *= mix(0.35, 1.0, ssao);
 
     // Composite volumetric fog light shafts
-    scene = scene * (1.0 - fog.a) + fog.rgb;
+    if (fog.a > 0.001) {
+        scene = scene * clamp(1.0 - fog.a * 0.4, 0.2, 1.0) + fog.rgb;
+    }
 
     // Additive Bloom
     scene += bloom * uBloomIntensity;

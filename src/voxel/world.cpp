@@ -162,6 +162,13 @@ void World::generate_chunk_terrain(Chunk& chunk) {
                     continue;
                 }
 
+                // Guarantee open landing cavern around spawn point (16, 20, 16)
+                float dist_to_spawn_sq = static_cast<float>((wx - 16)*(wx - 16) + (wy - 20)*(wy - 20) + (wz - 16)*(wz - 16));
+                if (dist_to_spawn_sq < 64.0f && wy > 1) {
+                    chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                    continue;
+                }
+
                 // Sample cavern density
                 float noise = sample_cavern_noise(static_cast<float>(wx), static_cast<float>(wy), static_cast<float>(wz));
 
