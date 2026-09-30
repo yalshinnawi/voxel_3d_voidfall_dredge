@@ -29,6 +29,8 @@ public:
     void update(float dt);
 
     void add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color);
+    void show_warning(const std::string& msg, float duration = 2.0f);
+    void clear_target_info();
 
     void render(
         const PlayerController& player,
@@ -64,6 +66,9 @@ private:
     unsigned int m_font_tex{0};
 
     std::vector<FloatingLootText> m_floating_loot;
+    float m_warning_timer{0.0f};
+    std::string m_warning_message;
+    float m_total_time{0.0f};
 };
 
 } // namespace Voidfall

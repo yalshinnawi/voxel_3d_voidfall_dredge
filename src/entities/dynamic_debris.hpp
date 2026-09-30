@@ -27,6 +27,8 @@ public:
     const glm::vec3& velocity() const { return m_velocity; }
     bool is_sleeping() const { return m_sleeping; }
 
+    bool has_dealt_damage{false};
+
 private:
     uint32_t m_id{0};
     glm::vec3 m_position{0.0f};

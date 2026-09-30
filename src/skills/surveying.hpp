@@ -29,8 +29,8 @@ public:
 private:
     bool m_active{false};
     float m_timer{0.0f};
-    float m_duration{5.0f};
-    float m_radius{18.0f};
+    float m_duration{2.5f};
+    float m_radius{14.0f};
     glm::vec3 m_origin{0.0f};
     std::vector<SurveyedVoxel> m_surveyed;
 };

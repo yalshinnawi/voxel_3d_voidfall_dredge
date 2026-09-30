@@ -20,6 +20,7 @@ public:
 
     ExtractionPhase phase() const { return m_phase; }
     float countdown() const { return m_countdown; }
+    float initial_countdown() const { return 40.0f; }
     const glm::vec3& beacon_position() const { return m_beacon_pos; }
     float siren_pulse() const { return m_siren_pulse; }
 
@@ -29,7 +30,7 @@ public:
 private:
     ExtractionPhase m_phase{ExtractionPhase::Dormant};
     glm::vec3 m_beacon_pos{0.0f};
-    float m_countdown{90.0f};
+    float m_countdown{40.0f};
     float m_siren_pulse{0.0f};
     ExtractionCompleteCallback m_on_complete;
 };

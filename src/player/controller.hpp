@@ -66,11 +66,15 @@ public:
     using BlockPlaceCallback = std::function<void(int x, int y, int z, uint8_t mat)>;
     using SonarCastCallback = std::function<void(const glm::vec3& origin)>;
     using ExplosiveBlastCallback = std::function<void(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro)>;
+    using CanPlacePredicate = std::function<bool()>;
+    using WarningCallback = std::function<void(const std::string&)>;
 
     void set_on_block_break(BlockBreakCallback cb) { m_on_block_break = std::move(cb); }
     void set_on_block_place(BlockPlaceCallback cb) { m_on_block_place = std::move(cb); }
     void set_on_sonar_cast(SonarCastCallback cb) { m_on_sonar_cast = std::move(cb); }
     void set_on_explosive_blast(ExplosiveBlastCallback cb) { m_on_explosive_blast = std::move(cb); }
+    void set_can_place_predicate(CanPlacePredicate pred) { m_can_place_predicate = std::move(pred); }
+    void set_on_warning(WarningCallback cb) { m_on_warning = std::move(cb); }
 
 private:
     void update_camera_vectors();
@@ -104,11 +108,16 @@ private:
     glm::ivec3 m_target_block{-1};
     glm::ivec3 m_target_normal{0, 1, 0};
 
+    // Placement cooldown debounce (0.2s)
+    float m_place_cooldown{0.0f};
+
     // Action callbacks
     BlockBreakCallback m_on_block_break;
     BlockPlaceCallback m_on_block_place;
     SonarCastCallback m_on_sonar_cast;
     ExplosiveBlastCallback m_on_explosive_blast;
+    CanPlacePredicate m_can_place_predicate;
+    WarningCallback m_on_warning;
 };
 
 } // namespace Voidfall

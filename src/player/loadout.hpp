@@ -15,6 +15,7 @@ struct PlayerInventory {
     int titanium{0};
     int salvage_parts{0};
     int demolition_charges{3};
+    int bulkheads{15};
     int total_run_score{0};
 
     // Level objective tracking
@@ -42,11 +43,28 @@ struct PlayerInventory {
         total_run_score += 250;
     }
 
+    bool has_bulkhead_material() const {
+        return bulkheads > 0 || titanium >= 1;
+    }
+
+    bool consume_bulkhead() {
+        if (bulkheads > 0) {
+            bulkheads--;
+            return true;
+        }
+        if (titanium >= 1) {
+            titanium--;
+            return true;
+        }
+        return false;
+    }
+
     void reset(int voidite_goal = 25) {
         voidite = 0;
         titanium = 0;
         salvage_parts = 0;
         demolition_charges = 3;
+        bulkheads = 15;
         total_run_score = 0;
         vault_breached = false;
         relic_extracted = false;

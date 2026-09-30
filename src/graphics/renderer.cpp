@@ -51,6 +51,7 @@ Renderer::Renderer(int width, int height)
     glBindVertexArray(0);
 
     init_wireframe_cube();
+    init_cable_buffer();
     init_particle_buffers();
 }
 
@@ -60,6 +61,8 @@ Renderer::~Renderer() {
     if (m_quad_vbo != 0) glDeleteBuffers(1, &m_quad_vbo);
     if (m_wireframe_vao != 0) glDeleteVertexArrays(1, &m_wireframe_vao);
     if (m_wireframe_vbo != 0) glDeleteBuffers(1, &m_wireframe_vbo);
+    if (m_cable_vao != 0) glDeleteVertexArrays(1, &m_cable_vao);
+    if (m_cable_vbo != 0) glDeleteBuffers(1, &m_cable_vbo);
     if (m_particle_vao != 0) glDeleteVertexArrays(1, &m_particle_vao);
     if (m_particle_vbo != 0) glDeleteBuffers(1, &m_particle_vbo);
 }
@@ -90,6 +93,17 @@ void Renderer::init_wireframe_cube() {
     glBindVertexArray(m_wireframe_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_wireframe_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(cube_lines), cube_lines, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
+    glBindVertexArray(0);
+}
+
+void Renderer::init_cable_buffer() {
+    glGenVertexArrays(1, &m_cable_vao);
+    glGenBuffers(1, &m_cable_vbo);
+    glBindVertexArray(m_cable_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_cable_vbo);
+    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
     glBindVertexArray(0);
@@ -235,25 +249,23 @@ void Renderer::render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels,
     m_wireframe_shader.use();
     m_wireframe_shader.set_mat4("uProjection", m_proj);
     m_wireframe_shader.set_mat4("uView", m_view);
+    m_wireframe_shader.set_int("uIsLineOnly", 0);
 
     glBindVertexArray(m_wireframe_vao);
 
     for (const auto& v : voxels) {
         glm::vec4 color(0.0f);
         if (v.material_id == MAT_VOIDITE_CRYSTAL) {
-            // Neon cyan / holographic purple
-            color = glm::vec4(0.15f, 0.9f, 1.0f, alpha);
-        } else if (v.material_id == MAT_INDUSTRIAL_BULKHEAD) {
-            // Neon silver-cyan
-            color = glm::vec4(0.5f, 0.85f, 1.0f, alpha * 0.85f);
+            // Neon cyan
+            color = glm::vec4(0.15f, 0.95f, 1.0f, alpha);
+        } else if (v.material_id == MAT_RADIOACTIVE_ORE) {
+            // Amber
+            color = glm::vec4(1.0f, 0.75f, 0.15f, alpha);
         } else if (v.material_id == MAT_REINFORCED_VAULT_DOOR) {
             // Neon gold
-            color = glm::vec4(1.0f, 0.82f, 0.15f, alpha);
-        } else if (v.material_id == MAT_RADIOACTIVE_ORE) {
-            // Toxic neon green
-            color = glm::vec4(0.2f, 1.0f, 0.3f, alpha);
+            color = glm::vec4(1.0f, 0.85f, 0.2f, alpha);
         } else {
-            color = glm::vec4(0.7f, 0.7f, 0.9f, alpha * 0.7f);
+            continue; // Ignore common rock and bulkheads to prevent visual clutter
         }
 
         m_wireframe_shader.set_vec3("uVoxelPos", glm::vec3(v.pos));
@@ -267,6 +279,43 @@ void Renderer::render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels,
     glEnable(GL_DEPTH_TEST);
 }
 
+void Renderer::render_grapple_cable(const glm::vec3& start, const glm::vec3& end) {
+    if (m_cable_vao == 0) return;
+
+    float vertices[6] = {
+        start.x, start.y, start.z,
+        end.x, end.y, end.z
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_cable_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive luminous cable
+    glLineWidth(2.5f);
+
+    m_wireframe_shader.use();
+    m_wireframe_shader.set_mat4("uProjection", m_proj);
+    m_wireframe_shader.set_mat4("uView", m_view);
+    m_wireframe_shader.set_vec3("uVoxelPos", glm::vec3(0.0f));
+    m_wireframe_shader.set_int("uIsLineOnly", 1);
+    m_wireframe_shader.set_vec4("uColor", glm::vec4(0.2f, 0.95f, 1.0f, 0.95f));
+
+    glBindVertexArray(m_cable_vao);
+    glDrawArrays(GL_LINES, 0, 2);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+}
+
+void Renderer::trigger_dust_kickup(float duration) {
+    m_dust_timer = duration;
+}
+
 void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id) {
     glm::vec3 center = block_pos + glm::vec3(0.5f);
     glm::vec3 n_dir = glm::vec3(normal);
@@ -276,20 +325,20 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
     // Color palette based on material
     glm::vec4 base_color(0.6f, 0.6f, 0.6f, 1.0f);
     if (mat_id == MAT_VOIDITE_CRYSTAL) {
-        base_color = glm::vec4(0.75f, 0.2f, 0.95f, 1.0f);
+        base_color = glm::vec4(0.85f, 0.3f, 1.0f, 1.0f);
     } else if (mat_id == MAT_INDUSTRIAL_BULKHEAD) {
-        base_color = glm::vec4(0.35f, 0.75f, 0.95f, 1.0f);
+        base_color = glm::vec4(0.4f, 0.85f, 1.0f, 1.0f);
     } else if (mat_id == MAT_REINFORCED_VAULT_DOOR) {
-        base_color = glm::vec4(0.95f, 0.8f, 0.2f, 1.0f);
+        base_color = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
     } else if (mat_id == MAT_RADIOACTIVE_ORE) {
-        base_color = glm::vec4(0.2f, 0.95f, 0.35f, 1.0f);
+        base_color = glm::vec4(0.25f, 1.0f, 0.4f, 1.0f);
     } else if (mat_id == MAT_VOLCANIC_BASALT) {
         base_color = glm::vec4(0.28f, 0.28f, 0.32f, 1.0f);
     } else if (mat_id == MAT_FRACTURED_GRANITE) {
         base_color = glm::vec4(0.58f, 0.55f, 0.52f, 1.0f);
     }
 
-    // Spawn 12 dynamic billboard debris quads
+    // Spawn 12 dynamic billboard debris quads with reduced size (0.12m) and 0.6s lifetime
     for (int i = 0; i < 12; ++i) {
         BreakParticle p;
         float rx = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
@@ -297,11 +346,11 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
         float rz = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
         glm::vec3 jitter(rx, ry, rz);
 
-        p.pos = center + n_dir * 0.35f + jitter * 0.3f;
-        p.vel = n_dir * (3.5f + static_cast<float>(rand() % 100) / 35.0f) + jitter * 4.0f;
+        p.pos = center + n_dir * 0.25f + jitter * 0.15f;
+        p.vel = n_dir * (2.8f + static_cast<float>(rand() % 100) / 40.0f) + jitter * 3.5f;
         p.color = base_color;
-        p.size = 0.18f + static_cast<float>(rand() % 100) / 600.0f;
-        p.max_life = 0.7f + static_cast<float>(rand() % 100) / 250.0f;
+        p.size = 0.10f + static_cast<float>(rand() % 100) / 2500.0f; // ~0.10m - 0.14m (average 0.12m)
+        p.max_life = 0.5f + static_cast<float>(rand() % 100) / 500.0f; // ~0.5s - 0.7s (average 0.6s)
         p.life = p.max_life;
         m_particles.push_back(p);
     }
@@ -310,8 +359,8 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
 void Renderer::update_particles(float dt) {
     for (auto it = m_particles.begin(); it != m_particles.end();) {
         it->pos += it->vel * dt;
-        it->vel.y -= 14.0f * dt; // gravity
-        it->vel *= (1.0f - 1.2f * dt); // air resistance
+        it->vel.y -= 16.0f * dt; // gravity drop
+        it->vel *= (1.0f - 1.5f * dt); // air resistance
         it->life -= dt;
 
         if (it->life <= 0.0f) {
@@ -495,7 +544,12 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
         m_fog_compute_shader.set_float("uHeadlampOuterCutoff", m_headlamp.outer_cutoff);
         m_fog_compute_shader.set_float("uHeadlampIntensity", m_headlamp.enabled ? m_headlamp.intensity : 0.0f);
 
-        m_fog_compute_shader.set_float("uFogDensity", 0.035f);
+        if (m_dust_timer > 0.0f) {
+            m_dust_timer = std::max(0.0f, m_dust_timer - delta_time);
+        }
+        float dust_boost = (m_dust_timer > 0.0f) ? (0.075f * (m_dust_timer / 3.0f)) : 0.0f;
+
+        m_fog_compute_shader.set_float("uFogDensity", 0.035f + dust_boost);
         m_fog_compute_shader.set_float("uToxicHazeFactor", glm::clamp(radiation_level / 100.0f, 0.0f, 1.0f));
         m_fog_compute_shader.set_float("uTime", m_total_time);
 

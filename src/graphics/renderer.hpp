@@ -59,6 +59,8 @@ public:
 
     void trigger_sonar_pulse(const glm::vec3& origin);
     void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);
+    void render_grapple_cable(const glm::vec3& start, const glm::vec3& end);
+    void trigger_dust_kickup(float duration = 3.0f);
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
     void update_particles(float dt);
@@ -80,6 +82,7 @@ private:
     void cleanup_framebuffers();
     void render_quad();
     void init_wireframe_cube();
+    void init_cable_buffer();
     void init_particle_buffers();
 
     int m_width{1600};
@@ -129,12 +132,17 @@ private:
     unsigned int m_wireframe_vao{0};
     unsigned int m_wireframe_vbo{0};
 
+    // Grapple cable line
+    unsigned int m_cable_vao{0};
+    unsigned int m_cable_vbo{0};
+
     // Break particles
     unsigned int m_particle_vao{0};
     unsigned int m_particle_vbo{0};
     std::vector<BreakParticle> m_particles;
 
     float m_total_time{0.0f};
+    float m_dust_timer{0.0f};
 };
 
 } // namespace Voidfall

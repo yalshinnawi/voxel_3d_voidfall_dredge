@@ -48,6 +48,7 @@ private:
     void on_block_placed(int x, int y, int z, uint8_t mat);
     void on_sonar_cast(const glm::vec3& origin);
     void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
+    void setup_hazard_system();
 
     AppConfig m_config;
     std::unique_ptr<Window> m_window;
@@ -79,6 +80,7 @@ private:
     // Level 3 collapse timer
     float m_level3_timer{180.0f};
     bool m_expedition_success{false};
+    bool m_mouse_down_last{false};
 };
 
 } // namespace Voidfall

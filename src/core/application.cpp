@@ -56,6 +56,14 @@ void Application::init_systems() {
         on_block_placed(x, y, z, mat);
     });
 
+    m_player->set_can_place_predicate([this]() {
+        return m_inventory.has_bulkhead_material();
+    });
+
+    m_player->set_on_warning([this](const std::string& msg) {
+        if (m_hud) m_hud->show_warning(msg);
+    });
+
     m_player->set_on_sonar_cast([this](const glm::vec3& origin) {
         on_sonar_cast(origin);
     });
@@ -65,11 +73,7 @@ void Application::init_systems() {
     });
 
     // 5. Systems
-    m_hazard = std::make_unique<HazardClock>();
-    m_hazard->set_on_tremor([this](float intensity) {
-        m_trauma = std::min(m_trauma + intensity * 0.4f, 1.0f);
-        std::cout << "[Hazard] Seismic Tremor shaking subterranean caverns!" << std::endl;
-    });
+    setup_hazard_system();
 
     m_extraction = std::make_unique<ExtractionSystem>();
     m_extraction->set_on_complete([this]() {
@@ -132,10 +136,7 @@ void Application::start_expedition(int level) {
     m_player->exo_mut().overheated = false;
 
     // Reset systems
-    m_hazard = std::make_unique<HazardClock>();
-    m_hazard->set_on_tremor([this](float intensity) {
-        m_trauma = std::min(m_trauma + intensity * 0.4f, 1.0f);
-    });
+    setup_hazard_system();
 
     m_extraction = std::make_unique<ExtractionSystem>();
     m_extraction->set_on_complete([this]() {
@@ -245,6 +246,10 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
 }
 
 void Application::on_block_placed(int x, int y, int z, uint8_t mat) {
+    if (mat == MAT_INDUSTRIAL_BULKHEAD) {
+        m_inventory.consume_bulkhead();
+    }
+
     if (m_host) {
         int cx = (x >= 0) ? (x / CHUNK_SIZE) : ((x - CHUNK_SIZE + 1) / CHUNK_SIZE);
         int cy = (y >= 0) ? (y / CHUNK_SIZE) : ((y - CHUNK_SIZE + 1) / CHUNK_SIZE);
@@ -320,6 +325,51 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
     }
 }
 
+void Application::setup_hazard_system() {
+    m_hazard = std::make_unique<HazardClock>();
+    m_hazard->set_on_tremor([this](float intensity) {
+        m_trauma = std::min(m_trauma + intensity * 0.4f, 1.0f);
+        if (m_hud) {
+            m_hud->show_warning("WARNING: CEILING INSTABILITY - SEEK HARD COVER OR PLACE BULKHEADS [RMB]", 4.0f);
+        }
+        if (m_renderer) {
+            m_renderer->trigger_dust_kickup(3.0f);
+        }
+
+        // Query 3-6 ceiling voxels directly above the player (py + 3 to py + 10)
+        glm::vec3 p = m_player->position();
+        int px = static_cast<int>(std::floor(p.x));
+        int py = static_cast<int>(std::floor(p.y));
+        int pz = static_cast<int>(std::floor(p.z));
+
+        int debris_spawned = 0;
+        for (int dy = 3; dy <= 10 && debris_spawned < 5; ++dy) {
+            for (int dx = -1; dx <= 1 && debris_spawned < 5; ++dx) {
+                for (int dz = -1; dz <= 1 && debris_spawned < 5; ++dz) {
+                    int vx = px + dx;
+                    int vy = py + dy;
+                    int vz = pz + dz;
+                    Voxel v = m_world->get_voxel(vx, vy, vz);
+                    if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
+                        m_world->set_voxel(vx, vy, vz, Voxel{MAT_AIR, 0}, true);
+                        on_block_broken(vx, vy, vz, glm::ivec3(0, -1, 0), v.material_id);
+                        uint32_t did = m_next_debris_id++;
+                        float rvx = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
+                        float rvz = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
+                        glm::vec3 vel(rvx * 1.5f, -2.5f, rvz * 1.5f);
+                        glm::vec3 rot(0.3f, 0.6f, 0.2f);
+                        m_debris.emplace_back(did, glm::vec3(vx + 0.5f, vy + 0.5f, vz + 0.5f), vel, rot, v.material_id, 1);
+                        if (m_host) {
+                            m_host->broadcast_debris_spawn(did, glm::vec3(vx + 0.5f, vy + 0.5f, vz + 0.5f), vel, v.material_id, 1);
+                        }
+                        debris_spawned++;
+                    }
+                }
+            }
+        }
+    });
+}
+
 void Application::fixed_tick(float dt) {
     m_current_tick++;
 
@@ -349,9 +399,37 @@ void Application::fixed_tick(float dt) {
     }
     m_skills.add_suit_xp(1);
 
-    // 3. Falling Debris simulation
+    // 3. Falling Debris simulation & player hazard damage
+    glm::vec3 player_center = m_player->position() + glm::vec3(0.3f, 0.9f, 0.3f);
+    int p_head_x = static_cast<int>(std::floor(player_center.x));
+    int p_head_y = static_cast<int>(std::floor(player_center.y));
+    int p_head_z = static_cast<int>(std::floor(player_center.z));
+
+    bool covered_by_bulkhead = false;
+    for (int check_y = p_head_y + 1; check_y <= p_head_y + 10; ++check_y) {
+        Voxel v = m_world->get_voxel(p_head_x, check_y, p_head_z);
+        if (v.material_id == MAT_INDUSTRIAL_BULKHEAD) {
+            covered_by_bulkhead = true;
+            break;
+        }
+    }
+
     for (auto& d : m_debris) {
         d.update(dt, *m_world);
+
+        if (!d.has_dealt_damage && !d.is_sleeping() && d.velocity().y < -1.0f) {
+            float dist = glm::distance(d.position(), player_center);
+            if (dist < 1.35f) {
+                d.has_dealt_damage = true;
+                if (!covered_by_bulkhead) {
+                    m_player->exo_mut().integrity = std::max(0.0f, m_player->exo_mut().integrity - 20.0f);
+                    m_trauma = std::min(m_trauma + 0.5f, 1.0f);
+                    if (m_hud) m_hud->show_warning("SUIT INTEGRITY COMPROMISED (-20%) - CAVE-IN COLLAPSE!", 3.0f);
+                } else {
+                    if (m_hud) m_hud->show_warning("TITANIUM BULKHEAD DEFLECTED FALLING DEBRIS IMPACT!", 2.0f);
+                }
+            }
+        }
     }
 
     // 4. Update Hazard Clock, Extraction, Surveying, and Particles
@@ -446,6 +524,12 @@ void Application::render(float dt) {
         d.render();
     }
 
+    // Render Grapple Cable (Module 4)
+    if (m_player->grapple().active) {
+        glm::vec3 tool_pos = m_player->position() + m_player->forward() * 0.4f + m_player->right() * 0.25f - glm::vec3(0.0f, 0.2f, 0.0f);
+        m_renderer->render_grapple_cable(tool_pos, m_player->grapple().anchor_point);
+    }
+
     // Render Volumetric Sonar Ping with X-Ray Wireframe (Module 2)
     if (m_surveying.is_active()) {
         m_renderer->render_sonar_wireframes(m_surveying.surveyed_voxels(), m_surveying.alpha());
@@ -454,13 +538,27 @@ void Application::render(float dt) {
     // End HDR Frame & Post-Processing Tonemap
     m_renderer->end_frame(dt, m_hazard->radiation_level());
 
+    // Mouse coordinates and clicks for responsive menus
+    glm::dvec2 cur_pos = m_window->get_cursor_pos();
+    float mouse_x = static_cast<float>(cur_pos.x);
+    float mouse_y = static_cast<float>(cur_pos.y);
+    bool mouse_down = m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+    bool mouse_clicked = mouse_down && !m_mouse_down_last;
+    m_mouse_down_last = mouse_down;
+
     // Render State-Specific Overlay
     if (m_state == GameState::MainMenu) {
-        m_hub_ui->render_main_menu(m_selected_level);
+        if (m_hub_ui->render_main_menu(m_selected_level, mouse_x, mouse_y, mouse_clicked)) {
+            start_expedition(m_selected_level);
+        }
     } else if (m_state == GameState::OrbitalHub) {
-        m_hub_ui->render_orbital_hub(m_selected_level, m_skills, m_inventory);
+        if (m_hub_ui->render_orbital_hub(m_selected_level, m_skills, m_inventory, mouse_x, mouse_y, mouse_clicked)) {
+            start_expedition(m_selected_level);
+        }
     } else if (m_state == GameState::Debrief) {
-        m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills);
+        if (m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills, mouse_x, mouse_y, mouse_clicked)) {
+            m_state = GameState::OrbitalHub;
+        }
     } else {
         // Render HUD Overlay (Module 4)
         m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj);
@@ -486,6 +584,13 @@ void Application::run() {
 
         m_window->poll_events();
 
+        // Enforce cursor unlock during Menu and Hub states
+        if (m_state != GameState::Gameplay) {
+            if (m_window->is_cursor_locked()) {
+                m_window->set_cursor_locked(false);
+            }
+        }
+
         // 1. MAIN MENU INPUTS
         if (m_state == GameState::MainMenu) {
             if (m_window->is_key_down(GLFW_KEY_1)) m_selected_level = 1;
@@ -494,11 +599,10 @@ void Application::run() {
 
             static bool enter_down_last = false;
             bool enter_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
-                             m_window->is_key_down(GLFW_KEY_SPACE) ||
-                             m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+                             m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (enter_now && !enter_down_last) {
-                m_state = GameState::OrbitalHub;
+                start_expedition(m_selected_level);
             }
             enter_down_last = enter_now;
 
@@ -510,8 +614,7 @@ void Application::run() {
         else if (m_state == GameState::OrbitalHub) {
             static bool launch_down_last = false;
             bool launch_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
-                              m_window->is_key_down(GLFW_KEY_SPACE) ||
-                              m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+                              m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (launch_now && !launch_down_last) {
                 start_expedition(m_selected_level);
@@ -529,8 +632,7 @@ void Application::run() {
         else if (m_state == GameState::Debrief) {
             static bool debrief_down_last = false;
             bool debrief_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
-                               m_window->is_key_down(GLFW_KEY_SPACE) ||
-                               m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+                               m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (debrief_now && !debrief_down_last) {
                 m_state = GameState::OrbitalHub;

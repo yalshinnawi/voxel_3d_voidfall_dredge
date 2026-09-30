@@ -93,6 +93,11 @@ void HUD::resize(int width, int height) {
 }
 
 void HUD::update(float dt) {
+    m_total_time += dt;
+    if (m_warning_timer > 0.0f) {
+        m_warning_timer -= dt;
+    }
+
     for (auto it = m_floating_loot.begin(); it != m_floating_loot.end();) {
         it->world_pos.y += 1.1f * dt;
         it->timer -= dt;
@@ -102,6 +107,15 @@ void HUD::update(float dt) {
             ++it;
         }
     }
+}
+
+void HUD::show_warning(const std::string& msg, float duration) {
+    m_warning_message = msg;
+    m_warning_timer = duration;
+}
+
+void HUD::clear_target_info() {
+    // Explicit instant clearance of crosshair tooltip
 }
 
 void HUD::add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color) {
@@ -434,7 +448,8 @@ void HUD::render(
         // Slot 2
         bool s2 = (active == ToolSlot::IndustrialBulkhead);
         draw_rect(hb_x + 140.0f, hb_y + 10.0f, 120.0f, 32.0f, s2 ? glm::vec4(0.15f, 0.35f, 0.5f, 0.95f) : glm::vec4(0.08f, 0.1f, 0.14f, 0.8f));
-        draw_text("[2] BULKHEAD", hb_x + 148.0f, hb_y + 18.0f, 1.25f, s2 ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
+        std::string s2_text = "[2] BULK (" + std::to_string(inventory.bulkheads) + ")";
+        draw_text(s2_text, hb_x + 148.0f, hb_y + 18.0f, 1.25f, s2 ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
 
         // Slot 3
         bool s3 = (active == ToolSlot::DemolitionCharge);
@@ -466,9 +481,9 @@ void HUD::render(
         float pulse = extraction.siren_pulse();
         glm::vec4 banner_color = glm::mix(glm::vec4(0.85f, 0.15f, 0.1f, 0.9f), glm::vec4(1.0f, 0.4f, 0.1f, 1.0f), pulse);
         draw_rect(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.12f, 0.02f, 0.02f, 0.9f));
-        draw_rect(ex_x, ex_y, ex_w * (extraction.countdown() / 90.0f), ex_h, banner_color);
+        draw_rect(ex_x, ex_y, ex_w * std::clamp(extraction.countdown() / 40.0f, 0.0f, 1.0f), ex_h, banner_color);
 
-        std::string evac_str = "EXTRACTION DEFENSE IN PROGRESS: " + std::to_string(static_cast<int>(extraction.countdown())) + "s";
+        std::string evac_str = "EVAC POD ARRIVING IN: " + std::to_string(static_cast<int>(extraction.countdown())) + "s";
         draw_text(evac_str, ex_x + 18.0f, ex_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     } else if (extraction.phase() == ExtractionPhase::PodLanded) {
         float ex_w = 460.0f;
@@ -477,6 +492,71 @@ void HUD::render(
         float ex_y = 70.0f;
         draw_rect(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
         draw_text("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x + 14.0f, ex_y + 14.0f, 1.35f, glm::vec4(0.04f, 0.1f, 0.04f, 1.0f));
+    }
+
+    // 8. 3D-to-2D SCREEN WAYPOINT DIAMOND FOR EXTRACTION BEACON / POD
+    if (extraction.phase() == ExtractionPhase::BeaconDeployed || extraction.phase() == ExtractionPhase::PodLanded) {
+        glm::vec3 b_world = extraction.beacon_position() + glm::vec3(0.0f, 1.2f, 0.0f);
+        glm::vec4 clip = proj * view * glm::vec4(b_world, 1.0f);
+        if (clip.w > 0.1f) {
+            glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            if (ndc.z >= -1.0f && ndc.z <= 1.0f) {
+                float sx = (ndc.x * 0.5f + 0.5f) * static_cast<float>(m_width);
+                float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(m_height);
+
+                bool is_landed = (extraction.phase() == ExtractionPhase::PodLanded);
+                glm::vec4 marker_col = is_landed ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
+                    glm::mix(glm::vec4(1.0f, 0.3f, 0.1f, 1.0f), glm::vec4(1.0f, 0.85f, 0.2f, 1.0f), extraction.siren_pulse());
+
+                float d_sz = 16.0f + 2.0f * std::sin(m_total_time * 6.0f);
+
+                glm::mat4 ui_proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+
+                // Outer rotated diamond
+                glm::mat4 d_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                d_model = glm::rotate(d_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                d_model = glm::scale(d_model, glm::vec3(d_sz, d_sz, 1.0f));
+                d_model = glm::translate(d_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+
+                m_ui_shader.use();
+                m_ui_shader.set_mat4("uProjection", ui_proj * d_model);
+                m_ui_shader.set_vec4("uColor", marker_col);
+
+                glBindVertexArray(m_rect_vao);
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+
+                // Inner cutout for diamond wireframe look
+                float in_sz = d_sz - 4.0f;
+                glm::mat4 in_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                in_model = glm::rotate(in_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                in_model = glm::scale(in_model, glm::vec3(in_sz, in_sz, 1.0f));
+                in_model = glm::translate(in_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+                m_ui_shader.set_mat4("uProjection", ui_proj * in_model);
+                m_ui_shader.set_vec4("uColor", glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+                glBindVertexArray(0);
+
+                // Waypoint distance
+                float dist = glm::distance(player.position(), extraction.beacon_position());
+                std::string dist_str = (is_landed ? "[EVAC POD: " : "[EVAC BEACON: ") + std::to_string(static_cast<int>(dist)) + "m]";
+                float text_w = dist_str.size() * 8.0f * 1.25f;
+                draw_rect(sx - text_w / 2.0f - 6.0f, sy + d_sz * 0.8f + 6.0f, text_w + 12.0f, 20.0f, glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+                draw_rect(sx - text_w / 2.0f - 6.0f, sy + d_sz * 0.8f + 25.0f, text_w + 12.0f, 1.0f, marker_col);
+                draw_text(dist_str, sx - text_w / 2.0f, sy + d_sz * 0.8f + 10.0f, 1.25f, marker_col);
+            }
+        }
+    }
+
+    // 9. ON-SCREEN WARNING BANNER
+    if (m_warning_timer > 0.0f && !m_warning_message.empty()) {
+        float warn_w = m_warning_message.size() * 8.0f * 1.35f + 32.0f;
+        float warn_h = 36.0f;
+        float warn_x = cx - warn_w / 2.0f;
+        float warn_y = cy + 55.0f;
+        draw_rect(warn_x, warn_y, warn_w, warn_h, glm::vec4(0.35f, 0.05f, 0.05f, 0.95f));
+        draw_rect(warn_x, warn_y, warn_w, 2.0f, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
+        draw_rect(warn_x, warn_y + warn_h - 2.0f, warn_w, 2.0f, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
+        draw_text(m_warning_message, warn_x + 16.0f, warn_y + 11.0f, 1.35f, glm::vec4(1.0f, 0.9f, 0.2f, 1.0f));
     }
 
     glDisable(GL_BLEND);

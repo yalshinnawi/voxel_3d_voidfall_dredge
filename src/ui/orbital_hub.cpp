@@ -171,7 +171,7 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
     glBindVertexArray(0);
 }
 
-void OrbitalHubUI::render_main_menu(int selected_level) {
+bool OrbitalHubUI::render_main_menu(int& selected_level, float mouse_x, float mouse_y, bool mouse_clicked) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -179,6 +179,8 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
 
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
+
+    bool action_triggered = false;
 
     // Semi-transparent deep subterranean background
     draw_rect(0, 0, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.94f));
@@ -197,10 +199,10 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
 
     draw_rect(cx - 380.0f, banner_y + 65.0f, 760.0f, 2.0f, glm::vec4(0.15f, 0.85f, 1.0f, 0.6f));
 
-    // Sector Selection Cards
-    float card_w = 760.0f;
+    // Responsive Sector Selection Cards: cardWidth = min(w * 0.75, 900)
+    float card_w = std::min(w * 0.75f, 900.0f);
     float card_h = 95.0f;
-    float card_x = cx - card_w / 2.0f;
+    float card_x = (w - card_w) * 0.5f;
     float start_y = banner_y + 85.0f;
 
     struct LevelInfo {
@@ -233,24 +235,43 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
 
     for (int i = 0; i < 3; ++i) {
         float y = start_y + i * (card_h + 18.0f);
+
+        // AABB Mouse hit detection
+        bool is_hovered = (mouse_x >= card_x && mouse_x <= card_x + card_w &&
+                           mouse_y >= y && mouse_y <= y + card_h);
+        if (is_hovered) {
+            selected_level = levels[i].id;
+            if (mouse_clicked) {
+                action_triggered = true; // Launch or select
+            }
+        }
+
         bool is_sel = (selected_level == levels[i].id);
 
-        glm::vec4 bg_col = is_sel ? glm::vec4(0.08f, 0.16f, 0.25f, 0.95f) : glm::vec4(0.04f, 0.06f, 0.09f, 0.85f);
+        glm::vec4 bg_col = is_hovered ? glm::vec4(0.10f, 0.22f, 0.32f, 0.98f) :
+                           is_sel     ? glm::vec4(0.08f, 0.16f, 0.25f, 0.95f) :
+                                        glm::vec4(0.04f, 0.06f, 0.09f, 0.85f);
         draw_rect(card_x, y, card_w, card_h, bg_col);
 
-        glm::vec4 border_col = is_sel ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
-        draw_rect(card_x, y, 4.0f, card_h, border_col);
-        draw_rect(card_x, y, card_w, 1.0f, border_col * 0.7f);
+        glm::vec4 border_col = is_hovered ? glm::vec4(0.4f, 1.0f, 1.0f, 1.0f) :
+                               is_sel     ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) :
+                                            glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
+        draw_rect(card_x, y, is_hovered ? 6.0f : 4.0f, card_h, border_col);
+        draw_rect(card_x, y, card_w, is_hovered ? 2.0f : 1.0f, border_col);
+        if (is_hovered) {
+            draw_rect(card_x, y + card_h - 2.0f, card_w, 2.0f, border_col);
+            draw_rect(card_x + card_w - 2.0f, y, 2.0f, card_h, border_col);
+        }
 
-        std::string selector = is_sel ? ">> " : "   ";
-        draw_text(selector + levels[i].title, card_x + 16.0f, y + 14.0f, 1.6f, is_sel ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+        std::string selector = (is_hovered || is_sel) ? ">> " : "   ";
+        draw_text(selector + levels[i].title, card_x + 16.0f, y + 14.0f, 1.6f, is_hovered ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : is_sel ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
         draw_text(levels[i].desc, card_x + 36.0f, y + 40.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
         draw_text(levels[i].obj, card_x + 36.0f, y + 62.0f, 1.25f, is_sel ? glm::vec4(1.0f, 0.85f, 0.2f, 0.95f) : glm::vec4(0.5f, 0.75f, 0.55f, 0.8f));
     }
 
     // Controls overview panel (Bottom)
     float ctrl_y = start_y + 3 * (card_h + 18.0f) + 8.0f;
-    float ctrl_w = 760.0f;
+    float ctrl_w = card_w;
     float ctrl_h = 100.0f;
     draw_rect(card_x, ctrl_y, ctrl_w, ctrl_h, glm::vec4(0.03f, 0.05f, 0.07f, 0.9f));
     draw_rect(card_x, ctrl_y, ctrl_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.6f));
@@ -260,17 +281,32 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
     draw_text("[F] Anchor Grapple  |  [E] Reel Cable  |  [Q] Sonar Pulse  |  [1,2,3] Equipment Hotbar", card_x + 16.0f, ctrl_y + 56.0f, 1.25f, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
     draw_text("[B] Deploy Extraction Beacon  |  [H] Toggle Headlamp  |  [TAB / ESC] Toggle Cursor", card_x + 16.0f, ctrl_y + 76.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
 
-    // Action button prompt
+    // Action button prompt: [LAUNCH EXPEDITION]
     float prompt_y = ctrl_y + ctrl_h + 18.0f;
-    draw_rect(card_x, prompt_y, card_w, 42.0f, glm::vec4(0.12f, 0.4f, 0.65f, 0.95f));
-    draw_text("[1, 2, 3] SELECT SECTOR   --   [SPACE / ENTER] LAUNCH EXPEDITION", card_x + 80.0f, prompt_y + 13.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    float prompt_h = 44.0f;
+    bool btn_hovered = (mouse_x >= card_x && mouse_x <= card_x + card_w &&
+                        mouse_y >= prompt_y && mouse_y <= prompt_y + prompt_h);
+    if (btn_hovered && mouse_clicked) {
+        action_triggered = true;
+    }
+
+    glm::vec4 btn_col = btn_hovered ? glm::vec4(0.2f, 0.65f, 0.95f, 1.0f) : glm::vec4(0.12f, 0.4f, 0.65f, 0.95f);
+    draw_rect(card_x, prompt_y, card_w, prompt_h, btn_col);
+    if (btn_hovered) {
+        draw_rect(card_x, prompt_y, card_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+        draw_rect(card_x, prompt_y + prompt_h - 2.0f, card_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+    }
+
+    draw_text("[CLICK OR ENTER / SPACE] LAUNCH EXPEDITION   --   [1, 2, 3] SELECT SECTOR", card_x + 30.0f, prompt_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+
+    return action_triggered;
 }
 
-void OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory) {
+bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, float mouse_x, float mouse_y, bool mouse_clicked) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -310,7 +346,7 @@ void OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
         draw_text("  1. Mine 25 Voidite Crystals using Subterranean Drill [LMB]", col1_x + 20.0f, col_y + 135.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         draw_text("  2. Use Sonar Pulse [Q] to locate rich mineral veins", col1_x + 20.0f, col_y + 160.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         draw_text("  3. Deploy Extraction Beacon [B] when quota met", col1_x + 20.0f, col_y + 185.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  4. Defend zone for 90s until evacuation landing pod arrives", col1_x + 20.0f, col_y + 210.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  4. Defend zone for 40s until evacuation landing pod arrives", col1_x + 20.0f, col_y + 210.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
     } else if (selected_level == 2) {
         draw_text("Target Depth: 340m | Crust Stability: 65%", col1_x + 20.0f, col_y + 80.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
         draw_text("Directives:", col1_x + 20.0f, col_y + 110.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
@@ -363,16 +399,35 @@ void OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
 
     // Launch expedition banner
     float btn_y = h - 65.0f;
-    draw_rect(40.0f, btn_y, w - 80.0f, 44.0f, glm::vec4(0.15f, 0.45f, 0.75f, 0.95f));
-    draw_text("[PRESS SPACE / ENTER TO LAUNCH EXPEDITION]    |    [TAB / ESC TO RETURN TO MENU]",
-              cx - 360.0f, btn_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    float btn_w = w - 80.0f;
+    float btn_x = 40.0f;
+    float btn_h = 44.0f;
+
+    bool btn_hovered = (mouse_x >= btn_x && mouse_x <= btn_x + btn_w &&
+                        mouse_y >= btn_y && mouse_y <= btn_y + btn_h);
+    bool launch_triggered = false;
+    if (btn_hovered && mouse_clicked) {
+        launch_triggered = true;
+    }
+
+    glm::vec4 btn_col = btn_hovered ? glm::vec4(0.25f, 0.65f, 0.95f, 1.0f) : glm::vec4(0.15f, 0.45f, 0.75f, 0.95f);
+    draw_rect(btn_x, btn_y, btn_w, btn_h, btn_col);
+    if (btn_hovered) {
+        draw_rect(btn_x, btn_y, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+        draw_rect(btn_x, btn_y + btn_h - 2.0f, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+    }
+
+    draw_text("[CLICK OR PRESS SPACE / ENTER TO LAUNCH EXPEDITION]    |    [TAB / ESC TO RETURN TO MENU]",
+              cx - 380.0f, btn_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+
+    return launch_triggered;
 }
 
-void OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory& inventory, const SkillMatrix& skills) {
+bool OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x, float mouse_y, bool mouse_clicked) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -394,9 +449,9 @@ void OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory
     draw_rect(cx - 380.0f, banner_y + 40.0f, 760.0f, 2.0f, status_col * 0.6f);
 
     // Summary Card
-    float card_w = 760.0f;
+    float card_w = std::min(w * 0.75f, 900.0f);
     float card_h = 320.0f;
-    float card_x = cx - card_w / 2.0f;
+    float card_x = (w - card_w) * 0.5f;
     float card_y = banner_y + 60.0f;
 
     draw_rect(card_x, card_y, card_w, card_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.9f));
@@ -431,15 +486,34 @@ void OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory
     draw_text(sk1, card_x + 24.0f, card_y + 264.0f, 1.25f, skills.demolitions.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
     draw_text(sk2, card_x + 360.0f, card_y + 264.0f, 1.25f, skills.surveying.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
 
-    // Next Actions
+    // Next Actions button
     float btn_y = card_y + card_h + 30.0f;
-    draw_rect(card_x, btn_y, card_w, 44.0f, glm::vec4(0.12f, 0.4f, 0.65f, 0.95f));
-    draw_text("[SPACE / ENTER] RETURN TO ORBITAL HUB      |      [R] RETRY EXPEDITION",
-              card_x + 70.0f, btn_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    float btn_w = card_w;
+    float btn_x = card_x;
+    float btn_h = 44.0f;
+
+    bool btn_hovered = (mouse_x >= btn_x && mouse_x <= btn_x + btn_w &&
+                        mouse_y >= btn_y && mouse_y <= btn_y + btn_h);
+    bool continue_triggered = false;
+    if (btn_hovered && mouse_clicked) {
+        continue_triggered = true;
+    }
+
+    glm::vec4 btn_col = btn_hovered ? glm::vec4(0.2f, 0.6f, 0.9f, 1.0f) : glm::vec4(0.12f, 0.4f, 0.65f, 0.95f);
+    draw_rect(btn_x, btn_y, btn_w, btn_h, btn_col);
+    if (btn_hovered) {
+        draw_rect(btn_x, btn_y, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+        draw_rect(btn_x, btn_y + btn_h - 2.0f, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
+    }
+
+    draw_text("[CLICK OR SPACE / ENTER] RETURN TO ORBITAL HUB      |      [R] RETRY EXPEDITION",
+              card_x + 60.0f, btn_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+
+    return continue_triggered;
 }
 
 } // namespace Voidfall
