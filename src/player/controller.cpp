@@ -210,70 +210,115 @@ void PlayerController::update_physics(float dt, World& world) {
 
 void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt) {
     const float radius = 0.35f;
-    const float height = 1.8f;
+    const float feet_offset = 1.6f;
+    const float head_offset = 0.2f;
     m_on_ground = false;
 
-    // X Axis
+    // 1. Move & Resolve X
     pos.x += vel.x * dt;
-    int min_x = static_cast<int>(std::floor(pos.x - radius));
-    int max_x = static_cast<int>(std::floor(pos.x + radius));
-    int min_y = static_cast<int>(std::floor(pos.y - height));
-    int max_y = static_cast<int>(std::floor(pos.y));
-    int min_z = static_cast<int>(std::floor(pos.z - radius));
-    int max_z = static_cast<int>(std::floor(pos.z + radius));
+    {
+        int min_x = static_cast<int>(std::floor(pos.x - radius));
+        int max_x = static_cast<int>(std::floor(pos.x + radius));
+        int min_y = static_cast<int>(std::floor(pos.y - feet_offset + 0.05f));
+        int max_y = static_cast<int>(std::floor(pos.y + head_offset - 0.05f));
+        int min_z = static_cast<int>(std::floor(pos.z - radius));
+        int max_z = static_cast<int>(std::floor(pos.z + radius));
 
-    for (int y = min_y; y <= max_y; ++y) {
-        for (int z = min_z; z <= max_z; ++z) {
-            for (int x = min_x; x <= max_x; ++x) {
-                if (world.get_voxel(x, y, z).is_solid()) {
-                    if (vel.x > 0.0f) pos.x = static_cast<float>(x) - radius;
-                    else if (vel.x < 0.0f) pos.x = static_cast<float>(x + 1) + radius;
-                    vel.x = 0.0f;
-                }
-            }
-        }
-    }
-
-    // Z Axis
-    pos.z += vel.z * dt;
-    min_x = static_cast<int>(std::floor(pos.x - radius));
-    max_x = static_cast<int>(std::floor(pos.x + radius));
-    min_z = static_cast<int>(std::floor(pos.z - radius));
-    max_z = static_cast<int>(std::floor(pos.z + radius));
-
-    for (int y = min_y; y <= max_y; ++y) {
-        for (int x = min_x; x <= max_x; ++x) {
-            for (int z = min_z; z <= max_z; ++z) {
-                if (world.get_voxel(x, y, z).is_solid()) {
-                    if (vel.z > 0.0f) pos.z = static_cast<float>(z) - radius;
-                    else if (vel.z < 0.0f) pos.z = static_cast<float>(z + 1) + radius;
-                    vel.z = 0.0f;
-                }
-            }
-        }
-    }
-
-    // Y Axis
-    pos.y += vel.y * dt;
-    min_y = static_cast<int>(std::floor(pos.y - height));
-    max_y = static_cast<int>(std::floor(pos.y));
-
-    for (int x = min_x; x <= max_x; ++x) {
-        for (int z = min_z; z <= max_z; ++z) {
+        if (vel.x > 0.0f) {
             for (int y = min_y; y <= max_y; ++y) {
-                if (world.get_voxel(x, y, z).is_solid()) {
-                    if (vel.y > 0.0f) {
-                        pos.y = static_cast<float>(y) - 0.01f;
-                        vel.y = 0.0f;
-                    } else if (vel.y < 0.0f) {
-                        pos.y = static_cast<float>(y + 1) + height;
-                        vel.y = 0.0f;
-                        m_on_ground = true;
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_voxel(max_x, y, z).is_solid()) {
+                        pos.x = static_cast<float>(max_x) - radius - 0.001f;
+                        vel.x = 0.0f;
+                        goto resolved_x;
+                    }
+                }
+            }
+        } else if (vel.x < 0.0f) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_voxel(min_x, y, z).is_solid()) {
+                        pos.x = static_cast<float>(min_x + 1) + radius + 0.001f;
+                        vel.x = 0.0f;
+                        goto resolved_x;
                     }
                 }
             }
         }
     }
+resolved_x:
+
+    // 2. Move & Resolve Z
+    pos.z += vel.z * dt;
+    {
+        int min_x = static_cast<int>(std::floor(pos.x - radius));
+        int max_x = static_cast<int>(std::floor(pos.x + radius));
+        int min_y = static_cast<int>(std::floor(pos.y - feet_offset + 0.05f));
+        int max_y = static_cast<int>(std::floor(pos.y + head_offset - 0.05f));
+        int min_z = static_cast<int>(std::floor(pos.z - radius));
+        int max_z = static_cast<int>(std::floor(pos.z + radius));
+
+        if (vel.z > 0.0f) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int x = min_x; x <= max_x; ++x) {
+                    if (world.get_voxel(x, y, max_z).is_solid()) {
+                        pos.z = static_cast<float>(max_z) - radius - 0.001f;
+                        vel.z = 0.0f;
+                        goto resolved_z;
+                    }
+                }
+            }
+        } else if (vel.z < 0.0f) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int x = min_x; x <= max_x; ++x) {
+                    if (world.get_voxel(x, y, min_z).is_solid()) {
+                        pos.z = static_cast<float>(min_z + 1) + radius + 0.001f;
+                        vel.z = 0.0f;
+                        goto resolved_z;
+                    }
+                }
+            }
+        }
+    }
+resolved_z:
+
+    // 3. Move & Resolve Y (Ceiling and Floor)
+    pos.y += vel.y * dt;
+    {
+        int min_x = static_cast<int>(std::floor(pos.x - radius + 0.05f));
+        int max_x = static_cast<int>(std::floor(pos.x + radius - 0.05f));
+        int min_y = static_cast<int>(std::floor(pos.y - feet_offset));
+        int max_y = static_cast<int>(std::floor(pos.y + head_offset));
+        int min_z = static_cast<int>(std::floor(pos.z - radius + 0.05f));
+        int max_z = static_cast<int>(std::floor(pos.z + radius - 0.05f));
+
+        if (vel.y > 0.0f) {
+            // Moving UP (Jetpack / Jump): check top ceiling blocks
+            for (int x = min_x; x <= max_x; ++x) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_voxel(x, max_y, z).is_solid()) {
+                        pos.y = static_cast<float>(max_y) - head_offset - 0.001f;
+                        vel.y = 0.0f;
+                        goto resolved_y;
+                    }
+                }
+            }
+        } else if (vel.y <= 0.0f) {
+            // Moving DOWN (Gravity): check bottom feet floor blocks
+            for (int x = min_x; x <= max_x; ++x) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_voxel(x, min_y, z).is_solid()) {
+                        pos.y = static_cast<float>(min_y + 1) + feet_offset;
+                        vel.y = 0.0f;
+                        m_on_ground = true;
+                        goto resolved_y;
+                    }
+                }
+            }
+        }
+    }
+resolved_y:
+    ;
 }
 
 PlayerInputPacket PlayerController::build_input_packet(uint32_t tick, float dt) const {
