@@ -27,14 +27,15 @@ OrbitalHubUI::~OrbitalHubUI() {
 }
 
 void OrbitalHubUI::init_gl() {
+    // 2 triangles forming a unit quad [0, 1]^2 with CCW winding in screen ortho
     float unit_quad[] = {
-        0.0f, 1.0f,
         0.0f, 0.0f,
-        1.0f, 0.0f,
-
         0.0f, 1.0f,
-        1.0f, 0.0f,
-        1.0f, 1.0f
+        1.0f, 1.0f,
+
+        0.0f, 0.0f,
+        1.0f, 1.0f,
+        1.0f, 0.0f
     };
 
     glGenVertexArrays(1, &m_rect_vao);
@@ -135,14 +136,17 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
         float y0 = cur_y;
         float y1 = cur_y + char_h;
 
+        // Quad with CCW winding in top-left screen ortho:
+        // (x0, y0), (x0, y1), (x1, y1)
+        // (x0, y0), (x1, y1), (x1, y0)
         float quad[24] = {
-            x0, y1, u0, v1,
             x0, y0, u0, v0,
-            x1, y0, u1, v0,
-
             x0, y1, u0, v1,
-            x1, y0, u1, v0,
-            x1, y1, u1, v1
+            x1, y1, u1, v1,
+
+            x0, y0, u0, v0,
+            x1, y1, u1, v1,
+            x1, y0, u1, v0
         };
 
         vertices.insert(vertices.end(), quad, quad + 24);
@@ -169,24 +173,25 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
 
 void OrbitalHubUI::render_main_menu(int selected_level) {
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
 
-    // Deep subterranean background overlay
-    draw_rect(0, 0, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.96f));
+    // Semi-transparent deep subterranean background
+    draw_rect(0, 0, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.94f));
 
     // Decorative geometric grid lines
     for (float y = 50.0f; y < h; y += 120.0f) {
-        draw_rect(0, y, w, 1.0f, glm::vec4(0.1f, 0.2f, 0.3f, 0.15f));
+        draw_rect(0, y, w, 1.0f, glm::vec4(0.1f, 0.2f, 0.3f, 0.2f));
     }
 
     float cx = w / 2.0f;
 
     // Header banner
-    float banner_y = 60.0f;
+    float banner_y = 50.0f;
     draw_text("V O I D F A L L :   D R E D G E", cx - 340.0f, banner_y, 3.2f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
     draw_text("SUBTERRANEAN VOXEL CAVERN EXTRACTION // INDUSTRIAL EXPEDITION PROTOCOL", cx - 330.0f, banner_y + 40.0f, 1.35f, glm::vec4(0.6f, 0.75f, 0.85f, 0.85f));
 
@@ -196,7 +201,7 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
     float card_w = 760.0f;
     float card_h = 95.0f;
     float card_x = cx - card_w / 2.0f;
-    float start_y = banner_y + 90.0f;
+    float start_y = banner_y + 85.0f;
 
     struct LevelInfo {
         int id;
@@ -227,10 +232,10 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
     };
 
     for (int i = 0; i < 3; ++i) {
-        float y = start_y + i * (card_h + 20.0f);
+        float y = start_y + i * (card_h + 18.0f);
         bool is_sel = (selected_level == levels[i].id);
 
-        glm::vec4 bg_col = is_sel ? glm::vec4(0.08f, 0.14f, 0.22f, 0.95f) : glm::vec4(0.04f, 0.06f, 0.09f, 0.85f);
+        glm::vec4 bg_col = is_sel ? glm::vec4(0.08f, 0.16f, 0.25f, 0.95f) : glm::vec4(0.04f, 0.06f, 0.09f, 0.85f);
         draw_rect(card_x, y, card_w, card_h, bg_col);
 
         glm::vec4 border_col = is_sel ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
@@ -244,7 +249,7 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
     }
 
     // Controls overview panel (Bottom)
-    float ctrl_y = start_y + 3 * (card_h + 20.0f) + 10.0f;
+    float ctrl_y = start_y + 3 * (card_h + 18.0f) + 8.0f;
     float ctrl_w = 760.0f;
     float ctrl_h = 100.0f;
     draw_rect(card_x, ctrl_y, ctrl_w, ctrl_h, glm::vec4(0.03f, 0.05f, 0.07f, 0.9f));
@@ -256,16 +261,18 @@ void OrbitalHubUI::render_main_menu(int selected_level) {
     draw_text("[B] Deploy Extraction Beacon  |  [H] Toggle Headlamp  |  [TAB / ESC] Toggle Cursor", card_x + 16.0f, ctrl_y + 76.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
 
     // Action button prompt
-    float prompt_y = ctrl_y + ctrl_h + 25.0f;
+    float prompt_y = ctrl_y + ctrl_h + 18.0f;
     draw_rect(card_x, prompt_y, card_w, 42.0f, glm::vec4(0.12f, 0.4f, 0.65f, 0.95f));
-    draw_text("[PRESS 1, 2, 3 TO CHOOSE SECTOR]   --   [PRESS ENTER / SPACE TO LAUNCH EXPEDITION]", card_x + 40.0f, prompt_y + 13.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    draw_text("[1, 2, 3] SELECT SECTOR   --   [SPACE / ENTER] LAUNCH EXPEDITION", card_x + 80.0f, prompt_y + 13.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 }
 
 void OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory) {
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -362,10 +369,12 @@ void OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 }
 
 void OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory& inventory, const SkillMatrix& skills) {
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -430,6 +439,7 @@ void OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 }
 
 } // namespace Voidfall

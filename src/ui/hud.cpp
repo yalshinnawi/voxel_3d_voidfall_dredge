@@ -29,14 +29,15 @@ HUD::~HUD() {
 
 void HUD::init_gl() {
     // 1. Rect Quad VAO
+    // 2 triangles forming a unit quad [0, 1]^2 with CCW winding in screen ortho
     float unit_quad[] = {
-        0.0f, 1.0f,
         0.0f, 0.0f,
-        1.0f, 0.0f,
-
         0.0f, 1.0f,
-        1.0f, 0.0f,
-        1.0f, 1.0f
+        1.0f, 1.0f,
+
+        0.0f, 0.0f,
+        1.0f, 1.0f,
+        1.0f, 0.0f
     };
 
     glGenVertexArrays(1, &m_rect_vao);
@@ -160,14 +161,15 @@ void HUD::draw_text(const std::string& text, float x, float y, float scale, cons
         float y0 = cur_y;
         float y1 = cur_y + char_h;
 
+        // Quad with CCW winding in top-left screen ortho:
         float quad[24] = {
-            x0, y1, u0, v1,
             x0, y0, u0, v0,
-            x1, y0, u1, v0,
-
             x0, y1, u0, v1,
-            x1, y0, u1, v0,
-            x1, y1, u1, v1
+            x1, y1, u1, v1,
+
+            x0, y0, u0, v0,
+            x1, y1, u1, v1,
+            x1, y0, u1, v0
         };
 
         vertices.insert(vertices.end(), quad, quad + 24);
@@ -275,6 +277,7 @@ void HUD::render(
     const glm::mat4& proj
 ) {
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -478,6 +481,7 @@ void HUD::render(
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 }
 
 } // namespace Voidfall

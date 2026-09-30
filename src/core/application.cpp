@@ -379,41 +379,35 @@ void Application::fixed_tick(float dt) {
 }
 
 void Application::render(float dt) {
-    if (m_state == GameState::MainMenu) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, m_window->width(), m_window->height());
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        m_hub_ui->render_main_menu(m_selected_level);
-        return;
-    }
-
-    if (m_state == GameState::OrbitalHub) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, m_window->width(), m_window->height());
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        m_hub_ui->render_orbital_hub(m_selected_level, m_skills, m_inventory);
-        return;
-    }
-
-    if (m_state == GameState::Debrief) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, m_window->width(), m_window->height());
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills);
-        return;
-    }
-
-    // GAMEPLAY RENDER PASS
     m_world->upload_dirty_chunks();
 
-    // Camera view setup with non-linear impulse trauma screen shake
-    glm::mat4 view = m_player->get_view_matrix();
-    if (m_trauma > 0.001f) {
-        float shake_amount = m_trauma * m_trauma * 0.35f;
-        float shake_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
-        float shake_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
-        view = glm::translate(view, glm::vec3(shake_x, shake_y, 0.0f));
-        m_trauma = (std::max)(0.0f, m_trauma - dt * 0.8f);
+    glm::mat4 view;
+    glm::vec3 cam_pos;
+
+    if (m_state == GameState::Gameplay) {
+        view = m_player->get_view_matrix();
+        cam_pos = m_player->position();
+
+        // Camera view setup with non-linear impulse trauma screen shake
+        if (m_trauma > 0.001f) {
+            float shake_amount = m_trauma * m_trauma * 0.35f;
+            float shake_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
+            float shake_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
+            view = glm::translate(view, glm::vec3(shake_x, shake_y, 0.0f));
+            m_trauma = (std::max)(0.0f, m_trauma - dt * 0.8f);
+        }
+
+        m_renderer->headlamp().position = m_player->position();
+        m_renderer->headlamp().direction = m_player->forward();
+    } else {
+        // Cinematic rotating cavern background for Main Menu, Orbital Hub, and Debrief
+        static float menu_cam_angle = 0.0f;
+        menu_cam_angle += dt * 0.15f;
+        float radius = 10.0f;
+        cam_pos = glm::vec3(16.0f + std::sin(menu_cam_angle) * radius, 22.0f, 16.0f + std::cos(menu_cam_angle) * radius);
+        view = glm::lookAt(cam_pos, glm::vec3(16.0f, 18.0f, 16.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        m_renderer->headlamp().position = cam_pos;
+        m_renderer->headlamp().direction = glm::normalize(glm::vec3(16.0f, 18.0f, 16.0f) - cam_pos);
     }
 
     glm::mat4 proj = glm::perspective(
@@ -422,10 +416,6 @@ void Application::render(float dt) {
         0.1f,
         250.0f
     );
-
-    // Update headlamp position to camera
-    m_renderer->headlamp().position = m_player->position();
-    m_renderer->headlamp().direction = m_player->forward();
 
     // Setup dynamic point lights (e.g. extraction beacon)
     m_renderer->clear_point_lights();
@@ -439,7 +429,7 @@ void Application::render(float dt) {
     }
 
     // Begin HDR Frame
-    m_renderer->begin_frame(view, proj, m_player->position());
+    m_renderer->begin_frame(view, proj, cam_pos);
 
     // Render Chunks
     for (const auto& [pos, chunk] : m_world->chunks()) {
@@ -459,8 +449,17 @@ void Application::render(float dt) {
     // End HDR Frame & Post-Processing Tonemap
     m_renderer->end_frame(dt, m_hazard->radiation_level());
 
-    // Render HUD Overlay (Module 4)
-    m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj);
+    // Render State-Specific Overlay
+    if (m_state == GameState::MainMenu) {
+        m_hub_ui->render_main_menu(m_selected_level);
+    } else if (m_state == GameState::OrbitalHub) {
+        m_hub_ui->render_orbital_hub(m_selected_level, m_skills, m_inventory);
+    } else if (m_state == GameState::Debrief) {
+        m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills);
+    } else {
+        // Render HUD Overlay (Module 4)
+        m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj);
+    }
 }
 
 void Application::run() {
@@ -488,15 +487,15 @@ void Application::run() {
             if (m_window->is_key_down(GLFW_KEY_2)) m_selected_level = 2;
             if (m_window->is_key_down(GLFW_KEY_3)) m_selected_level = 3;
 
-            static bool enter_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_ENTER) || m_window->is_key_down(GLFW_KEY_SPACE)) {
-                if (!enter_pressed) {
-                    enter_pressed = true;
-                    m_state = GameState::OrbitalHub;
-                }
-            } else {
-                enter_pressed = false;
+            static bool enter_down_last = false;
+            bool enter_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
+                             m_window->is_key_down(GLFW_KEY_SPACE) ||
+                             m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+
+            if (enter_now && !enter_down_last) {
+                m_state = GameState::OrbitalHub;
             }
+            enter_down_last = enter_now;
 
             if (m_window->is_key_down(GLFW_KEY_ESCAPE)) {
                 break;
@@ -504,79 +503,64 @@ void Application::run() {
         }
         // 2. ORBITAL HUB INPUTS
         else if (m_state == GameState::OrbitalHub) {
-            static bool launch_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_ENTER) || m_window->is_key_down(GLFW_KEY_SPACE)) {
-                if (!launch_pressed) {
-                    launch_pressed = true;
-                    start_expedition(m_selected_level);
-                }
-            } else {
-                launch_pressed = false;
-            }
+            static bool launch_down_last = false;
+            bool launch_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
+                              m_window->is_key_down(GLFW_KEY_SPACE) ||
+                              m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
 
-            static bool hub_back_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE)) {
-                if (!hub_back_pressed) {
-                    hub_back_pressed = true;
-                    m_state = GameState::MainMenu;
-                }
-            } else {
-                hub_back_pressed = false;
+            if (launch_now && !launch_down_last) {
+                start_expedition(m_selected_level);
             }
+            launch_down_last = launch_now;
+
+            static bool hub_back_down_last = false;
+            bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE);
+            if (hub_back_now && !hub_back_down_last) {
+                m_state = GameState::MainMenu;
+            }
+            hub_back_down_last = hub_back_now;
         }
         // 3. DEBRIEF INPUTS
         else if (m_state == GameState::Debrief) {
-            static bool debrief_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_ENTER) || m_window->is_key_down(GLFW_KEY_SPACE)) {
-                if (!debrief_pressed) {
-                    debrief_pressed = true;
-                    m_state = GameState::OrbitalHub;
-                }
-            } else {
-                debrief_pressed = false;
-            }
+            static bool debrief_down_last = false;
+            bool debrief_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
+                               m_window->is_key_down(GLFW_KEY_SPACE) ||
+                               m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
 
-            static bool retry_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_R)) {
-                if (!retry_pressed) {
-                    retry_pressed = true;
-                    start_expedition(m_selected_level);
-                }
-            } else {
-                retry_pressed = false;
+            if (debrief_now && !debrief_down_last) {
+                m_state = GameState::OrbitalHub;
             }
+            debrief_down_last = debrief_now;
+
+            static bool retry_down_last = false;
+            bool retry_now = m_window->is_key_down(GLFW_KEY_R);
+            if (retry_now && !retry_down_last) {
+                start_expedition(m_selected_level);
+            }
+            retry_down_last = retry_now;
         }
         // 4. GAMEPLAY INPUTS
         else if (m_state == GameState::Gameplay) {
-            static bool b_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_B)) {
-                if (!b_pressed) {
-                    b_pressed = true;
-                    m_extraction->deploy_beacon(m_player->position());
-                }
-            } else {
-                b_pressed = false;
+            static bool b_down_last = false;
+            bool b_now = m_window->is_key_down(GLFW_KEY_B);
+            if (b_now && !b_down_last) {
+                m_extraction->deploy_beacon(m_player->position());
             }
+            b_down_last = b_now;
 
-            static bool h_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_H)) {
-                if (!h_pressed) {
-                    h_pressed = true;
-                    m_renderer->headlamp().enabled = !m_renderer->headlamp().enabled;
-                }
-            } else {
-                h_pressed = false;
+            static bool h_down_last = false;
+            bool h_now = m_window->is_key_down(GLFW_KEY_H);
+            if (h_now && !h_down_last) {
+                m_renderer->headlamp().enabled = !m_renderer->headlamp().enabled;
             }
+            h_down_last = h_now;
 
-            static bool tab_pressed = false;
-            if (m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE)) {
-                if (!tab_pressed) {
-                    tab_pressed = true;
-                    m_window->set_cursor_locked(!m_window->is_cursor_locked());
-                }
-            } else {
-                tab_pressed = false;
+            static bool tab_down_last = false;
+            bool tab_now = m_window->is_key_down(GLFW_KEY_TAB) || m_window->is_key_down(GLFW_KEY_ESCAPE);
+            if (tab_now && !tab_down_last) {
+                m_window->set_cursor_locked(!m_window->is_cursor_locked());
             }
+            tab_down_last = tab_now;
 
             m_player->handle_input(*m_window, static_cast<float>(frame_time));
         }

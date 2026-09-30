@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 namespace Voidfall {
 
@@ -14,9 +15,20 @@ Shader::~Shader() {
 }
 
 std::string Shader::read_file_to_string(const std::string& filepath) {
-    std::ifstream file(filepath);
+    std::filesystem::path p(filepath);
+    if (!std::filesystem::exists(p)) {
+        if (std::filesystem::exists("../" + filepath)) {
+            p = "../" + filepath;
+        } else if (std::filesystem::exists("../../" + filepath)) {
+            p = "../../" + filepath;
+        } else if (std::filesystem::exists("../../../" + filepath)) {
+            p = "../../../" + filepath;
+        }
+    }
+
+    std::ifstream file(p);
     if (!file.is_open()) {
-        std::cerr << "[Shader] Error opening shader file: " << filepath << std::endl;
+        std::cerr << "[Shader] Error opening shader file: " << filepath << " (resolved: " << p.string() << ")" << std::endl;
         return "";
     }
     std::stringstream ss;
