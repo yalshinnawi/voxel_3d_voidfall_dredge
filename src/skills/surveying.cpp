@@ -39,10 +39,10 @@ void SurveyingSystem::trigger_scan(const glm::vec3& origin, const World& world, 
                 if (dyz2 + dx * dx > radius_sq) continue;
 
                 Voxel v = world.get_voxel(x, y, z);
-                // Filter: only high-value targets (Voidite, Radioactive Ore, Vault Doors/Relics)
-                if (v.material_id == MAT_VOIDITE_CRYSTAL ||
-                    v.material_id == MAT_RADIOACTIVE_ORE ||
-                    v.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                // Highlight ONLY: MAT_VOIDITE, MAT_TITANIUM, and MAT_VAULT_DOOR
+                if (v.material_id == MAT_VOIDITE ||
+                    v.material_id == MAT_TITANIUM ||
+                    v.material_id == MAT_VAULT_DOOR) {
                     m_surveyed.push_back(SurveyedVoxel{glm::ivec3(x, y, z), v.material_id});
                 }
             }
@@ -63,8 +63,8 @@ void SurveyingSystem::update(float dt) {
 
 float SurveyingSystem::alpha() const {
     if (!m_active || m_duration <= 0.0f) return 0.0f;
-    // Solid visibility during initial 1.5s, smooth fade-out over final 1.0s
-    return (m_timer <= 1.0f) ? std::clamp(m_timer / 1.0f, 0.0f, 1.0f) : 1.0f;
+    // Immediate linear fade over duration (2.5s)
+    return std::clamp(m_timer / m_duration, 0.0f, 1.0f);
 }
 
 } // namespace Voidfall

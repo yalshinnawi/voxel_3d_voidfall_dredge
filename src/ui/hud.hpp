@@ -15,9 +15,12 @@ namespace Voidfall {
 struct FloatingLootText {
     glm::vec3 world_pos;
     std::string text;
+    std::string resource_name;
+    int amount{0};
+    int score{0};
     glm::vec4 color;
-    float timer{1.5f};
-    float max_timer{1.5f};
+    float timer{1.8f};
+    float max_timer{1.8f};
 };
 
 class HUD {
@@ -30,6 +33,7 @@ public:
 
     void add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color);
     void show_warning(const std::string& msg, float duration = 2.0f);
+    void trigger_damage_flash(float intensity = 0.5f) { m_damage_flash_timer = intensity; }
     void clear_target_info();
 
     void render(
@@ -68,6 +72,7 @@ private:
     std::vector<FloatingLootText> m_floating_loot;
     float m_warning_timer{0.0f};
     std::string m_warning_message;
+    float m_damage_flash_timer{0.0f};
     float m_total_time{0.0f};
 };
 

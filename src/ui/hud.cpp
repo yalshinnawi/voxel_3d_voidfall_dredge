@@ -97,6 +97,9 @@ void HUD::update(float dt) {
     if (m_warning_timer > 0.0f) {
         m_warning_timer -= dt;
     }
+    if (m_damage_flash_timer > 0.0f) {
+        m_damage_flash_timer = std::max(0.0f, m_damage_flash_timer - dt * 1.5f);
+    }
 
     for (auto it = m_floating_loot.begin(); it != m_floating_loot.end();) {
         it->world_pos.y += 1.1f * dt;
@@ -119,12 +122,49 @@ void HUD::clear_target_info() {
 }
 
 void HUD::add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color) {
+    // Check if recent entry nearby matches this resource to consolidate continuous drill hits
+    std::string res_key;
+    int amt = 0;
+    int pts = 0;
+    if (text.find("VOIDITE") != std::string::npos) {
+        res_key = "VOIDITE"; amt = 10; pts = 50;
+    } else if (text.find("TITANIUM") != std::string::npos) {
+        res_key = "TITANIUM"; amt = 2; pts = 12;
+    } else if (text.find("SCRAP") != std::string::npos) {
+        res_key = "SCRAP METAL"; amt = 1; pts = 0;
+    } else if (text.find("RADIOACTIVE") != std::string::npos) {
+        res_key = "RADIOACTIVE"; amt = 15; pts = 80;
+    } else if (text.find("RELIC") != std::string::npos) {
+        res_key = "RELIC HYPER-CORE"; amt = 1; pts = 250;
+    }
+
+    if (!res_key.empty()) {
+        for (auto& item : m_floating_loot) {
+            if (item.resource_name == res_key && glm::distance(item.world_pos, world_pos) < 4.0f && item.timer > 0.1f) {
+                // Consolidate continuous drill hits into one rising accumulator number
+                item.amount += amt;
+                item.score += pts;
+                item.timer = item.max_timer; // Reset fade timer
+                item.world_pos.y = std::max(item.world_pos.y, world_pos.y + 0.3f);
+                if (item.score > 0) {
+                    item.text = "+" + std::to_string(item.amount) + " " + item.resource_name + " (+" + std::to_string(item.score) + " PTS)";
+                } else {
+                    item.text = "+" + std::to_string(item.amount) + " " + item.resource_name;
+                }
+                return;
+            }
+        }
+    }
+
     FloatingLootText loot;
     loot.world_pos = world_pos;
     loot.text = text;
+    loot.resource_name = res_key;
+    loot.amount = (amt > 0) ? amt : 1;
+    loot.score = pts;
     loot.color = color;
-    loot.timer = 1.5f;
-    loot.max_timer = 1.5f;
+    loot.timer = 1.8f;
+    loot.max_timer = 1.8f;
     m_floating_loot.push_back(loot);
 }
 
@@ -194,8 +234,6 @@ void HUD::draw_text(const std::string& text, float x, float y, float scale, cons
 
     m_text_shader.use();
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
-    m_text_shader.set_mat4("uProjection", proj);
-    m_text_shader.set_vec4("uTextColor", color);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
@@ -204,7 +242,18 @@ void HUD::draw_text(const std::string& text, float x, float y, float scale, cons
     glBindVertexArray(m_text_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_text_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)), vertices.data());
+
+    // 1. Draw 1-pixel dark drop shadow / outline quad behind text for high contrast
+    glm::mat4 shadow_proj = glm::translate(proj, glm::vec3(1.2f, 1.2f, 0.0f));
+    m_text_shader.set_mat4("uProjection", shadow_proj);
+    m_text_shader.set_vec4("uTextColor", glm::vec4(0.0f, 0.0f, 0.0f, color.a * 0.95f));
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+
+    // 2. Draw high-visibility foreground text
+    m_text_shader.set_mat4("uProjection", proj);
+    m_text_shader.set_vec4("uTextColor", color);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+
     glBindVertexArray(0);
 }
 
@@ -275,7 +324,10 @@ void HUD::render_floating_loot(const glm::mat4& view, const glm::mat4& proj) {
         col.a *= alpha;
 
         float text_w = item.text.size() * 8.0f * 1.35f;
-        draw_text(item.text, sx - text_w / 2.0f, sy, 1.35f, col);
+        // High contrast dark pill backing
+        draw_rect(sx - text_w / 2.0f - 6.0f, sy - 2.0f, text_w + 12.0f, 19.0f, glm::vec4(0.02f, 0.03f, 0.05f, 0.85f * alpha));
+        draw_rect(sx - text_w / 2.0f - 6.0f, sy + 17.0f, text_w + 12.0f, 1.0f, glm::vec4(col.r, col.g, col.b, 0.6f * alpha));
+        draw_text(item.text, sx - text_w / 2.0f, sy + 2.0f, 1.35f, col);
     }
 }
 
@@ -547,16 +599,33 @@ void HUD::render(
         }
     }
 
-    // 9. ON-SCREEN WARNING BANNER
+    // 9. ON-SCREEN WARNING BANNER (High-Contrast Red #FF3333 or Amber #FFB300 on Dark Semi-Transparent Pill Backing)
     if (m_warning_timer > 0.0f && !m_warning_message.empty()) {
-        float warn_w = m_warning_message.size() * 8.0f * 1.35f + 32.0f;
+        float warn_w = m_warning_message.size() * 8.0f * 1.35f + 36.0f;
         float warn_h = 36.0f;
         float warn_x = cx - warn_w / 2.0f;
         float warn_y = cy + 55.0f;
-        draw_rect(warn_x, warn_y, warn_w, warn_h, glm::vec4(0.35f, 0.05f, 0.05f, 0.95f));
-        draw_rect(warn_x, warn_y, warn_w, 2.0f, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
-        draw_rect(warn_x, warn_y + warn_h - 2.0f, warn_w, 2.0f, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
-        draw_text(m_warning_message, warn_x + 16.0f, warn_y + 11.0f, 1.35f, glm::vec4(1.0f, 0.9f, 0.2f, 1.0f));
+        bool is_spall_amber = (m_warning_message.find("TECTONIC SPALL") != std::string::npos);
+        glm::vec4 warn_col = is_spall_amber ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) : glm::vec4(1.0f, 0.20f, 0.20f, 1.0f); // Amber or #FF3333
+        draw_rect(warn_x, warn_y, warn_w, warn_h, glm::vec4(0.04f, 0.05f, 0.07f, 0.94f));
+        draw_rect(warn_x, warn_y, warn_w, 2.0f, warn_col);
+        draw_rect(warn_x, warn_y + warn_h - 2.0f, warn_w, 2.0f, warn_col);
+        draw_rect(warn_x, warn_y, 2.0f, warn_h, warn_col);
+        draw_rect(warn_x + warn_w - 2.0f, warn_y, 2.0f, warn_h, warn_col);
+        draw_text(m_warning_message, warn_x + 18.0f, warn_y + 11.0f, 1.35f, warn_col);
+    }
+
+    // 10. DIRECTIONAL DAMAGE FLASH / VIGNETTE
+    if (m_damage_flash_timer > 0.0f) {
+        float f_alpha = glm::clamp(m_damage_flash_timer, 0.0f, 0.75f);
+        float b_thick = 24.0f;
+        float sw = static_cast<float>(m_width);
+        float sh = static_cast<float>(m_height);
+        glm::vec4 flash_col(1.0f, 0.15f, 0.1f, f_alpha);
+        draw_rect(0.0f, 0.0f, sw, b_thick, flash_col);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, flash_col);
+        draw_rect(0.0f, 0.0f, b_thick, sh, flash_col);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, flash_col);
     }
 
     glDisable(GL_BLEND);

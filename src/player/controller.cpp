@@ -35,9 +35,8 @@ void PlayerController::handle_input(const Window& window, float dt) {
 
     // 1. Mouse Look
     glm::dvec2 mouse_delta = const_cast<Window&>(window).get_cursor_delta();
-    float sensitivity = 0.12f;
-    m_yaw   += static_cast<float>(mouse_delta.x) * sensitivity;
-    m_pitch += static_cast<float>(mouse_delta.y) * sensitivity;
+    m_yaw   += static_cast<float>(mouse_delta.x) * m_mouse_sensitivity;
+    m_pitch += static_cast<float>(mouse_delta.y) * m_mouse_sensitivity;
     m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
     update_camera_vectors();
 
@@ -107,27 +106,37 @@ void PlayerController::handle_input(const Window& window, float dt) {
         m_current_buttons |= BTN_GRAPPLE_FIRE;
     }
 
-    // 5. Reel Grapple or Throw Micro-Charge (E key)
+    // 5. Reel Grapple (E key strictly reels grapple cable when active)
     if (window.is_key_down(GLFW_KEY_E)) {
         if (m_grapple.active) {
             m_current_buttons |= BTN_GRAPPLE_REEL;
             float effective_reel = m_grapple.reel_speed * m_reel_speed_multiplier;
             m_grapple.rest_length = std::max(2.0f, m_grapple.rest_length - effective_reel * dt);
-        } else if (m_allow_micro_charges) {
-            m_current_buttons |= BTN_SKILL_DEMO;
         }
     }
 
-    // 6. Mining & Building buttons
-    if (window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT)) {
-        m_current_buttons |= BTN_MINE_DRILL;
-    }
-    if (window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT)) {
-        if (m_active_tool == ToolSlot::DemolitionCharge) {
-            m_current_buttons |= BTN_SKILL_DEMO;
-        } else {
-            m_current_buttons |= BTN_PLACE_BLOCK;
-        }
+    // 6. Tool-specific mouse actions:
+    // Slot 1 (Standard Excavator Drill):
+    //   LMB: Mine/Drill single targeted voxel.
+    //   RMB: Place Industrial Bulkhead (MAT_BULKHEAD) if bulkheads > 0.
+    // Slot 2 (Reinforce / Builder Tool):
+    //   LMB: Place Structural Support Bulkhead (MAT_BULKHEAD).
+    //   RMB: Remove player-placed bulkhead cleanly without triggering cave-in checks.
+    // Slot 3 (Demolition Shaped Charges):
+    //   LMB: Deploy shaped charge on targeted surface.
+    //   RMB: Detonate placed shaped charges (blasts 3x1x1 tunnel).
+    bool lmb = window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+    bool rmb = window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
+
+    if (m_active_tool == ToolSlot::MiningDrill) {
+        if (lmb) m_current_buttons |= BTN_MINE_DRILL;
+        if (rmb) m_current_buttons |= BTN_PLACE_BLOCK;
+    } else if (m_active_tool == ToolSlot::IndustrialBulkhead) {
+        if (lmb) m_current_buttons |= BTN_PLACE_BLOCK;
+        if (rmb) m_current_buttons |= BTN_REMOVE_BULKHEAD;
+    } else if (m_active_tool == ToolSlot::DemolitionCharge) {
+        if (lmb) m_current_buttons |= BTN_SKILL_DEMO;       // Deploy shaped charge
+        if (rmb) m_current_buttons |= BTN_DETONATE_CHARGE;   // Detonate placed charge
     }
 
     // 7. Surveying Sonar Pulse (Q key)
@@ -196,9 +205,10 @@ void PlayerController::update_physics(float dt, World& world) {
             }
 
             m_mine_timer += dt;
-            m_target_time_to_break = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
-                                     (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) ? 2.5f :
-                                     (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.2f : 0.6f;
+            float base_time = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
+                              (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) ? 2.5f :
+                              (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.2f : 0.6f;
+            m_target_time_to_break = base_time / std::max(0.2f, m_drill_speed_multiplier);
 
             if (m_mine_timer >= m_target_time_to_break) {
                 uint8_t old_mat = hit.voxel.material_id;
@@ -220,28 +230,68 @@ void PlayerController::update_physics(float dt, World& world) {
         m_target_block = glm::ivec3(-1);
     }
 
-    // 5. Block Placement or Demolitions Skill
+    // 5. Tool Actions & Cooldowns
     if (m_place_cooldown > 0.0f) {
         m_place_cooldown -= dt;
     }
 
-    static bool demo_charge_handled = false;
+    // Slot 3 LMB: Deploy Shaped Charge on targeted surface
     if (m_current_buttons & BTN_SKILL_DEMO) {
-        if (!demo_charge_handled) {
-            demo_charge_handled = true;
+        if (m_place_cooldown <= 0.0f) {
+            m_place_cooldown = 0.25f;
             glm::vec3 ray_origin = m_position + m_front * 0.6f;
             RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
             if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
-                bool is_micro = m_allow_micro_charges;
-                if (m_on_explosive_blast) {
-                    m_on_explosive_blast(hit.block_pos, hit.normal, is_micro);
+                m_placed_charge_pos = hit.block_pos;
+                m_placed_charge_normal = hit.normal;
+                m_has_placed_charge = true;
+                if (m_on_warning) {
+                    m_on_warning("SHAPED CHARGE DEPLOYED. PRESS [RMB] TO DETONATE TUNNEL.");
                 }
             }
         }
-    } else {
-        demo_charge_handled = false;
     }
 
+    // Slot 3 RMB: Detonate Placed Shaped Charge (blasts 3x1x1 tunnel)
+    if (m_current_buttons & BTN_DETONATE_CHARGE) {
+        if (m_place_cooldown <= 0.0f) {
+            m_place_cooldown = 0.35f;
+            if (m_has_placed_charge) {
+                if (m_on_explosive_blast) {
+                    m_on_explosive_blast(m_placed_charge_pos, m_placed_charge_normal, true);
+                }
+                m_has_placed_charge = false;
+            } else {
+                glm::vec3 ray_origin = m_position + m_front * 0.6f;
+                RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
+                if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
+                    if (m_on_explosive_blast) {
+                        m_on_explosive_blast(hit.block_pos, hit.normal, true);
+                    }
+                }
+            }
+        }
+    }
+
+    // Slot 2 RMB: Remove Player-Placed Bulkhead cleanly without triggering cave-in checks
+    if (m_current_buttons & BTN_REMOVE_BULKHEAD) {
+        if (m_place_cooldown <= 0.0f) {
+            m_place_cooldown = 0.25f;
+            glm::vec3 ray_origin = m_position + m_front * 0.6f;
+            RaycastHit hit = world.raycast(ray_origin, m_front, 6.0f);
+            if (hit.hit && (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD || hit.voxel.material_id == MAT_BULKHEAD)) {
+                world.set_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z, Voxel{MAT_AIR, 0}, true);
+                if (m_on_bulkhead_dismantle) {
+                    m_on_bulkhead_dismantle(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
+                }
+                if (m_on_warning) {
+                    m_on_warning("BULKHEAD DISMANTLED CLEANLY (+1 BULKHEAD RECLAIMED)");
+                }
+            }
+        }
+    }
+
+    // Slot 1 RMB or Slot 2 LMB: Place Industrial Bulkhead
     if (m_current_buttons & BTN_PLACE_BLOCK) {
         if (m_place_cooldown <= 0.0f) {
             m_place_cooldown = 0.2f;

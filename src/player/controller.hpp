@@ -57,13 +57,27 @@ public:
 
     void set_reel_speed_multiplier(float mul) { m_reel_speed_multiplier = mul; }
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
+    void set_drill_speed_multiplier(float mul) { m_drill_speed_multiplier = mul; }
     void set_allow_micro_charges(bool allow) { m_allow_micro_charges = allow; }
+
+    void add_trauma(float t) { m_trauma = glm::clamp(m_trauma + t, 0.0f, 1.0f); }
+    float trauma() const { return m_trauma; }
+    void set_trauma(float t) { m_trauma = glm::clamp(t, 0.0f, 1.0f); }
+
+    void set_mouse_sensitivity(float sens) { m_mouse_sensitivity = sens; }
+    float mouse_sensitivity() const { return m_mouse_sensitivity; }
+
+    bool has_placed_charge() const { return m_has_placed_charge; }
+    const glm::ivec3& placed_charge_pos() const { return m_placed_charge_pos; }
+    const glm::ivec3& placed_charge_normal() const { return m_placed_charge_normal; }
+    void clear_placed_charge() { m_has_placed_charge = false; }
 
     PlayerInputPacket build_input_packet(uint32_t tick, float dt) const;
 
     // Callbacks for gameplay actions
     using BlockBreakCallback = std::function<void(int x, int y, int z, const glm::ivec3& normal, uint8_t mat)>;
     using BlockPlaceCallback = std::function<void(int x, int y, int z, uint8_t mat)>;
+    using BulkheadDismantleCallback = std::function<void(int x, int y, int z)>;
     using SonarCastCallback = std::function<void(const glm::vec3& origin)>;
     using ExplosiveBlastCallback = std::function<void(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro)>;
     using CanPlacePredicate = std::function<bool()>;
@@ -71,6 +85,7 @@ public:
 
     void set_on_block_break(BlockBreakCallback cb) { m_on_block_break = std::move(cb); }
     void set_on_block_place(BlockPlaceCallback cb) { m_on_block_place = std::move(cb); }
+    void set_on_bulkhead_dismantle(BulkheadDismantleCallback cb) { m_on_bulkhead_dismantle = std::move(cb); }
     void set_on_sonar_cast(SonarCastCallback cb) { m_on_sonar_cast = std::move(cb); }
     void set_on_explosive_blast(ExplosiveBlastCallback cb) { m_on_explosive_blast = std::move(cb); }
     void set_can_place_predicate(CanPlacePredicate pred) { m_can_place_predicate = std::move(pred); }
@@ -100,7 +115,13 @@ private:
     // Progression skill modifiers
     float m_reel_speed_multiplier{1.0f};
     float m_thruster_regen_multiplier{1.0f};
+    float m_drill_speed_multiplier{1.0f};
     bool m_allow_micro_charges{false};
+
+    // Shaped charge deployment state
+    bool m_has_placed_charge{false};
+    glm::ivec3 m_placed_charge_pos{0};
+    glm::ivec3 m_placed_charge_normal{0, 1, 0};
 
     // Mining / drilling state
     float m_mine_timer{0.0f};
@@ -111,9 +132,16 @@ private:
     // Placement cooldown debounce (0.2s)
     float m_place_cooldown{0.0f};
 
+    // Camera trauma / screen shake (clamped 0..1)
+    float m_trauma{0.0f};
+
+    // Look sensitivity
+    float m_mouse_sensitivity{0.12f};
+
     // Action callbacks
     BlockBreakCallback m_on_block_break;
     BlockPlaceCallback m_on_block_place;
+    BulkheadDismantleCallback m_on_bulkhead_dismantle;
     SonarCastCallback m_on_sonar_cast;
     ExplosiveBlastCallback m_on_explosive_blast;
     CanPlacePredicate m_can_place_predicate;

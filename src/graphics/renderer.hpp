@@ -4,6 +4,7 @@
 #include "../voxel/chunk.hpp"
 #include "../skills/surveying.hpp"
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <memory>
 
@@ -60,6 +61,7 @@ public:
     void trigger_sonar_pulse(const glm::vec3& origin);
     void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);
     void render_grapple_cable(const glm::vec3& start, const glm::vec3& end);
+    void render_extraction_beacon(const glm::vec3& beacon_pos, float siren_pulse, float time, bool is_pod_landed);
     void trigger_dust_kickup(float duration = 3.0f);
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
@@ -76,6 +78,10 @@ public:
     int height() const { return m_height; }
     const glm::mat4& view_matrix() const { return m_view; }
     const glm::mat4& proj_matrix() const { return m_proj; }
+
+    static glm::mat4 create_projection(float aspect, float fov_deg = 75.0f) {
+        return glm::perspective(glm::radians(fov_deg), aspect, 0.1f, 250.0f);
+    }
 
 private:
     void init_framebuffers();

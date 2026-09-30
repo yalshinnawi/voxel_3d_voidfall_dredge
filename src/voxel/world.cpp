@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <ctime>
 
 namespace Voidfall {
 
@@ -44,6 +45,19 @@ World::~World() {
 
 void World::set_seed(uint32_t seed) {
     m_seed = seed;
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    m_chunks.clear();
+}
+
+void World::generate_world(int sector_index, uint32_t seed) {
+    m_sector_index = sector_index;
+    uint32_t effective_seed = (seed ^ (static_cast<uint32_t>(sector_index) * 2654435761u)) + static_cast<uint32_t>(time(nullptr));
+    m_seed = effective_seed;
+    m_noise_offset = glm::vec3(
+        static_cast<float>(effective_seed % 10000),
+        static_cast<float>((effective_seed / 10000) % 10000),
+        static_cast<float>((effective_seed / 100) % 10000)
+    );
     std::lock_guard<std::mutex> lock(m_world_mutex);
     m_chunks.clear();
 }
@@ -129,18 +143,38 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
 
 // 3D procedural noise synthesis for subterranean caverns
 float World::sample_cavern_noise(float x, float y, float z) const {
-    float s = static_cast<float>(m_seed);
-    float nx = (x + s * 13.1f) * 0.04f;
-    float ny = (y + s * 17.3f) * 0.04f;
-    float nz = (z + s * 19.7f) * 0.04f;
+    float ox = x + m_noise_offset.x;
+    float oy = y + m_noise_offset.y;
+    float oz = z + m_noise_offset.z;
 
-    // Harmonic multi-octave 3D cavern noise
-    float n1 = std::sin(nx) * std::cos(ny) + std::sin(ny) * std::cos(nz) + std::sin(nz) * std::cos(nx);
-    float n2 = (std::sin(nx * 2.3f + 1.2f) * std::cos(ny * 2.3f) +
-                std::sin(ny * 2.3f + 0.7f) * std::cos(nz * 2.3f)) * 0.5f;
-    float n3 = (std::sin(nx * 4.7f) * std::cos(nz * 4.7f)) * 0.25f;
-
-    return n1 + n2 + n3;
+    if (m_sector_index == 1) {
+        // Broad open hollow chambers (smoother, lower frequency)
+        float nx = ox * 0.025f;
+        float ny = oy * 0.025f;
+        float nz = oz * 0.025f;
+        float n1 = std::sin(nx) * std::cos(ny) + std::sin(ny) * std::cos(nz) + std::sin(nz) * std::cos(nx);
+        float n2 = (std::sin(nx * 1.8f + 1.2f) * std::cos(ny * 1.8f) +
+                    std::sin(ny * 1.8f + 0.7f) * std::cos(nz * 1.8f)) * 0.4f;
+        return n1 + n2;
+    } else if (m_sector_index == 3) {
+        // Narrow vertical fissures (elongated vertically, high horizontal frequency)
+        float nx = ox * 0.07f;
+        float ny = oy * 0.015f; // stretched vertically
+        float nz = oz * 0.07f;
+        float n1 = std::sin(nx) * std::cos(nz) + std::sin(nz * 1.4f) * std::cos(nx * 1.4f);
+        float n2 = std::sin(nx * 2.1f + oy * 0.04f) * 0.5f;
+        return n1 + n2;
+    } else {
+        // Sector 2 / default
+        float nx = ox * 0.04f;
+        float ny = oy * 0.04f;
+        float nz = oz * 0.04f;
+        float n1 = std::sin(nx) * std::cos(ny) + std::sin(ny) * std::cos(nz) + std::sin(nz) * std::cos(nx);
+        float n2 = (std::sin(nx * 2.3f + 1.2f) * std::cos(ny * 2.3f) +
+                    std::sin(ny * 2.3f + 0.7f) * std::cos(nz * 2.3f)) * 0.5f;
+        float n3 = (std::sin(nx * 4.7f) * std::cos(nz * 4.7f)) * 0.25f;
+        return n1 + n2 + n3;
+    }
 }
 
 void World::generate_chunk_terrain(Chunk& chunk) {
@@ -169,35 +203,108 @@ void World::generate_chunk_terrain(Chunk& chunk) {
                     continue;
                 }
 
-                // Sample cavern density
                 float noise = sample_cavern_noise(static_cast<float>(wx), static_cast<float>(wy), static_cast<float>(wz));
 
-                // Carve subterranean tunnel voids where noise < -0.2
-                if (noise < -0.15f) {
-                    chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                    continue;
-                }
+                if (m_sector_index == 1) {
+                    // Level 1 (Crystalline Caverns): Broad open hollow chambers, high MAT_VOIDITE crystal clusters
+                    if (noise < 0.10f) {
+                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                        continue;
+                    }
 
-                // Determine geological rock tier
-                uint8_t mat = MAT_FRACTURED_GRANITE;
-                if (wy < 12) {
-                    mat = MAT_VOLCANIC_BASALT;
-                }
+                    uint8_t mat = MAT_FRACTURED_GRANITE;
+                    if (wy < 8) {
+                        mat = MAT_VOLCANIC_BASALT;
+                    }
 
-                // Mineral vein sampling
-                float crystal_noise = std::sin(wx * 0.18f) * std::cos(wy * 0.18f) * std::sin(wz * 0.18f);
-                if (crystal_noise > 0.78f) {
-                    mat = MAT_VOIDITE_CRYSTAL;
-                } else if (crystal_noise < -0.82f) {
-                    mat = MAT_RADIOACTIVE_ORE;
-                }
+                    // High voidite crystal clusters
+                    float crystal_noise = std::sin((wx + m_noise_offset.x) * 0.16f) *
+                                          std::cos((wy + m_noise_offset.y) * 0.16f) *
+                                          std::sin((wz + m_noise_offset.z) * 0.16f);
+                    if (crystal_noise > 0.58f) {
+                        mat = MAT_VOIDITE_CRYSTAL;
+                    } else if (crystal_noise < -0.85f) {
+                        mat = MAT_TITANIUM;
+                    }
 
-                // Subterranean Vault structures (industrial bulkheads)
-                if (wy >= 6 && wy <= 18 && (wx % 48 == 0 || wz % 48 == 0)) {
-                    mat = MAT_INDUSTRIAL_BULKHEAD;
+                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
                 }
+                else if (m_sector_index == 2) {
+                    // Level 2 (Subterranean Vault): Linear corridors cut through dense basalt, embedded metal plates (MAT_TITANIUM), reinforced vault bulkheads (MAT_VAULT_DOOR)
+                    int off_x = wx + static_cast<int>(m_noise_offset.x);
+                    int off_z = wz + static_cast<int>(m_noise_offset.z);
+                    int mod_x = floor_mod(off_x, 24);
+                    int mod_z = floor_mod(off_z, 24);
 
-                chunk.set_voxel(x, y, z, Voxel{mat, 0});
+                    bool is_corridor_x = (mod_z >= 10 && mod_z <= 14 && wy >= 4 && wy <= 16);
+                    bool is_corridor_z = (mod_x >= 10 && mod_x <= 14 && wy >= 4 && wy <= 16);
+                    bool is_corridor = is_corridor_x || is_corridor_z;
+
+                    if (is_corridor) {
+                        // Check for reinforced vault doors blocking corridor sections
+                        bool is_door_x = is_corridor_x && (floor_mod(off_x, 48) == 0);
+                        bool is_door_z = is_corridor_z && (floor_mod(off_z, 48) == 0);
+                        if (is_door_x || is_door_z) {
+                            chunk.set_voxel(x, y, z, Voxel{MAT_REINFORCED_VAULT_DOOR, 0x10});
+                            continue;
+                        }
+                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                        continue;
+                    }
+
+                    // Organic caverns
+                    if (noise < -0.25f) {
+                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                        continue;
+                    }
+
+                    uint8_t mat = MAT_VOLCANIC_BASALT; // dense basalt
+
+                    // Embedded metal plates / titanium lining
+                    bool near_corridor_wall = (mod_z == 9 || mod_z == 15 || mod_x == 9 || mod_x == 15) && (wy >= 4 && wy <= 16);
+                    if (near_corridor_wall) {
+                        mat = MAT_TITANIUM;
+                    } else {
+                        float v_noise = std::sin((wx + m_noise_offset.x) * 0.20f) * std::sin((wz + m_noise_offset.z) * 0.20f);
+                        if (v_noise > 0.72f) {
+                            mat = MAT_TITANIUM;
+                        } else if (v_noise < -0.80f) {
+                            mat = MAT_VOIDITE_CRYSTAL;
+                        }
+                    }
+
+                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
+                }
+                else {
+                    // Level 3 (Fault-Line Collapse): Narrow vertical fissures, sparse ground paths, frequent falling stalactites
+                    float fissure = std::abs(std::sin((wx + m_noise_offset.x) * 0.08f) +
+                                             std::cos((wz + m_noise_offset.z) * 0.08f));
+                    if (fissure < 0.38f || noise < -0.22f) {
+                        bool is_ledge = (wy % 12 == 1 && ((wx + wz) % 5 == 0));
+                        if (!is_ledge) {
+                            chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                            continue;
+                        }
+                    }
+
+                    uint8_t mat = MAT_FRACTURED_GRANITE;
+                    if (wy < 14) {
+                        mat = MAT_VOLCANIC_BASALT;
+                    }
+
+                    if (wy >= 18 && (wx % 6 == 0 && wz % 6 == 0)) {
+                        mat = MAT_RADIOACTIVE_ORE;
+                    } else {
+                        float ore_noise = std::sin((wx + m_noise_offset.x) * 0.22f) * std::cos((wy + m_noise_offset.y) * 0.22f);
+                        if (ore_noise > 0.75f) {
+                            mat = MAT_VOIDITE_CRYSTAL;
+                        } else if (ore_noise < -0.65f) {
+                            mat = MAT_RADIOACTIVE_ORE;
+                        }
+                    }
+
+                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
+                }
             }
         }
     }

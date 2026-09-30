@@ -21,8 +21,11 @@ enum MaterialID : uint8_t {
 // Aliases for gameplay and surveying systems
 constexpr uint8_t MAT_VOIDITE = MAT_VOIDITE_CRYSTAL;
 constexpr uint8_t MAT_TITANIUM = MAT_INDUSTRIAL_BULKHEAD;
+constexpr uint8_t MAT_BULKHEAD = MAT_INDUSTRIAL_BULKHEAD;
 constexpr uint8_t MAT_VAULT_DOOR = MAT_REINFORCED_VAULT_DOOR;
 constexpr uint8_t MAT_RADIOACTIVE = MAT_RADIOACTIVE_ORE;
+constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
+constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
 
 // 16-bit packed voxel state
 #pragma pack(push, 1)

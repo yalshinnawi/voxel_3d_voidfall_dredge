@@ -11,7 +11,14 @@ enum class GameState {
     MainMenu,
     OrbitalHub,
     Gameplay,
+    Paused,
     Debrief
+};
+
+enum class DebriefAction {
+    None,
+    ReturnToHub,
+    LaunchNextSector
 };
 
 class OrbitalHubUI {
@@ -21,9 +28,9 @@ public:
 
     void resize(int width, int height);
 
-    bool render_main_menu(int& selected_level, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
+    bool render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
     bool render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
-    bool render_debrief(bool success, int level, const PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
+    DebriefAction render_debrief(bool success, int level, PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
 
 private:
     void init_gl();

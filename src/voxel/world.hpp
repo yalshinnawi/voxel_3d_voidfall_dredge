@@ -34,6 +34,8 @@ public:
 
     uint32_t seed() const { return m_seed; }
     void set_seed(uint32_t seed);
+    void generate_world(int sector_index, uint32_t seed = 0);
+    int sector_index() const { return m_sector_index; }
 
     Chunk* get_chunk(const ChunkPos& pos);
     const Chunk* get_chunk(const ChunkPos& pos) const;
@@ -65,6 +67,8 @@ private:
     void queue_chunk_for_meshing(const ChunkPos& pos);
 
     uint32_t m_seed{1337};
+    int m_sector_index{1};
+    glm::vec3 m_noise_offset{0.0f};
     mutable std::mutex m_world_mutex;
     std::unordered_map<ChunkPos, std::unique_ptr<Chunk>, ChunkPosHash> m_chunks;
 

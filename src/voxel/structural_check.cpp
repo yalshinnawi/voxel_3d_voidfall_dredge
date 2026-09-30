@@ -117,4 +117,86 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
     return unanchored_islands;
 }
 
+std::vector<glm::ivec3> StructuralCheck::query_seismic_detachment_blocks(
+    const World& world,
+    const glm::vec3& player_pos,
+    int min_blocks,
+    int max_blocks,
+    float radius,
+    int min_y_offset,
+    int max_y_offset
+) {
+    int px = static_cast<int>(std::floor(player_pos.x));
+    int py = static_cast<int>(std::floor(player_pos.y));
+    int pz = static_cast<int>(std::floor(player_pos.z));
+
+    std::vector<glm::ivec3> candidates;
+    int r_ceil = static_cast<int>(std::ceil(radius));
+
+    const glm::ivec3 neighbors[6] = {
+        {1, 0, 0}, {-1, 0, 0},
+        {0, 1, 0}, {0, -1, 0},
+        {0, 0, 1}, {0, 0, -1}
+    };
+
+    for (int dy = min_y_offset; dy <= max_y_offset; ++dy) {
+        int vy = py + dy;
+        if (vy < 0 || vy >= 128) continue;
+
+        for (int dx = -r_ceil; dx <= r_ceil; ++dx) {
+            for (int dz = -r_ceil; dz <= r_ceil; ++dz) {
+                if (dx * dx + dz * dz > radius * radius) continue;
+
+                int vx = px + dx;
+                int vz = pz + dz;
+
+                Voxel v = world.get_voxel(vx, vy, vz);
+                // Must be solid stone ceiling block (MAT_GRANITE, MAT_BASALT)
+                if (!v.is_solid()) continue;
+                if (v.material_id == MAT_DREDGE_BEDROCK ||
+                    v.material_id == MAT_INDUSTRIAL_BULKHEAD ||
+                    v.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                    continue;
+                }
+
+                // Must have air directly below it so it can fall
+                Voxel v_below = world.get_voxel(vx, vy - 1, vz);
+                if (v_below.is_solid()) continue;
+
+                // Check if supported by any adjacent player-placed MAT_BULKHEAD blocks
+                bool supported_by_bulkhead = false;
+                for (const auto& offset : neighbors) {
+                    Voxel adj = world.get_voxel(vx + offset.x, vy + offset.y, vz + offset.z);
+                    if (adj.material_id == MAT_INDUSTRIAL_BULKHEAD) {
+                        supported_by_bulkhead = true;
+                        break;
+                    }
+                }
+
+                if (!supported_by_bulkhead) {
+                    candidates.push_back(glm::ivec3(vx, vy, vz));
+                }
+            }
+        }
+    }
+
+    if (candidates.empty()) return {};
+
+    int target_count = min_blocks + (rand() % (std::max(1, max_blocks - min_blocks + 1)));
+    if (static_cast<int>(candidates.size()) <= target_count) {
+        return candidates;
+    }
+
+    std::vector<glm::ivec3> selected;
+    selected.reserve(target_count);
+    for (int i = 0; i < target_count && !candidates.empty(); ++i) {
+        size_t idx = rand() % candidates.size();
+        selected.push_back(candidates[idx]);
+        candidates[idx] = candidates.back();
+        candidates.pop_back();
+    }
+
+    return selected;
+}
+
 } // namespace Voidfall

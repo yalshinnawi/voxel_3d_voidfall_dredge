@@ -157,8 +157,6 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
 
     m_text_shader.use();
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
-    m_text_shader.set_mat4("uProjection", proj);
-    m_text_shader.set_vec4("uTextColor", color);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
@@ -167,11 +165,22 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
     glBindVertexArray(m_text_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_text_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)), vertices.data());
+
+    // 1. Draw 1-pixel dark drop shadow / outline quad behind text for high contrast
+    glm::mat4 shadow_proj = glm::translate(proj, glm::vec3(1.2f, 1.2f, 0.0f));
+    m_text_shader.set_mat4("uProjection", shadow_proj);
+    m_text_shader.set_vec4("uTextColor", glm::vec4(0.0f, 0.0f, 0.0f, color.a * 0.95f));
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+
+    // 2. Draw high-visibility foreground text
+    m_text_shader.set_mat4("uProjection", proj);
+    m_text_shader.set_vec4("uTextColor", color);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+
     glBindVertexArray(0);
 }
 
-bool OrbitalHubUI::render_main_menu(int& selected_level, float mouse_x, float mouse_y, bool mouse_clicked) {
+bool OrbitalHubUI::render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x, float mouse_y, bool mouse_clicked) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -267,6 +276,20 @@ bool OrbitalHubUI::render_main_menu(int& selected_level, float mouse_x, float mo
         draw_text(selector + levels[i].title, card_x + 16.0f, y + 14.0f, 1.6f, is_hovered ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : is_sel ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
         draw_text(levels[i].desc, card_x + 36.0f, y + 40.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
         draw_text(levels[i].obj, card_x + 36.0f, y + 62.0f, 1.25f, is_sel ? glm::vec4(1.0f, 0.85f, 0.2f, 0.95f) : glm::vec4(0.5f, 0.75f, 0.55f, 0.8f));
+
+        // Render Sector Progress Badge and Completion Rate
+        int s_idx = levels[i].id;
+        std::string badge = inventory.sector_records[s_idx].best_badge;
+        int comp_rate = inventory.sector_records[s_idx].highest_completion_rate;
+
+        glm::vec4 badge_col = (badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
+                              (badge.find("PARTIAL") != std::string::npos) ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) :
+                              (badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
+                                                                 glm::vec4(0.45f, 0.60f, 0.70f, 0.8f);
+
+        std::string badge_str = (badge == "UNEXPLORED") ? "[UNEXPLORED]" : "[" + badge + "]";
+        float badge_x = card_x + card_w - static_cast<float>(badge_str.length() * 8.0f * 1.3f) - 18.0f;
+        draw_text(badge_str, badge_x, y + 14.0f, 1.3f, badge_col);
     }
 
     // Controls overview panel (Bottom)
@@ -340,26 +363,35 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
                                                    "SECTOR 3: FAULT-LINE COLLAPSE";
     draw_text(sec_name, col1_x + 20.0f, col_y + 54.0f, 1.4f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
 
+    std::string sec_badge = inventory.sector_records[selected_level].best_badge;
+    int sec_rate = inventory.sector_records[selected_level].highest_completion_rate;
+    std::string rec_str = "RECORD: [" + sec_badge + "] - BEST RATING: " + std::to_string(sec_rate) + "%";
+    glm::vec4 rec_col = (sec_badge == "SECTOR CLEARED (100%)") ? glm::vec4(0.2f, 1.0f, 0.4f, 1.0f) :
+                        (sec_badge.find("PARTIAL") != std::string::npos) ? glm::vec4(1.0f, 0.75f, 0.0f, 1.0f) :
+                        (sec_badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
+                                                               glm::vec4(0.5f, 0.7f, 0.8f, 0.85f);
+    draw_text(rec_str, col1_x + 20.0f, col_y + 74.0f, 1.15f, rec_col);
+
     if (selected_level == 1) {
-        draw_text("Target Depth: 120m | Crust Stability: 85%", col1_x + 20.0f, col_y + 80.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-        draw_text("Directives:", col1_x + 20.0f, col_y + 110.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-        draw_text("  1. Mine 25 Voidite Crystals using Subterranean Drill [LMB]", col1_x + 20.0f, col_y + 135.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  2. Use Sonar Pulse [Q] to locate rich mineral veins", col1_x + 20.0f, col_y + 160.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  3. Deploy Extraction Beacon [B] when quota met", col1_x + 20.0f, col_y + 185.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  4. Defend zone for 40s until evacuation landing pod arrives", col1_x + 20.0f, col_y + 210.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("Target Depth: 120m | Crust Stability: 85%", col1_x + 20.0f, col_y + 96.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+        draw_text("Directives:", col1_x + 20.0f, col_y + 120.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+        draw_text("  1. Mine 25 Voidite Crystals using Subterranean Drill [LMB]", col1_x + 20.0f, col_y + 145.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  2. Use Sonar Pulse [Q] to locate rich mineral veins", col1_x + 20.0f, col_y + 170.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  3. Deploy Extraction Beacon [B] when quota met", col1_x + 20.0f, col_y + 195.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  4. Defend zone for 40s until evacuation landing pod arrives", col1_x + 20.0f, col_y + 220.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
     } else if (selected_level == 2) {
-        draw_text("Target Depth: 340m | Crust Stability: 65%", col1_x + 20.0f, col_y + 80.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-        draw_text("Directives:", col1_x + 20.0f, col_y + 110.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-        draw_text("  1. Track subterranean vault signatures using Sonar [Q]", col1_x + 20.0f, col_y + 135.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  2. Equip Demolition Charges [3] to blast Reinforced Doors", col1_x + 20.0f, col_y + 160.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  3. Breach the vault chamber and extract the Hyper-Core Relic", col1_x + 20.0f, col_y + 185.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  4. Call beacon [B] and extract all salvaged minerals", col1_x + 20.0f, col_y + 210.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("Target Depth: 340m | Crust Stability: 65%", col1_x + 20.0f, col_y + 96.0f, 1.25f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+        draw_text("Directives:", col1_x + 20.0f, col_y + 120.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+        draw_text("  1. Track subterranean vault signatures using Sonar [Q]", col1_x + 20.0f, col_y + 145.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  2. Equip Demolition Charges [3] to blast Reinforced Doors", col1_x + 20.0f, col_y + 170.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  3. Breach the vault chamber and extract the Hyper-Core Relic", col1_x + 20.0f, col_y + 195.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  4. Call beacon [B] and extract all salvaged minerals", col1_x + 20.0f, col_y + 220.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
     } else {
-        draw_text("Target Depth: 600m | Crust Stability: CRITICAL (Collapse Imminent)", col1_x + 20.0f, col_y + 80.0f, 1.25f, glm::vec4(1.0f, 0.3f, 0.3f, 0.9f));
-        draw_text("Directives:", col1_x + 20.0f, col_y + 110.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-        draw_text("  1. 180-SECOND HARD COUNTDOWN: Subterranean collapse timer active", col1_x + 20.0f, col_y + 135.0f, 1.25f, glm::vec4(1.0f, 0.35f, 0.2f, 0.95f));
-        draw_text("  2. Mine 50 Voidite Crystals while surviving recurring cave-ins", col1_x + 20.0f, col_y + 160.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-        draw_text("  3. Reach the emergency drop pod before seismic fault collapse", col1_x + 20.0f, col_y + 185.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("Target Depth: 600m | Crust Stability: CRITICAL (Collapse Imminent)", col1_x + 20.0f, col_y + 96.0f, 1.25f, glm::vec4(1.0f, 0.3f, 0.3f, 0.9f));
+        draw_text("Directives:", col1_x + 20.0f, col_y + 120.0f, 1.35f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+        draw_text("  1. 180-SECOND HARD COUNTDOWN: Subterranean collapse timer active", col1_x + 20.0f, col_y + 145.0f, 1.25f, glm::vec4(1.0f, 0.35f, 0.2f, 0.95f));
+        draw_text("  2. Mine 50 Voidite Crystals while surviving recurring cave-ins", col1_x + 20.0f, col_y + 170.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+        draw_text("  3. Reach the emergency drop pod before seismic fault collapse", col1_x + 20.0f, col_y + 195.0f, 1.25f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
     }
 
     // Right Column: Skill Matrix & Proficiency Branches
@@ -427,7 +459,7 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
     return launch_triggered;
 }
 
-bool OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x, float mouse_y, bool mouse_clicked) {
+DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x, float mouse_y, bool mouse_clicked) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -441,79 +473,191 @@ bool OrbitalHubUI::render_debrief(bool success, int level, const PlayerInventory
     float cx = w / 2.0f;
 
     // Header banner
-    float banner_y = 70.0f;
-    glm::vec4 status_col = success ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(1.0f, 0.25f, 0.2f, 1.0f);
-    std::string status_text = success ? "EXPEDITION EXTRACTION SUCCESSFUL" : "EXPEDITION FAILED: DELVER M.I.A.";
-    draw_text(status_text, cx - 290.0f, banner_y, 2.4f, status_col);
+    float banner_y = 35.0f;
+    std::string status_text = inventory.is_abandoned ? "EXPEDITION ABANDONED // SALVAGE PENALTY (50%)" :
+                              inventory.suit_failed ? "EXPEDITION FAILED: DELVER M.I.A." :
+                              success ? "EXPEDITION EXTRACTION SUCCESSFUL" : "EXPEDITION FAILED";
+    glm::vec4 status_col = (success && !inventory.is_abandoned && !inventory.suit_failed) ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
+                           inventory.is_abandoned ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) :
+                           glm::vec4(1.0f, 0.25f, 0.2f, 1.0f);
 
-    draw_rect(cx - 380.0f, banner_y + 40.0f, 760.0f, 2.0f, status_col * 0.6f);
+    draw_text(status_text, cx - 330.0f, banner_y, 2.0f, status_col);
+    draw_rect(cx - 400.0f, banner_y + 35.0f, 800.0f, 2.0f, status_col * 0.7f);
 
-    // Summary Card
-    float card_w = std::min(w * 0.75f, 900.0f);
-    float card_h = 320.0f;
-    float card_x = (w - card_w) * 0.5f;
-    float card_y = banner_y + 60.0f;
+    float total_content_w = std::min(w * 0.88f, 1100.0f);
+    float col_w = (total_content_w - 24.0f) * 0.5f;
+    float start_x = (w - total_content_w) * 0.5f;
+    float col1_x = start_x;
+    float col2_x = start_x + col_w + 24.0f;
+    float panel_y = banner_y + 50.0f;
+    float panel_h = 440.0f;
 
-    draw_rect(card_x, card_y, card_w, card_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.9f));
-    draw_rect(card_x, card_y, 4.0f, card_h, status_col);
+    // ==========================================
+    // LEFT COLUMN: SUBTERRANEAN EXPEDITION SUMMARY
+    // ==========================================
+    draw_rect(col1_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
+    draw_rect(col1_x, panel_y, 4.0f, panel_h, status_col);
+    draw_rect(col1_x, panel_y, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
 
-    draw_text("SUBTERRANEAN CARGO MANIFEST", card_x + 24.0f, card_y + 20.0f, 1.6f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-    draw_rect(card_x + 24.0f, card_y + 44.0f, card_w - 48.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    draw_text("EXPEDITION HARVEST & MANIFEST", col1_x + 20.0f, panel_y + 14.0f, 1.45f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+    std::string badge_disp = "[" + inventory.run_outcome_badge + "]  --  " + std::to_string(inventory.run_completion_rate) + "% COMPLETION";
+    draw_text(badge_disp, col1_x + 20.0f, panel_y + 36.0f, 1.25f, status_col);
+    draw_rect(col1_x + 20.0f, panel_y + 54.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
 
-    std::string v_str = "Voidite Crystals Extracted: " + std::to_string(inventory.voidite) + " units (" + std::to_string(inventory.voidite * 5) + " pts)";
-    draw_text(v_str, card_x + 24.0f, card_y + 60.0f, 1.35f, glm::vec4(0.85f, 0.4f, 1.0f, 1.0f));
+    float stat_y = panel_y + 64.0f;
+    std::string v_str = "Voidite Extracted:     " + std::to_string(inventory.voidite) + " units (" + std::to_string(inventory.voidite * 5) + " pts)";
+    draw_text(v_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
 
-    std::string t_str = "Titanium Bulkheads Salvaged: " + std::to_string(inventory.titanium) + " units (" + std::to_string(inventory.titanium * 6) + " pts)";
-    draw_text(t_str, card_x + 24.0f, card_y + 88.0f, 1.35f, glm::vec4(0.4f, 0.85f, 1.0f, 1.0f));
+    stat_y += 30.0f;
+    std::string t_str = "Titanium Cores:        " + std::to_string(inventory.titanium) + " cores (" + std::to_string(inventory.titanium * 6) + " pts)";
+    draw_text(t_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(1.0f, 0.70f, 0.0f, 1.0f));
 
-    std::string s_str = "General Mineral Salvage:    " + std::to_string(inventory.salvage_parts) + " units (" + std::to_string(inventory.salvage_parts * 2) + " pts)";
-    draw_text(s_str, card_x + 24.0f, card_y + 116.0f, 1.35f, glm::vec4(0.75f, 0.8f, 0.85f, 1.0f));
+    stat_y += 30.0f;
+    std::string sc_str = "Scrap Metal Salvaged:  " + std::to_string(inventory.scrap_metal) + " scrap";
+    draw_text(sc_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.85f, 0.85f, 0.9f, 1.0f));
+
+    stat_y += 30.0f;
+    std::string s_str = "Mineral Salvage:       " + std::to_string(inventory.salvage_parts) + " units (" + std::to_string(inventory.salvage_parts * 2) + " pts)";
+    draw_text(s_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.7f, 0.75f, 0.8f, 1.0f));
 
     if (level == 2) {
-        std::string r_str = inventory.relic_extracted ? "Hyper-Core Relic:           RECOVERED (+250 pts)" : "Hyper-Core Relic:           NOT RECOVERED";
-        draw_text(r_str, card_x + 24.0f, card_y + 144.0f, 1.35f, inventory.relic_extracted ? glm::vec4(1.0f, 0.82f, 0.2f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
+        stat_y += 30.0f;
+        std::string r_str = inventory.relic_extracted ? "Hyper-Core Relic:      RECOVERED (+250 pts)" : "Hyper-Core Relic:      NOT RECOVERED";
+        draw_text(r_str, col1_x + 20.0f, stat_y, 1.3f, inventory.relic_extracted ? glm::vec4(1.0f, 0.0f, 0.85f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
     }
 
-    draw_rect(card_x + 24.0f, card_y + 180.0f, card_w - 48.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    stat_y += 38.0f;
+    draw_rect(col1_x + 20.0f, stat_y - 8.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    std::string score_str = "TOTAL SCORE: " + std::to_string(inventory.total_run_score) + " POINTS";
+    draw_text(score_str, col1_x + 20.0f, stat_y, 1.6f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
 
-    std::string total_str = "TOTAL EXPEDITION SCORE: " + std::to_string(inventory.total_run_score) + " POINTS";
-    draw_text(total_str, card_x + 24.0f, card_y + 195.0f, 1.7f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    stat_y += 45.0f;
+    draw_text("DELVER SPECIALIZATIONS XP:", col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+    stat_y += 24.0f;
+    draw_text("Demolitions: " + std::to_string(skills.demolitions.xp) + " XP" + (skills.demolitions.unlocked ? " [ACTIVE]" : ""),
+              col1_x + 20.0f, stat_y, 1.15f, skills.demolitions.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+    stat_y += 20.0f;
+    draw_text("Surveying:   " + std::to_string(skills.surveying.xp) + " XP" + (skills.surveying.unlocked ? " [ACTIVE]" : ""),
+              col1_x + 20.0f, stat_y, 1.15f, skills.surveying.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
 
-    // Skill unlocks notification
-    draw_text("DELVER SPECIALIZATIONS EARNED:", card_x + 24.0f, card_y + 240.0f, 1.35f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-    std::string sk1 = "Demolitions: " + std::to_string(skills.demolitions.xp) + " XP" + (skills.demolitions.unlocked ? " [Micro-Charges UNLOCKED]" : "");
-    std::string sk2 = "Surveying:   " + std::to_string(skills.surveying.xp) + " XP" + (skills.surveying.unlocked ? " [30-Voxel Sonar UNLOCKED]" : "");
-    draw_text(sk1, card_x + 24.0f, card_y + 264.0f, 1.25f, skills.demolitions.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-    draw_text(sk2, card_x + 360.0f, card_y + 264.0f, 1.25f, skills.surveying.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+    // ==========================================
+    // RIGHT COLUMN: AUGMENTATIONS & UPGRADES TERMINAL
+    // ==========================================
+    draw_rect(col2_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
+    draw_rect(col2_x, panel_y, 4.0f, panel_h, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    draw_rect(col2_x, panel_y, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
 
-    // Next Actions button
-    float btn_y = card_y + card_h + 30.0f;
-    float btn_w = card_w;
-    float btn_x = card_x;
-    float btn_h = 44.0f;
+    draw_text("AUGMENTATIONS & UPGRADES TERMINAL", col2_x + 20.0f, panel_y + 16.0f, 1.5f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    draw_rect(col2_x + 20.0f, panel_y + 38.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
 
-    bool btn_hovered = (mouse_x >= btn_x && mouse_x <= btn_x + btn_w &&
-                        mouse_y >= btn_y && mouse_y <= btn_y + btn_h);
-    bool continue_triggered = false;
-    if (btn_hovered && mouse_clicked) {
-        continue_triggered = true;
+    std::string bal_str = "FUNDS: " + std::to_string(inventory.voidite) + " VOIDITE  |  " + std::to_string(inventory.titanium) + " TITANIUM";
+    draw_text(bal_str, col2_x + 20.0f, panel_y + 46.0f, 1.25f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+
+    // 5 Upgrades
+    struct UpgradeDef {
+        std::string name;
+        std::string benefit;
+        int* level_ptr;
+        bool is_voidite;
+        int cost;
+    };
+
+    UpgradeDef upgrades[5] = {
+        {"1. Drill Speed", "+20% Mining Rate", &inventory.upgrades.drill_speed_level, true, 15},
+        {"2. Thruster Energy", "+25% Thruster & Recharge", &inventory.upgrades.thruster_energy_level, true, 20},
+        {"3. Sonar Pulse Range", "+5m Scan Radius", &inventory.upgrades.sonar_range_level, true, 15},
+        {"4. Max Bulkhead Cap", "+5 Max Bulkheads", &inventory.upgrades.max_bulkheads_level, false, 4},
+        {"5. Shield Plating", "+25% Impact Armor", &inventory.upgrades.shield_plating_level, false, 6}
+    };
+
+    float up_y = panel_y + 72.0f;
+    float up_h = 64.0f;
+    float up_w = col_w - 40.0f;
+
+    for (int i = 0; i < 5; ++i) {
+        auto& u = upgrades[i];
+        float ux = col2_x + 20.0f;
+        float uy = up_y + i * (up_h + 8.0f);
+
+        draw_rect(ux, uy, up_w, up_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.85f));
+        draw_rect(ux, uy, up_w, 1.0f, glm::vec4(0.15f, 0.25f, 0.35f, 0.5f));
+
+        std::string title = u.name + " [LVL " + std::to_string(*u.level_ptr) + "]";
+        draw_text(title, ux + 10.0f, uy + 10.0f, 1.25f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+        draw_text(u.benefit, ux + 10.0f, uy + 32.0f, 1.1f, glm::vec4(0.65f, 0.75f, 0.85f, 0.85f));
+
+        // Upgrade button
+        float btn_w = 120.0f;
+        float btn_h = 36.0f;
+        float bx = ux + up_w - btn_w - 10.0f;
+        float by = uy + 14.0f;
+
+        bool can_afford = u.is_voidite ? (inventory.voidite >= u.cost) : (inventory.titanium >= u.cost);
+        bool btn_hov = (mouse_x >= bx && mouse_x <= bx + btn_w && mouse_y >= by && mouse_y <= by + btn_h);
+
+        if (btn_hov && mouse_clicked && can_afford) {
+            if (u.is_voidite) {
+                inventory.voidite -= u.cost;
+            } else {
+                inventory.titanium -= u.cost;
+            }
+            (*u.level_ptr)++;
+        }
+
+        glm::vec4 b_bg = can_afford ?
+            (btn_hov ? glm::vec4(0.2f, 0.6f, 0.85f, 1.0f) : glm::vec4(0.1f, 0.35f, 0.6f, 0.9f)) :
+            glm::vec4(0.1f, 0.12f, 0.15f, 0.6f);
+        draw_rect(bx, by, btn_w, btn_h, b_bg);
+        if (can_afford) {
+            draw_rect(bx, by, btn_w, 1.0f, glm::vec4(0.4f, 0.85f, 1.0f, 0.8f));
+        }
+
+        std::string cost_str = std::to_string(u.cost) + (u.is_voidite ? " VOID" : " TITAN");
+        draw_text("UPGRADE", bx + 18.0f, by + 6.0f, 1.15f, can_afford ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.5f, 0.5f, 0.5f, 0.7f));
+        draw_text(cost_str, bx + 16.0f, by + 20.0f, 1.0f, can_afford ? (u.is_voidite ? glm::vec4(0.0f, 0.94f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.70f, 0.0f, 1.0f)) : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
     }
 
-    glm::vec4 btn_col = btn_hovered ? glm::vec4(0.2f, 0.6f, 0.9f, 1.0f) : glm::vec4(0.12f, 0.4f, 0.65f, 0.95f);
-    draw_rect(btn_x, btn_y, btn_w, btn_h, btn_col);
-    if (btn_hovered) {
-        draw_rect(btn_x, btn_y, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
-        draw_rect(btn_x, btn_y + btn_h - 2.0f, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
-    }
+    // ==========================================
+    // BOTTOM BUTTONS: LAUNCH NEXT SECTOR & RETURN TO HUB
+    // ==========================================
+    DebriefAction result = DebriefAction::None;
+    float bot_y = panel_y + panel_h + 16.0f;
+    float bot_btn_w = (total_content_w - 20.0f) * 0.5f;
+    float bot_btn_h = 48.0f;
 
-    draw_text("[CLICK OR SPACE / ENTER] RETURN TO ORBITAL HUB      |      [R] RETRY EXPEDITION",
-              card_x + 60.0f, btn_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    // Button 1: [LAUNCH NEXT SECTOR]
+    float b1_x = start_x;
+    bool b1_hov = (mouse_x >= b1_x && mouse_x <= b1_x + bot_btn_w && mouse_y >= bot_y && mouse_y <= bot_y + bot_btn_h);
+    if (b1_hov && mouse_clicked) {
+        result = DebriefAction::LaunchNextSector;
+    }
+    glm::vec4 b1_col = b1_hov ? glm::vec4(0.15f, 0.65f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.45f, 0.38f, 0.95f);
+    draw_rect(b1_x, bot_y, bot_btn_w, bot_btn_h, b1_col);
+    if (b1_hov) {
+        draw_rect(b1_x, bot_y, bot_btn_w, 2.0f, glm::vec4(0.4f, 1.0f, 0.8f, 1.0f));
+        draw_rect(b1_x, bot_y + bot_btn_h - 2.0f, bot_btn_w, 2.0f, glm::vec4(0.4f, 1.0f, 0.8f, 1.0f));
+    }
+    draw_text("[LAUNCH NEXT SECTOR]", b1_x + bot_btn_w * 0.5f - 110.0f, bot_y + 16.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+    // Button 2: [RETURN TO ORBITAL HUB]
+    float b2_x = start_x + bot_btn_w + 20.0f;
+    bool b2_hov = (mouse_x >= b2_x && mouse_x <= b2_x + bot_btn_w && mouse_y >= bot_y && mouse_y <= bot_y + bot_btn_h);
+    if (b2_hov && mouse_clicked) {
+        result = DebriefAction::ReturnToHub;
+    }
+    glm::vec4 b2_col = b2_hov ? glm::vec4(0.2f, 0.45f, 0.75f, 1.0f) : glm::vec4(0.12f, 0.3f, 0.55f, 0.95f);
+    draw_rect(b2_x, bot_y, bot_btn_w, bot_btn_h, b2_col);
+    if (b2_hov) {
+        draw_rect(b2_x, bot_y, bot_btn_w, 2.0f, glm::vec4(0.6f, 0.85f, 1.0f, 1.0f));
+        draw_rect(b2_x, bot_y + bot_btn_h - 2.0f, bot_btn_w, 2.0f, glm::vec4(0.6f, 0.85f, 1.0f, 1.0f));
+    }
+    draw_text("[RETURN TO ORBITAL HUB]", b2_x + bot_btn_w * 0.5f - 120.0f, bot_y + 16.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    return continue_triggered;
+    return result;
 }
 
 } // namespace Voidfall

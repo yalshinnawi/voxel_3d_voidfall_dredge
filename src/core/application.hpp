@@ -11,6 +11,7 @@
 #include "../systems/extraction.hpp"
 #include "../ui/hud.hpp"
 #include "../ui/orbital_hub.hpp"
+#include "../ui/pause_menu.hpp"
 #include "../net/net_host.hpp"
 #include "../net/net_client.hpp"
 #include "../entities/dynamic_debris.hpp"
@@ -46,6 +47,7 @@ private:
 
     void on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat);
     void on_block_placed(int x, int y, int z, uint8_t mat);
+    void on_bulkhead_dismantled(int x, int y, int z);
     void on_sonar_cast(const glm::vec3& origin);
     void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
     void setup_hazard_system();
@@ -59,6 +61,9 @@ private:
     std::unique_ptr<ExtractionSystem> m_extraction;
     std::unique_ptr<HUD> m_hud;
     std::unique_ptr<OrbitalHubUI> m_hub_ui;
+    std::unique_ptr<PauseMenu> m_pause_menu;
+    GameSettings m_settings;
+    float m_expedition_time{0.0f};
 
     std::unique_ptr<NetHost> m_host;
     std::unique_ptr<NetClient> m_client;

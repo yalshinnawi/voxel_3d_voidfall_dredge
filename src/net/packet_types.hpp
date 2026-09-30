@@ -64,9 +64,11 @@ enum PlayerButtonFlags : uint16_t {
     BTN_GRAPPLE_REEL = 1 << 7, // Reel grapple in
     BTN_MINE_DRILL   = 1 << 8, // Subterranean mining drill
     BTN_PLACE_BLOCK  = 1 << 9, // Structural reinforcement placement
-    BTN_SKILL_DEMO   = 1 << 10, // Demolitions shaped charge / thermite
-    BTN_SKILL_SONAR  = 1 << 11, // Seismic Sonar pulse scan
-    BTN_SPRINT       = 1 << 12
+    BTN_SKILL_DEMO      = 1 << 10, // Demolitions shaped charge / thermite
+    BTN_SKILL_SONAR     = 1 << 11, // Seismic Sonar pulse scan
+    BTN_SPRINT          = 1 << 12,
+    BTN_REMOVE_BULKHEAD = 1 << 13, // Remove player-placed bulkhead cleanly
+    BTN_DETONATE_CHARGE = 1 << 14  // Detonate placed shaped charges
 };
 
 struct PlayerInputPacket {

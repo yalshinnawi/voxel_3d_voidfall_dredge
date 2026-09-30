@@ -19,6 +19,16 @@ public:
     );
     ~DynamicDebris();
 
+    struct CollisionResult {
+        bool hit_player{false};
+        float damage{0.0f};
+        bool hit_bulkhead{false};
+        bool shattered{false};
+        glm::vec3 shatter_pos{0.0f};
+        uint8_t shatter_mat{0};
+    };
+
+    CollisionResult update(float dt, World& world, const glm::vec3& player_pos, bool is_player_sheltered);
     void update(float dt, World& world);
     void render() const;
 
@@ -26,6 +36,8 @@ public:
     const glm::vec3& position() const { return m_position; }
     const glm::vec3& velocity() const { return m_velocity; }
     bool is_sleeping() const { return m_sleeping; }
+    bool is_destroyed() const { return m_destroyed; }
+    uint8_t material_id() const { return m_material_id; }
 
     bool has_dealt_damage{false};
 
@@ -38,6 +50,7 @@ private:
     uint8_t m_material_id{MAT_FRACTURED_GRANITE};
     size_t m_block_count{1};
     bool m_sleeping{false};
+    bool m_destroyed{false};
     float m_life_time{0.0f};
 
     // GPU mesh for falling boulder

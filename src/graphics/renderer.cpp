@@ -103,7 +103,7 @@ void Renderer::init_cable_buffer() {
     glGenBuffers(1, &m_cable_vbo);
     glBindVertexArray(m_cable_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_cable_vbo);
-    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 8192 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
     glBindVertexArray(0);
@@ -255,17 +255,17 @@ void Renderer::render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels,
 
     for (const auto& v : voxels) {
         glm::vec4 color(0.0f);
-        if (v.material_id == MAT_VOIDITE_CRYSTAL) {
-            // Neon cyan
-            color = glm::vec4(0.15f, 0.95f, 1.0f, alpha);
-        } else if (v.material_id == MAT_RADIOACTIVE_ORE) {
-            // Amber
-            color = glm::vec4(1.0f, 0.75f, 0.15f, alpha);
-        } else if (v.material_id == MAT_REINFORCED_VAULT_DOOR) {
-            // Neon gold
-            color = glm::vec4(1.0f, 0.85f, 0.2f, alpha);
+        if (v.material_id == MAT_VOIDITE || v.material_id == MAT_VOIDITE_CRYSTAL) {
+            // Neon cyan (#00F0FF)
+            color = glm::vec4(0.0f, 0.94f, 1.0f, alpha);
+        } else if (v.material_id == MAT_TITANIUM || v.material_id == MAT_INDUSTRIAL_BULKHEAD) {
+            // Gold (#FFB300)
+            color = glm::vec4(1.0f, 0.70f, 0.0f, alpha);
+        } else if (v.material_id == MAT_VAULT_DOOR || v.material_id == MAT_REINFORCED_VAULT_DOOR) {
+            // Magenta (#FF00D4)
+            color = glm::vec4(1.0f, 0.0f, 0.85f, alpha);
         } else {
-            continue; // Ignore common rock and bulkheads to prevent visual clutter
+            continue; // Plain rock is not wireframed
         }
 
         m_wireframe_shader.set_vec3("uVoxelPos", glm::vec3(v.pos));
@@ -308,6 +308,134 @@ void Renderer::render_grapple_cable(const glm::vec3& start, const glm::vec3& end
     glDrawArrays(GL_LINES, 0, 2);
     glBindVertexArray(0);
 
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+}
+
+void Renderer::render_extraction_beacon(const glm::vec3& beacon_pos, float siren_pulse, float time, bool is_pod_landed) {
+    if (m_cable_vao == 0) return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive luminous visuals
+
+    m_wireframe_shader.use();
+    m_wireframe_shader.set_mat4("uProjection", m_proj);
+    m_wireframe_shader.set_mat4("uView", m_view);
+    m_wireframe_shader.set_vec3("uVoxelPos", glm::vec3(0.0f));
+    m_wireframe_shader.set_int("uIsLineOnly", 1);
+
+    glBindVertexArray(m_cable_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_cable_vbo);
+
+    // 1. Grounded Tripod and Cylinder Base Entity
+    std::vector<float> base_lines;
+    base_lines.reserve(128);
+
+    // 3 Tripod legs
+    for (int i = 0; i < 3; ++i) {
+        float angle = glm::radians(i * 120.0f);
+        glm::vec3 foot = beacon_pos + glm::vec3(std::cos(angle) * 0.95f, 0.0f, std::sin(angle) * 0.95f);
+        glm::vec3 hub = beacon_pos + glm::vec3(0.0f, 0.75f, 0.0f);
+        base_lines.insert(base_lines.end(), {foot.x, foot.y, foot.z, hub.x, hub.y, hub.z});
+
+        // Cross-brace between feet
+        float next_angle = glm::radians(((i + 1) % 3) * 120.0f);
+        glm::vec3 next_foot = beacon_pos + glm::vec3(std::cos(next_angle) * 0.95f, 0.0f, std::sin(next_angle) * 0.95f);
+        base_lines.insert(base_lines.end(), {foot.x, foot.y, foot.z, next_foot.x, next_foot.y, next_foot.z});
+    }
+
+    // Octagonal central cylinder base
+    const int segs = 8;
+    for (int i = 0; i < segs; ++i) {
+        float a0 = glm::radians(i * (360.0f / segs));
+        float a1 = glm::radians((i + 1) * (360.0f / segs));
+        glm::vec3 b0 = beacon_pos + glm::vec3(std::cos(a0) * 0.42f, 0.0f, std::sin(a0) * 0.42f);
+        glm::vec3 b1 = beacon_pos + glm::vec3(std::cos(a1) * 0.42f, 0.0f, std::sin(a1) * 0.42f);
+        glm::vec3 t0 = beacon_pos + glm::vec3(std::cos(a0) * 0.42f, 0.75f, std::sin(a0) * 0.42f);
+        glm::vec3 t1 = beacon_pos + glm::vec3(std::cos(a1) * 0.42f, 0.75f, std::sin(a1) * 0.42f);
+
+        base_lines.insert(base_lines.end(), {b0.x, b0.y, b0.z, b1.x, b1.y, b1.z}); // bottom edge
+        base_lines.insert(base_lines.end(), {t0.x, t0.y, t0.z, t1.x, t1.y, t1.z}); // top edge
+        base_lines.insert(base_lines.end(), {b0.x, b0.y, b0.z, t0.x, t0.y, t0.z}); // vertical strut
+    }
+
+    glLineWidth(2.5f);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, base_lines.size() * sizeof(float), base_lines.data());
+    m_wireframe_shader.set_vec4("uColor", glm::vec4(1.0f, 0.70f, 0.0f, 0.95f)); // industrial gold-orange
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(base_lines.size() / 3));
+
+    // 2. Pulsating Vertical Light Column with Upward-Drifting Particle Rings
+    std::vector<float> beam_lines;
+    beam_lines.reserve(512);
+
+    float pulse = 0.7f + 0.3f * std::sin(time * 5.0f);
+    glm::vec4 beam_color = is_pod_landed ?
+        glm::vec4(0.1f, 1.0f, 0.45f, 0.90f * pulse) :
+        glm::vec4(0.0f, 0.94f, 1.0f, 0.90f * pulse);
+
+    // Center core laser
+    glm::vec3 core_start = beacon_pos + glm::vec3(0.0f, 0.75f, 0.0f);
+    glm::vec3 core_end   = beacon_pos + glm::vec3(0.0f, 32.0f, 0.0f);
+    beam_lines.insert(beam_lines.end(), {core_start.x, core_start.y, core_start.z, core_end.x, core_end.y, core_end.z});
+
+    // Outer column struts
+    for (int i = 0; i < 6; ++i) {
+        float a = glm::radians(i * 60.0f + time * 30.0f);
+        glm::vec3 p0 = beacon_pos + glm::vec3(std::cos(a) * 0.35f, 0.75f, std::sin(a) * 0.35f);
+        glm::vec3 p1 = beacon_pos + glm::vec3(std::cos(a) * 0.35f, 32.0f, std::sin(a) * 0.35f);
+        beam_lines.insert(beam_lines.end(), {p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
+    }
+
+    // Upward-drifting particle rings
+    for (int r = 0; r < 5; ++r) {
+        float ring_y = 1.0f + std::fmod(time * 4.5f + r * 5.0f, 25.0f);
+        float ring_rad = 0.5f + 0.03f * ring_y;
+
+        const int ring_pts = 12;
+        for (int p = 0; p < ring_pts; ++p) {
+            float pa0 = glm::radians(p * (360.0f / ring_pts));
+            float pa1 = glm::radians((p + 1) * (360.0f / ring_pts));
+            glm::vec3 r0 = beacon_pos + glm::vec3(std::cos(pa0) * ring_rad, ring_y, std::sin(pa0) * ring_rad);
+            glm::vec3 r1 = beacon_pos + glm::vec3(std::cos(pa1) * ring_rad, ring_y, std::sin(pa1) * ring_rad);
+            beam_lines.insert(beam_lines.end(), {r0.x, r0.y, r0.z, r1.x, r1.y, r1.z});
+        }
+    }
+
+    glLineWidth(2.0f);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, beam_lines.size() * sizeof(float), beam_lines.data());
+    m_wireframe_shader.set_vec4("uColor", beam_color);
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(beam_lines.size() / 3));
+
+    // 3. Rotating Emergency Siren Light (sweeping beam)
+    std::vector<float> siren_lines;
+    float siren_ang = time * 7.5f;
+    glm::vec3 siren_origin = beacon_pos + glm::vec3(0.0f, 0.85f, 0.0f);
+    glm::vec3 siren_dir(std::cos(siren_ang), 0.08f, std::sin(siren_ang));
+    siren_dir = glm::normalize(siren_dir);
+
+    // Siren head light
+    glm::vec3 siren_tip = siren_origin + siren_dir * 0.55f;
+    siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, siren_tip.x, siren_tip.y, siren_tip.z});
+
+    // Siren sweeping spotlight rays on cavern walls
+    glm::vec3 sweep_end = siren_origin + siren_dir * 20.0f;
+    siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, sweep_end.x, sweep_end.y, sweep_end.z});
+
+    // Fanned side rays
+    glm::vec3 right_ray = glm::normalize(siren_dir + glm::vec3(-siren_dir.z, 0, siren_dir.x) * 0.15f) * 18.0f;
+    glm::vec3 left_ray  = glm::normalize(siren_dir - glm::vec3(-siren_dir.z, 0, siren_dir.x) * 0.15f) * 18.0f;
+    glm::vec3 r_end = siren_origin + right_ray;
+    glm::vec3 l_end = siren_origin + left_ray;
+    siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, r_end.x, r_end.y, r_end.z});
+    siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, l_end.x, l_end.y, l_end.z});
+
+    glLineWidth(3.0f);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, siren_lines.size() * sizeof(float), siren_lines.data());
+    m_wireframe_shader.set_vec4("uColor", glm::vec4(1.0f, 0.15f, 0.1f, 0.95f)); // emergency red siren
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(siren_lines.size() / 3));
+
+    glBindVertexArray(0);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
 }
