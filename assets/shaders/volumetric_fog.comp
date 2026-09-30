@@ -1,0 +1,147 @@
+#version 430 core
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+layout (rgba16f, binding = 0) uniform writeonly image2D uFogVolume;
+
+uniform sampler2D uDepthTexture;
+uniform mat4 uInverseProj;
+uniform mat4 uInverseView;
+
+uniform vec3 uCameraPos;
+uniform vec3 uHeadlampPos;
+uniform vec3 uHeadlampDir;
+uniform vec3 uHeadlampColor;
+uniform float uHeadlampInnerCutoff;
+uniform float uHeadlampOuterCutoff;
+uniform float uHeadlampIntensity;
+
+uniform float uFogDensity;
+uniform float uToxicHazeFactor;
+uniform float uTime;
+
+// Point Lights in fog
+struct PointLight {
+    vec3 position;
+    vec3 color;
+    float radius;
+    float intensity;
+};
+
+const int MAX_POINT_LIGHTS = 8;
+uniform int uNumPointLights;
+uniform PointLight uPointLights[MAX_POINT_LIGHTS];
+
+// Henyey-Greenstein scattering phase function
+float henyey_greenstein(float cosTheta, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * 3.14159265 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+}
+
+// 3D hash for subterranean particulate dust
+float hash31(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float dust_noise(vec3 pos) {
+    vec3 p = pos * 0.25 + vec3(0.0, uTime * 0.05, 0.0);
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = hash31(i + vec3(0,0,0));
+    float n100 = hash31(i + vec3(1,0,0));
+    float n010 = hash31(i + vec3(0,1,0));
+    float n110 = hash31(i + vec3(1,1,0));
+    float n001 = hash31(i + vec3(0,0,1));
+    float n101 = hash31(i + vec3(1,0,1));
+    float n011 = hash31(i + vec3(0,1,1));
+    float n111 = hash31(i + vec3(1,1,1));
+
+    float nx0 = mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y);
+    float nx1 = mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y);
+    return mix(nx0, nx1, f.z);
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 volumeSize = imageSize(uFogVolume);
+
+    if (pixelCoord.x >= volumeSize.x || pixelCoord.y >= volumeSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(volumeSize);
+    float depthVal = texture(uDepthTexture, uv).r;
+
+    // Reconstruct world ray
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, depthVal * 2.0 - 1.0, 1.0);
+    vec4 viewPos = uInverseProj * clipPos;
+    viewPos /= viewPos.w;
+    vec3 worldPos = (uInverseView * viewPos).xyz;
+
+    vec3 rayDir = worldPos - uCameraPos;
+    float maxDist = length(rayDir);
+    rayDir = normalize(rayDir);
+
+    // Limit maximum raymarch distance for performance
+    maxDist = min(maxDist, 60.0);
+
+    const int NUM_STEPS = 24;
+    float stepSize = maxDist / float(NUM_STEPS);
+    vec3 inscatter = vec3(0.0);
+    float transmittance = 1.0;
+
+    // Dither ray start offset to reduce banding
+    float jitter = fract(sin(dot(vec2(pixelCoord), vec2(12.9898, 78.233))) * 43758.5453);
+    vec3 currentPos = uCameraPos + rayDir * (stepSize * jitter);
+
+    float cosHeadlamp = dot(rayDir, normalize(-uHeadlampDir));
+    float phaseHeadlamp = henyey_greenstein(cosHeadlamp, 0.45); // Forward scatter
+
+    vec3 hazeColor = mix(vec3(0.08, 0.10, 0.12), vec3(0.12, 0.35, 0.15), uToxicHazeFactor);
+
+    for (int i = 0; i < NUM_STEPS; ++i) {
+        if (transmittance < 0.01) break;
+
+        // Density modulated by particulate subterranean dust
+        float localDust = 0.6 + 0.8 * dust_noise(currentPos);
+        float density = uFogDensity * localDust;
+
+        // 1. Headlamp illumination cone
+        vec3 toLight = uHeadlampPos - currentPos;
+        float distToLight = length(toLight);
+        vec3 lightDir = toLight / max(distToLight, 0.001);
+
+        float theta = dot(lightDir, normalize(-uHeadlampDir));
+        float epsilon = uHeadlampInnerCutoff - uHeadlampOuterCutoff;
+        float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
+
+        if (spotFactor > 0.0) {
+            float attenuation = 1.0 / (1.0 + 0.08 * distToLight + 0.02 * distToLight * distToLight);
+            vec3 lightScatter = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor * phaseHeadlamp;
+            inscatter += lightScatter * density * transmittance * stepSize;
+        }
+
+        // 2. Dynamic Point Lights (flares / beacon)
+        for (int p = 0; p < uNumPointLights && p < MAX_POINT_LIGHTS; ++p) {
+            vec3 pPos = uPointLights[p].position;
+            float pDist = distance(pPos, currentPos);
+            if (pDist < uPointLights[p].radius) {
+                float pAtten = clamp(1.0 - (pDist / uPointLights[p].radius), 0.0, 1.0);
+                inscatter += uPointLights[p].color * uPointLights[p].intensity * pAtten * pAtten * density * transmittance * stepSize * 0.5;
+            }
+        }
+
+        // 3. Ambient subterranean mist
+        inscatter += hazeColor * density * transmittance * stepSize * 0.15;
+
+        // Beer-Lambert transmittance extinction
+        transmittance *= exp(-density * stepSize * 0.8);
+        currentPos += rayDir * stepSize;
+    }
+
+    imageStore(uFogVolume, pixelCoord, vec4(inscatter, 1.0 - transmittance));
+}

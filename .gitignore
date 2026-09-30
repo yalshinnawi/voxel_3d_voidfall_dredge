@@ -1,0 +1,35 @@
+# Build directories
+build/
+bin/
+out/
+.vs/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.cmake
+
+# Compiled binaries and libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.obj
+*.o
+*.pdb
+*.ilk
+*.idb
+
+# Dependencies downloaded during build
+_deps/
+external/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+.DS_Store
+Thumbs.db
