@@ -1,9 +1,20 @@
 #include "renderer.hpp"
 #include "../core/logger.hpp"
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <iostream>
 #include <algorithm>
 #include <cstdlib>
+
+#ifndef GL_POLYGON_OFFSET_LINE
+#define GL_POLYGON_OFFSET_LINE 0x2A02
+#endif
+#ifndef GL_POLYGON_OFFSET_FILL
+#define GL_POLYGON_OFFSET_FILL 0x8037
+#endif
+
+typedef void (APIENTRY *PFNGLPOLYGONOFFSETPROC)(GLfloat factor, GLfloat units);
+static PFNGLPOLYGONOFFSETPROC s_glPolygonOffset = nullptr;
 
 namespace Voidfall {
 
@@ -482,6 +493,214 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
         p.life = p.max_life;
         m_particles.push_back(p);
     }
+}
+
+void Renderer::spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id) {
+    glm::vec3 n_dir = glm::vec3(normal);
+    if (glm::length(n_dir) < 0.1f) n_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+    else n_dir = glm::normalize(n_dir);
+
+    glm::vec4 base_color(0.6f, 0.6f, 0.6f, 1.0f);
+    if (mat_id == MAT_VOIDITE_CRYSTAL) {
+        base_color = glm::vec4(0.85f, 0.3f, 1.0f, 1.0f);
+    } else if (mat_id == MAT_INDUSTRIAL_BULKHEAD) {
+        base_color = glm::vec4(0.4f, 0.85f, 1.0f, 1.0f);
+    } else if (mat_id == MAT_REINFORCED_VAULT_DOOR) {
+        base_color = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
+    } else if (mat_id == MAT_RADIOACTIVE_ORE) {
+        base_color = glm::vec4(0.25f, 1.0f, 0.4f, 1.0f);
+    } else if (mat_id == MAT_VOLCANIC_BASALT) {
+        base_color = glm::vec4(0.28f, 0.28f, 0.32f, 1.0f);
+    } else if (mat_id == MAT_FRACTURED_GRANITE) {
+        base_color = glm::vec4(0.58f, 0.55f, 0.52f, 1.0f);
+    }
+
+    int count = std::max(1, static_cast<int>(intensity * 3.0f));
+    for (int i = 0; i < count; ++i) {
+        BreakParticle p;
+        float rx = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
+        float ry = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
+        float rz = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
+        glm::vec3 jitter(rx, ry, rz);
+
+        p.pos = block_pos + n_dir * 0.15f + jitter * 0.2f;
+        p.vel = n_dir * (1.5f + static_cast<float>(rand() % 100) / 50.0f) + jitter * 2.5f;
+        p.color = base_color;
+        p.size = 0.05f + static_cast<float>(rand() % 100) / 2000.0f;
+        p.max_life = 0.3f + static_cast<float>(rand() % 100) / 500.0f;
+        p.life = p.max_life;
+        m_particles.push_back(p);
+    }
+}
+
+void Renderer::render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id) {
+    if (progress <= 0.0f || m_cable_vao == 0) return;
+
+    progress = glm::clamp(progress, 0.0f, 1.0f);
+    int stage = std::min(5, static_cast<int>(progress * 6.0f));
+
+    glm::vec3 n = glm::vec3(face_norm);
+    if (glm::length(n) < 0.1f) n = glm::vec3(0.0f, 1.0f, 0.0f);
+    else n = glm::normalize(n);
+
+    glm::vec3 center = glm::vec3(voxel_pos) + glm::vec3(0.5f) + n * 0.501f;
+
+    // Escalating particle debris as progress exceeds 75%
+    if (progress > 0.75f) {
+        float prob = (progress - 0.75f) * 2.0f;
+        if ((static_cast<float>(rand() % 100) / 100.0f) < prob) {
+            spawn_crack_debris(center, face_norm, (progress - 0.75f) / 0.25f, mat_id);
+        }
+    }
+
+    // Tangent axes on targeted face
+    glm::vec3 u_dir, v_dir;
+    if (std::abs(n.y) > 0.8f) {
+        u_dir = glm::vec3(1.0f, 0.0f, 0.0f);
+        v_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+    } else if (std::abs(n.x) > 0.8f) {
+        u_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+        v_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+    } else {
+        u_dir = glm::vec3(1.0f, 0.0f, 0.0f);
+        v_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+
+    auto to_world = [&](float u, float v) -> glm::vec3 {
+        return center + u * u_dir + v * v_dir;
+    };
+
+    std::vector<float> lines;
+    lines.reserve(512);
+
+    auto add_line = [&](float u1, float v1, float u2, float v2) {
+        glm::vec3 p1 = to_world(u1, v1);
+        glm::vec3 p2 = to_world(u2, v2);
+        lines.insert(lines.end(), {p1.x, p1.y, p1.z, p2.x, p2.y, p2.z});
+    };
+
+    // Stage 0: Hairline fracture core
+    add_line( 0.00f,  0.00f,   0.12f,  0.15f);
+    add_line( 0.00f,  0.00f,  -0.14f,  0.11f);
+    add_line( 0.00f,  0.00f,  -0.11f, -0.15f);
+    add_line( 0.00f,  0.00f,   0.15f, -0.12f);
+    add_line( 0.00f,  0.00f,   0.02f,  0.18f);
+    add_line( 0.00f,  0.00f,  -0.03f, -0.17f);
+
+    // Stage 1: Primary radial fissures reaching edges
+    if (stage >= 1) {
+        add_line( 0.12f,  0.15f,   0.28f,  0.32f);
+        add_line( 0.28f,  0.32f,   0.42f,  0.40f);
+        add_line(-0.14f,  0.11f,  -0.31f,  0.22f);
+        add_line(-0.31f,  0.22f,  -0.44f,  0.35f);
+        add_line(-0.11f, -0.15f,  -0.25f, -0.30f);
+        add_line(-0.25f, -0.30f,  -0.38f, -0.42f);
+        add_line( 0.15f, -0.12f,   0.32f, -0.26f);
+        add_line( 0.32f, -0.26f,   0.44f, -0.36f);
+        add_line( 0.02f,  0.18f,   0.06f,  0.45f);
+        add_line(-0.03f, -0.17f,  -0.08f, -0.44f);
+    }
+
+    // Stage 2: Lateral cross-cracks & fragment boundaries
+    if (stage >= 2) {
+        add_line( 0.28f,  0.32f,  -0.14f,  0.11f);
+        add_line(-0.31f,  0.22f,  -0.25f, -0.30f);
+        add_line(-0.25f, -0.30f,   0.15f, -0.12f);
+        add_line( 0.32f, -0.26f,   0.28f,  0.32f);
+        add_line( 0.12f,  0.15f,   0.35f,  0.08f);
+        add_line(-0.14f,  0.11f,  -0.42f,  0.02f);
+        add_line(-0.11f, -0.15f,  -0.05f, -0.38f);
+        add_line( 0.15f, -0.12f,   0.40f, -0.10f);
+    }
+
+    // Stage 3: Spiderweb circumferential perimeter loop
+    if (stage >= 3) {
+        add_line( 0.42f,  0.40f,   0.06f,  0.45f);
+        add_line( 0.06f,  0.45f,  -0.44f,  0.35f);
+        add_line(-0.44f,  0.35f,  -0.42f,  0.02f);
+        add_line(-0.42f,  0.02f,  -0.38f, -0.42f);
+        add_line(-0.38f, -0.42f,  -0.08f, -0.44f);
+        add_line(-0.08f, -0.44f,   0.44f, -0.36f);
+        add_line( 0.44f, -0.36f,   0.40f, -0.10f);
+        add_line( 0.40f, -0.10f,   0.42f,  0.40f);
+    }
+
+    // Stage 4: Corner cleavage and face detachment
+    if (stage >= 4) {
+        add_line( 0.42f,  0.40f,   0.48f,  0.48f);
+        add_line(-0.44f,  0.35f,  -0.48f,  0.48f);
+        add_line(-0.38f, -0.42f,  -0.48f, -0.48f);
+        add_line( 0.44f, -0.36f,   0.48f, -0.48f);
+        // Perimeter detachment boundary
+        add_line(-0.48f, -0.48f,   0.48f, -0.48f);
+        add_line( 0.48f, -0.48f,   0.48f,  0.48f);
+        add_line( 0.48f,  0.48f,  -0.48f,  0.48f);
+        add_line(-0.48f,  0.48f,  -0.48f, -0.48f);
+    }
+
+    // Stage 5: Total pulverization network with diagonal shears
+    if (stage >= 5) {
+        add_line( 0.00f,  0.00f,   0.20f,  0.00f);
+        add_line( 0.00f,  0.00f,  -0.20f,  0.00f);
+        add_line( 0.00f,  0.00f,   0.00f,  0.20f);
+        add_line( 0.00f,  0.00f,   0.00f, -0.20f);
+        add_line(-0.20f,  0.00f,   0.00f,  0.20f);
+        add_line( 0.00f,  0.20f,   0.20f,  0.00f);
+        add_line( 0.20f,  0.00f,   0.00f, -0.20f);
+        add_line( 0.00f, -0.20f,  -0.20f,  0.00f);
+        add_line( 0.28f,  0.32f,   0.48f, -0.48f);
+        add_line(-0.31f,  0.22f,   0.48f,  0.48f);
+        add_line(-0.25f, -0.30f,   0.42f,  0.40f);
+        add_line( 0.15f, -0.12f,  -0.48f,  0.48f);
+    }
+
+    if (lines.empty()) return;
+
+    // Color gradient across stages: electric cyan -> glowing safety amber -> molten incandescent white
+    glm::vec4 crack_color;
+    if (stage < 2) {
+        crack_color = glm::vec4(0.0f, 0.95f, 1.0f, 0.85f); // Electric cyan
+    } else if (stage < 4) {
+        crack_color = glm::vec4(1.0f, 0.75f, 0.15f, 0.92f); // Safety amber
+    } else {
+        crack_color = glm::vec4(1.0f, 0.92f, 0.70f, 1.0f); // Molten incandescent core
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE); // Don't write depth for crack decal overlay
+
+    // Clean overlay without Z-fighting using glPolygonOffset
+    if (!s_glPolygonOffset) {
+        s_glPolygonOffset = reinterpret_cast<PFNGLPOLYGONOFFSETPROC>(glfwGetProcAddress("glPolygonOffset"));
+    }
+    glEnable(GL_POLYGON_OFFSET_LINE);
+    if (s_glPolygonOffset) {
+        s_glPolygonOffset(-1.0f, -1.0f);
+    }
+
+    // Additive blending for luminous energy discharge
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(2.5f);
+
+    m_wireframe_shader.use();
+    m_wireframe_shader.set_mat4("uProjection", m_proj);
+    m_wireframe_shader.set_mat4("uView", m_view);
+    m_wireframe_shader.set_vec3("uVoxelPos", glm::vec3(0.0f));
+    m_wireframe_shader.set_int("uIsLineOnly", 1);
+    m_wireframe_shader.set_vec4("uColor", crack_color);
+
+    glBindVertexArray(m_cable_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_cable_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, lines.size() * sizeof(float), lines.data());
+
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lines.size() / 3));
+    glBindVertexArray(0);
+
+    glDisable(GL_POLYGON_OFFSET_LINE);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 void Renderer::update_particles(float dt) {

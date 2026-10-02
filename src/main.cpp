@@ -29,6 +29,12 @@ int main(int argc, char* argv[]) {
             config.world_seed = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--name" && i + 1 < argc) {
             config.player_name = argv[++i];
+        } else if (arg == "--auto-test" || arg == "--auto-play-test") {
+            config.auto_play_test = true;
+        } else if (arg == "--hidden" || arg == "--headless") {
+            config.hidden_window = true;
+        } else if (arg == "--screenshot" && i + 1 < argc) {
+            config.single_screenshot_path = argv[++i];
         }
     }
 

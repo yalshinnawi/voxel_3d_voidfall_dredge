@@ -29,16 +29,16 @@ public:
         size_t max_search_nodes = 1024
     );
 
-    // Queries 3 to 8 stone ceiling blocks (MAT_GRANITE, MAT_BASALT) 3-12 units above player within 6-block radius
+    // Queries 3 to 6 stone ceiling blocks (MAT_GRANITE, MAT_BASALT) 3-10 units above player within 6-block radius
     // Ignores blocks supported by adjacent player-placed MAT_BULKHEAD blocks
     static std::vector<glm::ivec3> query_seismic_detachment_blocks(
         const World& world,
         const glm::vec3& player_pos,
         int min_blocks = 3,
-        int max_blocks = 8,
+        int max_blocks = 6,
         float radius = 6.0f,
         int min_y_offset = 3,
-        int max_y_offset = 12
+        int max_y_offset = 10
     );
 };
 

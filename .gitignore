@@ -32,5 +32,11 @@ external/
 *.suo
 *.sln.docstates
 .DS_Store
-Thumbs.db
 *.log
+
+# Player Saves & Test Output Artifacts
+saves/
+tests/*.json
+test_*.json
+e2e_*.json
+save_data.json

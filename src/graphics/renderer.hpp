@@ -65,6 +65,8 @@ public:
     void trigger_dust_kickup(float duration = 3.0f);
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
+    void spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id);
+    void render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id = 1);
     void update_particles(float dt);
     void render_particles();
 

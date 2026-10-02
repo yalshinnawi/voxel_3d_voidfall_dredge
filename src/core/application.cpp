@@ -3,11 +3,13 @@
 #endif
 #include "application.hpp"
 #include "logger.hpp"
+#include "screenshot.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <cmath>
+#include <chrono>
 #include <algorithm>
 
 namespace Voidfall {
@@ -28,6 +30,7 @@ void Application::init_systems() {
                     std::string(m_config.is_host ? "HOST" : "CLIENT") + "]";
     win_cfg.width = 1600;
     win_cfg.height = 900;
+    win_cfg.visible = !m_config.hidden_window;
     m_window = std::make_unique<Window>(win_cfg);
 
     // Start with cursor unlocked for menus
@@ -40,14 +43,21 @@ void Application::init_systems() {
         if (m_pause_menu) m_pause_menu->resize(w, h);
     });
 
-    // 2. Renderer
+    // 2. Renderer & First-Person Viewmodel
     m_renderer = std::make_unique<Renderer>(m_window->width(), m_window->height());
+    m_viewmodel = std::make_unique<ViewModel>();
+    m_viewmodel->set_on_spark_callback([this](const glm::vec3& origin, const glm::vec3& dir) {
+        if (m_renderer) {
+            m_renderer->spawn_crack_debris(origin, glm::ivec3(glm::sign(dir)), 0.75f, MAT_VOIDITE_CRYSTAL);
+        }
+    });
 
     // 3. Voxel World & Procedural Caverns
     m_world = std::make_unique<World>(m_config.world_seed);
 
     // 4. Player Controller
     m_player = std::make_unique<PlayerController>(glm::vec3(16.0f, 22.0f, 16.0f));
+    m_player->clamp_to_surface(*m_world);
 
     m_player->set_on_block_break([this](int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags) {
         on_block_broken(x, y, z, normal, mat, flags);
@@ -131,6 +141,25 @@ void Application::init_systems() {
 
     // Pre-generate initial chunks around spawn
     m_world->update(m_player->position(), 2);
+
+    // 8. Load user profile persistence & synchronize player archetype / upgrades
+    SaveSystem::load_profile(m_user_profile, SaveSystem::DEFAULT_SAVE_FILE);
+    for (int s = 1; s <= 3; ++s) {
+        m_inventory.sector_records[s] = m_user_profile.sector_records[s];
+    }
+    sync_profile_with_player();
+}
+
+void Application::sync_profile_with_player() {
+    CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
+    if (m_player) {
+        m_player->apply_attributes_and_upgrades(cls, m_user_profile.upgrades);
+    }
+    if (m_viewmodel) {
+        m_viewmodel->set_character_class(cls);
+        m_viewmodel->set_drill_speed_tier(m_user_profile.upgrades.drillSpeedTier);
+        m_viewmodel->set_drill_durability_tier(m_user_profile.upgrades.drillDurabilityTier);
+    }
 }
 
 void Application::start_expedition(int level) {
@@ -142,14 +171,13 @@ void Application::start_expedition(int level) {
     m_inventory.reset(level == 3 ? 50 : 25);
     m_expedition_time = 0.0f;
 
-    // Apply Delver Upgrades
-    float drill_mult = 1.0f + 0.20f * m_inventory.upgrades.drill_speed_level;
-    m_player->set_drill_speed_multiplier(drill_mult);
+    // Apply Delver Archetype & Upgrades
+    CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
+    auto attr = get_character_attributes(cls);
+    sync_profile_with_player();
 
-    float thruster_mult = 1.0f + 0.25f * m_inventory.upgrades.thruster_energy_level;
-    m_player->set_thruster_regen_multiplier(thruster_mult);
-
-    m_inventory.max_bulkheads = 20 + m_inventory.upgrades.max_bulkheads_level * 5;
+    // Baseline Bulkheads per class
+    m_inventory.max_bulkheads = attr.maxBulkheads;
     m_inventory.bulkheads = std::min(m_inventory.bulkheads, m_inventory.get_max_bulkheads());
 
     // Generate Level Sector Procedural Topology
@@ -157,10 +185,7 @@ void Application::start_expedition(int level) {
     m_world->update(m_player->position(), 2);
 
     m_player->set_position(glm::vec3(16.0f, 22.0f, 16.0f));
-    m_player->exo_mut().integrity = 100.0f + 25.0f * m_inventory.upgrades.shield_plating_level;
-    m_player->exo_mut().power = 100.0f;
-    m_player->exo_mut().heat = 0.0f;
-    m_player->exo_mut().overheated = false;
+    m_player->clamp_to_surface(*m_world);
 
     // Reset systems
     setup_hazard_system();
@@ -225,10 +250,16 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         return;
     }
 
+    bool is_demolitionist = (m_user_profile.selected_class_id == 0);
+
     if (mat == MAT_VOIDITE_CRYSTAL) {
         m_inventory.add_voidite(10);
-        m_hud->add_floating_loot(popup_pos, "+10 VOIDITE (+50 PTS)", glm::vec4(0.0f, 0.94f, 1.0f, 1.0f)); // Glowing Bright Cyan (#00F0FF)
-        m_skills.add_demolitions_xp(15);
+        int bonus_xp = is_demolitionist ? 4 : 0;
+        int bonus_score = is_demolitionist ? 12 : 0;
+        m_inventory.total_run_score += bonus_score;
+        m_skills.add_demolitions_xp(15 + bonus_xp);
+        std::string popup = is_demolitionist ? "+10 VOIDITE (+62 PTS [DEMO +25%])" : "+10 VOIDITE (+50 PTS)";
+        m_hud->add_floating_loot(popup_pos, popup, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f)); // Glowing Bright Cyan
     } else if (mat == MAT_INDUSTRIAL_BULKHEAD) {
         m_inventory.add_titanium(2); // Grants +2 Titanium Cores
         m_hud->add_floating_loot(popup_pos, "+2 TITANIUM (+12 PTS)", glm::vec4(1.0f, 0.70f, 0.0f, 1.0f)); // Bright Golden-Orange (#FFB300)
@@ -246,8 +277,12 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_skills.add_demolitions_xp(5);
     } else if (mat == MAT_RADIOACTIVE_ORE) {
         m_inventory.add_salvage(15);
-        m_hud->add_floating_loot(popup_pos, "+15 RADIOACTIVE (+80 PTS)", glm::vec4(0.2f, 1.0f, 0.35f, 1.0f));
-        m_skills.add_demolitions_xp(20);
+        int bonus_xp = is_demolitionist ? 5 : 0;
+        int bonus_score = is_demolitionist ? 20 : 0;
+        m_inventory.total_run_score += bonus_score;
+        m_skills.add_demolitions_xp(20 + bonus_xp);
+        std::string popup = is_demolitionist ? "+15 RADIOACTIVE (+100 PTS [DEMO +25%])" : "+15 RADIOACTIVE (+80 PTS)";
+        m_hud->add_floating_loot(popup_pos, popup, glm::vec4(0.2f, 1.0f, 0.35f, 1.0f));
     } else if (mat == MAT_REINFORCED_VAULT_DOOR) {
         m_inventory.vault_breached = true;
         m_inventory.add_relic();
@@ -276,9 +311,11 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
 }
 
 void Application::on_block_placed(int x, int y, int z, uint8_t mat) {
-    if (mat == MAT_INDUSTRIAL_BULKHEAD) {
+    if (mat == MAT_INDUSTRIAL_BULKHEAD || mat == MAT_BULKHEAD) {
         m_inventory.consume_bulkhead();
     }
+
+    uint8_t flags = (mat == MAT_INDUSTRIAL_BULKHEAD || mat == MAT_BULKHEAD) ? VOXEL_FLAG_PLAYER_PLACED : 0;
 
     if (m_host) {
         int cx = (x >= 0) ? (x / CHUNK_SIZE) : ((x - CHUNK_SIZE + 1) / CHUNK_SIZE);
@@ -288,7 +325,7 @@ void Application::on_block_placed(int x, int y, int z, uint8_t mat) {
         int ly = (y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
         int lz = (z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
         uint16_t idx = static_cast<uint16_t>(Chunk::to_index(lx, ly, lz));
-        m_host->broadcast_block_delta(cx, cy, cz, idx, mat, 0);
+        m_host->broadcast_block_delta(cx, cy, cz, idx, mat, flags);
     } else if (m_client) {
         int cx = (x >= 0) ? (x / CHUNK_SIZE) : ((x - CHUNK_SIZE + 1) / CHUNK_SIZE);
         int cy = (y >= 0) ? (y / CHUNK_SIZE) : ((y - CHUNK_SIZE + 1) / CHUNK_SIZE);
@@ -300,7 +337,7 @@ void Application::on_block_placed(int x, int y, int z, uint8_t mat) {
         pkt.chunk_x = cx; pkt.chunk_y = cy; pkt.chunk_z = cz;
         pkt.local_block_idx = static_cast<uint16_t>(Chunk::to_index(lx, ly, lz));
         pkt.material_id = mat;
-        pkt.flags_and_damage = 0;
+        pkt.flags_and_damage = flags;
         m_client->send_block_delta(pkt);
     }
 }
@@ -350,8 +387,12 @@ void Application::on_bulkhead_dismantled(int x, int y, int z) {
 }
 
 void Application::on_sonar_cast(const glm::vec3& origin) {
-    float radius = m_skills.get_sonar_radius() + 5.0f * m_inventory.upgrades.sonar_range_level;
-    m_surveying.trigger_scan(origin, *m_world, radius);
+    CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
+    auto attr = get_character_attributes(cls);
+    float radius = attr.sonarRadius + 2.0f * m_user_profile.upgrades.sonarFrequencyTier;
+    float linger_bonus = attr.scanLingerBonus;
+
+    m_surveying.trigger_scan(origin, *m_world, radius, linger_bonus);
     m_renderer->trigger_sonar_pulse(origin);
     m_skills.add_surveying_xp(40);
 
@@ -363,10 +404,13 @@ void Application::on_sonar_cast(const glm::vec3& origin) {
 }
 
 void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro) {
+    bool is_demolitionist = (m_user_profile.selected_class_id == 0);
+
     if (is_micro) {
-        // Surgical 1x1x3 directional blast that removes a tunnel without destroying adjacent fragile ore
+        // Surgical 1x1x3 (or 1x1x4 for Demolitionist) directional blast that removes a tunnel without destroying adjacent fragile ore
         glm::ivec3 forward_step = (glm::length(glm::vec3(dir)) > 0.1f) ? -dir : glm::ivec3(0, 0, -1);
-        for (int step = 0; step < 3; ++step) {
+        int blast_steps = is_demolitionist ? 4 : 3;
+        for (int step = 0; step < blast_steps; ++step) {
             glm::ivec3 bpos = origin + forward_step * step;
             Voxel v = m_world->get_voxel(bpos.x, bpos.y, bpos.z);
             if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK) {
@@ -379,13 +423,15 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
         }
         m_trauma = std::min(m_trauma + 0.2f, 1.0f);
     } else {
-        // Heavy Demolition Charge: 3x3x3 spherical blast radius
+        // Heavy Demolition Charge: 3x3x3 spherical blast radius (expanded +1 perimeter for Demolitionist)
         if (m_inventory.demolition_charges <= 0) return;
         m_inventory.demolition_charges--;
 
-        for (int dx = -1; dx <= 1; ++dx) {
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dz = -1; dz <= 1; ++dz) {
+        int blast_rad = is_demolitionist ? 2 : 1;
+        for (int dx = -blast_rad; dx <= blast_rad; ++dx) {
+            for (int dy = -blast_rad; dy <= blast_rad; ++dy) {
+                for (int dz = -blast_rad; dz <= blast_rad; ++dz) {
+                    if (is_demolitionist && (std::abs(dx) + std::abs(dy) + std::abs(dz) > 3)) continue;
                     glm::ivec3 bpos = origin + glm::ivec3(dx, dy, dz);
                     Voxel v = m_world->get_voxel(bpos.x, bpos.y, bpos.z);
                     if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK) {
@@ -426,13 +472,13 @@ void Application::setup_hazard_system() {
             m_renderer->trigger_dust_kickup(3.5f);
         }
 
-        // Seismic Detachment Pass: locate 3-8 candidate blocks 3-12 units above player within 6-block radius
+        // Seismic Detachment Pass: locate 3-6 candidate blocks 3-10 units above player within 6-block radius
         auto detach_blocks = StructuralCheck::query_seismic_detachment_blocks(
             *m_world,
             m_player->position(),
-            3, 8,   // 3 to 8 blocks
+            3, 6,   // 3 to 6 blocks
             6.0f,   // 6-block radius
-            3, 12   // 3 to 12 units directly above
+            3, 10   // 3 to 10 units directly above
         );
 
         for (const auto& b : detach_blocks) {
@@ -534,11 +580,11 @@ void Application::fixed_tick(float dt) {
         }
 
         if (res.hit_player) {
-            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo_mut().integrity - res.damage);
+            float applied_dmg = m_player->take_damage(res.damage, true);
             m_player->add_trauma(0.35f);
             m_trauma = std::min(m_trauma + 0.35f, 1.0f);
             m_hud->trigger_damage_flash(0.7f);
-            m_hud->show_warning("CRITICAL IMPACT: DELVER CRUSHED BY FALLING DEBRIS (-" + std::to_string(static_cast<int>(res.damage)) + "%)!", 3.0f);
+            m_hud->show_warning("CRITICAL IMPACT: DELVER HIT BY FALLING DEBRIS (-" + std::to_string(static_cast<int>(applied_dmg)) + " HP)!", 3.0f);
         } else if (res.hit_bulkhead) {
             m_hud->show_warning("TITANIUM BULKHEAD DEFLECTED FALLING DEBRIS!", 2.0f);
         }
@@ -678,6 +724,31 @@ void Application::render(float dt) {
         m_renderer->render_sonar_wireframes(m_surveying.surveyed_voxels(), m_surveying.alpha());
     }
 
+    // Render Progressive Block Cracks (Module 4) - only when CrackStage > 0.05f
+    if (m_player->crack_stage() > 0.05f && m_player->target_block() != glm::ivec3(-1)) {
+        Voxel v = m_world->get_voxel(m_player->target_block().x, m_player->target_block().y, m_player->target_block().z);
+        m_renderer->render_block_cracks(m_player->target_block(), m_player->crack_stage(), m_player->target_normal(), v.material_id);
+    }
+
+    // Render 1st-Person Drill & Animated Hands Viewmodel (Module 3)
+    if (m_state == GameState::Gameplay && m_viewmodel) {
+        float aspect = static_cast<float>(m_window->width()) / std::max(1.0f, static_cast<float>(m_window->height()));
+        bool is_drilling = m_player->is_drilling();
+        bool is_in_range = (m_player->target_block() != glm::ivec3(-1));
+        glm::vec3 drill_target = is_in_range ?
+            (glm::vec3(m_player->target_block()) + glm::vec3(0.5f) + glm::vec3(m_player->target_normal()) * 0.5f) :
+            (m_player->position() + m_player->forward() * 2.0f);
+
+        m_viewmodel->render(
+            dt,
+            aspect,
+            is_drilling,
+            is_in_range,
+            m_player->active_tool(),
+            drill_target
+        );
+    }
+
     // End HDR Frame & Post-Processing Tonemap
     m_renderer->end_frame(dt, m_hazard->radiation_level());
 
@@ -691,20 +762,35 @@ void Application::render(float dt) {
 
     // Render State-Specific Overlay
     if (m_state == GameState::MainMenu) {
-        if (m_hub_ui->render_main_menu(m_selected_level, m_inventory, mouse_x, mouse_y, mouse_clicked)) {
+        bool has_save = (m_user_profile.total_exp > 0 ||
+                         m_user_profile.sector_records[1].highest_completion_rate > 0 ||
+                         m_user_profile.sector_records[2].highest_completion_rate > 0 ||
+                         m_user_profile.sector_records[3].highest_completion_rate > 0);
+        MainMenuAction action = m_hub_ui->render_main_menu(m_selected_level, m_user_profile, has_save, mouse_x, mouse_y, mouse_clicked);
+        if (action == MainMenuAction::Continue) {
             start_expedition(m_selected_level);
+        } else if (action == MainMenuAction::NewExpedition) {
+            start_expedition(m_selected_level);
+        } else if (action == MainMenuAction::UpgradeTerminal) {
+            m_hub_ui->set_subview(MenuSubView::Upgrades);
+        } else if (action == MainMenuAction::Exit) {
+            glfwSetWindowShouldClose(m_window->handle(), GLFW_TRUE);
         }
     } else if (m_state == GameState::OrbitalHub) {
-        if (m_hub_ui->render_orbital_hub(m_selected_level, m_skills, m_inventory, mouse_x, mouse_y, mouse_clicked)) {
-            start_expedition(m_selected_level);
-        }
+        // Redundant staging wall bypassed - route directly to MainMenu
+        m_hub_ui->set_subview(MenuSubView::Main);
+        m_state = GameState::MainMenu;
     } else if (m_state == GameState::Debrief) {
-        DebriefAction action = m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills, mouse_x, mouse_y, mouse_clicked);
+        DebriefAction action = m_hub_ui->render_debrief(m_expedition_success, m_selected_level, m_inventory, m_skills, m_user_profile, mouse_x, mouse_y, mouse_clicked);
         if (action == DebriefAction::LaunchNextSector) {
+            SaveSystem::save_profile(m_user_profile, SaveSystem::DEFAULT_SAVE_FILE);
             m_selected_level = std::min(3, m_selected_level + 1);
             start_expedition(m_selected_level);
         } else if (action == DebriefAction::ReturnToHub) {
-            m_state = GameState::OrbitalHub;
+            SaveSystem::save_profile(m_user_profile, SaveSystem::DEFAULT_SAVE_FILE);
+            m_hub_ui->set_subview(MenuSubView::Main);
+            m_state = GameState::MainMenu;
+            m_window->set_cursor_locked(false);
         }
     } else if (m_state == GameState::Paused) {
         // 1. Render game HUD behind pause modal
@@ -724,23 +810,46 @@ void Application::render(float dt) {
         if (action == PauseMenuAction::Resume) {
             m_state = GameState::Gameplay;
             m_window->set_cursor_locked(true);
-        } else if (action == PauseMenuAction::Abandon) {
+        } else if (action == PauseMenuAction::Abandon || action == PauseMenuAction::ReturnToStartup || action == PauseMenuAction::ReturnToHub) {
+            // Reset mission runtime containers (clear active debris entities, reset hazard clocks, flush world delta queues)
+            m_debris.clear();
+            if (m_hazard) {
+                m_hazard->reset();
+            }
+            m_trauma = 0.0f;
+            m_hud->clear_target_info();
             m_inventory.apply_abandon_penalty();
             m_inventory.finalize_run(m_selected_level, false);
             m_expedition_success = false;
-            m_state = GameState::Debrief;
-            m_window->set_cursor_locked(false);
-            m_hud->show_warning("EXPEDITION ABANDONED // 50% SALVAGE PENALTY APPLIED", 4.0f);
-        } else if (action == PauseMenuAction::ReturnToHub) {
-            m_inventory.apply_abandon_penalty();
-            m_inventory.finalize_run(m_selected_level, false);
-            m_expedition_success = false;
-            m_state = GameState::OrbitalHub;
+
+            // Bank remaining salvage into profile
+            int run_exp = m_inventory.total_run_score;
+            if (run_exp <= 0) {
+                run_exp = m_inventory.voidite * 5 + m_inventory.titanium * 6 + m_inventory.salvage_parts * 2;
+            }
+            m_user_profile.total_exp += run_exp;
+            m_user_profile.total_voidite += m_inventory.voidite;
+            m_user_profile.total_titanium += m_inventory.titanium;
+            for (int s = 1; s <= 3; ++s) {
+                if (m_inventory.sector_records[s].highest_completion_rate > m_user_profile.sector_records[s].highest_completion_rate) {
+                    m_user_profile.sector_records[s].highest_completion_rate = m_inventory.sector_records[s].highest_completion_rate;
+                }
+            }
+            SaveSystem::save_profile(m_user_profile, SaveSystem::DEFAULT_SAVE_FILE);
+
+            m_hub_ui->set_subview(MenuSubView::Main);
+            m_state = GameState::MainMenu;
             m_window->set_cursor_locked(false);
         }
     } else {
         // Render HUD Overlay (Module 4)
         m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj);
+    }
+
+    if (m_hub_ui->has_profile_changed()) {
+        m_hub_ui->clear_profile_changed();
+        SaveSystem::save_profile(m_user_profile, SaveSystem::DEFAULT_SAVE_FILE);
+        sync_profile_with_player();
     }
 }
 
@@ -776,16 +885,21 @@ void Application::run() {
 
         // 1. MAIN MENU INPUTS
         if (m_state == GameState::MainMenu) {
-            if (m_window->is_key_down(GLFW_KEY_1)) m_selected_level = 1;
-            if (m_window->is_key_down(GLFW_KEY_2)) m_selected_level = 2;
-            if (m_window->is_key_down(GLFW_KEY_3)) m_selected_level = 3;
-
             static bool enter_down_last = false;
             bool enter_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
                              m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (enter_now && !enter_down_last) {
-                start_expedition(m_selected_level);
+                bool has_save = (m_user_profile.total_exp > 0 ||
+                                 m_user_profile.sector_records[1].highest_completion_rate > 0 ||
+                                 m_user_profile.sector_records[2].highest_completion_rate > 0 ||
+                                 m_user_profile.sector_records[3].highest_completion_rate > 0);
+                if (has_save) {
+                    start_expedition(m_selected_level);
+                } else {
+                    m_hub_ui->set_active_tab(HubTab::SectorSelect);
+                    m_state = GameState::OrbitalHub;
+                }
             }
             enter_down_last = enter_now;
 
@@ -795,21 +909,34 @@ void Application::run() {
         }
         // 2. ORBITAL HUB INPUTS
         else if (m_state == GameState::OrbitalHub) {
+            if (m_hub_ui->active_tab() == HubTab::SectorSelect) {
+                if (m_window->is_key_down(GLFW_KEY_1)) m_selected_level = 1;
+                if (m_window->is_key_down(GLFW_KEY_2)) m_selected_level = 2;
+                if (m_window->is_key_down(GLFW_KEY_3)) m_selected_level = 3;
+            }
+
             static bool launch_down_last = false;
             bool launch_now = m_window->is_key_down(GLFW_KEY_ENTER) ||
                               m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (launch_now && !launch_down_last) {
-                start_expedition(m_selected_level);
+                if (m_hub_ui->active_tab() == HubTab::SectorSelect) {
+                    start_expedition(m_selected_level);
+                }
             }
             launch_down_last = launch_now;
 
             static bool hub_back_down_last = false;
             bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB);
             if (hub_back_now && !hub_back_down_last) {
-                m_state = GameState::MainMenu;
+                int next_tab = (static_cast<int>(m_hub_ui->active_tab()) + 1) % 3;
+                m_hub_ui->set_active_tab(static_cast<HubTab>(next_tab));
             }
             hub_back_down_last = hub_back_now;
+
+            if (m_window->is_key_down(GLFW_KEY_ESCAPE)) {
+                m_state = GameState::MainMenu;
+            }
         }
         // 3. DEBRIEF INPUTS
         else if (m_state == GameState::Debrief) {
@@ -868,6 +995,97 @@ void Application::run() {
         }
 
         render(static_cast<float>(frame_time));
+
+        // ── Single screenshot CLI flag ──
+        if (!m_config.single_screenshot_path.empty() && m_auto_test_frame >= 5) {
+            capture_screenshot_png(m_config.single_screenshot_path, m_window->width(), m_window->height());
+            break;
+        }
+
+        // ── In-Game F12 Screenshot Hotkey ──
+        static bool f12_down_last = false;
+        bool f12_now = m_window->is_key_down(GLFW_KEY_F12);
+        if (f12_now && !f12_down_last) {
+            auto now = std::chrono::system_clock::now();
+            auto t = std::chrono::system_clock::to_time_t(now);
+            std::tm tm_buf{};
+#ifdef _WIN32
+            localtime_s(&tm_buf, &t);
+#else
+            localtime_r(&t, &tm_buf);
+#endif
+            char buf[128];
+            std::strftime(buf, sizeof(buf), "screenshots/screenshot_%Y%m%d_%H%M%S.png", &tm_buf);
+            capture_screenshot_png(buf, m_window->width(), m_window->height());
+        }
+        f12_down_last = f12_now;
+
+        // ── Automated Visual Test & Playthrough Sequence ──
+        if (m_config.auto_play_test) {
+            m_auto_test_frame++;
+
+            // Frame 10: Capture Main Menu
+            if (m_auto_test_frame == 10) {
+                VisualTestHarness::instance().record_phase(0, "MAIN MENU", "screenshots/01_main_menu.png", m_window->width(), m_window->height());
+                // Switch to Sector Select carousel
+                m_hub_ui->set_subview(MenuSubView::SectorSelect);
+                m_selected_level = 2; // Preview Sector 2 card
+            }
+            // Frame 20: Capture Sector Select Carousel
+            else if (m_auto_test_frame == 20) {
+                VisualTestHarness::instance().record_phase(1, "SECTOR SELECT", "screenshots/02_sector_select.png", m_window->width(), m_window->height());
+                // Switch to Upgrades / Delvers view
+                m_hub_ui->set_subview(MenuSubView::Upgrades);
+            }
+            // Frame 30: Capture Upgrades / Delvers screen
+            else if (m_auto_test_frame == 30) {
+                VisualTestHarness::instance().record_phase(2, "UPGRADES MENU", "screenshots/03_upgrades_menu.png", m_window->width(), m_window->height());
+                // Launch Sector 1 Expedition
+                m_hub_ui->set_subview(MenuSubView::Main);
+                start_expedition(1);
+            }
+            // Frame 65: Settle in gameplay cavern and capture viewmodel + HUD
+            else if (m_auto_test_frame == 65) {
+                m_world->update(m_player->position(), 2);
+                VisualTestHarness::instance().record_phase(3, "GAMEPLAY CAVERN", "screenshots/04_gameplay_cavern.png", m_window->width(), m_window->height());
+            }
+            // Frames 70 to 110: Player mines the cavern rock directly in front
+            else if (m_auto_test_frame >= 70 && m_auto_test_frame <= 110) {
+                m_player->set_look_angles(0.0f, -22.0f);
+                m_player->set_drilling(true);
+                m_player->MineBlock(static_cast<float>(fixed_dt), *m_world);
+
+                if (m_auto_test_frame == 95) {
+                    VisualTestHarness::instance().record_phase(4, "DRILL CRACKS", "screenshots/05_drilling_cracks.png", m_window->width(), m_window->height());
+                }
+            }
+            // Frame 111: Stop drilling
+            else if (m_auto_test_frame == 111) {
+                m_player->set_drilling(false);
+            }
+            // Frame 115: Simulate loot collection & stacked toasts
+            else if (m_auto_test_frame == 115) {
+                m_hud->add_loot_toast("VOIDITE CRYSTAL", glm::vec4(0.7f, 0.3f, 1.0f, 1.0f), 3, 45);
+                m_hud->add_loot_toast("SCRAP METAL", glm::vec4(0.85f, 0.7f, 0.3f, 1.0f), 2, 20);
+            }
+            else if (m_auto_test_frame == 120) {
+                m_hud->add_loot_toast("VOIDITE CRYSTAL", glm::vec4(0.7f, 0.3f, 1.0f, 1.0f), 3, 45); // Stack +3 [x2]
+            }
+            else if (m_auto_test_frame == 130) {
+                VisualTestHarness::instance().record_phase(5, "LOOT TOASTS", "screenshots/06_loot_toasts.png", m_window->width(), m_window->height());
+                // Deploy extraction beacon
+                m_extraction->deploy_beacon(m_player->position());
+            }
+            else if (m_auto_test_frame == 145) {
+                VisualTestHarness::instance().record_phase(6, "EXTRACTION BEACON", "screenshots/07_extraction_beacon.png", m_window->width(), m_window->height());
+            }
+            else if (m_auto_test_frame >= 155) {
+                VisualTestHarness::instance().finalize();
+                VF_LOG_INFO("AutoPlayTest", "Automated visual test completed! All screenshots & montage captured.");
+                break;
+            }
+        }
+
         m_window->swap_buffers();
     }
 }

@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
+#include <deque>
 
 namespace Voidfall {
 
@@ -23,6 +24,16 @@ struct FloatingLootText {
     float max_timer{1.8f};
 };
 
+struct LootToast {
+    std::string label;
+    std::string resource_name;
+    int count{1};
+    int unit_points{0};
+    glm::vec4 color{1.0f};
+    float lifetime{2.5f};      // Total duration (e.g., 2.5s)
+    float maxLifetime{2.5f};
+};
+
 class HUD {
 public:
     HUD(int screen_width, int height);
@@ -32,6 +43,7 @@ public:
     void update(float dt);
 
     void add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color);
+    void add_loot_toast(const std::string& resource_name, const glm::vec4& color, int count = 1, int unit_points = 0);
     void show_warning(const std::string& msg, float duration = 2.0f);
     void trigger_damage_flash(float intensity = 0.5f) { m_damage_flash_timer = intensity; }
     void clear_target_info();
@@ -52,9 +64,11 @@ private:
     void init_gl();
     void init_font_atlas();
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
+    void draw_pill(float x, float y, float w, float h, const glm::vec4& border_col = glm::vec4(0.0f, 0.95f, 1.0f, 0.35f));
     void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
     void render_crosshair(const PlayerController& player, const World& world);
     void render_floating_loot(const glm::mat4& view, const glm::mat4& proj);
+    void render_loot_toasts();
 
     int m_width{1600};
     int m_height{900};
@@ -70,6 +84,7 @@ private:
     unsigned int m_font_tex{0};
 
     std::vector<FloatingLootText> m_floating_loot;
+    std::deque<LootToast> m_loot_toasts;
     float m_warning_timer{0.0f};
     std::string m_warning_message;
     float m_damage_flash_timer{0.0f};

@@ -20,7 +20,7 @@ Voxel GreedyMesher::sample_voxel(
     }
 
     if (!get_neighbor) {
-        return Voxel{MAT_AIR, 0};
+        return Voxel{MAT_FRACTURED_GRANITE, 0};
     }
 
     ChunkPos pos = chunk.get_pos();
@@ -57,7 +57,22 @@ Voxel GreedyMesher::sample_voxel(
         return neighbor->get_voxel(nx, ny, nz);
     }
 
-    return Voxel{MAT_AIR, 0};
+    // Treat unloaded neighbor boundaries as solid granite to prevent void leaks and seam culling
+    return Voxel{MAT_FRACTURED_GRANITE, 0};
+}
+
+bool GreedyMesher::is_face_visible(
+    const Chunk& chunk,
+    const NeighborChunkGetter& get_neighbor,
+    int x, int y, int z,
+    int nx, int ny, int nz
+) {
+    Voxel current = sample_voxel(chunk, get_neighbor, x, y, z);
+    if (!current.is_solid()) {
+        return false;
+    }
+    Voxel neighbor = sample_voxel(chunk, get_neighbor, nx, ny, nz);
+    return !neighbor.is_solid();
 }
 
 std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
@@ -115,41 +130,38 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         int mask_idx = x[u] + x[v] * CHUNK_SIZE;
                         mask[mask_idx].visible = false;
 
-                        Voxel current = sample_voxel(chunk, get_neighbor, x[0], x[1], x[2]);
-                        if (!current.is_solid()) {
+                        if (!is_face_visible(chunk, get_neighbor, x[0], x[1], x[2], x[0] + q[0], x[1] + q[1], x[2] + q[2])) {
                             continue;
                         }
 
-                        Voxel neighbor = sample_voxel(chunk, get_neighbor, x[0] + q[0], x[1] + q[1], x[2] + q[2]);
-                        if (!neighbor.is_solid()) {
-                            mask[mask_idx].visible = true;
-                            mask[mask_idx].voxel = current;
+                        Voxel current = sample_voxel(chunk, get_neighbor, x[0], x[1], x[2]);
+                        mask[mask_idx].visible = true;
+                        mask[mask_idx].voxel = current;
 
-                            // Calculate Baked Vertex AO for the 4 corners
-                            // Tangent offsets:
-                            int tu[3] = {0, 0, 0}; tu[u] = 1;
-                            int tv[3] = {0, 0, 0}; tv[v] = 1;
+                        // Calculate Baked Vertex AO for the 4 corners
+                        // Tangent offsets:
+                        int tu[3] = {0, 0, 0}; tu[u] = 1;
+                        int tv[3] = {0, 0, 0}; tv[v] = 1;
 
-                            int bx = x[0] + q[0];
-                            int by = x[1] + q[1];
-                            int bz = x[2] + q[2];
+                        int bx = x[0] + q[0];
+                        int by = x[1] + q[1];
+                        int bz = x[2] + q[2];
 
-                            // Check 8 neighbors in the adjacent face plane
-                            bool s_left   = sample_voxel(chunk, get_neighbor, bx - tu[0], by - tu[1], bz - tu[2]).is_solid();
-                            bool s_right  = sample_voxel(chunk, get_neighbor, bx + tu[0], by + tu[1], bz + tu[2]).is_solid();
-                            bool s_down   = sample_voxel(chunk, get_neighbor, bx - tv[0], by - tv[1], bz - tv[2]).is_solid();
-                            bool s_up     = sample_voxel(chunk, get_neighbor, bx + tv[0], by + tv[1], bz + tv[2]).is_solid();
+                        // Check 8 neighbors in the adjacent face plane
+                        bool s_left   = sample_voxel(chunk, get_neighbor, bx - tu[0], by - tu[1], bz - tu[2]).is_solid();
+                        bool s_right  = sample_voxel(chunk, get_neighbor, bx + tu[0], by + tu[1], bz + tu[2]).is_solid();
+                        bool s_down   = sample_voxel(chunk, get_neighbor, bx - tv[0], by - tv[1], bz - tv[2]).is_solid();
+                        bool s_up     = sample_voxel(chunk, get_neighbor, bx + tv[0], by + tv[1], bz + tv[2]).is_solid();
 
-                            bool c_ld = sample_voxel(chunk, get_neighbor, bx - tu[0] - tv[0], by - tu[1] - tv[1], bz - tu[2] - tv[2]).is_solid();
-                            bool c_rd = sample_voxel(chunk, get_neighbor, bx + tu[0] - tv[0], by + tu[1] - tv[1], bz + tu[2] - tv[2]).is_solid();
-                            bool c_ru = sample_voxel(chunk, get_neighbor, bx + tu[0] + tv[0], by + tu[1] + tv[1], bz + tu[2] + tv[2]).is_solid();
-                            bool c_lu = sample_voxel(chunk, get_neighbor, bx - tu[0] + tv[0], by - tu[1] + tv[1], bz - tu[2] + tv[2]).is_solid();
+                        bool c_ld = sample_voxel(chunk, get_neighbor, bx - tu[0] - tv[0], by - tu[1] - tv[1], bz - tu[2] - tv[2]).is_solid();
+                        bool c_rd = sample_voxel(chunk, get_neighbor, bx + tu[0] - tv[0], by + tu[1] - tv[1], bz + tu[2] - tv[2]).is_solid();
+                        bool c_ru = sample_voxel(chunk, get_neighbor, bx + tu[0] + tv[0], by + tu[1] + tv[1], bz + tu[2] + tv[2]).is_solid();
+                        bool c_lu = sample_voxel(chunk, get_neighbor, bx - tu[0] + tv[0], by - tu[1] + tv[1], bz - tu[2] + tv[2]).is_solid();
 
-                            mask[mask_idx].ao[0] = compute_vertex_ao(s_left, s_down, c_ld);  // Corner (0, 0)
-                            mask[mask_idx].ao[1] = compute_vertex_ao(s_right, s_down, c_rd); // Corner (1, 0)
-                            mask[mask_idx].ao[2] = compute_vertex_ao(s_right, s_up, c_ru);   // Corner (1, 1)
-                            mask[mask_idx].ao[3] = compute_vertex_ao(s_left, s_up, c_lu);    // Corner (0, 1)
-                        }
+                        mask[mask_idx].ao[0] = compute_vertex_ao(s_left, s_down, c_ld);  // Corner (0, 0)
+                        mask[mask_idx].ao[1] = compute_vertex_ao(s_right, s_down, c_rd); // Corner (1, 0)
+                        mask[mask_idx].ao[2] = compute_vertex_ao(s_right, s_up, c_ru);   // Corner (1, 1)
+                        mask[mask_idx].ao[3] = compute_vertex_ao(s_left, s_up, c_lu);    // Corner (0, 1)
                     }
                 }
 

@@ -76,9 +76,9 @@ DynamicDebris::CollisionResult DynamicDebris::update(
     glm::vec3 next_pos = m_position + m_velocity * dt;
 
     // Sweeping AABB against player capsule / bounding box
-    // Player AABB: eye at player_pos, feet at player_pos.y - 1.6f, head at player_pos.y + 0.2f
-    glm::vec3 p_min = player_pos - glm::vec3(0.35f, 1.6f, 0.35f);
-    glm::vec3 p_max = player_pos + glm::vec3(0.35f, 0.2f, 0.35f);
+    // Player extents: half_extents = (0.3f, 0.9f, 0.3f), height = 1.8f
+    glm::vec3 p_min = glm::vec3(player_pos.x - 0.35f, std::min(player_pos.y - 0.95f, player_pos.y - 1.6f), player_pos.z - 0.35f);
+    glm::vec3 p_max = glm::vec3(player_pos.x + 0.35f, std::max(player_pos.y + 0.95f, player_pos.y + 0.2f), player_pos.z + 0.35f);
 
     glm::vec3 d_min = next_pos - glm::vec3(0.45f);
     glm::vec3 d_max = next_pos + glm::vec3(0.45f);
@@ -88,7 +88,7 @@ DynamicDebris::CollisionResult DynamicDebris::update(
                         (p_min.z <= d_max.z && p_max.z >= d_min.z);
 
     // If an active falling block impacts the player capsule with vertical velocity |v_y| > 4.0 m/s
-    if (aabb_overlap && !has_dealt_damage && m_velocity.y < -4.0f) {
+    if (aabb_overlap && !has_dealt_damage && std::abs(m_velocity.y) > 4.0f) {
         has_dealt_damage = true;
         m_destroyed = true;
         res.shattered = true;
@@ -99,10 +99,9 @@ DynamicDebris::CollisionResult DynamicDebris::update(
             // Bulkhead shelter utility: falling debris strikes bulkhead harmlessly
             res.hit_bulkhead = true;
         } else {
-            // Player takes crushing damage: damage = clamp(int(|v_y| * 3.5f), 15, 45)
+            // Player takes crushing damage: 20 Suit Integrity damage
             res.hit_player = true;
-            int dmg = glm::clamp(static_cast<int>(std::abs(m_velocity.y) * 3.5f), 15, 45);
-            res.damage = static_cast<float>(dmg);
+            res.damage = 20.0f;
         }
         return res;
     }

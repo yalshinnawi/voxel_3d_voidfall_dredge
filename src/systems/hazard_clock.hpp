@@ -10,6 +10,7 @@ public:
 
     void update(float dt);
     void set_sector_parameters(int sector);
+    void reset();
 
     float radiation_level() const { return m_radiation_level; }
     float tremor_timer() const { return m_tremor_timer; }

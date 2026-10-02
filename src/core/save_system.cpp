@@ -1,0 +1,149 @@
+#include "save_system.hpp"
+#include "logger.hpp"
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
+#include <filesystem>
+#include <chrono>
+#include <ctime>
+
+namespace Voidfall {
+
+bool SaveSystem::save_profile(const UserProfile& profile, const std::string& filepath) {
+    std::filesystem::path p(filepath);
+    if (p.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(p.parent_path(), ec);
+    }
+
+    std::ofstream out(filepath, std::ios::trunc);
+    if (!out.is_open()) {
+        VF_LOG_ERROR("SaveSystem", "Failed to open save file for writing: " << filepath);
+        return false;
+    }
+
+    // Generate formatted ISO/standard timestamp for last save
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf{};
+#if defined(_WIN32)
+    localtime_s(&tm_buf, &in_time_t);
+#else
+    localtime_r(&in_time_t, &tm_buf);
+#endif
+    std::stringstream time_ss;
+    time_ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
+    const_cast<UserProfile&>(profile).last_saved_time = time_ss.str();
+
+    out << "{\n";
+    out << "  \"save_version\": " << profile.save_version << ",\n";
+    out << "  \"last_saved_time\": \"" << profile.last_saved_time << "\",\n";
+    out << "  \"player_name\": \"" << profile.player_name << "\",\n";
+    out << "  \"total_exp\": " << profile.total_exp << ",\n";
+    out << "  \"total_voidite\": " << profile.total_voidite << ",\n";
+    int class_val = (profile.selected_class_id != 0) ? profile.selected_class_id : static_cast<int>(profile.selectedClass);
+    out << "  \"total_titanium\": " << profile.total_titanium << ",\n";
+    out << "  \"selected_class_id\": " << class_val << ",\n";
+    out << "  \"selected_class\": " << class_val << ",\n";
+    out << "  \"drill_speed_tier\": " << profile.upgrades.drillSpeedTier << ",\n";
+    out << "  \"drill_durability_tier\": " << profile.upgrades.drillDurabilityTier << ",\n";
+    out << "  \"thruster_tank_tier\": " << profile.upgrades.thrusterTankTier << ",\n";
+    out << "  \"kinetic_dynamo_tier\": " << profile.upgrades.kineticDynamoTier << ",\n";
+    out << "  \"sonar_frequency_tier\": " << profile.upgrades.sonarFrequencyTier << ",\n";
+    out << "  \"reinforced_plating_tier\": " << profile.upgrades.reinforcedPlatingTier << ",\n";
+    out << "  \"sector1_rate\": " << profile.sector_records[1].highest_completion_rate << ",\n";
+    out << "  \"sector1_badge\": \"" << profile.sector_records[1].best_badge << "\",\n";
+    out << "  \"sector2_rate\": " << profile.sector_records[2].highest_completion_rate << ",\n";
+    out << "  \"sector2_badge\": \"" << profile.sector_records[2].best_badge << "\",\n";
+    out << "  \"sector3_rate\": " << profile.sector_records[3].highest_completion_rate << ",\n";
+    out << "  \"sector3_badge\": \"" << profile.sector_records[3].best_badge << "\"\n";
+    out << "}\n";
+
+    out.close();
+    VF_LOG_INFO("SaveSystem", "Successfully saved profile to " << filepath << " (Timestamp: " << profile.last_saved_time << ")");
+    return true;
+}
+
+bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath) {
+    std::string path_to_open = filepath;
+    bool migrated = false;
+
+    // Backward compatibility: If target in saves/ doesn't exist, check root legacy file
+    if (!std::filesystem::exists(path_to_open) && filepath == DEFAULT_SAVE_FILE && std::filesystem::exists("save_data.json")) {
+        VF_LOG_INFO("SaveSystem", "Found legacy save_data.json in root. Migrating to " << DEFAULT_SAVE_FILE);
+        path_to_open = "save_data.json";
+        migrated = true;
+    }
+
+    std::ifstream in(path_to_open);
+    if (!in.is_open()) {
+        VF_LOG_INFO("SaveSystem", "No existing save file found at " << filepath << ". Initializing new profile in saves folder.");
+        save_profile(profile, filepath);
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        auto parse_int = [&](const std::string& key, int& val) {
+            auto pos = line.find("\"" + key + "\":");
+            if (pos != std::string::npos) {
+                auto comma = line.find(',', pos);
+                std::string num_str = line.substr(pos + key.length() + 3, (comma != std::string::npos ? comma : line.length()) - (pos + key.length() + 3));
+                try {
+                    val = std::stoi(num_str);
+                } catch (...) {}
+            }
+        };
+
+        auto parse_str = [&](const std::string& key, std::string& val) {
+            auto pos = line.find("\"" + key + "\": \"");
+            if (pos != std::string::npos) {
+                auto start = pos + key.length() + 5;
+                auto end = line.find('"', start);
+                if (end != std::string::npos) {
+                    val = line.substr(start, end - start);
+                }
+            }
+        };
+
+        parse_int("save_version", profile.save_version);
+        parse_str("last_saved_time", profile.last_saved_time);
+        parse_str("player_name", profile.player_name);
+        parse_int("total_exp", profile.total_exp);
+        parse_int("total_voidite", profile.total_voidite);
+        parse_int("total_titanium", profile.total_titanium);
+        parse_int("selected_class_id", profile.selected_class_id);
+        profile.selectedClass = static_cast<CharacterClass>(profile.selected_class_id);
+
+        parse_int("drill_speed_tier", profile.upgrades.drillSpeedTier);
+        parse_int("drill_durability_tier", profile.upgrades.drillDurabilityTier);
+        parse_int("thruster_tank_tier", profile.upgrades.thrusterTankTier);
+        parse_int("kinetic_dynamo_tier", profile.upgrades.kineticDynamoTier);
+        parse_int("sonar_frequency_tier", profile.upgrades.sonarFrequencyTier);
+        parse_int("reinforced_plating_tier", profile.upgrades.reinforcedPlatingTier);
+
+        parse_int("sector1_rate", profile.sector_records[1].highest_completion_rate);
+        parse_str("sector1_badge", profile.sector_records[1].best_badge);
+
+        parse_int("sector2_rate", profile.sector_records[2].highest_completion_rate);
+        parse_str("sector2_badge", profile.sector_records[2].best_badge);
+
+        parse_int("sector3_rate", profile.sector_records[3].highest_completion_rate);
+        parse_str("sector3_badge", profile.sector_records[3].best_badge);
+    }
+
+    in.close();
+
+    if (migrated) {
+        save_profile(profile, filepath);
+        VF_LOG_INFO("SaveSystem", "Saved migrated profile to " << filepath);
+    }
+
+    VF_LOG_INFO("SaveSystem", "Successfully loaded user profile from " << filepath
+                << " (EXP: " << profile.total_exp << ", Class: " << profile.selected_class_id
+                << ", Saved: " << (profile.last_saved_time.empty() ? "None" : profile.last_saved_time) << ")");
+    return true;
+}
+
+} // namespace Voidfall

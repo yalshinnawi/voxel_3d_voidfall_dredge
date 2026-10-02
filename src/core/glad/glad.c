@@ -92,6 +92,7 @@ PFNGLGETINTEGERVPROC glad_glGetIntegerv = NULL;
 PFNGLGETSTRINGPROC glad_glGetString = NULL;
 PFNGLBLENDFUNCPROC glad_glBlendFunc = NULL;
 PFNGLDEPTHFUNCPROC glad_glDepthFunc = NULL;
+PFNGLDEPTHRANGEPROC glad_glDepthRange = NULL;
 PFNGLCULLFACEPROC glad_glCullFace = NULL;
 PFNGLFRONTFACEPROC glad_glFrontFace = NULL;
 PFNGLLINEWIDTHPROC glad_glLineWidth = NULL;
@@ -219,6 +220,7 @@ static void glad_load_gl_functions(void) {
     glad_glGetString = (PFNGLGETSTRINGPROC)glad_get_proc("glGetString");
     glad_glBlendFunc = (PFNGLBLENDFUNCPROC)glad_get_proc("glBlendFunc");
     glad_glDepthFunc = (PFNGLDEPTHFUNCPROC)glad_get_proc("glDepthFunc");
+    glad_glDepthRange = (PFNGLDEPTHRANGEPROC)glad_get_proc("glDepthRange");
     glad_glCullFace = (PFNGLCULLFACEPROC)glad_get_proc("glCullFace");
     glad_glFrontFace = (PFNGLFRONTFACEPROC)glad_get_proc("glFrontFace");
     glad_glLineWidth = (PFNGLLINEWIDTHPROC)glad_get_proc("glLineWidth");

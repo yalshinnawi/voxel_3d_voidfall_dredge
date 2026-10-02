@@ -1,4 +1,5 @@
 #include "hud.hpp"
+#include "font_renderer.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include "../include/font8x8.h"
@@ -61,27 +62,16 @@ void HUD::init_gl() {
 }
 
 void HUD::init_font_atlas() {
-    const int atlas_w = 128 * 8;
-    const int atlas_h = 8;
-    std::vector<uint8_t> atlas(atlas_w * atlas_h, 0);
-
-    for (int c = 0; c < 128; ++c) {
-        for (int y = 0; y < 8; ++y) {
-            uint8_t row = font8x8_basic[c][y];
-            for (int x = 0; x < 8; ++x) {
-                bool bit = (row & (1 << x)) != 0;
-                int px = c * 8 + x;
-                int py = y;
-                atlas[py * atlas_w + px] = bit ? 255 : 0;
-            }
-        }
-    }
+    int atlas_w = 0, atlas_h = 0;
+    std::vector<uint8_t> atlas;
+    std::array<GlyphMetric, 128> metrics;
+    generate_proportional_sans_font_atlas(atlas_w, atlas_h, atlas, metrics);
 
     glGenTextures(1, &m_font_tex);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, atlas_w, atlas_h, 0, GL_RED, GL_UNSIGNED_BYTE, atlas.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -110,6 +100,15 @@ void HUD::update(float dt) {
             ++it;
         }
     }
+
+    for (auto it = m_loot_toasts.begin(); it != m_loot_toasts.end();) {
+        it->lifetime -= dt;
+        if (it->lifetime <= 0.0f) {
+            it = m_loot_toasts.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void HUD::show_warning(const std::string& msg, float duration) {
@@ -121,51 +120,58 @@ void HUD::clear_target_info() {
     // Explicit instant clearance of crosshair tooltip
 }
 
+void HUD::add_loot_toast(const std::string& resource_name, const glm::vec4& color, int count, int unit_points) {
+    if (!m_loot_toasts.empty() && m_loot_toasts.front().resource_name == resource_name) {
+        auto& toast = m_loot_toasts.front();
+        toast.count += count;
+        toast.lifetime = 2.5f;
+        toast.maxLifetime = 2.5f;
+        toast.label = "+" + std::to_string(toast.count) + " " + resource_name + " [x" + std::to_string(toast.count) + "]";
+        return;
+    }
+
+    LootToast toast;
+    toast.resource_name = resource_name;
+    toast.count = count;
+    toast.unit_points = unit_points;
+    toast.color = color;
+    toast.lifetime = 2.5f;
+    toast.maxLifetime = 2.5f;
+    if (count > 1) {
+        toast.label = "+" + std::to_string(count) + " " + resource_name + " [x" + std::to_string(count) + "]";
+    } else {
+        toast.label = "+1 " + resource_name;
+    }
+
+    m_loot_toasts.push_front(toast);
+    while (m_loot_toasts.size() > 5) {
+        m_loot_toasts.pop_back();
+    }
+}
+
 void HUD::add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color) {
-    // Check if recent entry nearby matches this resource to consolidate continuous drill hits
+    (void)world_pos;
     std::string res_key;
-    int amt = 0;
+    int amt = 1;
     int pts = 0;
     if (text.find("VOIDITE") != std::string::npos) {
-        res_key = "VOIDITE"; amt = 10; pts = 50;
+        res_key = "VOIDITE CRYSTAL"; amt = 10; pts = 50;
     } else if (text.find("TITANIUM") != std::string::npos) {
-        res_key = "TITANIUM"; amt = 2; pts = 12;
+        res_key = "TITANIUM CORE"; amt = 2; pts = 12;
     } else if (text.find("SCRAP") != std::string::npos) {
         res_key = "SCRAP METAL"; amt = 1; pts = 0;
     } else if (text.find("RADIOACTIVE") != std::string::npos) {
-        res_key = "RADIOACTIVE"; amt = 15; pts = 80;
+        res_key = "RADIOACTIVE ORE"; amt = 15; pts = 80;
     } else if (text.find("RELIC") != std::string::npos) {
         res_key = "RELIC HYPER-CORE"; amt = 1; pts = 250;
+    } else if (text.find("BULKHEAD") != std::string::npos) {
+        res_key = "BULKHEAD PLATE"; amt = 1; pts = 0;
+    } else {
+        res_key = "SALVAGE SCRAP"; amt = 1; pts = 10;
     }
 
-    if (!res_key.empty()) {
-        for (auto& item : m_floating_loot) {
-            if (item.resource_name == res_key && glm::distance(item.world_pos, world_pos) < 4.0f && item.timer > 0.1f) {
-                // Consolidate continuous drill hits into one rising accumulator number
-                item.amount += amt;
-                item.score += pts;
-                item.timer = item.max_timer; // Reset fade timer
-                item.world_pos.y = std::max(item.world_pos.y, world_pos.y + 0.3f);
-                if (item.score > 0) {
-                    item.text = "+" + std::to_string(item.amount) + " " + item.resource_name + " (+" + std::to_string(item.score) + " PTS)";
-                } else {
-                    item.text = "+" + std::to_string(item.amount) + " " + item.resource_name;
-                }
-                return;
-            }
-        }
-    }
-
-    FloatingLootText loot;
-    loot.world_pos = world_pos;
-    loot.text = text;
-    loot.resource_name = res_key;
-    loot.amount = (amt > 0) ? amt : 1;
-    loot.score = pts;
-    loot.color = color;
-    loot.timer = 1.8f;
-    loot.max_timer = 1.8f;
-    m_floating_loot.push_back(loot);
+    // Always push to dedicated multi-hit right-margin stacking toast feed
+    add_loot_toast(res_key, color, amt, pts);
 }
 
 void HUD::draw_rect(float x, float y, float w, float h, const glm::vec4& color) {
@@ -182,77 +188,38 @@ void HUD::draw_rect(float x, float y, float w, float h, const glm::vec4& color) 
     glBindVertexArray(0);
 }
 
+void HUD::draw_pill(float x, float y, float w, float h, const glm::vec4& border_col) {
+    draw_rect(x, y, w, h, Typography::COLOR_PANEL_BG);
+    draw_rect(x, y, w, 1.0f, border_col);
+    draw_rect(x, y + h - 1.0f, w, 1.0f, border_col);
+    draw_rect(x, y, 1.0f, h, border_col);
+    draw_rect(x + w - 1.0f, y, 1.0f, h, border_col);
+}
+
 void HUD::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color) {
     if (text.empty()) return;
 
-    std::vector<float> vertices;
-    vertices.reserve(text.size() * 24);
-
-    float cur_x = x;
-    float cur_y = y;
-    float char_w = 8.0f * scale;
-    float char_h = 8.0f * scale;
-
-    const float atlas_w = 128.0f * 8.0f;
-
-    for (char ch : text) {
-        if (ch == '\n') {
-            cur_y += char_h + 4.0f * scale;
-            cur_x = x;
-            continue;
-        }
-
-        uint8_t c = static_cast<uint8_t>(ch);
-        if (c >= 128) c = '?';
-
-        float u0 = (c * 8.0f) / atlas_w;
-        float u1 = (c * 8.0f + 8.0f) / atlas_w;
-        float v0 = 0.0f;
-        float v1 = 1.0f;
-
-        float x0 = cur_x;
-        float x1 = cur_x + char_w;
-        float y0 = cur_y;
-        float y1 = cur_y + char_h;
-
-        // Quad with CCW winding in top-left screen ortho:
-        float quad[24] = {
-            x0, y0, u0, v0,
-            x0, y1, u0, v1,
-            x1, y1, u1, v1,
-
-            x0, y0, u0, v0,
-            x1, y1, u1, v1,
-            x1, y0, u1, v0
-        };
-
-        vertices.insert(vertices.end(), quad, quad + 24);
-        cur_x += char_w;
-    }
-
-    if (vertices.empty()) return;
-
     m_text_shader.use();
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+    m_text_shader.set_mat4("uProjection", proj);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
     m_text_shader.set_int("uFontTexture", 0);
+    m_text_shader.set_vec2("uShadowOffset", glm::vec2(-1.5f / 4096.0f, -1.5f / 32.0f));
+    m_text_shader.set_vec4("uTextColor", color);
 
     glBindVertexArray(m_text_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_text_vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)), vertices.data());
 
-    // 1. Draw 1-pixel dark drop shadow / outline quad behind text for high contrast
-    glm::mat4 shadow_proj = glm::translate(proj, glm::vec3(1.2f, 1.2f, 0.0f));
-    m_text_shader.set_mat4("uProjection", shadow_proj);
-    m_text_shader.set_vec4("uTextColor", glm::vec4(0.0f, 0.0f, 0.0f, color.a * 0.95f));
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+    std::vector<float> vertices;
+    vertices.reserve(text.length() * 24);
+    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices);
 
-    // 2. Draw high-visibility foreground text
-    m_text_shader.set_mat4("uProjection", proj);
-    m_text_shader.set_vec4("uTextColor", color);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+    if (!vertices.empty()) {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+    }
 
     glBindVertexArray(0);
 }
@@ -283,28 +250,30 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
     RaycastHit hit = player.get_look_target(world, 5.0f);
     if (hit.hit && hit.voxel.is_solid()) {
         std::string prompt;
-        glm::vec4 prompt_col(0.9f, 0.95f, 1.0f, 0.9f);
+        glm::vec4 prompt_col = Typography::COLOR_PRIMARY;
 
         if (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) {
-            prompt = "[LMB] Drill Voidite Crystal  |  [F] Grapple";
-            prompt_col = glm::vec4(0.8f, 0.4f, 1.0f, 1.0f);
+            prompt = "[LMB] DRILL VOIDITE";
+            prompt_col = Typography::COLOR_CYAN;
         } else if (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) {
-            prompt = "[LMB] Drill Titanium Bulkhead  |  [F] Grapple";
-            prompt_col = glm::vec4(0.4f, 0.85f, 1.0f, 1.0f);
+            prompt = "[LMB] DRILL BULKHEAD";
+            prompt_col = Typography::COLOR_AMBER;
         } else if (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) {
-            prompt = "[3/RMB] Demo Charge Breach Required  |  [F] Grapple Anchor";
-            prompt_col = glm::vec4(1.0f, 0.8f, 0.2f, 1.0f);
+            prompt = "[3] BREACH VAULT";
+            prompt_col = Typography::COLOR_AMBER;
         } else if (hit.voxel.material_id == MAT_RADIOACTIVE_ORE) {
-            prompt = "[LMB] Extract Radioactive Ore  |  [F] Grapple";
-            prompt_col = glm::vec4(0.3f, 1.0f, 0.4f, 1.0f);
+            prompt = "[LMB] MINE ORE";
+            prompt_col = Typography::COLOR_GREEN;
         } else {
-            prompt = "[LMB] Drill Subterranean Rock  |  [F] Grapple";
+            prompt = "[LMB] DRILL";
+            prompt_col = Typography::COLOR_PRIMARY;
         }
 
-        float text_w = prompt.size() * 8.0f * 1.25f;
-        draw_rect(cx - text_w / 2.0f - 8.0f, cy + 24.0f, text_w + 16.0f, 22.0f, glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
-        draw_rect(cx - text_w / 2.0f - 8.0f, cy + 44.0f, text_w + 16.0f, 1.0f, prompt_col * 0.7f);
-        draw_text(prompt, cx - text_w / 2.0f, cy + 28.0f, 1.25f, prompt_col);
+        float text_w = static_cast<float>(prompt.size()) * 9.0f * 1.15f;
+        float pill_w = text_w + 16.0f;
+        float pill_h = 22.0f;
+        draw_pill(cx - pill_w / 2.0f, cy + 20.0f, pill_w, pill_h, prompt_col * 0.45f);
+        draw_text(prompt, cx - text_w / 2.0f, cy + 24.0f, 1.15f, prompt_col);
     }
 }
 
@@ -323,11 +292,50 @@ void HUD::render_floating_loot(const glm::mat4& view, const glm::mat4& proj) {
         glm::vec4 col = item.color;
         col.a *= alpha;
 
-        float text_w = item.text.size() * 8.0f * 1.35f;
-        // High contrast dark pill backing
-        draw_rect(sx - text_w / 2.0f - 6.0f, sy - 2.0f, text_w + 12.0f, 19.0f, glm::vec4(0.02f, 0.03f, 0.05f, 0.85f * alpha));
-        draw_rect(sx - text_w / 2.0f - 6.0f, sy + 17.0f, text_w + 12.0f, 1.0f, glm::vec4(col.r, col.g, col.b, 0.6f * alpha));
-        draw_text(item.text, sx - text_w / 2.0f, sy + 2.0f, 1.35f, col);
+        float text_w = static_cast<float>(item.text.size()) * 9.0f * 1.25f;
+        draw_pill(sx - text_w / 2.0f - 8.0f, sy - 2.0f, text_w + 16.0f, 22.0f, glm::vec4(col.r, col.g, col.b, 0.5f * alpha));
+        draw_text(item.text, sx - text_w / 2.0f, sy + 3.0f, 1.25f, col);
+    }
+}
+
+void HUD::render_loot_toasts() {
+    if (m_loot_toasts.empty()) return;
+
+    float toast_w = 260.0f;
+    float toast_x = static_cast<float>(m_width) - 280.0f;
+    float row_h = 28.0f;
+    float base_y = 120.0f;
+
+    for (size_t i = 0; i < m_loot_toasts.size(); ++i) {
+        const auto& toast = m_loot_toasts[i];
+        float alpha = (toast.lifetime < 0.4f) ? (toast.lifetime / 0.4f) : 1.0f;
+        alpha = glm::clamp(alpha, 0.0f, 1.0f);
+
+        // Smooth slide-in animation over first 0.25s
+        float age = toast.maxLifetime - toast.lifetime;
+        float slide_offset = 0.0f;
+        if (age < 0.25f) {
+            float t = age / 0.25f;
+            slide_offset = (1.0f - t) * 40.0f;
+        }
+
+        float draw_x = toast_x + slide_offset;
+        float y = base_y + static_cast<float>(i * 34.0f);
+
+        glm::vec4 border_col = (toast.resource_name.find("VOIDITE") != std::string::npos) ?
+            glm::vec4(Typography::COLOR_CYAN.r, Typography::COLOR_CYAN.g, Typography::COLOR_CYAN.b, 0.90f * alpha) :
+            glm::vec4(Typography::COLOR_AMBER.r, Typography::COLOR_AMBER.g, Typography::COLOR_AMBER.b, 0.90f * alpha);
+
+        // Dark semi-transparent pill container (rgba(10, 15, 22, 0.85)) with 1px border
+        glm::vec4 pill_bg(10.0f / 255.0f, 15.0f / 255.0f, 22.0f / 255.0f, 0.85f * alpha);
+        draw_rect(draw_x, y, toast_w, row_h, pill_bg);
+        draw_rect(draw_x, y, toast_w, 1.0f, border_col);
+        draw_rect(draw_x, y + row_h - 1.0f, toast_w, 1.0f, border_col);
+        draw_rect(draw_x, y, 1.0f, row_h, border_col);
+        draw_rect(draw_x + toast_w - 1.0f, y, 1.0f, row_h, border_col);
+
+        glm::vec4 text_col = glm::vec4(1.0f, 1.0f, 1.0f, alpha);
+        draw_text(toast.label, draw_x + 12.0f, y + 6.0f, 0.95f, text_col);
     }
 }
 
@@ -342,6 +350,9 @@ void HUD::render(
     const glm::mat4& view,
     const glm::mat4& proj
 ) {
+    (void)skills;
+    (void)view;
+    (void)proj;
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -350,177 +361,131 @@ void HUD::render(
     float cx = static_cast<float>(m_width) / 2.0f;
     float cy = static_cast<float>(m_height) / 2.0f;
 
-    // 1. Center Crosshair & Interactive Prompt
+    // 1. Center Crosshair & Simplified Interactive Prompt
     render_crosshair(player, world);
 
-    // 2. Floating World-Space Loot Popups
-    render_floating_loot(view, proj);
+    // 2. Discrete Toast Queue in Right Margin Above Resources (Anchored x = width - 280, y = 120 + i * 34)
+    render_loot_toasts();
 
-    // 3. MISSION OBJECTIVES TRACKER (Top-Left)
+    // 3. Center-screen floating text popups completely eliminated per Task 5
+
+    // 4. TOP-CENTER (Objective / Timer Only) - Single-line compact pill
     {
-        float p_x = 24.0f;
-        float p_y = 24.0f;
-        float p_w = 480.0f;
-        float p_h = 168.0f;
-
-        draw_rect(p_x, p_y, p_w, p_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f));
-        draw_rect(p_x, p_y, 4.0f, p_h, glm::vec4(0.15f, 0.85f, 1.0f, 0.95f));
-        draw_rect(p_x, p_y, p_w, 2.0f, glm::vec4(0.15f, 0.85f, 1.0f, 0.5f));
-
-        std::string level_title;
-        if (current_level == 1) level_title = "SECTOR 1: CRYSTALLINE CAVERNS";
-        else if (current_level == 2) level_title = "SECTOR 2: SUBTERRANEAN VAULT";
-        else level_title = "SECTOR 3: FAULT-LINE COLLAPSE";
-
-        draw_text(level_title, p_x + 14.0f, p_y + 12.0f, 1.55f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-        draw_rect(p_x + 14.0f, p_y + 28.0f, p_w - 28.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.6f));
-
-        // Objective 1: Voidite Mineral Extraction
-        bool obj1_done = inventory.voidite >= inventory.target_voidite;
-        glm::vec4 obj1_col = obj1_done ? glm::vec4(0.25f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.9f, 0.9f, 0.95f, 1.0f);
-        std::string obj1_str = std::string(obj1_done ? "[OK] " : "[ ] ") +
-            "MINE VOIDITE CRYSTALS (" + std::to_string(inventory.voidite) + "/" +
-            std::to_string(inventory.target_voidite) + ")";
-        draw_text(obj1_str, p_x + 14.0f, p_y + 36.0f, 1.3f, obj1_col);
-
-        // Objective 2: Sector-Specific Primary Objective
-        if (current_level == 2) {
-            bool vault_done = inventory.vault_breached;
-            bool relic_done = inventory.relic_extracted;
-            std::string obj2_str = std::string(vault_done ? "[OK] " : "[ ] ") +
-                "LOCATE & BREACH VAULT BULKHEADS [Charges]";
-            draw_text(obj2_str, p_x + 14.0f, p_y + 54.0f, 1.3f, vault_done ? glm::vec4(0.25f, 0.95f, 0.4f, 1.0f) : glm::vec4(1.0f, 0.8f, 0.2f, 1.0f));
-
-            std::string obj3_str = std::string(relic_done ? "[OK] " : "[ ] ") +
-                "RECOVER HYPER-CORE RELIC FROM VAULT";
-            draw_text(obj3_str, p_x + 14.0f, p_y + 72.0f, 1.3f, relic_done ? glm::vec4(0.25f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.9f, 0.9f, 0.95f, 1.0f));
-        } else {
-            bool ext_active = (extraction.phase() != ExtractionPhase::Dormant);
-            glm::vec4 ext_col = ext_active ? glm::vec4(1.0f, 0.65f, 0.15f, 1.0f) : glm::vec4(0.9f, 0.9f, 0.95f, 1.0f);
-            std::string ext_str = ext_active ?
-                "[!] EXTRACTION BEACON DEFENSE IN PROGRESS" :
-                "[ ] DEPLOY EXTRACTION BEACON [Press B]";
-            draw_text(ext_str, p_x + 14.0f, p_y + 54.0f, 1.3f, ext_col);
-        }
-
-        // Tectonic Stability Meter
-        float stability = std::clamp(100.0f - hazard.radiation_level(), 0.0f, 100.0f);
-        glm::vec4 stab_col = (stability > 50.0f) ? glm::vec4(0.2f, 0.9f, 0.4f, 1.0f) :
-                             (stability > 25.0f) ? glm::vec4(1.0f, 0.8f, 0.2f, 1.0f) :
-                                                   glm::vec4(1.0f, 0.2f, 0.2f, 1.0f);
-        std::string stab_text = "TECTONIC STABILITY: " + std::to_string(static_cast<int>(stability)) + "%";
-        draw_text(stab_text, p_x + 14.0f, p_y + 96.0f, 1.25f, stab_col);
-        draw_rect(p_x + 14.0f, p_y + 110.0f, 440.0f, 6.0f, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
-        draw_rect(p_x + 14.0f, p_y + 110.0f, 440.0f * (stability / 100.0f), 6.0f, stab_col);
-
-        // Tactical tips
-        draw_text("SONAR: Press Q to scan high-value ores through solid rock", p_x + 14.0f, p_y + 126.0f, 1.15f, glm::vec4(0.4f, 0.8f, 1.0f, 0.85f));
-        draw_text("GRAPPLE: F fires anchor, E reels cable tension", p_x + 14.0f, p_y + 142.0f, 1.15f, glm::vec4(0.7f, 0.8f, 0.9f, 0.8f));
-    }
-
-    // 4. VOID HAZARD CLOCK (Top-Center)
-    {
-        float hz_w = 460.0f;
-        float hz_h = 44.0f;
+        float hz_w = 540.0f;
+        float hz_h = 36.0f;
         float hz_x = cx - hz_w / 2.0f;
-        float hz_y = 20.0f;
+        float hz_y = 16.0f;
 
         bool tremoring = hazard.is_tremoring();
-        glm::vec4 bar_bg = tremoring ? glm::vec4(0.25f, 0.05f, 0.05f, 0.95f) : glm::vec4(0.08f, 0.09f, 0.06f, 0.9f);
-        draw_rect(hz_x, hz_y, hz_w, hz_h, bar_bg);
-        draw_rect(hz_x, hz_y, hz_w, 2.0f, tremoring ? glm::vec4(1.0f, 0.2f, 0.2f, 1.0f) : glm::vec4(0.6f, 0.9f, 0.2f, 0.8f));
+        glm::vec4 border_col = tremoring ? Typography::COLOR_CRIMSON : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f);
+        draw_pill(hz_x, hz_y, hz_w, hz_h, border_col);
 
-        if (tremoring) {
-            draw_text("! SEISMIC TREMOR IN PROGRESS: CAVE-IN RISK !", hz_x + 16.0f, hz_y + 12.0f, 1.35f, glm::vec4(1.0f, 0.2f, 0.2f, 1.0f));
-            draw_rect(hz_x + 16.0f, hz_y + 32.0f, hz_w - 32.0f, 4.0f, glm::vec4(1.0f, 0.15f, 0.15f, 1.0f));
+        // Left: Active Objective Tracker
+        std::string obj_str;
+        glm::vec4 obj_col = Typography::COLOR_PRIMARY;
+        if (extraction.phase() == ExtractionPhase::BeaconDeployed) {
+            obj_str = "EVAC IN: " + std::to_string(static_cast<int>(extraction.countdown())) + "s";
+            obj_col = Typography::COLOR_AMBER;
+        } else if (extraction.phase() == ExtractionPhase::PodLanded) {
+            obj_str = "BOARD EVAC POD!";
+            obj_col = Typography::COLOR_GREEN;
+        } else if (current_level == 1) {
+            bool done = inventory.voidite >= inventory.target_voidite;
+            obj_str = "VOIDITE: " + std::to_string(inventory.voidite) + " / " + std::to_string(inventory.target_voidite);
+            obj_col = done ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
+        } else if (current_level == 2) {
+            if (!inventory.vault_breached) {
+                obj_str = "OBJ: BREACH VAULT [3]";
+                obj_col = Typography::COLOR_AMBER;
+            } else if (!inventory.relic_extracted) {
+                obj_str = "OBJ: EXTRACT RELIC";
+                obj_col = Typography::COLOR_CYAN;
+            } else {
+                obj_str = "OBJ: CALL BEACON [B]";
+                obj_col = Typography::COLOR_GREEN;
+            }
         } else {
-            float tremor_ratio = std::clamp(hazard.tremor_timer() / 50.0f, 0.0f, 1.0f);
-            glm::vec4 timer_col = (tremor_ratio > 0.4f) ? glm::vec4(0.6f, 0.95f, 0.2f, 0.95f) :
-                                  (tremor_ratio > 0.15f) ? glm::vec4(1.0f, 0.75f, 0.2f, 0.95f) :
-                                                           glm::vec4(1.0f, 0.25f, 0.15f, 0.95f);
+            obj_str = "VOIDITE: " + std::to_string(inventory.voidite) + " / 50";
+            obj_col = Typography::COLOR_AMBER;
+        }
+        draw_text(obj_str, hz_x + 16.0f, hz_y + 11.0f, 1.25f, obj_col);
 
-            std::string hz_text = "NEXT TREMOR: " + std::to_string(static_cast<int>(hazard.tremor_timer())) + "s  |  RADIATION: " +
-                                  std::to_string(static_cast<int>(hazard.radiation_level())) + "%";
-            draw_text(hz_text, hz_x + 16.0f, hz_y + 10.0f, 1.3f, timer_col);
-            draw_rect(hz_x + 16.0f, hz_y + 28.0f, hz_w - 32.0f, 6.0f, glm::vec4(0.15f, 0.18f, 0.12f, 0.8f));
-            draw_rect(hz_x + 16.0f, hz_y + 28.0f, (hz_w - 32.0f) * tremor_ratio, 6.0f, timer_col);
+        // Subtle vertical divider line
+        draw_rect(hz_x + 285.0f, hz_y + 6.0f, 1.0f, hz_h - 12.0f, glm::vec4(0.2f, 0.3f, 0.4f, 0.5f));
+
+        // Right: Hazard Clock (Seismic Tremor Countdown)
+        if (tremoring) {
+            draw_text("! SEISMIC TREMOR !", hz_x + 300.0f, hz_y + 11.0f, 1.25f, Typography::COLOR_CRIMSON);
+        } else {
+            int t_sec = static_cast<int>(hazard.tremor_timer());
+            std::string trem_str = "TREMOR: " + std::to_string(t_sec) + "s";
+            glm::vec4 trem_col = (t_sec <= 10) ? Typography::COLOR_CRIMSON :
+                                 (t_sec <= 25) ? Typography::COLOR_AMBER :
+                                                 Typography::COLOR_PRIMARY;
+            draw_text(trem_str, hz_x + 300.0f, hz_y + 11.0f, 1.25f, trem_col);
+
+            float t_ratio = std::clamp(hazard.tremor_timer() / 50.0f, 0.0f, 1.0f);
+            draw_rect(hz_x + 420.0f, hz_y + 15.0f, 100.0f, 6.0f, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
+            draw_rect(hz_x + 420.0f, hz_y + 15.0f, 100.0f * t_ratio, 6.0f, trem_col);
         }
     }
 
-    // 5. SUIT INTEGRITY & THRUSTER ENERGY (Bottom-Left)
+    // 5. BOTTOM-LEFT (Vitals Only) - Compact Health & Thruster Fuel bars
     {
+        float s_w = 230.0f;
+        float s_h = 58.0f;
         float s_x = 24.0f;
-        float s_y = static_cast<float>(m_height) - 150.0f;
-        float s_w = 280.0f;
-        float s_h = 110.0f;
-
-        draw_rect(s_x, s_y, s_w, s_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f));
-        draw_rect(s_x, s_y, 4.0f, s_h, glm::vec4(0.2f, 0.9f, 0.4f, 0.95f));
+        float s_y = static_cast<float>(m_height) - s_h - 20.0f;
 
         const auto& exo = player.exo();
 
-        // Integrity (Health)
-        std::string int_str = "SUIT INTEGRITY: " + std::to_string(static_cast<int>(exo.integrity)) + "%";
-        draw_text(int_str, s_x + 12.0f, s_y + 8.0f, 1.25f, glm::vec4(0.25f, 0.95f, 0.4f, 1.0f));
-        draw_rect(s_x + 12.0f, s_y + 22.0f, 256.0f, 10.0f, glm::vec4(0.12f, 0.22f, 0.14f, 0.8f));
-        draw_rect(s_x + 12.0f, s_y + 22.0f, 256.0f * (exo.integrity / 100.0f), 10.0f, glm::vec4(0.25f, 0.9f, 0.35f, 0.95f));
+        draw_pill(s_x, s_y, s_w, s_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
+        draw_rect(s_x, s_y, 3.0f, s_h, Typography::COLOR_GREEN);
 
-        // Thruster Energy (Power)
-        std::string pwr_str = "THRUSTER FUEL: " + std::to_string(static_cast<int>(exo.power)) + "%";
-        draw_text(pwr_str, s_x + 12.0f, s_y + 40.0f, 1.25f, glm::vec4(0.2f, 0.85f, 1.0f, 1.0f));
-        draw_rect(s_x + 12.0f, s_y + 54.0f, 256.0f, 10.0f, glm::vec4(0.10f, 0.20f, 0.26f, 0.8f));
-        draw_rect(s_x + 12.0f, s_y + 54.0f, 256.0f * (exo.power / 100.0f), 10.0f, glm::vec4(0.15f, 0.8f, 1.0f, 0.95f));
+        // Row 1: Health (Integrity)
+        std::string hp_str = "HP   " + std::to_string(static_cast<int>(exo.integrity)) + "%";
+        draw_text(hp_str, s_x + 12.0f, s_y + 8.0f, 1.15f, Typography::COLOR_GREEN);
+        draw_rect(s_x + 85.0f, s_y + 12.0f, 130.0f, 8.0f, glm::vec4(0.10f, 0.16f, 0.12f, 0.8f));
+        draw_rect(s_x + 85.0f, s_y + 12.0f, 130.0f * (exo.integrity / 100.0f), 8.0f, Typography::COLOR_GREEN);
 
-        // Heat
-        std::string heat_str = exo.overheated ? "THERMAL OVERHEAT!" : ("HEAT SINK: " + std::to_string(static_cast<int>(exo.heat)) + "%");
-        glm::vec4 heat_col = exo.overheated ? glm::vec4(1.0f, 0.15f, 0.15f, 1.0f) : glm::vec4(1.0f, 0.65f, 0.15f, 1.0f);
-        draw_text(heat_str, s_x + 12.0f, s_y + 72.0f, 1.25f, heat_col);
-        draw_rect(s_x + 12.0f, s_y + 86.0f, 256.0f, 8.0f, glm::vec4(0.26f, 0.16f, 0.10f, 0.8f));
-        draw_rect(s_x + 12.0f, s_y + 86.0f, 256.0f * (exo.heat / 100.0f), 8.0f, heat_col);
+        // Row 2: Fuel (Power)
+        std::string fuel_str = "FUEL " + std::to_string(static_cast<int>(exo.power)) + "%";
+        draw_text(fuel_str, s_x + 12.0f, s_y + 32.0f, 1.15f, Typography::COLOR_CYAN);
+        draw_rect(s_x + 85.0f, s_y + 36.0f, 130.0f, 8.0f, glm::vec4(0.08f, 0.14f, 0.20f, 0.8f));
+        draw_rect(s_x + 85.0f, s_y + 36.0f, 130.0f * (exo.power / 100.0f), 8.0f, Typography::COLOR_CYAN);
     }
 
-    // 6. HOTBAR & MINERAL TALLIES (Bottom-Right)
+    // 6. BOTTOM-RIGHT (Resources Only) - Compact Hotbar & Counters
     {
-        float hb_w = 420.0f;
-        float hb_h = 125.0f;
+        float hb_w = 296.0f;
+        float hb_h = 58.0f;
         float hb_x = static_cast<float>(m_width) - hb_w - 24.0f;
-        float hb_y = static_cast<float>(m_height) - hb_h - 24.0f;
+        float hb_y = static_cast<float>(m_height) - hb_h - 20.0f;
 
-        draw_rect(hb_x, hb_y, hb_w, hb_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f));
-        draw_rect(hb_x + hb_w - 4.0f, hb_y, 4.0f, hb_h, glm::vec4(0.15f, 0.85f, 1.0f, 0.95f));
+        draw_pill(hb_x, hb_y, hb_w, hb_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
+        draw_rect(hb_x + hb_w - 3.0f, hb_y, 3.0f, hb_h, Typography::COLOR_CYAN);
 
-        // Equipment Hotbar Slots
         ToolSlot active = player.active_tool();
 
-        // Slot 1
+        // Row 1: Hotbar Slots [1] DRILL  [2] BULK: X  [3] DEMO: Y
         bool s1 = (active == ToolSlot::MiningDrill);
-        draw_rect(hb_x + 12.0f, hb_y + 10.0f, 120.0f, 32.0f, s1 ? glm::vec4(0.15f, 0.35f, 0.5f, 0.95f) : glm::vec4(0.08f, 0.1f, 0.14f, 0.8f));
-        draw_text("[1] DRILL", hb_x + 22.0f, hb_y + 18.0f, 1.25f, s1 ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
-
-        // Slot 2
         bool s2 = (active == ToolSlot::IndustrialBulkhead);
-        draw_rect(hb_x + 140.0f, hb_y + 10.0f, 120.0f, 32.0f, s2 ? glm::vec4(0.15f, 0.35f, 0.5f, 0.95f) : glm::vec4(0.08f, 0.1f, 0.14f, 0.8f));
-        std::string s2_text = "[2] BULK (" + std::to_string(inventory.bulkheads) + ")";
-        draw_text(s2_text, hb_x + 148.0f, hb_y + 18.0f, 1.25f, s2 ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
-
-        // Slot 3
         bool s3 = (active == ToolSlot::DemolitionCharge);
-        draw_rect(hb_x + 268.0f, hb_y + 10.0f, 140.0f, 32.0f, s3 ? glm::vec4(0.45f, 0.25f, 0.1f, 0.95f) : glm::vec4(0.12f, 0.08f, 0.06f, 0.8f));
-        std::string s3_text = "[3] DEMO (" + std::to_string(inventory.demolition_charges) + ")";
-        draw_text(s3_text, hb_x + 276.0f, hb_y + 18.0f, 1.25f, s3 ? glm::vec4(1.0f, 0.7f, 0.2f, 1.0f) : glm::vec4(0.7f, 0.5f, 0.3f, 0.8f));
 
-        draw_rect(hb_x + 12.0f, hb_y + 50.0f, hb_w - 24.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+        draw_text("[1] DRILL", hb_x + 12.0f, hb_y + 8.0f, 1.15f, s1 ? Typography::COLOR_CYAN : Typography::COLOR_MUTED);
+        std::string b_str = "[2] BULK:" + std::to_string(inventory.bulkheads);
+        draw_text(b_str, hb_x + 104.0f, hb_y + 8.0f, 1.15f, s2 ? Typography::COLOR_AMBER : Typography::COLOR_MUTED);
+        std::string d_str = "[3] DEMO:" + std::to_string(inventory.demolition_charges);
+        draw_text(d_str, hb_x + 204.0f, hb_y + 8.0f, 1.15f, s3 ? Typography::COLOR_AMBER : Typography::COLOR_MUTED);
 
-        // Extracted Resource Tallies
-        std::string voidite_str = "VOIDITE:  " + std::to_string(inventory.voidite) + " (" + std::to_string(inventory.voidite * 5) + " pts)";
-        std::string titan_str   = "TITANIUM: " + std::to_string(inventory.titanium) + " (" + std::to_string(inventory.titanium * 6) + " pts)";
-        std::string salvage_str = "SALVAGE:  " + std::to_string(inventory.salvage_parts);
-        std::string score_str   = "EXPEDITION SCORE: " + std::to_string(inventory.total_run_score) + " PTS";
+        // Thin separator
+        draw_rect(hb_x + 12.0f, hb_y + 28.0f, hb_w - 24.0f, 1.0f, glm::vec4(0.2f, 0.3f, 0.4f, 0.4f));
 
-        draw_text(voidite_str, hb_x + 14.0f, hb_y + 58.0f, 1.25f, glm::vec4(0.85f, 0.4f, 1.0f, 1.0f));
-        draw_text(titan_str, hb_x + 14.0f, hb_y + 74.0f, 1.25f, glm::vec4(0.4f, 0.85f, 1.0f, 1.0f));
-        draw_text(salvage_str, hb_x + 220.0f, hb_y + 74.0f, 1.25f, glm::vec4(0.8f, 0.8f, 0.8f, 0.9f));
-        draw_text(score_str, hb_x + 14.0f, hb_y + 94.0f, 1.4f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+        // Row 2: Resources
+        std::string voidite_str = "VOIDITE: " + std::to_string(inventory.voidite);
+        std::string titan_str = "TITANIUM: " + std::to_string(inventory.titanium);
+        draw_text(voidite_str, hb_x + 12.0f, hb_y + 34.0f, 1.2f, Typography::COLOR_CYAN);
+        draw_text(titan_str, hb_x + 154.0f, hb_y + 34.0f, 1.2f, Typography::COLOR_AMBER);
     }
 
     // 7. EXTRACTION BEACON BANNER
@@ -532,8 +497,8 @@ void HUD::render(
 
         float pulse = extraction.siren_pulse();
         glm::vec4 banner_color = glm::mix(glm::vec4(0.85f, 0.15f, 0.1f, 0.9f), glm::vec4(1.0f, 0.4f, 0.1f, 1.0f), pulse);
-        draw_rect(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.12f, 0.02f, 0.02f, 0.9f));
-        draw_rect(ex_x, ex_y, ex_w * std::clamp(extraction.countdown() / 40.0f, 0.0f, 1.0f), ex_h, banner_color);
+        draw_pill(ex_x, ex_y, ex_w, ex_h, banner_color);
+        draw_rect(ex_x, ex_y, ex_w * std::clamp(extraction.countdown() / 40.0f, 0.0f, 1.0f), ex_h, banner_color * 0.4f);
 
         std::string evac_str = "EVAC POD ARRIVING IN: " + std::to_string(static_cast<int>(extraction.countdown())) + "s";
         draw_text(evac_str, ex_x + 18.0f, ex_y + 14.0f, 1.4f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -542,8 +507,8 @@ void HUD::render(
         float ex_h = 44.0f;
         float ex_x = cx - ex_w / 2.0f;
         float ex_y = 70.0f;
-        draw_rect(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
-        draw_text("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x + 14.0f, ex_y + 14.0f, 1.35f, glm::vec4(0.04f, 0.1f, 0.04f, 1.0f));
+        draw_pill(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
+        draw_text("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x + 14.0f, ex_y + 14.0f, 1.35f, glm::vec4(0.2f, 1.0f, 0.4f, 1.0f));
     }
 
     // 8. 3D-to-2D SCREEN WAYPOINT DIAMOND FOR EXTRACTION BEACON / POD
@@ -591,28 +556,23 @@ void HUD::render(
                 // Waypoint distance
                 float dist = glm::distance(player.position(), extraction.beacon_position());
                 std::string dist_str = (is_landed ? "[EVAC POD: " : "[EVAC BEACON: ") + std::to_string(static_cast<int>(dist)) + "m]";
-                float text_w = dist_str.size() * 8.0f * 1.25f;
-                draw_rect(sx - text_w / 2.0f - 6.0f, sy + d_sz * 0.8f + 6.0f, text_w + 12.0f, 20.0f, glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
-                draw_rect(sx - text_w / 2.0f - 6.0f, sy + d_sz * 0.8f + 25.0f, text_w + 12.0f, 1.0f, marker_col);
+                float text_w = dist_str.size() * (8.0f + 1.0f) * 1.25f;
+                draw_pill(sx - text_w / 2.0f - 8.0f, sy + d_sz * 0.8f + 6.0f, text_w + 16.0f, 22.0f, marker_col * 0.6f);
                 draw_text(dist_str, sx - text_w / 2.0f, sy + d_sz * 0.8f + 10.0f, 1.25f, marker_col);
             }
         }
     }
 
-    // 9. ON-SCREEN WARNING BANNER (High-Contrast Red #FF3333 or Amber #FFB300 on Dark Semi-Transparent Pill Backing)
+    // 9. ON-SCREEN WARNING BANNER (High-Contrast Red #FF3838 or Amber #FFAE00 on Dark Semi-Transparent Pill Backing)
     if (m_warning_timer > 0.0f && !m_warning_message.empty()) {
-        float warn_w = m_warning_message.size() * 8.0f * 1.35f + 36.0f;
+        float warn_w = m_warning_message.size() * (8.0f + 1.0f) * 1.35f + 40.0f;
         float warn_h = 36.0f;
         float warn_x = cx - warn_w / 2.0f;
         float warn_y = cy + 55.0f;
         bool is_spall_amber = (m_warning_message.find("TECTONIC SPALL") != std::string::npos);
-        glm::vec4 warn_col = is_spall_amber ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) : glm::vec4(1.0f, 0.20f, 0.20f, 1.0f); // Amber or #FF3333
-        draw_rect(warn_x, warn_y, warn_w, warn_h, glm::vec4(0.04f, 0.05f, 0.07f, 0.94f));
-        draw_rect(warn_x, warn_y, warn_w, 2.0f, warn_col);
-        draw_rect(warn_x, warn_y + warn_h - 2.0f, warn_w, 2.0f, warn_col);
-        draw_rect(warn_x, warn_y, 2.0f, warn_h, warn_col);
-        draw_rect(warn_x + warn_w - 2.0f, warn_y, 2.0f, warn_h, warn_col);
-        draw_text(m_warning_message, warn_x + 18.0f, warn_y + 11.0f, 1.35f, warn_col);
+        glm::vec4 warn_col = is_spall_amber ? glm::vec4(1.0f, 0.68f, 0.0f, 1.0f) : glm::vec4(1.0f, 0.22f, 0.22f, 1.0f); // Amber or Crimson
+        draw_pill(warn_x, warn_y, warn_w, warn_h, warn_col);
+        draw_text(m_warning_message, warn_x + 20.0f, warn_y + 11.0f, 1.35f, warn_col);
     }
 
     // 10. DIRECTIONAL DAMAGE FLASH / VIGNETTE

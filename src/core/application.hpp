@@ -1,6 +1,7 @@
 #pragma once
 #include "window.hpp"
 #include "../graphics/renderer.hpp"
+#include "../graphics/viewmodel.hpp"
 #include "../voxel/world.hpp"
 #include "../voxel/structural_check.hpp"
 #include "../player/controller.hpp"
@@ -15,6 +16,7 @@
 #include "../net/net_host.hpp"
 #include "../net/net_client.hpp"
 #include "../entities/dynamic_debris.hpp"
+#include "save_system.hpp"
 #include <vector>
 #include <memory>
 #include <string>
@@ -27,6 +29,9 @@ struct AppConfig {
     uint16_t port{27015};
     uint32_t world_seed{1337};
     std::string player_name{"Delver"};
+    bool auto_play_test{false};
+    bool hidden_window{false};
+    std::string single_screenshot_path{""};
 };
 
 constexpr GameState STATE_MAIN_MENU   = GameState::MainMenu;
@@ -37,6 +42,8 @@ constexpr GameState STATE_DEBRIEF     = GameState::Debrief;
 
 class Application {
 public:
+    using GameState = Voidfall::GameState;
+
     explicit Application(const AppConfig& config);
     ~Application();
 
@@ -58,10 +65,12 @@ private:
     void on_sonar_cast(const glm::vec3& origin);
     void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
     void setup_hazard_system();
+    void sync_profile_with_player();
 
     AppConfig m_config;
     std::unique_ptr<Window> m_window;
     std::unique_ptr<Renderer> m_renderer;
+    std::unique_ptr<ViewModel> m_viewmodel;
     std::unique_ptr<World> m_world;
     std::unique_ptr<PlayerController> m_player;
     std::unique_ptr<HazardClock> m_hazard;
@@ -81,6 +90,7 @@ private:
     // Game state machine & progression
     GameState m_state{GameState::MainMenu};
     int m_selected_level{1};
+    UserProfile m_user_profile;
     PlayerInventory m_inventory;
     SkillMatrix m_skills;
     SurveyingSystem m_surveying;
@@ -93,6 +103,7 @@ private:
     float m_level3_timer{180.0f};
     bool m_expedition_success{false};
     bool m_mouse_down_last{false};
+    int m_auto_test_frame{0};
 };
 
 } // namespace Voidfall

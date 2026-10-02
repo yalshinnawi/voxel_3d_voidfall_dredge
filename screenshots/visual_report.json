@@ -1,0 +1,77 @@
+{
+  "total_phases": 7,
+  "all_healthy": true,
+  "montage_png": "screenshots/00_all_phases_montage.png",
+  "phases": [
+    {
+      "slot": 0,
+      "phase_id": "MAIN MENU",
+      "master_file": "screenshots/01_main_menu.png",
+      "preview_file": "screenshots/previews/01_main_menu.jpg",
+      "mean_luminance": 0.163735,
+      "non_black_ratio": 0.998479,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 1,
+      "phase_id": "SECTOR SELECT",
+      "master_file": "screenshots/02_sector_select.png",
+      "preview_file": "screenshots/previews/02_sector_select.jpg",
+      "mean_luminance": 0.125891,
+      "non_black_ratio": 0.993921,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 2,
+      "phase_id": "UPGRADES MENU",
+      "master_file": "screenshots/03_upgrades_menu.png",
+      "preview_file": "screenshots/previews/03_upgrades_menu.jpg",
+      "mean_luminance": 0.090636,
+      "non_black_ratio": 0.995371,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 3,
+      "phase_id": "GAMEPLAY CAVERN",
+      "master_file": "screenshots/04_gameplay_cavern.png",
+      "preview_file": "screenshots/previews/04_gameplay_cavern.jpg",
+      "mean_luminance": 0.289117,
+      "non_black_ratio": 0.999506,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 4,
+      "phase_id": "DRILL CRACKS",
+      "master_file": "screenshots/05_drilling_cracks.png",
+      "preview_file": "screenshots/previews/05_drilling_cracks.jpg",
+      "mean_luminance": 0.274134,
+      "non_black_ratio": 0.999498,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 5,
+      "phase_id": "LOOT TOASTS",
+      "master_file": "screenshots/06_loot_toasts.png",
+      "preview_file": "screenshots/previews/06_loot_toasts.jpg",
+      "mean_luminance": 0.248216,
+      "non_black_ratio": 0.999156,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 6,
+      "phase_id": "EXTRACTION BEACON",
+      "master_file": "screenshots/07_extraction_beacon.png",
+      "preview_file": "screenshots/previews/07_extraction_beacon.jpg",
+      "mean_luminance": 0.283368,
+      "non_black_ratio": 0.999174,
+      "is_healthy": true,
+      "status": "PASS"
+    }
+  ]
+}

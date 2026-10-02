@@ -1,4 +1,5 @@
 #include "pause_menu.hpp"
+#include "font_renderer.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include "../include/font8x8.h"
@@ -59,27 +60,16 @@ void PauseMenu::init_gl() {
 }
 
 void PauseMenu::init_font_atlas() {
-    const int atlas_w = 128 * 8;
-    const int atlas_h = 8;
-    std::vector<uint8_t> atlas(atlas_w * atlas_h, 0);
-
-    for (int c = 0; c < 128; ++c) {
-        for (int y = 0; y < 8; ++y) {
-            uint8_t row = font8x8_basic[c][y];
-            for (int x = 0; x < 8; ++x) {
-                bool bit = (row & (1 << x)) != 0;
-                int px = c * 8 + x;
-                int py = y;
-                atlas[py * atlas_w + px] = bit ? 255 : 0;
-            }
-        }
-    }
+    int atlas_w = 0, atlas_h = 0;
+    std::vector<uint8_t> atlas;
+    std::array<GlyphMetric, 128> metrics;
+    generate_proportional_sans_font_atlas(atlas_w, atlas_h, atlas, metrics);
 
     glGenTextures(1, &m_font_tex);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, atlas_w, atlas_h, 0, GL_RED, GL_UNSIGNED_BYTE, atlas.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -116,62 +106,20 @@ void PauseMenu::draw_text(const std::string& text, float x, float y, float scale
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
     m_text_shader.set_int("uFontTexture", 0);
+    m_text_shader.set_vec2("uShadowOffset", glm::vec2(-1.5f / 4096.0f, -1.5f / 32.0f));
+    m_text_shader.set_vec4("uTextColor", color);
 
     glBindVertexArray(m_text_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_text_vbo);
 
-    auto render_pass = [&](float ox, float oy, const glm::vec4& col) {
-        m_text_shader.set_vec4("uTextColor", col);
-        std::vector<float> vertices;
-        vertices.reserve(text.length() * 24);
+    std::vector<float> vertices;
+    vertices.reserve(text.length() * 24);
+    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices);
 
-        float cur_x = ox;
-        float cur_y = oy;
-        float char_w = 8.0f * scale;
-        float char_h = 8.0f * scale;
-
-        for (char c : text) {
-            if (c == '\n') {
-                cur_x = ox;
-                cur_y += char_h + 4.0f * scale;
-                continue;
-            }
-            uint8_t uc = static_cast<uint8_t>(c);
-            if (uc >= 128) uc = '?';
-
-            float u0 = static_cast<float>(uc * 8) / (128.0f * 8.0f);
-            float u1 = static_cast<float>((uc + 1) * 8) / (128.0f * 8.0f);
-            float v0 = 0.0f;
-            float v1 = 1.0f;
-
-            float x0 = cur_x;
-            float y0 = cur_y;
-            float x1 = cur_x + char_w;
-            float y1 = cur_y + char_h;
-
-            float quad_verts[] = {
-                x0, y0, u0, v0,
-                x0, y1, u0, v1,
-                x1, y1, u1, v1,
-
-                x0, y0, u0, v0,
-                x1, y1, u1, v1,
-                x1, y0, u1, v0
-            };
-            vertices.insert(vertices.end(), quad_verts, quad_verts + 24);
-            cur_x += char_w;
-        }
-
-        if (!vertices.empty()) {
-            glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
-            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
-        }
-    };
-
-    // 1. Drop shadow
-    render_pass(x + 1.0f, y + 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, color.a * 0.9f));
-    // 2. Main text glyph
-    render_pass(x, y, color);
+    if (!vertices.empty()) {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 4));
+    }
 
     glBindVertexArray(0);
 }
@@ -195,8 +143,8 @@ PauseMenuAction PauseMenu::render(
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
 
-    // 1. Dark tinted frosted modal backdrop over frozen game frame: rgba(8, 12, 18, 0.82)
-    draw_rect(0.0f, 0.0f, w, h, glm::vec4(8.0f / 255.0f, 12.0f / 255.0f, 18.0f / 255.0f, 0.82f));
+    // 1. Dark tinted frosted modal backdrop over frozen game frame: rgba(8, 12, 18, 0.85)
+    draw_rect(0.0f, 0.0f, w, h, glm::vec4(8.0f / 255.0f, 12.0f / 255.0f, 18.0f / 255.0f, 0.85f));
 
     // 2. Central Modal Dialog Window
     float panel_w = std::min(w * 0.72f, 760.0f);
@@ -325,15 +273,15 @@ PauseMenuAction PauseMenu::render(
         action = PauseMenuAction::Abandon;
     }
 
-    // [RETURN TO ORBITAL HUB]
+    // [RETURN TO STARTUP / HUB]
     float hub_y = abn_y + btn_h + 10.0f;
     bool hub_hover = (mouse_x >= panel_x + 28.0f && mouse_x <= panel_x + 28.0f + btn_w &&
                       mouse_y >= hub_y && mouse_y <= hub_y + btn_h);
     draw_rect(panel_x + 28.0f, hub_y, btn_w, btn_h, hub_hover ? glm::vec4(0.12f, 0.18f, 0.24f, 0.95f) : glm::vec4(0.06f, 0.09f, 0.13f, 0.85f));
     draw_rect(panel_x + 28.0f, hub_y, 4.0f, btn_h, glm::vec4(0.4f, 0.6f, 0.75f, 0.8f));
-    draw_text(">> [RETURN TO ORBITAL HUB]", panel_x + 48.0f, hub_y + 13.0f, 1.5f, hub_hover ? glm::vec4(1.0f) : glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
+    draw_text(">> [RETURN TO STARTUP / HUB]", panel_x + 48.0f, hub_y + 13.0f, 1.5f, hub_hover ? glm::vec4(1.0f) : glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
     if (hub_hover && mouse_clicked) {
-        action = PauseMenuAction::ReturnToHub;
+        action = PauseMenuAction::ReturnToStartup;
     }
 
     glDisable(GL_BLEND);

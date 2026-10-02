@@ -15,6 +15,23 @@ public:
         const NeighborChunkGetter& get_neighbor = nullptr
     );
 
+    // Queries face visibility between adjacent voxels.
+    // If neighbor chunk is unloaded, treats boundary block as SOLID (MAT_GRANITE) to prevent void leaks.
+    static bool is_face_visible(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor,
+        int x, int y, int z,
+        int nx, int ny, int nz
+    );
+    static bool IsFaceVisible(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor,
+        int x, int y, int z,
+        int nx, int ny, int nz
+    ) {
+        return is_face_visible(chunk, get_neighbor, x, y, z, nx, ny, nz);
+    }
+
 private:
     static Voxel sample_voxel(
         const Chunk& chunk,

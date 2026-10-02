@@ -22,11 +22,13 @@ void PlayerController::update_camera_vectors() {
 }
 
 glm::mat4 PlayerController::get_view_matrix() const {
-    return glm::lookAt(m_position, m_position + m_front, m_up);
+    glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+    return glm::lookAt(eye, eye + m_front, m_up);
 }
 
 RaycastHit PlayerController::get_look_target(const World& world, float max_dist) const {
-    glm::vec3 ray_origin = m_position + m_front * 0.6f;
+    glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+    glm::vec3 ray_origin = eye + m_front * 0.6f;
     return world.raycast(ray_origin, m_front, max_dist);
 }
 
@@ -60,7 +62,7 @@ void PlayerController::handle_input(const Window& window, float dt) {
         wish_dir = glm::normalize(wish_dir);
     }
 
-    float move_speed = (m_current_buttons & BTN_SPRINT) ? 12.0f : 7.0f;
+    float move_speed = ((m_current_buttons & BTN_SPRINT) ? 12.0f : 7.0f) * m_char_attr.moveSpeed;
     if (m_on_ground) {
         m_velocity.x = wish_dir.x * move_speed;
         m_velocity.z = wish_dir.z * move_speed;
@@ -83,7 +85,8 @@ void PlayerController::handle_input(const Window& window, float dt) {
             m_velocity.y += 18.0f * dt;
             m_velocity.y = glm::clamp(m_velocity.y, -4.0f, 9.0f);
             m_exo.power -= 25.0f * dt;
-            m_exo.heat  += 20.0f * dt;
+            float heat_buildup = 20.0f * std::max(0.25f, 1.0f - m_upgrades.drillDurabilityTier * 0.15f);
+            m_exo.heat += heat_buildup * dt;
             m_current_buttons |= BTN_THRUSTER;
         }
     }
@@ -91,7 +94,14 @@ void PlayerController::handle_input(const Window& window, float dt) {
     // Passive heat dissipation & power regeneration with Kinetic Dynamo perk
     if (!(m_current_buttons & BTN_THRUSTER)) {
         m_exo.heat = std::max(0.0f, m_exo.heat - 18.0f * dt);
-        float regen_rate = 15.0f * m_thruster_regen_multiplier;
+
+        // Kinetic Dynamo: Movement and falling recharge fuel faster
+        float dynamo_mult = 1.0f + m_upgrades.kineticDynamoTier * 0.15f;
+        if ((m_current_buttons & BTN_SPRINT) || (!m_on_ground && m_velocity.y < -1.0f)) {
+            dynamo_mult += m_upgrades.kineticDynamoTier * 0.15f;
+        }
+
+        float regen_rate = 15.0f * m_thruster_regen_multiplier * dynamo_mult;
         m_exo.power = std::min(m_exo.max_power, m_exo.power + regen_rate * dt);
         if (m_exo.heat < 15.0f) {
             m_exo.overheated = false;
@@ -110,7 +120,7 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (window.is_key_down(GLFW_KEY_E)) {
         if (m_grapple.active) {
             m_current_buttons |= BTN_GRAPPLE_REEL;
-            float effective_reel = m_grapple.reel_speed * m_reel_speed_multiplier;
+            float effective_reel = m_grapple.reel_speed * m_reel_speed_multiplier * m_char_attr.grapplePullSpeed;
             m_grapple.rest_length = std::max(2.0f, m_grapple.rest_length - effective_reel * dt);
         }
     }
@@ -152,11 +162,14 @@ void PlayerController::handle_input(const Window& window, float dt) {
 }
 
 void PlayerController::update_physics(float dt, World& world) {
+    m_current_world = &world;
+
     // 1. Grapple Fire & Tension Cable Dynamics
     // DDA raycast starts 0.6 units in front of the camera along the view vector to prevent self-collision
     if (m_current_buttons & BTN_GRAPPLE_FIRE) {
         if (!m_grapple.active) {
-            glm::vec3 ray_origin = m_position + m_front * 0.6f;
+            glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+            glm::vec3 ray_origin = eye + m_front * 0.6f;
             RaycastHit hit = world.raycast(ray_origin, m_front, m_grapple.max_length);
             if (hit.hit && hit.voxel.is_solid()) {
                 m_grapple.active = true;
@@ -193,44 +206,8 @@ void PlayerController::update_physics(float dt, World& world) {
     // 3. Subterranean Voxel Collision Resolution (AABB vs Voxel Grid)
     resolve_voxel_collisions(world, m_position, m_velocity, dt);
 
-    // 4. Mining / Drilling Handling
-    if (m_current_buttons & BTN_MINE_DRILL) {
-        glm::vec3 ray_origin = m_position + m_front * 0.6f;
-        RaycastHit hit = world.raycast(ray_origin, m_front, 6.5f);
-        if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
-            if (hit.block_pos != m_target_block) {
-                m_target_block = hit.block_pos;
-                m_target_normal = hit.normal;
-                m_mine_timer = 0.0f;
-            }
-
-            m_mine_timer += dt;
-            float base_time = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
-                              (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) ? 2.5f :
-                              (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.2f : 0.6f;
-            m_target_time_to_break = base_time / std::max(0.2f, m_drill_speed_multiplier);
-
-            if (m_mine_timer >= m_target_time_to_break) {
-                Voxel target_vox = world.get_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
-                uint8_t old_mat = target_vox.material_id;
-                uint8_t old_flags = target_vox.flags_and_damage;
-                glm::ivec3 break_pos = hit.block_pos;
-                glm::ivec3 break_norm = hit.normal;
-                world.set_voxel(break_pos.x, break_pos.y, break_pos.z, Voxel{MAT_AIR, 0}, true);
-                if (m_on_block_break) {
-                    m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
-                }
-                m_mine_timer = 0.0f;
-                m_target_block = glm::ivec3(-1);
-            }
-        } else {
-            m_mine_timer = 0.0f;
-            m_target_block = glm::ivec3(-1);
-        }
-    } else {
-        m_mine_timer = 0.0f;
-        m_target_block = glm::ivec3(-1);
-    }
+    // 4. Mining / Drilling Handling (Progressive cumulative damage with 1.0s decay)
+    MineBlock(dt, world);
 
     // 5. Tool Actions & Cooldowns
     if (m_place_cooldown > 0.0f) {
@@ -241,7 +218,8 @@ void PlayerController::update_physics(float dt, World& world) {
     if (m_current_buttons & BTN_SKILL_DEMO) {
         if (m_place_cooldown <= 0.0f) {
             m_place_cooldown = 0.25f;
-            glm::vec3 ray_origin = m_position + m_front * 0.6f;
+            glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+            glm::vec3 ray_origin = eye + m_front * 0.6f;
             RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
             if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
                 m_placed_charge_pos = hit.block_pos;
@@ -264,7 +242,8 @@ void PlayerController::update_physics(float dt, World& world) {
                 }
                 m_has_placed_charge = false;
             } else {
-                glm::vec3 ray_origin = m_position + m_front * 0.6f;
+                glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+                glm::vec3 ray_origin = eye + m_front * 0.6f;
                 RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
                 if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
                     if (m_on_explosive_blast) {
@@ -279,7 +258,8 @@ void PlayerController::update_physics(float dt, World& world) {
     if (m_current_buttons & BTN_REMOVE_BULKHEAD) {
         if (m_place_cooldown <= 0.0f) {
             m_place_cooldown = 0.25f;
-            glm::vec3 ray_origin = m_position + m_front * 0.6f;
+            glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+            glm::vec3 ray_origin = eye + m_front * 0.6f;
             RaycastHit hit = world.raycast(ray_origin, m_front, 6.0f);
             if (hit.hit && (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD || hit.voxel.material_id == MAT_BULKHEAD)) {
                 world.set_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z, Voxel{MAT_AIR, 0}, true);
@@ -287,7 +267,7 @@ void PlayerController::update_physics(float dt, World& world) {
                     m_on_bulkhead_dismantle(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
                 }
                 if (m_on_warning) {
-                    m_on_warning("BULKHEAD DISMANTLED CLEANLY (+1 BULKHEAD RECLAIMED)");
+                    m_on_warning("+1 BULKHEAD | 0 PTS");
                 }
             }
         }
@@ -303,14 +283,15 @@ void PlayerController::update_physics(float dt, World& world) {
                     m_on_warning("INSUFFICIENT BULKHEAD MATERIALS");
                 }
             } else {
-                glm::vec3 ray_origin = m_position + m_front * 0.6f;
+                glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+                glm::vec3 ray_origin = eye + m_front * 0.6f;
                 RaycastHit hit = world.raycast(ray_origin, m_front, 6.0f);
                 if (hit.hit) {
                     glm::ivec3 place_pos = hit.block_pos + hit.normal;
 
                     // AABB Self-Collision Check: verify place_pos does NOT intersect player bounding box
-                    glm::vec3 player_min = m_position - glm::vec3(0.35f, 1.6f, 0.35f);
-                    glm::vec3 player_max = m_position + glm::vec3(0.35f, 0.2f, 0.35f);
+                    glm::vec3 player_min = m_position - glm::vec3(0.35f, 0.95f, 0.35f);
+                    glm::vec3 player_max = m_position + glm::vec3(0.35f, 0.95f, 0.35f);
                     glm::vec3 block_min(place_pos);
                     glm::vec3 block_max = block_min + glm::vec3(1.0f);
 
@@ -320,10 +301,7 @@ void PlayerController::update_physics(float dt, World& world) {
 
                     if (!overlaps) {
                         // Guarantee: face normal placement ONLY with VOXEL_FLAG_PLAYER_PLACED metadata
-                        world.set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED}, true);
-                        if (m_on_block_place) {
-                            m_on_block_place(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
-                        }
+                        place_bulkhead(world, place_pos);
                     }
                 }
             }
@@ -331,12 +309,42 @@ void PlayerController::update_physics(float dt, World& world) {
     }
 }
 
+void PlayerController::place_bulkhead(World& world, const glm::ivec3& place_pos) {
+    world.set_block_with_flags(place_pos, MAT_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED);
+    if (m_on_block_place) {
+        m_on_block_place(place_pos.x, place_pos.y, place_pos.z, MAT_BULKHEAD);
+    }
+}
+
+void PlayerController::PlaceBulkhead(World& world, const glm::ivec3& place_pos) {
+    place_bulkhead(world, place_pos);
+}
+
+void PlayerController::clamp_to_surface(const World& world) {
+    float surface = world.get_highest_solid_surface(static_cast<int>(m_position.x), static_cast<int>(m_position.z));
+    m_position.y = surface + 1.1f;
+}
+
+void PlayerController::UpdatePhysics(float dt) {
+    if (m_current_world) {
+        update_physics(dt, *m_current_world);
+    }
+}
+
+void PlayerController::ResolveAxisCollision(int axis, const glm::vec3& half_extents) {
+    if (m_current_world) {
+        resolve_axis_collision(axis, half_extents, *m_current_world);
+    }
+}
+
+void PlayerController::ResolveAxisCollision(int axis, const glm::vec3& half_extents, World& world) {
+    m_current_world = &world;
+    resolve_axis_collision(axis, half_extents, world);
+}
+
 void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_extents, World& world) {
-    // Player extents: width 0.6m (radius 0.3m), height 1.8m
-    // m_position is eye level (1.6m above feet, 0.2m below head)
-    glm::vec3 center = m_position + glm::vec3(0.0f, -0.7f, 0.0f);
-    glm::vec3 box_min = center - half_extents;
-    glm::vec3 box_max = center + half_extents;
+    glm::vec3 box_min = m_position - half_extents;
+    glm::vec3 box_max = m_position + half_extents;
 
     int min_bx = static_cast<int>(std::floor(box_min.x + 0.001f));
     int max_bx = static_cast<int>(std::floor(box_max.x - 0.001f));
@@ -347,28 +355,29 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
 
     if (axis == 1) { // 1. Y Axis (Gravity, jumping, floors, ceilings)
         if (m_velocity.y < 0.0f) {
-            for (int x = min_bx; x <= max_bx; ++x) {
-                for (int z = min_bz; z <= max_bz; ++z) {
-                    for (int y = min_by; y <= max_by; ++y) {
+            for (int y = max_by; y >= min_by; --y) {
+                for (int x = min_bx; x <= max_bx; ++x) {
+                    for (int z = min_bz; z <= max_bz; ++z) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
-                            // If hit downward, land on top of block (y + 1.0f)
-                            float target_feet = static_cast<float>(y + 1);
-                            m_position.y = target_feet + 1.6f;
+                            // On floor contact: land on top of block (y + 1.0f)
+                            float target_floor = static_cast<float>(y + 1);
+                            m_position.y = target_floor + half_extents.y;
                             m_velocity.y = 0.0f;
                             m_on_ground = true;
+                            m_isGrounded = true;
                             return;
                         }
                     }
                 }
             }
         } else if (m_velocity.y > 0.0f) {
-            for (int x = min_bx; x <= max_bx; ++x) {
-                for (int z = min_bz; z <= max_bz; ++z) {
-                    for (int y = max_by; y >= min_by; --y) {
+            for (int y = min_by; y <= max_by; ++y) {
+                for (int x = min_bx; x <= max_bx; ++x) {
+                    for (int z = min_bz; z <= max_bz; ++z) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
                             // Hit ceiling
-                            float target_head = static_cast<float>(y);
-                            m_position.y = target_head - 0.2f - 0.001f;
+                            float target_ceiling = static_cast<float>(y);
+                            m_position.y = target_ceiling - half_extents.y - 0.001f;
                             m_velocity.y = 0.0f;
                             return;
                         }
@@ -378,9 +387,9 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         }
     } else if (axis == 0) { // 2. X Axis (Walls)
         if (m_velocity.x > 0.0f) {
-            for (int y = min_by; y <= max_by; ++y) {
-                for (int z = min_bz; z <= max_bz; ++z) {
-                    for (int x = max_bx; x >= min_bx; --x) {
+            for (int x = min_bx; x <= max_bx; ++x) {
+                for (int y = min_by; y <= max_by; ++y) {
+                    for (int z = min_bz; z <= max_bz; ++z) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
                             m_position.x = static_cast<float>(x) - half_extents.x - 0.001f;
                             m_velocity.x = 0.0f;
@@ -390,9 +399,9 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 }
             }
         } else if (m_velocity.x < 0.0f) {
-            for (int y = min_by; y <= max_by; ++y) {
-                for (int z = min_bz; z <= max_bz; ++z) {
-                    for (int x = min_bx; x <= max_bx; ++x) {
+            for (int x = max_bx; x >= min_bx; --x) {
+                for (int y = min_by; y <= max_by; ++y) {
+                    for (int z = min_bz; z <= max_bz; ++z) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
                             m_position.x = static_cast<float>(x + 1) + half_extents.x + 0.001f;
                             m_velocity.x = 0.0f;
@@ -404,9 +413,9 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         }
     } else if (axis == 2) { // 3. Z Axis (Walls)
         if (m_velocity.z > 0.0f) {
-            for (int y = min_by; y <= max_by; ++y) {
-                for (int x = min_bx; x <= max_bx; ++x) {
-                    for (int z = max_bz; z >= min_bz; --z) {
+            for (int z = min_bz; z <= max_bz; ++z) {
+                for (int y = min_by; y <= max_by; ++y) {
+                    for (int x = min_bx; x <= max_bx; ++x) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
                             m_position.z = static_cast<float>(z) - half_extents.z - 0.001f;
                             m_velocity.z = 0.0f;
@@ -416,9 +425,9 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 }
             }
         } else if (m_velocity.z < 0.0f) {
-            for (int y = min_by; y <= max_by; ++y) {
-                for (int x = min_bx; x <= max_bx; ++x) {
-                    for (int z = min_bz; z <= max_bz; ++z) {
+            for (int z = max_bz; z >= min_bz; --z) {
+                for (int y = min_by; y <= max_by; ++y) {
+                    for (int x = min_bx; x <= max_bx; ++x) {
                         if (world.is_solid(glm::ivec3(x, y, z))) {
                             m_position.z = static_cast<float>(z + 1) + half_extents.z + 0.001f;
                             m_velocity.z = 0.0f;
@@ -433,6 +442,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
 
 void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt) {
     m_on_ground = false;
+    m_isGrounded = false;
     glm::vec3 half_extents(0.3f, 0.9f, 0.3f);
 
     // 1. Resolve Y Axis (Gravity, jumping, floors, ceilings)
@@ -449,7 +459,7 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
 
     // Ground support probe: ensure m_on_ground stays true while standing or walking on floor
     if (m_velocity.y <= 0.05f) {
-        int ground_y = static_cast<int>(std::floor(m_position.y - 1.6f - 0.05f));
+        int ground_y = static_cast<int>(std::floor(m_position.y - half_extents.y - 0.05f));
         int min_x = static_cast<int>(std::floor(m_position.x - 0.28f));
         int max_x = static_cast<int>(std::floor(m_position.x + 0.28f));
         int min_z = static_cast<int>(std::floor(m_position.z - 0.28f));
@@ -459,6 +469,7 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
             for (int z = min_z; z <= max_z; ++z) {
                 if (world.is_solid(glm::ivec3(x, ground_y, z))) {
                     m_on_ground = true;
+                    m_isGrounded = true;
                     m_velocity.y = 0.0f;
                     break;
                 }
@@ -480,6 +491,122 @@ PlayerInputPacket PlayerController::build_input_packet(uint32_t tick, float dt) 
     pkt.buttons = m_current_buttons;
     pkt.delta_time = dt;
     return pkt;
+}
+
+void PlayerController::MineBlock(float dt) {
+    if (m_current_world) {
+        MineBlock(dt, *m_current_world);
+    }
+}
+
+void PlayerController::MineBlock(float dt, World& world) {
+    bool is_mining = (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill);
+
+    if (is_mining) {
+        glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+        glm::vec3 ray_origin = eye + m_front * 0.6f;
+        RaycastHit hit = world.raycast(ray_origin, m_front, 6.5f);
+
+        if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
+            if (hit.block_pos != m_target_block) {
+                m_target_block = hit.block_pos;
+                m_target_normal = hit.normal;
+                m_drillDamageAccumulator = 0.0f;
+                m_target_block_damage = 0.0f;
+                m_mine_timer = 0.0f;
+
+                // Calibrate block hardness according to material
+                m_block_hardness = (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) ? 0.35f :
+                                   (hit.voxel.material_id == MAT_FRACTURED_GRANITE) ? 0.45f :
+                                   (hit.voxel.material_id == MAT_RADIOACTIVE_ORE) ? 0.80f :
+                                   (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) ? 1.20f :
+                                   (hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR) ? 2.50f : 0.60f;
+            }
+
+            // Track cumulative drill progress per block factoring baseMineSpeed and drillSpeedTier
+            float effective_mine_speed = m_char_attr.baseMineSpeed * (1.0f + m_upgrades.drillSpeedTier * 0.12f) * std::max(0.2f, m_drill_speed_multiplier);
+            m_drillDamageAccumulator += effective_mine_speed * dt;
+            m_target_block_damage = m_drillDamageAccumulator;
+            m_mine_timer = m_drillDamageAccumulator;
+            m_target_time_to_break = m_block_hardness;
+
+            float progress = m_block_hardness > 0.0f ? (m_drillDamageAccumulator / m_block_hardness) : 1.0f;
+            if (progress >= 1.0f) {
+                Voxel target_vox = world.get_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
+                uint8_t old_mat = target_vox.material_id;
+                uint8_t old_flags = target_vox.flags_and_damage;
+                glm::ivec3 break_pos = hit.block_pos;
+                glm::ivec3 break_norm = hit.normal;
+                world.set_voxel(break_pos.x, break_pos.y, break_pos.z, Voxel{MAT_AIR, 0}, true);
+                if (m_on_block_break) {
+                    m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
+                }
+                m_drillDamageAccumulator = 0.0f;
+                m_target_block_damage = 0.0f;
+                m_mine_timer = 0.0f;
+                m_target_block = glm::ivec3(-1);
+            }
+        } else {
+            // Player looked away or hit bedrock: decay back to 0
+            if (m_drillDamageAccumulator > 0.0f) {
+                float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) * 2.0f;
+                m_drillDamageAccumulator = std::max(0.0f, m_drillDamageAccumulator - decay_rate * dt);
+                m_target_block_damage = m_drillDamageAccumulator;
+                m_mine_timer = m_drillDamageAccumulator;
+                if (m_drillDamageAccumulator <= 0.0f) {
+                    m_target_block = glm::ivec3(-1);
+                }
+            }
+        }
+    } else {
+        // Player released LMB: decay target block damage back to 0
+        if (m_drillDamageAccumulator > 0.0f) {
+            float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) * 2.0f;
+            m_drillDamageAccumulator = std::max(0.0f, m_drillDamageAccumulator - decay_rate * dt);
+            m_target_block_damage = m_drillDamageAccumulator;
+            m_mine_timer = m_drillDamageAccumulator;
+            if (m_drillDamageAccumulator <= 0.0f) {
+                m_target_block = glm::ivec3(-1);
+            }
+        }
+    }
+}
+
+void PlayerController::set_character_class(CharacterClass cls) {
+    m_char_attr = get_character_attributes(cls);
+    apply_attributes_and_upgrades(m_char_attr, m_upgrades);
+}
+
+void PlayerController::set_upgrades(const UpgradeTree& tree) {
+    m_upgrades = tree;
+    apply_attributes_and_upgrades(m_char_attr, m_upgrades);
+}
+
+void PlayerController::apply_attributes_and_upgrades(const CharacterAttributes& attr, const UpgradeTree& upg) {
+    m_char_attr = attr;
+    m_upgrades = upg;
+
+    m_max_health = attr.suitIntegrity + (upg.reinforcedPlatingTier * 15.0f);
+    m_health = m_max_health;
+    m_exo.max_power = 100.0f * (1.0f + upg.thrusterTankTier * 0.20f);
+    m_exo.power = m_exo.max_power;
+    m_exo.integrity = 100.0f;
+}
+
+void PlayerController::apply_attributes_and_upgrades(CharacterClass cls, const UpgradeTree& upg) {
+    apply_attributes_and_upgrades(get_character_attributes(cls), upg);
+}
+
+float PlayerController::take_damage(float dmg, bool is_falling_debris) {
+    if (is_falling_debris) {
+        float reduction = m_char_attr.fallingDamageReduction + (m_upgrades.reinforcedPlatingTier * 0.10f);
+        reduction = std::clamp(reduction, 0.0f, 0.85f);
+        dmg *= (1.0f - reduction);
+    }
+    m_health = std::max(0.0f, m_health - dmg);
+    m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
+    add_trauma(dmg * 0.02f);
+    return dmg;
 }
 
 } // namespace Voidfall

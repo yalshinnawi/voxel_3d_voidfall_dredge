@@ -14,6 +14,7 @@ struct WindowConfig {
     int height{900};
     bool vsync{true};
     bool fullscreen{false};
+    bool visible{true};
 };
 
 class Window {

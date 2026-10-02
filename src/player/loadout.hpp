@@ -45,6 +45,7 @@ struct PlayerInventory {
     // Mission status & completion tracking
     bool is_abandoned{false};
     bool suit_failed{false};
+    bool has_banked_run{false};
     std::string run_outcome_badge{"UNEXPLORED"};
     int run_completion_rate{0};
 
@@ -125,7 +126,7 @@ struct PlayerInventory {
         if (is_abandoned) return "ABANDONED (<50%)";
         if (suit_failed) return "M.I.A. (SUIT FAILURE)";
         if (safe_evac && completion_rate >= 100) return "CLEARED (100%)";
-        if (safe_evac && completion_rate >= 50) return "PARTIAL (" + std::to_string(completion_rate) + "%)";
+        if (safe_evac && completion_rate >= 50) return "PARTIAL (50–99%)";
         if (completion_rate < 50) return "ABANDONED (<50%)";
         return "EXPEDITION FAILED";
     }
@@ -169,6 +170,7 @@ struct PlayerInventory {
         relic_extracted = false;
         is_abandoned = false;
         suit_failed = false;
+        has_banked_run = false;
         run_outcome_badge = "UNEXPLORED";
         run_completion_rate = 0;
         target_voidite = voidite_goal;

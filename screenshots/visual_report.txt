@@ -1,0 +1,55 @@
+================================================================================
+VOIDFALL DREDGE - AUTOMATED VISUAL TEST HARNESS REPORT
+================================================================================
+Status: ALL PHASES HEALTHY (PASS)
+Master Montage Contact Sheet: screenshots/00_all_phases_montage.png
+Lightweight Previews Dir:     screenshots/previews/
+
+PHASE BREAKDOWN:
+  [1] MAIN MENU
+      Master PNG: screenshots/01_main_menu.png (1600x900)
+      Preview:    screenshots/previews/01_main_menu.jpg
+      Luminance:  0.164 | Non-Black: 99.848%
+      Evaluation: PASS
+
+  [2] SECTOR SELECT
+      Master PNG: screenshots/02_sector_select.png (1600x900)
+      Preview:    screenshots/previews/02_sector_select.jpg
+      Luminance:  0.126 | Non-Black: 99.392%
+      Evaluation: PASS
+
+  [3] UPGRADES MENU
+      Master PNG: screenshots/03_upgrades_menu.png (1600x900)
+      Preview:    screenshots/previews/03_upgrades_menu.jpg
+      Luminance:  0.091 | Non-Black: 99.537%
+      Evaluation: PASS
+
+  [4] GAMEPLAY CAVERN
+      Master PNG: screenshots/04_gameplay_cavern.png (1600x900)
+      Preview:    screenshots/previews/04_gameplay_cavern.jpg
+      Luminance:  0.289 | Non-Black: 99.951%
+      Evaluation: PASS
+
+  [5] DRILL CRACKS
+      Master PNG: screenshots/05_drilling_cracks.png (1600x900)
+      Preview:    screenshots/previews/05_drilling_cracks.jpg
+      Luminance:  0.274 | Non-Black: 99.950%
+      Evaluation: PASS
+
+  [6] LOOT TOASTS
+      Master PNG: screenshots/06_loot_toasts.png (1600x900)
+      Preview:    screenshots/previews/06_loot_toasts.jpg
+      Luminance:  0.248 | Non-Black: 99.916%
+      Evaluation: PASS
+
+  [7] EXTRACTION BEACON
+      Master PNG: screenshots/07_extraction_beacon.png (1600x900)
+      Preview:    screenshots/previews/07_extraction_beacon.jpg
+      Luminance:  0.283 | Non-Black: 99.917%
+      Evaluation: PASS
+
+================================================================================
+FAST AGENT REVIEW INSTRUCTION:
+Inspect 'screenshots/00_all_phases_montage.png' in a SINGLE view_file call
+to review all 7 screens at once instead of loading individual PNGs.
+================================================================================

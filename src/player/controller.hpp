@@ -3,6 +3,8 @@
 #include "../voxel/world.hpp"
 #include "../net/packet_types.hpp"
 #include "loadout.hpp"
+#include "character_class.hpp"
+#include "upgrades.hpp"
 #include <glm/glm.hpp>
 #include <functional>
 
@@ -33,6 +35,18 @@ public:
 
     void handle_input(const Window& window, float dt);
     void update_physics(float dt, World& world);
+    void UpdatePhysics(float dt, World& world) { update_physics(dt, world); }
+    void UpdatePhysics(float dt);
+
+    void ResolveAxisCollision(int axis, const glm::vec3& half_extents);
+    void ResolveAxisCollision(int axis, const glm::vec3& half_extents, World& world);
+
+    void place_bulkhead(World& world, const glm::ivec3& place_pos);
+    void PlaceBulkhead(World& world, const glm::ivec3& place_pos);
+    void clamp_to_surface(const World& world);
+
+    bool is_grounded() const { return m_on_ground; }
+    bool isGrounded() const { return m_on_ground; }
 
     glm::mat4 get_view_matrix() const;
     const glm::vec3& position() const { return m_position; }
@@ -44,16 +58,47 @@ public:
 
     float yaw() const { return m_yaw; }
     float pitch() const { return m_pitch; }
+    void set_look_angles(float yaw, float pitch) {
+        m_yaw = yaw;
+        m_pitch = glm::clamp(pitch, -89.0f, 89.0f);
+        update_camera_vectors();
+    }
 
     const GrappleHook& grapple() const { return m_grapple; }
+    GrappleHook& grapple_mut() { return m_grapple; }
     const ExoStatus& exo() const { return m_exo; }
     ExoStatus& exo_mut() { return m_exo; }
 
     ToolSlot active_tool() const { return m_active_tool; }
     void set_active_tool(ToolSlot tool) { m_active_tool = tool; }
 
-    float mine_progress() const { return m_target_time_to_break > 0.0f ? (m_mine_timer / m_target_time_to_break) : 0.0f; }
+    void MineBlock(float dt);
+    void MineBlock(float dt, World& world);
+
+    float crack_stage() const { return m_block_hardness > 0.0f ? glm::clamp(m_drillDamageAccumulator / m_block_hardness, 0.0f, 1.0f) : 0.0f; }
+    float mine_progress() const { return crack_stage(); }
+    float drill_damage_accumulator() const { return m_drillDamageAccumulator; }
+    float target_block_damage() const { return m_drillDamageAccumulator; }
+    float block_hardness() const { return m_block_hardness; }
+    const glm::ivec3& target_block() const { return m_target_block; }
+    const glm::ivec3& target_normal() const { return m_target_normal; }
+    bool is_drilling() const { return (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill); }
+    void set_drilling(bool drilling) { if (drilling) m_current_buttons |= BTN_MINE_DRILL; else m_current_buttons &= ~BTN_MINE_DRILL; }
     RaycastHit get_look_target(const World& world, float max_dist = 5.0f) const;
+
+    void set_character_class(CharacterClass cls);
+    CharacterClass character_class() const { return m_char_attr.classType; }
+    const CharacterAttributes& character_attributes() const { return m_char_attr; }
+
+    void set_upgrades(const UpgradeTree& tree);
+    const UpgradeTree& upgrades() const { return m_upgrades; }
+    void apply_attributes_and_upgrades(const CharacterAttributes& attr, const UpgradeTree& upg);
+    void apply_attributes_and_upgrades(CharacterClass cls, const UpgradeTree& upg);
+
+    float health() const { return m_health; }
+    float max_health() const { return m_max_health; }
+    void set_health(float h) { m_health = glm::clamp(h, 0.0f, m_max_health); }
+    float take_damage(float dmg, bool is_falling_debris = false);
 
     void set_reel_speed_multiplier(float mul) { m_reel_speed_multiplier = mul; }
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
@@ -61,6 +106,7 @@ public:
     void set_allow_micro_charges(bool allow) { m_allow_micro_charges = allow; }
 
     void add_trauma(float t) { m_trauma = glm::clamp(m_trauma + t, 0.0f, 1.0f); }
+    void AddTrauma(float t) { add_trauma(t); }
     float trauma() const { return m_trauma; }
     void set_trauma(float t) { m_trauma = glm::clamp(t, 0.0f, 1.0f); }
 
@@ -106,7 +152,15 @@ private:
     glm::vec3 m_up{0.0f, 1.0f, 0.0f};
 
     bool m_on_ground{false};
+    bool m_isGrounded{false};
+    World* m_current_world{nullptr};
     uint16_t m_current_buttons{0};
+
+    // Character Archetype & Meta-Upgrades
+    CharacterAttributes m_char_attr{get_character_attributes(CharacterClass::Demolitionist)};
+    UpgradeTree m_upgrades;
+    float m_health{100.0f};
+    float m_max_health{100.0f};
 
     // Suit status & equipment
     ExoStatus m_exo;
@@ -125,6 +179,9 @@ private:
     glm::ivec3 m_placed_charge_normal{0, 1, 0};
 
     // Mining / drilling state
+    float m_drillDamageAccumulator{0.0f};
+    float m_target_block_damage{0.0f};
+    float m_block_hardness{0.6f};
     float m_mine_timer{0.0f};
     float m_target_time_to_break{0.6f};
     glm::ivec3 m_target_block{-1};

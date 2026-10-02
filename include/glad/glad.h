@@ -230,6 +230,7 @@ typedef void  (APIENTRY *PFNGLGETINTEGERVPROC)(GLenum pname, GLint* params);
 typedef const GLubyte* (APIENTRY *PFNGLGETSTRINGPROC)(GLenum name);
 typedef void  (APIENTRY *PFNGLBLENDFUNCPROC)(GLenum sfactor, GLenum dfactor);
 typedef void  (APIENTRY *PFNGLDEPTHFUNCPROC)(GLenum func);
+typedef void  (APIENTRY *PFNGLDEPTHRANGEPROC)(GLdouble nearVal, GLdouble farVal);
 typedef void  (APIENTRY *PFNGLCULLFACEPROC)(GLenum mode);
 typedef void  (APIENTRY *PFNGLFRONTFACEPROC)(GLenum mode);
 typedef void  (APIENTRY *PFNGLLINEWIDTHPROC)(GLfloat width);
@@ -359,6 +360,8 @@ extern PFNGLBLENDFUNCPROC glad_glBlendFunc;
 #define glBlendFunc glad_glBlendFunc
 extern PFNGLDEPTHFUNCPROC glad_glDepthFunc;
 #define glDepthFunc glad_glDepthFunc
+extern PFNGLDEPTHRANGEPROC glad_glDepthRange;
+#define glDepthRange glad_glDepthRange
 extern PFNGLCULLFACEPROC glad_glCullFace;
 #define glCullFace glad_glCullFace
 extern PFNGLFRONTFACEPROC glad_glFrontFace;

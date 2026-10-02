@@ -145,26 +145,41 @@ bool World::set_block_with_flags(const glm::ivec3& pos, uint8_t mat, uint8_t fla
     return set_voxel(pos.x, pos.y, pos.z, Voxel{mat, flags}, true);
 }
 
-bool World::is_solid(const glm::ivec3& pos) const {
-    return is_solid(pos.x, pos.y, pos.z);
+uint8_t World::get_block_flags(const glm::ivec3& pos) const {
+    return get_voxel(pos.x, pos.y, pos.z).flags_and_damage;
 }
 
-bool World::is_solid(int world_x, int world_y, int world_z) const {
-    if (world_y <= 0) return true; // Bedrock base layer is always solid
+bool World::is_solid(const glm::ivec3& pos) const {
+    if (pos.y <= 0) return true; // Bedrock base layer is always solid
 
-    int cx = (world_x < 0) ? ((world_x - 31) / 32) : (world_x / 32);
-    int cy = (world_y < 0) ? ((world_y - 31) / 32) : (world_y / 32);
-    int cz = (world_z < 0) ? ((world_z - 31) / 32) : (world_z / 32);
+    int cx = (pos.x < 0) ? ((pos.x - 31) / 32) : (pos.x / 32);
+    int cy = (pos.y < 0) ? ((pos.y - 31) / 32) : (pos.y / 32);
+    int cz = (pos.z < 0) ? ((pos.z - 31) / 32) : (pos.z / 32);
 
     const Chunk* chunk = get_chunk(ChunkPos{cx, cy, cz});
     if (!chunk) return false;
 
-    int lx = floor_mod(world_x, CHUNK_SIZE);
-    int ly = floor_mod(world_y, CHUNK_SIZE);
-    int lz = floor_mod(world_z, CHUNK_SIZE);
+    int lx = floor_mod(pos.x, CHUNK_SIZE);
+    int ly = floor_mod(pos.y, CHUNK_SIZE);
+    int lz = floor_mod(pos.z, CHUNK_SIZE);
 
     Voxel v = chunk->get_voxel(lx, ly, lz);
-    return v.is_solid();
+    return v.material_id != MAT_AIR && v.material_id != MAT_GAS && v.material_id != MAT_VOLATILE_SMOKE;
+}
+
+bool World::is_solid(int world_x, int world_y, int world_z) const {
+    return is_solid(glm::ivec3(world_x, world_y, world_z));
+}
+
+float World::get_highest_solid_surface(int x, int z) const {
+    for (int y = 64; y >= 0; --y) {
+        if (is_solid(glm::ivec3(x, y, z))) {
+            if (!is_solid(glm::ivec3(x, y + 1, z)) && !is_solid(glm::ivec3(x, y + 2, z))) {
+                return static_cast<float>(y + 1);
+            }
+        }
+    }
+    return 1.0f;
 }
 
 // 3D procedural noise synthesis for subterranean caverns

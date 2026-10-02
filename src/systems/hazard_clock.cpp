@@ -21,6 +21,15 @@ void HazardClock::set_sector_parameters(int sector) {
     m_tremor_timer = m_tremor_interval;
 }
 
+void HazardClock::reset() {
+    m_radiation_level = 0.0f;
+    m_tremor_timer = m_tremor_interval;
+    m_is_tremoring = false;
+    m_warning_fired = false;
+    m_tremor_elapsed = 0.0f;
+    m_tremor_intensity = 0.0f;
+}
+
 void HazardClock::update(float dt) {
     // 1. Escalate radiation over time
     m_radiation_level = std::min(100.0f, m_radiation_level + m_radiation_rate * dt);

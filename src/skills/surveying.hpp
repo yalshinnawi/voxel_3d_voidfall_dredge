@@ -14,7 +14,7 @@ class SurveyingSystem {
 public:
     SurveyingSystem();
 
-    void trigger_scan(const glm::vec3& origin, const World& world, float scan_radius = 18.0f);
+    void trigger_scan(const glm::vec3& origin, const World& world, float scan_radius = 18.0f, float linger_bonus = 0.0f);
     void update(float dt);
 
     bool is_active() const { return m_active; }

@@ -54,13 +54,18 @@ set(SOURCES
     src/core/glad/glad.c
     src/core/window.cpp
     src/core/application.cpp
+    src/core/save_system.cpp
+    src/core/screenshot.cpp
     src/graphics/shader.cpp
     src/graphics/texture_array.cpp
     src/graphics/renderer.cpp
+    src/graphics/viewmodel.cpp
     src/voxel/chunk.cpp
     src/voxel/greedy_mesher.cpp
     src/voxel/world.cpp
     src/voxel/structural_check.cpp
+    src/player/character_class.cpp
+    src/player/upgrades.cpp
     src/player/controller.cpp
     src/entities/dynamic_debris.cpp
     src/systems/hazard_clock.cpp
@@ -114,3 +119,51 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
 )
+
+# ── Common Test Sources ──
+set(TEST_COMMON_SOURCES
+    src/core/logger.cpp
+    src/core/glad/glad.c
+    src/core/window.cpp
+    src/core/save_system.cpp
+    src/player/character_class.cpp
+    src/player/upgrades.cpp
+    src/player/controller.cpp
+    src/voxel/chunk.cpp
+    src/voxel/greedy_mesher.cpp
+    src/voxel/world.cpp
+    src/voxel/structural_check.cpp
+    src/skills/surveying.cpp
+    src/systems/hazard_clock.cpp
+    src/systems/extraction.cpp
+    src/entities/dynamic_debris.cpp
+)
+
+# ── Progression Test Executable ──
+add_executable(test_progression tests/test_progression.cpp ${TEST_COMMON_SOURCES})
+target_compile_definitions(test_progression PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_include_directories(test_progression PRIVATE include src)
+target_link_libraries(test_progression PRIVATE glfw glm::glm OpenGL::GL)
+if(WIN32)
+    target_link_libraries(test_progression PRIVATE ws2_32)
+endif()
+
+# ── Comprehensive Unit Test Suite ──
+add_executable(test_unit_all tests/test_unit_all.cpp ${TEST_COMMON_SOURCES})
+target_compile_definitions(test_unit_all PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_include_directories(test_unit_all PRIVATE include src)
+target_link_libraries(test_unit_all PRIVATE glfw glm::glm OpenGL::GL)
+if(WIN32)
+    target_link_libraries(test_unit_all PRIVATE ws2_32)
+endif()
+
+# ── End-to-End (E2E) Expeditions Test Suite ──
+add_executable(test_e2e_expeditions tests/test_e2e_expeditions.cpp ${TEST_COMMON_SOURCES})
+target_compile_definitions(test_e2e_expeditions PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_include_directories(test_e2e_expeditions PRIVATE include src)
+target_link_libraries(test_e2e_expeditions PRIVATE glfw glm::glm OpenGL::GL)
+if(WIN32)
+    target_link_libraries(test_e2e_expeditions PRIVATE ws2_32)
+endif()
+
+

@@ -6,11 +6,11 @@ namespace Voidfall {
 
 SurveyingSystem::SurveyingSystem() = default;
 
-void SurveyingSystem::trigger_scan(const glm::vec3& origin, const World& world, float scan_radius) {
+void SurveyingSystem::trigger_scan(const glm::vec3& origin, const World& world, float scan_radius, float linger_bonus) {
     m_active = true;
-    m_duration = 2.5f;
+    m_duration = 2.5f + linger_bonus;
     m_timer = m_duration;
-    m_radius = std::min(scan_radius, 14.0f);
+    m_radius = std::min(scan_radius, 45.0f);
     m_origin = origin;
     m_surveyed.clear();
 

@@ -1,0 +1,83 @@
+---
+name: game-build-and-test
+description: >-
+  Use this skill whenever building the Voidfall Dredge C++ engine, executing unit or E2E tests,
+  troubleshooting compilation/linker errors, or diagnosing runtime crashes via voidfall.log.
+---
+
+# Game Build, Test & Diagnostics
+
+This skill outlines the procedures for compiling and validating the Voidfall Dredge game engine.
+
+## 1. Building the Project
+
+The project uses CMake with MSVC on Windows.
+
+### Standard Build Command
+```powershell
+cmake --build build --config Release
+```
+
+For incremental builds of a specific test target:
+```powershell
+cmake --build build --config Release --target test_unit_all
+cmake --build build --config Release --target test_e2e_expeditions
+cmake --build build --config Release --target test_progression
+```
+
+### Full Clean Reconfigure
+```powershell
+cmake -B build -S .
+cmake --build build --config Release
+```
+
+---
+
+## 2. Running Automated Tests
+
+Use the automated test runner script:
+- Helper Script: [scripts/run_tests.ps1](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-build-and-test/scripts/run_tests.ps1)
+
+Execute via PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File .agents/skills/game-build-and-test/scripts/run_tests.ps1
+```
+
+Or run individual test binaries directly:
+- `.\build\Release\test_unit_all.exe`
+- `.\build\Release\test_e2e_expeditions.exe`
+- `.\build\Release\test_progression.exe`
+
+---
+
+## 3. Automated Visual Testing & Playthroughs
+
+The engine supports automated visual frame capture via `--auto-play-test` and `--screenshot`:
+```bash
+./build/Release/VoidfallDredge.exe --auto-play-test
+```
+This executes an automated 7-phase gameplay loop, computes visual metrics, and writes:
+- **Consolidated Contact Sheet Montage**: `screenshots/00_all_phases_montage.jpg` (or `.png`):
+  All 7 gameplay phases downscaled and stitched into a single 4x2 grid with an integrated visual health matrix card.
+- **Fast Diagnostics Report**: `screenshots/visual_report.txt` and `screenshots/visual_report.json`
+- **Lightweight Previews**: `screenshots/previews/*.jpg` (~40KB each for fast individual inspection)
+- **Master PNGs**: `screenshots/01_main_menu.png` through `07_extraction_beacon.png`
+
+### Fast Screenshot Analysis Protocol (Optimized for Speed)
+> [!IMPORTANT]
+> **Do NOT sequentially inspect all 7 individual PNGs across multiple tool turns.** Loading 7 full 1600x900 PNGs consumes multi-megabytes of context and takes several minutes of round-trips.
+>
+> **Follow this 1-step workflow instead:**
+> 1. Run `python scripts/analyze_screenshots.py` or inspect `screenshots/visual_report.txt` for instantaneous metrics.
+> 2. Call `view_file` on `screenshots/00_all_phases_montage.jpg` to visually inspect all 7 phases simultaneously in a **single turn (< 1 second)**!
+> 3. Only if a specific anomaly is spotted, inspect that specific lightweight frame preview in `screenshots/previews/0X_*.jpg`.
+
+
+---
+
+## 4. Investigating Runtime Crashes & Invariants
+
+When investigating crashes, assertion failures, or OpenGL state bugs, consult:
+- Reference Guide: [references/diagnostics_guide.md](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-build-and-test/references/diagnostics_guide.md)
+- Log File: [voidfall.log](file:///d:/Projects/voxel_3d_voidfall_dredge/voidfall.log)
+- Persistent Data: [save_data.json](file:///d:/Projects/voxel_3d_voidfall_dredge/save_data.json)

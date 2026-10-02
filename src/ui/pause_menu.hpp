@@ -10,7 +10,8 @@ enum class PauseMenuAction {
     None,
     Resume,
     Abandon,
-    ReturnToHub
+    ReturnToHub,
+    ReturnToStartup
 };
 
 struct GameSettings {
