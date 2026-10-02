@@ -28,12 +28,26 @@
     ```bash
     ./build/Release/VoidfallDredge.exe
     ```
-- **Run Test Suites**:
-  ```bash
-  ./build/Release/test_unit_all.exe
-  ./build/Release/test_e2e_expeditions.exe
-  ./build/Release/test_progression.exe
-  ```
+- **Run Test Suites (Fastest TDD Commands)**:
+  - **Single Command High-Speed Parallel Runner (Recommended)**:
+    ```bash
+    python scripts/tdd.py
+    ```
+    *(Builds incrementally and executes all 3 suites in parallel in < 0.1s)*
+  - **Parallel CTest**:
+    ```bash
+    ctest --test-dir build -C Release -j 3 --output-on-failure
+    ```
+  - **Continuous TDD Watch Mode**:
+    ```bash
+    python scripts/tdd.py --watch
+    ```
+  - **Direct Test Executables**:
+    ```bash
+    ./build/Release/test_unit_all.exe
+    ./build/Release/test_e2e_expeditions.exe
+    ./build/Release/test_progression.exe
+    ```
 - **Asset Synchronization**:
   - CMake copies [assets/](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/) to `<TARGET_FILE_DIR>/assets` as a post-build step. When editing shaders or textures, rebuild the target or update the build output directory so changes reflect in the running executable.
 - **Diagnostic Logs**:

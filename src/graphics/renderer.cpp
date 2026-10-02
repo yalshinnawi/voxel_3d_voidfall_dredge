@@ -255,7 +255,7 @@ void Renderer::render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels,
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending
-    glLineWidth(2.0f);
+    glLineWidth(1.0f);
 
     m_wireframe_shader.use();
     m_wireframe_shader.set_mat4("uProjection", m_proj);
@@ -306,7 +306,7 @@ void Renderer::render_grapple_cable(const glm::vec3& start, const glm::vec3& end
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive luminous cable
-    glLineWidth(2.5f);
+    glLineWidth(1.0f);
 
     m_wireframe_shader.use();
     m_wireframe_shader.set_mat4("uProjection", m_proj);
@@ -371,7 +371,7 @@ void Renderer::render_extraction_beacon(const glm::vec3& beacon_pos, float siren
         base_lines.insert(base_lines.end(), {b0.x, b0.y, b0.z, t0.x, t0.y, t0.z}); // vertical strut
     }
 
-    glLineWidth(2.5f);
+    glLineWidth(1.0f);
     glBufferSubData(GL_ARRAY_BUFFER, 0, base_lines.size() * sizeof(float), base_lines.data());
     m_wireframe_shader.set_vec4("uColor", glm::vec4(1.0f, 0.70f, 0.0f, 0.95f)); // industrial gold-orange
     glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(base_lines.size() / 3));
@@ -413,7 +413,7 @@ void Renderer::render_extraction_beacon(const glm::vec3& beacon_pos, float siren
         }
     }
 
-    glLineWidth(2.0f);
+    glLineWidth(1.0f);
     glBufferSubData(GL_ARRAY_BUFFER, 0, beam_lines.size() * sizeof(float), beam_lines.data());
     m_wireframe_shader.set_vec4("uColor", beam_color);
     glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(beam_lines.size() / 3));
@@ -441,7 +441,7 @@ void Renderer::render_extraction_beacon(const glm::vec3& beacon_pos, float siren
     siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, r_end.x, r_end.y, r_end.z});
     siren_lines.insert(siren_lines.end(), {siren_origin.x, siren_origin.y, siren_origin.z, l_end.x, l_end.y, l_end.z});
 
-    glLineWidth(3.0f);
+    glLineWidth(1.0f);
     glBufferSubData(GL_ARRAY_BUFFER, 0, siren_lines.size() * sizeof(float), siren_lines.data());
     m_wireframe_shader.set_vec4("uColor", glm::vec4(1.0f, 0.15f, 0.1f, 0.95f)); // emergency red siren
     glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(siren_lines.size() / 3));
@@ -682,7 +682,7 @@ void Renderer::render_block_cracks(const glm::ivec3& voxel_pos, float progress, 
     // Additive blending for luminous energy discharge
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glLineWidth(2.5f);
+    glLineWidth(1.0f);
 
     m_wireframe_shader.use();
     m_wireframe_shader.set_mat4("uProjection", m_proj);

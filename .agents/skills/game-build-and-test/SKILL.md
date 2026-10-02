@@ -35,18 +35,34 @@ cmake --build build --config Release
 
 ## 2. Running Automated Tests
 
-Use the automated test runner script:
-- Helper Script: [scripts/run_tests.ps1](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-build-and-test/scripts/run_tests.ps1)
+### A. High-Speed Parallel TDD Runner (Recommended)
+Use [scripts/tdd.py](file:///d:/Projects/voxel_3d_voidfall_dredge/scripts/tdd.py) for instantaneous parallel test execution and auto-builds:
+```bash
+# Build and run all test suites in parallel (<0.1s test execution):
+python scripts/tdd.py
 
-Execute via PowerShell:
-```powershell
-powershell -ExecutionPolicy Bypass -File .agents/skills/game-build-and-test/scripts/run_tests.ps1
+# Skip cmake build step (run binaries immediately):
+python scripts/tdd.py --no-build
+
+# Continuous TDD watch mode (recompiles & re-tests automatically on file save):
+python scripts/tdd.py --watch
+
+# Target a specific suite:
+python scripts/tdd.py --test unit
+python scripts/tdd.py --test progression
+python scripts/tdd.py --test e2e
 ```
 
-Or run individual test binaries directly:
-- `.\build\Release\test_unit_all.exe`
-- `.\build\Release\test_e2e_expeditions.exe`
-- `.\build\Release\test_progression.exe`
+### B. Parallel CTest Execution
+Run all test suites concurrently via CTest:
+```bash
+ctest --test-dir build -C Release -j 3 --output-on-failure
+```
+
+### C. Direct Test Binaries
+- `./build/Release/test_unit_all.exe`
+- `./build/Release/test_e2e_expeditions.exe`
+- `./build/Release/test_progression.exe`
 
 ---
 

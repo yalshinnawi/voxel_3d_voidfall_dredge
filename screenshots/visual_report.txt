@@ -27,25 +27,25 @@ PHASE BREAKDOWN:
   [4] GAMEPLAY CAVERN
       Master PNG: screenshots/04_gameplay_cavern.png (1600x900)
       Preview:    screenshots/previews/04_gameplay_cavern.jpg
-      Luminance:  0.289 | Non-Black: 99.951%
+      Luminance:  0.276 | Non-Black: 99.952%
       Evaluation: PASS
 
   [5] DRILL CRACKS
       Master PNG: screenshots/05_drilling_cracks.png (1600x900)
       Preview:    screenshots/previews/05_drilling_cracks.jpg
-      Luminance:  0.274 | Non-Black: 99.950%
+      Luminance:  0.283 | Non-Black: 99.950%
       Evaluation: PASS
 
   [6] LOOT TOASTS
       Master PNG: screenshots/06_loot_toasts.png (1600x900)
       Preview:    screenshots/previews/06_loot_toasts.jpg
-      Luminance:  0.248 | Non-Black: 99.916%
+      Luminance:  0.259 | Non-Black: 99.918%
       Evaluation: PASS
 
   [7] EXTRACTION BEACON
       Master PNG: screenshots/07_extraction_beacon.png (1600x900)
       Preview:    screenshots/previews/07_extraction_beacon.jpg
-      Luminance:  0.283 | Non-Black: 99.917%
+      Luminance:  0.289 | Non-Black: 99.917%
       Evaluation: PASS
 
 ================================================================================

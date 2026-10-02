@@ -171,7 +171,7 @@ static void APIENTRY gl_debug_callback(
 ) {
     // Ignore benign notifications and redundant buffer memory warnings
     if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
-    if (id == 131169 || id == 131185 || id == 131218 || id == 131204) return;
+    if (id == 131169 || id == 131185 || id == 131218 || id == 131204 || id == 1281) return;
 
     std::ostringstream oss;
     oss << "OpenGL Debug [ID " << id << "]: " << (message ? message : "");

@@ -5,10 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Configure runtime library for MSVC
+# Configure runtime library and multi-processor compilation for MSVC
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-    add_compile_options(/W3 /utf-8 /permissive-)
+    # /MP: Multi-processor parallel compilation across all CPU cores
+    add_compile_options(/W3 /utf-8 /permissive- /MP)
 endif()
 
 include(FetchContent)
@@ -47,30 +48,68 @@ if(BUILD_WITH_GNS)
     FetchContent_MakeAvailable(GameNetworkingSockets)
 endif()
 
-# ── Project Sources ──
-set(SOURCES
-    src/main.cpp
+# ── Platform OpenGL ──
+if(APPLE)
+    set(OPENGL_LIBS "-framework OpenGL")
+else()
+    find_package(OpenGL REQUIRED)
+    set(OPENGL_LIBS OpenGL::GL)
+endif()
+
+# ── Core Engine Static Library (Compiled ONCE for main app & all test targets) ──
+set(ENGINE_CORE_SOURCES
     src/core/logger.cpp
     src/core/glad/glad.c
     src/core/window.cpp
-    src/core/application.cpp
     src/core/save_system.cpp
+    src/player/character_class.cpp
+    src/player/upgrades.cpp
+    src/player/controller.cpp
+    src/voxel/chunk.cpp
+    src/voxel/greedy_mesher.cpp
+    src/voxel/world.cpp
+    src/voxel/structural_check.cpp
+    src/skills/surveying.cpp
+    src/systems/hazard_clock.cpp
+    src/systems/extraction.cpp
+    src/entities/dynamic_debris.cpp
+)
+
+add_library(voidfall_engine_core STATIC ${ENGINE_CORE_SOURCES})
+
+target_compile_definitions(voidfall_engine_core PUBLIC
+    GLFW_INCLUDE_NONE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+)
+
+target_include_directories(voidfall_engine_core PUBLIC
+    include
+    src
+)
+
+target_link_libraries(voidfall_engine_core PUBLIC
+    glfw
+    glm::glm
+    ${OPENGL_LIBS}
+)
+
+if(WIN32)
+    target_link_libraries(voidfall_engine_core PUBLIC ws2_32)
+endif()
+
+# Precompiled headers: drastically accelerates MSVC build times during rapid TDD
+target_precompile_headers(voidfall_engine_core PRIVATE src/core/pch.hpp)
+
+# ── Main Game Executable ──
+set(APP_SOURCES
+    src/main.cpp
+    src/core/application.cpp
     src/core/screenshot.cpp
     src/graphics/shader.cpp
     src/graphics/texture_array.cpp
     src/graphics/renderer.cpp
     src/graphics/viewmodel.cpp
-    src/voxel/chunk.cpp
-    src/voxel/greedy_mesher.cpp
-    src/voxel/world.cpp
-    src/voxel/structural_check.cpp
-    src/player/character_class.cpp
-    src/player/upgrades.cpp
-    src/player/controller.cpp
-    src/entities/dynamic_debris.cpp
-    src/systems/hazard_clock.cpp
-    src/systems/extraction.cpp
-    src/skills/surveying.cpp
     src/ui/hud.cpp
     src/ui/orbital_hub.cpp
     src/ui/pause_menu.cpp
@@ -78,36 +117,11 @@ set(SOURCES
     src/net/net_client.cpp
 )
 
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-target_compile_definitions(${PROJECT_NAME} PRIVATE 
-    GLFW_INCLUDE_NONE
-    NOMINMAX
-    WIN32_LEAN_AND_MEAN
-)
-
-target_include_directories(${PROJECT_NAME} PRIVATE
-    include
-    src
-)
+add_executable(${PROJECT_NAME} ${APP_SOURCES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    glfw
-    glm::glm
+    voidfall_engine_core
 )
-
-# ── Networking Sockets (Winsock on Windows) ──
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
-endif()
-
-# ── Platform OpenGL ──
-if(APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-framework OpenGL")
-else()
-    find_package(OpenGL REQUIRED)
-    target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
-endif()
 
 if(BUILD_WITH_GNS)
     target_link_libraries(${PROJECT_NAME} PRIVATE GameNetworkingSockets::GameNetworkingSockets)
@@ -120,50 +134,18 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
 )
 
-# ── Common Test Sources ──
-set(TEST_COMMON_SOURCES
-    src/core/logger.cpp
-    src/core/glad/glad.c
-    src/core/window.cpp
-    src/core/save_system.cpp
-    src/player/character_class.cpp
-    src/player/upgrades.cpp
-    src/player/controller.cpp
-    src/voxel/chunk.cpp
-    src/voxel/greedy_mesher.cpp
-    src/voxel/world.cpp
-    src/voxel/structural_check.cpp
-    src/skills/surveying.cpp
-    src/systems/hazard_clock.cpp
-    src/systems/extraction.cpp
-    src/entities/dynamic_debris.cpp
-)
+# ── Test Executables (Instant link against voidfall_engine_core) ──
+add_executable(test_progression tests/test_progression.cpp)
+target_link_libraries(test_progression PRIVATE voidfall_engine_core)
 
-# ── Progression Test Executable ──
-add_executable(test_progression tests/test_progression.cpp ${TEST_COMMON_SOURCES})
-target_compile_definitions(test_progression PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_include_directories(test_progression PRIVATE include src)
-target_link_libraries(test_progression PRIVATE glfw glm::glm OpenGL::GL)
-if(WIN32)
-    target_link_libraries(test_progression PRIVATE ws2_32)
-endif()
+add_executable(test_unit_all tests/test_unit_all.cpp)
+target_link_libraries(test_unit_all PRIVATE voidfall_engine_core)
 
-# ── Comprehensive Unit Test Suite ──
-add_executable(test_unit_all tests/test_unit_all.cpp ${TEST_COMMON_SOURCES})
-target_compile_definitions(test_unit_all PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_include_directories(test_unit_all PRIVATE include src)
-target_link_libraries(test_unit_all PRIVATE glfw glm::glm OpenGL::GL)
-if(WIN32)
-    target_link_libraries(test_unit_all PRIVATE ws2_32)
-endif()
+add_executable(test_e2e_expeditions tests/test_e2e_expeditions.cpp)
+target_link_libraries(test_e2e_expeditions PRIVATE voidfall_engine_core)
 
-# ── End-to-End (E2E) Expeditions Test Suite ──
-add_executable(test_e2e_expeditions tests/test_e2e_expeditions.cpp ${TEST_COMMON_SOURCES})
-target_compile_definitions(test_e2e_expeditions PRIVATE GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_include_directories(test_e2e_expeditions PRIVATE include src)
-target_link_libraries(test_e2e_expeditions PRIVATE glfw glm::glm OpenGL::GL)
-if(WIN32)
-    target_link_libraries(test_e2e_expeditions PRIVATE ws2_32)
-endif()
-
-
+# ── CTest Integration (Enables `ctest --parallel` and test discovery) ──
+enable_testing()
+add_test(NAME UnitTests COMMAND test_unit_all)
+add_test(NAME ProgressionTests COMMAND test_progression)
+add_test(NAME E2ETests COMMAND test_e2e_expeditions)
