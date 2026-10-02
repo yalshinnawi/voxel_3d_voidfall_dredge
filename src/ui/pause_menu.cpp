@@ -93,10 +93,12 @@ void PauseMenu::resize(int width, int height) {
 }
 
 void PauseMenu::draw_rect(float x, float y, float w, float h, const glm::vec4& color) {
-    m_ui_shader.use();
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
+    model = glm::scale(model, glm::vec3(w, h, 1.0f));
+
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
-    m_ui_shader.set_mat4("uProjection", proj);
-    m_ui_shader.set_vec4("uRect", glm::vec4(x, y, w, h));
+    m_ui_shader.use();
+    m_ui_shader.set_mat4("uProjection", proj * model);
     m_ui_shader.set_vec4("uColor", color);
 
     glBindVertexArray(m_rect_vao);
@@ -119,7 +121,7 @@ void PauseMenu::draw_text(const std::string& text, float x, float y, float scale
     glBindBuffer(GL_ARRAY_BUFFER, m_text_vbo);
 
     auto render_pass = [&](float ox, float oy, const glm::vec4& col) {
-        m_text_shader.set_vec4("uColor", col);
+        m_text_shader.set_vec4("uTextColor", col);
         std::vector<float> vertices;
         vertices.reserve(text.length() * 24);
 
@@ -186,6 +188,7 @@ PauseMenuAction PauseMenu::render(
     PauseMenuAction action = PauseMenuAction::None;
 
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -335,6 +338,7 @@ PauseMenuAction PauseMenu::render(
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 
     return action;
 }
