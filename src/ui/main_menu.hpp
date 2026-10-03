@@ -7,6 +7,7 @@ enum class MainMenuAction {
     Continue,
     NewExpedition,
     UpgradeTerminal,
+    Settings,
     Exit
 };
 

@@ -72,21 +72,21 @@ The engine supports automated visual frame capture via `--auto-play-test` and `-
 ```bash
 ./build/Release/VoidfallDredge.exe --auto-play-test
 ```
-This executes an automated 7-phase gameplay loop, computes visual metrics, and writes:
+This executes an automated 10-phase gameplay loop, computes visual metrics, and writes:
 - **Consolidated Contact Sheet Montage**: `screenshots/00_all_phases_montage.jpg` (or `.png`):
-  All 7 gameplay phases downscaled and stitched into a single 4x2 grid with an integrated visual health matrix card.
+  All 10 gameplay screens (Menus, Level Select, Delver Roster, Upgrades, Cavern, Drilling, Abilities, Esc Menu, Extraction, Debrief) + Subsystem Telemetry + Visual Health Matrix card stitched into a single 4x3 grid.
 - **Fast Diagnostics Report**: `screenshots/visual_report.txt` and `screenshots/visual_report.json`
-- **Lightweight Previews**: `screenshots/previews/*.jpg` (~40KB each for fast individual inspection)
-- **Master PNGs**: `screenshots/01_main_menu.png` through `07_extraction_beacon.png`
+- **Lightweight Previews**: `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg` (~40KB each, stamped with in-image date/time label; auto-removed during analysis)
+- **Master PNGs**: `screenshots/01_main_menu.png` through `10_mission_debrief.png`
 
 ### Fast Screenshot Analysis Protocol (Optimized for Speed)
 > [!IMPORTANT]
-> **Do NOT sequentially inspect all 7 individual PNGs across multiple tool turns.** Loading 7 full 1600x900 PNGs consumes multi-megabytes of context and takes several minutes of round-trips.
+> **Do NOT sequentially inspect individual PNGs across multiple tool turns.** Loading 10 full 1600x900 PNGs consumes tens of megabytes of context and takes several minutes of round-trips.
 >
 > **Follow this 1-step workflow instead:**
-> 1. Run `python scripts/analyze_screenshots.py` or inspect `screenshots/visual_report.txt` for instantaneous metrics.
-> 2. Call `view_file` on `screenshots/00_all_phases_montage.jpg` to visually inspect all 7 phases simultaneously in a **single turn (< 1 second)**!
-> 3. Only if a specific anomaly is spotted, inspect that specific lightweight frame preview in `screenshots/previews/0X_*.jpg`.
+> 1. Run `python scripts/analyze_screenshots.py` for instantaneous metrics and **automatic cleanup of temporary previews** (saving disk space). Pass `--keep-previews` to retain them.
+> 2. Call `view_file` on `screenshots/00_all_phases_montage.jpg` to visually inspect all 10 screens simultaneously in a **single turn (< 1 second)**!
+> 3. Only if a specific anomaly is spotted, inspect that specific lightweight frame preview in `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg` using `--keep-previews`.
 
 
 ---

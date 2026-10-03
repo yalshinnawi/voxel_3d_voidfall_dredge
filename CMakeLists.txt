@@ -67,12 +67,16 @@ set(ENGINE_CORE_SOURCES
     src/player/controller.cpp
     src/voxel/chunk.cpp
     src/voxel/greedy_mesher.cpp
+    src/voxel/level_shapes.cpp
     src/voxel/world.cpp
     src/voxel/structural_check.cpp
     src/skills/surveying.cpp
     src/systems/hazard_clock.cpp
     src/systems/extraction.cpp
     src/entities/dynamic_debris.cpp
+    src/entities/enemies/void_stalker.cpp
+    src/entities/enemies/seismic_burrower.cpp
+    src/audio/audio_engine.cpp
 )
 
 add_library(voidfall_engine_core STATIC ${ENGINE_CORE_SOURCES})
@@ -95,7 +99,7 @@ target_link_libraries(voidfall_engine_core PUBLIC
 )
 
 if(WIN32)
-    target_link_libraries(voidfall_engine_core PUBLIC ws2_32)
+    target_link_libraries(voidfall_engine_core PUBLIC ws2_32 winmm)
 endif()
 
 # Precompiled headers: drastically accelerates MSVC build times during rapid TDD
@@ -144,8 +148,24 @@ target_link_libraries(test_unit_all PRIVATE voidfall_engine_core)
 add_executable(test_e2e_expeditions tests/test_e2e_expeditions.cpp)
 target_link_libraries(test_e2e_expeditions PRIVATE voidfall_engine_core)
 
+add_executable(test_level_collision tests/test_level_collision.cpp)
+target_link_libraries(test_level_collision PRIVATE voidfall_engine_core)
+
+add_executable(test_enemy_stalker tests/test_enemy_stalker.cpp)
+target_link_libraries(test_enemy_stalker PRIVATE voidfall_engine_core)
+
+add_executable(test_enemy_burrower tests/test_enemy_burrower.cpp)
+target_link_libraries(test_enemy_burrower PRIVATE voidfall_engine_core)
+
+add_executable(test_audio tests/test_audio.cpp)
+target_link_libraries(test_audio PRIVATE voidfall_engine_core)
+
 # ── CTest Integration (Enables `ctest --parallel` and test discovery) ──
 enable_testing()
 add_test(NAME UnitTests COMMAND test_unit_all)
 add_test(NAME ProgressionTests COMMAND test_progression)
 add_test(NAME E2ETests COMMAND test_e2e_expeditions)
+add_test(NAME LevelCollisionTests COMMAND test_level_collision)
+add_test(NAME EnemyStalkerTests COMMAND test_enemy_stalker)
+add_test(NAME EnemyBurrowerTests COMMAND test_enemy_burrower)
+add_test(NAME AudioTests COMMAND test_audio)

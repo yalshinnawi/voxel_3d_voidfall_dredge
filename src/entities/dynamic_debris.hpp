@@ -19,10 +19,20 @@ public:
     );
     ~DynamicDebris();
 
+    // Non-copyable (owns OpenGL GPU resources)
+    DynamicDebris(const DynamicDebris&) = delete;
+    DynamicDebris& operator=(const DynamicDebris&) = delete;
+
+    // Movable
+    DynamicDebris(DynamicDebris&& other) noexcept;
+    DynamicDebris& operator=(DynamicDebris&& other) noexcept;
+
     struct CollisionResult {
         bool hit_player{false};
         float damage{0.0f};
         bool hit_bulkhead{false};
+        bool placed_on_ground{false};
+        glm::ivec3 place_pos{0};
         bool shattered{false};
         glm::vec3 shatter_pos{0.0f};
         uint8_t shatter_mat{0};
@@ -35,9 +45,13 @@ public:
     uint32_t id() const { return m_id; }
     const glm::vec3& position() const { return m_position; }
     const glm::vec3& velocity() const { return m_velocity; }
+    const glm::vec3& rotation() const { return m_rotation; }
     bool is_sleeping() const { return m_sleeping; }
     bool is_destroyed() const { return m_destroyed; }
     uint8_t material_id() const { return m_material_id; }
+    unsigned int vao() const { return m_vao; }
+    size_t vertex_count() const { return m_vertex_count; }
+    size_t block_count() const { return m_block_count; }
 
     bool has_dealt_damage{false};
 

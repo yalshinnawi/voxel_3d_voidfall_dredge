@@ -44,7 +44,7 @@ inline void generate_proportional_sans_font_atlas(
         // Space or non-printable glyphs
         if (max_col == -1) {
             GlyphMetric gm;
-            gm.advanceX = (c == ' ') ? 12.0f : 8.0f;
+            gm.advanceX = (c == ' ') ? 10.0f : 8.0f;
             gm.bearingX = 0.0f;
             gm.bearingY = 0.0f;
             gm.width = 0.0f;
@@ -62,26 +62,28 @@ inline void generate_proportional_sans_font_atlas(
         max_col = std::max(0, std::min(7, max_col));
 
         int cell_base_x = c * GLYPH_SIZE;
+        const int OFFSET_X = 4;
+        const int OFFSET_Y = 4;
+        const int PIXEL_SCALE = 3;
 
         // 2. Rasterize glyph into 32x32 cell with stroke dilation and smooth antialiasing
         for (int y = 0; y < 8; ++y) {
             uint8_t row = font8x8_basic[c][y];
             for (int x = 0; x < 8; ++x) {
                 if (row & (1 << x)) {
-                    int bx = cell_base_x + x * 4;
-                    int by = y * 4;
+                    int bx = cell_base_x + OFFSET_X + x * PIXEL_SCALE;
+                    int by = OFFSET_Y + y * PIXEL_SCALE;
 
-                    // Fill 4x4 core with 1-2px dilation for bold, legible weight
-                    for (int dy = -1; dy <= 4; ++dy) {
-                        for (int dx = -1; dx <= 4; ++dx) {
+                    // Fill 3x3 core with smooth antialiased outline
+                    for (int dy = -1; dy <= PIXEL_SCALE; ++dy) {
+                        for (int dx = -1; dx <= PIXEL_SCALE; ++dx) {
                             int px = bx + dx;
                             int py = by + dy;
 
-                            // Keep inside character's 32x32 boundary
                             if (px >= cell_base_x && px < cell_base_x + GLYPH_SIZE && py >= 0 && py < GLYPH_SIZE) {
                                 int val = 255;
-                                if (dx < 0 || dx >= 4 || dy < 0 || dy >= 4) {
-                                    val = 195; // Smooth antialiased outline
+                                if (dx < 0 || dx >= PIXEL_SCALE || dy < 0 || dy >= PIXEL_SCALE) {
+                                    val = 180; // Smooth antialiased border
                                 }
                                 int idx = py * out_w + px;
                                 if (out_atlas[idx] < val) {
@@ -95,8 +97,11 @@ inline void generate_proportional_sans_font_atlas(
         }
 
         // 3. Compute exact proportional quad metrics
-        float px_left = static_cast<float>(cell_base_x + min_col * 4);
-        float px_right = static_cast<float>(cell_base_x + (max_col + 1) * 4);
+        int left_i = std::max(0, OFFSET_X + min_col * PIXEL_SCALE - 1);
+        int right_i = std::min(GLYPH_SIZE, OFFSET_X + (max_col + 1) * PIXEL_SCALE + 1);
+
+        float px_left = static_cast<float>(cell_base_x + left_i);
+        float px_right = static_cast<float>(cell_base_x + right_i);
         float glyph_w = px_right - px_left;
 
         GlyphMetric gm;

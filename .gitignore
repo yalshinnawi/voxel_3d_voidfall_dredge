@@ -35,7 +35,8 @@ external/
 *.log
 
 # Player Saves & Test Output Artifacts
-saves/
+saves/*
+!saves/README.md
 tests/*.json
 test_*.json
 e2e_*.json

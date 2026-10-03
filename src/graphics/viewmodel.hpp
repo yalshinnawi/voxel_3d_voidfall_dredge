@@ -13,6 +13,7 @@ struct ViewmodelVertex {
     glm::vec3 pos;
     glm::vec3 normal;
     glm::vec4 color;
+    glm::vec4 material; // x: metallic, y: roughness, z: emissive, w: ao
 };
 
 class ViewModel {
@@ -36,14 +37,62 @@ public:
         bool is_drilling,
         bool is_in_range,
         ToolSlot active_tool,
-        const glm::vec3& drill_target_pos = glm::vec3(0.0f)
+        const glm::vec3& drill_target_pos = glm::vec3(0.0f),
+        bool is_firing = false
     );
 
 private:
     void init_geometry();
-    void add_box(std::vector<ViewmodelVertex>& verts, const glm::vec3& min_p, const glm::vec3& max_p, const glm::vec4& color);
-    void add_cylinder(std::vector<ViewmodelVertex>& verts, const glm::vec3& base, float radius, float length, int segments, const glm::vec4& color, int axis = 2);
-    void add_cone(std::vector<ViewmodelVertex>& verts, const glm::vec3& base, float radius, float length, int segments, const glm::vec4& color);
+
+    void add_box(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& min_p,
+        const glm::vec3& max_p,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
+    );
+
+    void add_transformed_box(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::mat4& transform,
+        const glm::vec3& half_extents,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
+    );
+
+    void add_capsule(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& p1,
+        const glm::vec3& p2,
+        float r1,
+        float r2,
+        int segments,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
+    );
+
+    void add_cylinder(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& base,
+        float radius,
+        float length,
+        int segments,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f),
+        int axis = 2,
+        bool cap_ends = true
+    );
+
+    void add_cone(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& base,
+        float radius_base,
+        float radius_tip,
+        float length,
+        int segments,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
+    );
 
     Shader m_shader;
 
@@ -59,9 +108,22 @@ private:
     unsigned int m_piston_vbo{0};
     size_t m_piston_count{0};
 
+    unsigned int m_carbine_vao{0};
+    unsigned int m_carbine_vbo{0};
+    size_t m_carbine_count{0};
+
+    unsigned int m_scattergun_vao{0};
+    unsigned int m_scattergun_vbo{0};
+    size_t m_scattergun_count{0};
+
+    unsigned int m_railgun_vao{0};
+    unsigned int m_railgun_vbo{0};
+    size_t m_railgun_count{0};
+
     float m_total_time{0.0f};
     float m_drill_rotation{0.0f};
     float m_switch_timer{0.0f};
+    float m_muzzle_flash_timer{0.0f};
     ToolSlot m_last_tool{ToolSlot::MiningDrill};
     CharacterClass m_character_class{CharacterClass::Demolitionist};
     int m_drill_speed_tier{0};

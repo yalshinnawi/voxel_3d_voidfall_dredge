@@ -1,0 +1,27 @@
+===================================================================================
+  VOIDFALL DREDGE - LEVEL DESIGN & ROOM ARCHETYPES VISUAL SHOWCASE REPORT
+===================================================================================
+  Montage Canvas: docs/level_design/level_shapes_showcase.png (1600x900, 4x4 Grid)
+  Total Archetypes: 16 / 16
+-----------------------------------------------------------------------------------
+  SLOT  ROOM / ARCHETYPE        TIMESTAMP            LUM     NON-BLACK  STATUS
+-----------------------------------------------------------------------------------
+  [ 1]  SPAWN STAGING CAVERN    2026-10-03 11:05:29  0.188   100.0%     PASS
+  [2 ]  MINING PILLAR HALL      2026-10-03 11:05:29  0.160   100.0%     PASS
+  [3 ]  CRYSTALLINE GEODE       2026-10-03 11:05:29  0.475   100.0%     PASS
+  [4 ]  TERRACED QUARRY         2026-10-03 11:05:30  0.198   100.0%     PASS
+  [5 ]  INDUSTRIAL VAULT BUNKER 2026-10-03 11:05:30  0.163   100.0%     PASS
+  [6 ]  FAULT LINE CREVASSE     2026-10-03 11:05:30  0.152   100.0%     PASS
+  [7 ]  ABYSSAL VERTICAL CHASM  2026-10-03 11:05:30  0.185   100.0%     PASS
+  [8 ]  RADIOACTIVE CORE SANCTUARY2026-10-03 11:05:30  0.408   100.0%     PASS
+  [9 ]  EXTRACTION LANDING BAY  2026-10-03 11:05:31  0.189   100.0%     PASS
+  [10]  MAGMA CALDERA LAKE      2026-10-03 11:05:31  0.279   100.0%     PASS
+  [11]  SPIKE TRENCH ARENA      2026-10-03 11:05:31  0.152   100.0%     PASS
+  [12]  VOID SINGULARITY RIFT   2026-10-03 11:05:31  0.204   100.0%     PASS
+  [13]  FUNGOID BIO GROTTO      2026-10-03 11:05:31  0.358   100.0%     PASS
+  [14]  LASER DEFENSE FOUNDRY   2026-10-03 11:05:32  0.171   100.0%     PASS
+  [15]  CRUMBLING ARCH CANYON   2026-10-03 11:05:32  0.195   100.0%     PASS
+  [16]  CORRIDOR BULKHEAD VAULT 2026-10-03 11:05:32  0.177   100.0%     PASS
+===================================================================================
+  OVERALL LEVEL SHAPES STATUS: PASS (ALL HEALTHY)
+===================================================================================

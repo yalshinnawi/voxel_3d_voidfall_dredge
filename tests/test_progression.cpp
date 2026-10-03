@@ -34,7 +34,7 @@ int main() {
         CHECK(vngd.name == "Rhodes", "Vanguard name mismatch");
         CHECK(std::abs(vngd.baseMineSpeed - 1.0f) < 0.001f, "Vanguard mine speed mismatch");
         CHECK(std::abs(vngd.moveSpeed - 0.88f) < 0.001f, "Vanguard move speed mismatch");
-        CHECK(std::abs(vngd.suitIntegrity - 160.0f) < 0.001f, "Vanguard suit integrity mismatch");
+        CHECK(std::abs(vngd.suitIntegrity - 135.0f) < 0.001f, "Vanguard suit integrity mismatch");
         CHECK(vngd.maxBulkheads == 12, "Vanguard bulkheads mismatch");
         CHECK(std::abs(vngd.fallingDamageReduction - 0.50f) < 0.001f, "Vanguard damage reduction mismatch");
 
@@ -50,66 +50,77 @@ int main() {
         std::cout << " -> All 3 Archetype attributes verified successfully." << std::endl;
     }
 
-    // Test 2: Exponential Cost Formula & Upgrade Purchasing
+    // Test 2: Exponential Coin Cost Formula, Level Gating & Upgrade Purchasing
     {
-        std::cout << "[Test 2] Testing EXP Cost Formula..." << std::endl;
-        CHECK(UpgradeTree::get_exp_cost(0) == 100, "Tier 0 cost mismatch");
-        CHECK(UpgradeTree::get_exp_cost(1) == 160, "Tier 1 cost mismatch");
-        CHECK(UpgradeTree::get_exp_cost(2) == 256, "Tier 2 cost mismatch");
-        CHECK(UpgradeTree::get_exp_cost(3) == 410, "Tier 3 cost mismatch");
-        CHECK(UpgradeTree::get_exp_cost(4) == 656, "Tier 4 cost mismatch");
-        CHECK(UpgradeTree::get_exp_cost(5) == 0, "Tier 5 (max) cost mismatch");
+        std::cout << "[Test 2] Testing Coin Cost Formula & Level Gating..." << std::endl;
+        CHECK(UpgradeTree::get_coin_cost(0) == 100, "Tier 0 coin cost mismatch");
+        CHECK(UpgradeTree::get_coin_cost(1) == 160, "Tier 1 coin cost mismatch");
+        CHECK(UpgradeTree::get_coin_cost(2) == 256, "Tier 2 coin cost mismatch");
+        CHECK(UpgradeTree::get_coin_cost(3) == 410, "Tier 3 coin cost mismatch");
+        CHECK(UpgradeTree::get_coin_cost(4) == 656, "Tier 4 coin cost mismatch");
+        CHECK(UpgradeTree::get_coin_cost(5) == 0, "Tier 5 (max) coin cost mismatch");
 
-        std::cout << " -> Exponential costs matched: 100 -> 160 -> 256 -> 410 -> 656 EXP." << std::endl;
+        std::cout << " -> Exponential coin costs matched: 100 -> 160 -> 256 -> 410 -> 656 Coins." << std::endl;
 
         UpgradeTree tree;
-        int exp = 1000;
+        int coins = 1000;
         int voidite = 100;
         int titanium = 100;
+        int player_level = 1;
 
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 0, "Initial tier not 0");
-        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, exp, voidite, titanium), "Cannot purchase tier 1");
-        bool bought = tree.purchase(UpgradeType::DrillSpeed, exp, voidite, titanium);
+        // Level 1: Can purchase Tier 1 (requires Level 1)
+        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Cannot purchase tier 1 at level 1");
+        bool bought = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
         CHECK(bought, "Purchase tier 1 failed");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 1, "Tier not 1 after purchase");
-        CHECK(exp == 900, "EXP not deducted correctly"); // 1000 - 100
+        CHECK(coins == 900, "Coins not deducted correctly (1000 - 100)");
 
-        // Purchase tier 2
-        bought = tree.purchase(UpgradeType::DrillSpeed, exp, voidite, titanium);
-        CHECK(bought, "Purchase tier 2 failed");
+        // At Level 1, cannot purchase Tier 2 (requires Level 2)
+        CHECK(!tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Should not allow Tier 2 at Level 1");
+        bool bought_fail = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        CHECK(!bought_fail, "Purchase Tier 2 should fail at Level 1");
+        CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 1, "Tier should remain 1");
+
+        // Level up to Level 2: Now Tier 2 purchase succeeds!
+        player_level = 2;
+        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Cannot purchase Tier 2 at Level 2");
+        bought = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        CHECK(bought, "Purchase tier 2 failed at Level 2");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 2, "Tier not 2 after purchase");
-        CHECK(exp == 740, "EXP not deducted correctly for tier 2"); // 900 - 160
+        CHECK(coins == 740, "Coins not deducted correctly for tier 2 (900 - 160)");
 
-        std::cout << " -> Upgrade purchasing and currency deduction verified." << std::endl;
+        std::cout << " -> Upgrade purchasing, level gating (Tier N requires Lv N), and coin deduction verified." << std::endl;
     }
 
-    // Test 3: Respec Feature (85% refund)
+    // Test 3: Respec Feature (85% Coins refund)
     {
-        std::cout << "[Test 3] Testing Respec with 85% Refund..." << std::endl;
+        std::cout << "[Test 3] Testing Respec with 85% Coins Refund..." << std::endl;
         UpgradeTree tree;
-        int exp = 2000;
+        int coins = 2000;
         int voidite = 100;
         int titanium = 100;
+        int player_level = 5;
 
-        // Buy 3 tiers of DrillSpeed (100 + 160 + 256 = 516 EXP)
-        tree.purchase(UpgradeType::DrillSpeed, exp, voidite, titanium);
-        tree.purchase(UpgradeType::DrillSpeed, exp, voidite, titanium);
-        tree.purchase(UpgradeType::DrillSpeed, exp, voidite, titanium);
+        // Buy 3 tiers of DrillSpeed (100 + 160 + 256 = 516 Coins)
+        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
 
-        // Buy 1 tier of ReinforcedPlating (100 EXP)
-        tree.purchase(UpgradeType::ReinforcedPlating, exp, voidite, titanium);
+        // Buy 1 tier of ReinforcedPlating (100 Coins)
+        tree.purchase(UpgradeType::ReinforcedPlating, player_level, coins, voidite, titanium);
 
-        int total_spent = tree.get_total_spent_exp();
-        CHECK(total_spent == 616, "Total spent EXP mismatch");
+        int total_spent = tree.get_total_spent_coins();
+        CHECK(total_spent == 616, "Total spent Coins mismatch");
 
         int refunded = 0;
         tree.respec(refunded);
-        int expected_refund = static_cast<int>(std::round(616 * 0.85f)); // 524 EXP
+        int expected_refund = static_cast<int>(std::round(616 * 0.85f)); // 524 Coins
         CHECK(refunded == expected_refund, "Refund amount mismatch");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 0, "DrillSpeed tier not reset");
         CHECK(tree.get_tier(UpgradeType::ReinforcedPlating) == 0, "ReinforcedPlating tier not reset");
 
-        std::cout << " -> Respec refunded exactly 85% (" << refunded << " / " << total_spent << " EXP) and reset tiers." << std::endl;
+        std::cout << " -> Respec refunded exactly 85% (" << refunded << " / " << total_spent << " Coins) and reset tiers." << std::endl;
     }
 
     // Test 4: Save & Load Persistence
@@ -117,6 +128,7 @@ int main() {
         std::cout << "[Test 4] Testing JSON Save / Load Persistence..." << std::endl;
         UserProfile p_write;
         p_write.total_exp = 1450;
+        p_write.total_coins = 580;
         p_write.total_voidite = 65;
         p_write.total_titanium = 42;
         p_write.selected_class_id = 1; // Vanguard
@@ -135,6 +147,8 @@ int main() {
         CHECK(loaded, "Load profile failed");
 
         CHECK(p_read.total_exp == 1450, "Loaded total_exp mismatch");
+        CHECK(p_read.total_coins == 580, "Loaded total_coins mismatch");
+        CHECK(p_read.get_player_level() == 4, "Derived player level mismatch for 1450 EXP (should be Level 4)");
         CHECK(p_read.total_voidite == 65, "Loaded total_voidite mismatch");
         CHECK(p_read.total_titanium == 42, "Loaded total_titanium mismatch");
         CHECK(p_read.selected_class_id == 1, "Loaded selected_class_id mismatch");
@@ -159,9 +173,9 @@ int main() {
         upg.thrusterTankTier = 2;
         player.apply_attributes_and_upgrades(CharacterClass::Vanguard, upg);
 
-        // Vanguard base 160 HP + 2 * 15 = 190 HP
-        CHECK(std::abs(player.max_health() - 190.0f) < 0.001f, "Max health mismatch");
-        CHECK(std::abs(player.health() - 190.0f) < 0.001f, "Health mismatch");
+        // Vanguard base 135 HP + 2 * 15 = 165 HP
+        CHECK(std::abs(player.max_health() - 165.0f) < 0.001f, "Max health mismatch");
+        CHECK(std::abs(player.health() - 165.0f) < 0.001f, "Health mismatch");
         // Thruster tank 100 * (1 + 2 * 0.20) = 140
         CHECK(std::abs(player.exo().max_power - 140.0f) < 0.001f, "Max power mismatch");
 
@@ -171,9 +185,86 @@ int main() {
         float taken = player.take_damage(raw_debris_damage, true);
         // 50 * (1 - 0.70) = 15.0 damage
         CHECK(std::abs(taken - 15.0f) < 0.01f, "Debris damage taken mismatch");
-        CHECK(std::abs(player.health() - 175.0f) < 0.01f, "Health after debris mismatch");
+        CHECK(std::abs(player.health() - 150.0f) < 0.01f, "Health after debris mismatch");
 
         std::cout << " -> Vanguard 50% + Plating 20% debris damage mitigation verified: 50 dmg -> 15 dmg taken." << std::endl;
+    }
+
+    // Test 6: Player Level Progression, Level-Up Coins Bonus, Sector & Class Gating
+    {
+        std::cout << "[Test 6] Testing Player Level Progression, Sector/Class Gating & Coin Upgrades..." << std::endl;
+        UserProfile profile;
+        profile.total_exp = 0;
+        profile.total_coins = 200;
+        profile.total_voidite = 0;
+        profile.total_titanium = 0;
+
+        // Baseline Level 1 (0 EXP)
+        CHECK(profile.get_player_level() == 1, "Initial level should be 1");
+        CHECK(profile.is_sector_unlocked(1), "Sector 1 must be unlocked at Level 1");
+        CHECK(!profile.is_sector_unlocked(2), "Sector 2 should be locked at Level 1");
+        CHECK(!profile.is_sector_unlocked(3), "Sector 3 should be locked at Level 1");
+
+        CHECK(profile.is_class_unlocked(CharacterClass::Demolitionist), "Demolitionist must be unlocked at Level 1");
+        CHECK(!profile.is_class_unlocked(CharacterClass::Vanguard), "Vanguard should be locked at Level 1");
+        CHECK(!profile.is_class_unlocked(CharacterClass::Scout), "Scout should be locked at Level 1");
+
+        // Add 350 EXP -> reaches Level 2 (+150 bonus coins)
+        int lvls = 0, bonus = 0;
+        bool leveled_up = profile.add_exp(350, lvls, bonus);
+        CHECK(leveled_up, "Should have leveled up to Level 2");
+        CHECK(lvls == 1, "Should have gained 1 level");
+        CHECK(bonus == 150, "Level up bonus should be +150 coins");
+        CHECK(profile.get_player_level() == 2, "Level should now be 2");
+        CHECK(profile.total_coins == 350, "Coins should be 200 + 150 = 350");
+
+        // Level 2 Unlocks: Sector 2 and Vanguard!
+        CHECK(profile.is_sector_unlocked(2), "Sector 2 should be unlocked at Level 2");
+        CHECK(!profile.is_sector_unlocked(3), "Sector 3 should still be locked at Level 2");
+        CHECK(profile.is_class_unlocked(CharacterClass::Vanguard), "Vanguard should be unlocked at Level 2");
+        CHECK(!profile.is_class_unlocked(CharacterClass::Scout), "Scout should still be locked at Level 2");
+
+        // Add 400 more EXP (total 750) -> reaches Level 3 (+150 bonus coins)
+        leveled_up = profile.add_exp(400, lvls, bonus);
+        CHECK(leveled_up, "Should have leveled up to Level 3");
+        CHECK(profile.get_player_level() == 3, "Level should now be 3");
+        CHECK(profile.total_coins == 500, "Coins should be 350 + 150 = 500");
+        CHECK(profile.is_class_unlocked(CharacterClass::Scout), "Scout should be unlocked at Level 3");
+
+        // Add 600 more EXP (total 1350) -> reaches Level 4 (+150 bonus coins)
+        profile.add_exp(600, lvls, bonus);
+        CHECK(profile.get_player_level() == 4, "Level should now be 4");
+        CHECK(profile.is_sector_unlocked(3), "Sector 3 should be unlocked at Level 4");
+
+        // Grant materials to test Coin-based purchasing and respec
+        profile.grant_resources(0, 0, 50, 50);
+
+        // Purchase DrillSpeed (100 coins)
+        bool p1 = profile.upgrades.purchase(UpgradeType::DrillSpeed, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+        CHECK(p1, "Purchase DrillSpeed Tier 1 failed");
+        CHECK(profile.upgrades.drillSpeedTier == 1, "DrillSpeed tier not 1");
+        CHECK(profile.total_coins == 550, "Coins deduction mismatch (650 - 100)");
+
+        // Purchase ThrusterTank (100 coins)
+        bool p2 = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+        CHECK(p2, "Purchase ThrusterTank Tier 1 failed");
+        CHECK(profile.upgrades.thrusterTankTier == 1, "ThrusterTank tier not 1");
+        CHECK(profile.total_coins == 450, "Coins deduction mismatch (550 - 100)");
+
+        int total_spent = profile.upgrades.get_total_spent_coins();
+        CHECK(total_spent == 200, "Total spent mismatch");
+
+        // Execute respec (85% recovery: 200 * 0.85 = 170 Coins)
+        int refunded = 0;
+        profile.upgrades.respec(refunded);
+        CHECK(refunded == 170, "Refund calculation mismatch");
+        profile.total_coins += refunded;
+        CHECK(profile.total_coins == 620, "Total Coins after respec refund mismatch (450 + 170)");
+
+        CHECK(profile.upgrades.drillSpeedTier == 0, "DrillSpeed tier not reset to 0");
+        CHECK(profile.upgrades.thrusterTankTier == 0, "ThrusterTank tier not reset to 0");
+
+        std::cout << " -> Level progression (Lv 1-4), level-up coin bonuses, sector/class gating, and coin-based respec verified." << std::endl;
     }
 
     std::cout << "========================================" << std::endl;

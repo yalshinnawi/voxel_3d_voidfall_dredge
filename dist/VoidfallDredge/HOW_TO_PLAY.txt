@@ -1,0 +1,50 @@
+================================================================================
+                           VOIDFALL: DREDGE
+                3D Extraction-Survival Voxel Engine
+================================================================================
+
+QUICK START:
+  1. Simply double-click "VoidfallDredge.exe" (or "Play_Voidfall_Dredge.bat") to play!
+  2. No installation required. All game assets and saves are self-contained.
+
+SYSTEM REQUIREMENTS:
+  - OS: Windows 10 / 11 (64-bit)
+  - Graphics: OpenGL 3.3 compatible GPU (NVIDIA, AMD, or Intel HD Graphics)
+  - Microsoft Visual C++ 2015-2022 Redistributable (x64)
+    * If you get an error about "MSVCP140.dll" or "VCRUNTIME140.dll missing",
+      download and install the official runtime here:
+      https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+CONTROLS:
+  - W, A, S, D       : Move Delver
+  - Mouse            : Look around
+  - Spacebar         : Jump / Climb
+  - Left Shift       : Sprint (consumes Delver stamina)
+  - Left Click       : Mine voxels / Attack with pickaxe
+  - Right Click      : Skill / Secondary action (Seismic pulse / Sonar)
+  - E                : Interact (Evac Beacon, Terminals, Drops)
+  - F                : Toggle Helmet Flashlight
+  - Tab              : Delver Skill Matrix & Upgrades overview
+  - Escape           : Pause Menu / Settings / Return to Orbital Hub
+
+GAMEPLAY LOOP:
+  1. Orbital Hub: Select your Delver Class (Scout, Demolitionist, Engineer, Bulwark).
+  2. Expedition: Drop into the asteroid cavern to mine Voidite and Titanium voxels.
+  3. Hazard Clock: The cavern escalates through 4 hazard phases (Phase I to Critical).
+     Tremors, ceiling collapses, and hostile Void Stalkers will increase over time.
+  4. Extraction: Locate the Evac Beacon, trigger the transmission, survive the holdout,
+     and extract before the sector caves in!
+  5. Progression: Bank your resources in the Orbital Hub to unlock permanent stat perks!
+
+MULTIPLAYER CO-OP:
+  - To Host:
+      Launch "Play_Voidfall_Dredge.bat" (runs in Host mode on port 27015).
+      Ensure your port 27015 (UDP/TCP) is forwarded or you are using LAN / Radmin / Hamachi.
+  - To Join a Friend's Game:
+      Right-click "Join_Multiplayer_Game.bat", edit your friend's IP address, and save.
+      Or run in command prompt / terminal:
+      VoidfallDredge.exe --client <Friend_IP_Address> --port 27015
+
+SAVES:
+  - Your progression and character stats are saved to the "saves/" folder in this directory.
+================================================================================

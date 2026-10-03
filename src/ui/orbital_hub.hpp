@@ -35,13 +35,15 @@ enum class DebriefAction {
 enum class MenuSubView {
     Main = 0,
     SectorSelect = 1,
-    Upgrades = 2
+    Upgrades = 2,
+    Settings = 3
 };
 
 enum class HubTab {
     SectorSelect = 0,
     DelverRoster = 1,
-    UpgradeTerminal = 2
+    UpgradeTerminal = 2,
+    AudioSettings = 3
 };
 
 class OrbitalHubUI {
@@ -73,24 +75,41 @@ public:
     bool wants_return_to_main_menu() const { return m_return_to_title; }
     void clear_return_to_main_menu() { m_return_to_title = false; }
 
+    bool check_and_clear_test_sound() {
+        bool req = m_test_sound_requested;
+        m_test_sound_requested = false;
+        return req;
+    }
+
+    bool is_test_mode() const { return m_test_mode; }
+    void set_test_mode(bool tm) { m_test_mode = tm; }
+
 private:
     void init_gl();
     void init_font_atlas();
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
     void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
+    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
+    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
+    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
+    void draw_panel_with_border(float x, float y, float w, float h, const glm::vec4& bg_col, const glm::vec4& border_col, float border_width = 1.0f);
 
     void render_sector_select_carousel(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, MainMenuAction& action);
     void render_delver_roster(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
     void render_upgrade_terminal(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
+    void render_audio_settings(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
 
     int m_width{1600};
     int m_height{900};
 
     MenuSubView m_subview{MenuSubView::Main};
     HubTab m_active_tab{HubTab::SectorSelect};
+    bool m_test_mode{false};
     bool m_profile_dirty{false};
     bool m_return_to_title{false};
+    bool m_test_sound_requested{false};
     float m_purchase_pulse_timer{0.0f};
+    int   m_carousel_page{0};   // which page of 3 sector cards is shown (0-indexed)
     std::string m_terminal_msg;
     glm::vec4 m_terminal_msg_col{0.2f, 0.95f, 0.4f, 1.0f};
 

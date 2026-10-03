@@ -29,12 +29,12 @@ void UpgradeTree::set_tier(UpgradeType type, int tier) {
     }
 }
 
-int UpgradeTree::get_exp_cost(int current_tier) {
+int UpgradeTree::get_coin_cost(int current_tier) {
     if (current_tier >= MAX_TIER) return 0;
-    // Cost(tier) = BaseEXP * 1.6^tier (100 -> 160 -> 256 -> 410 -> 656 EXP)
-    static const int s_exp_costs[MAX_TIER] = {100, 160, 256, 410, 656};
+    // Cost(tier) = BaseCoin * 1.6^tier (100 -> 160 -> 256 -> 410 -> 656 Coins)
+    static const int s_coin_costs[MAX_TIER] = {100, 160, 256, 410, 656};
     if (current_tier >= 0 && current_tier < MAX_TIER) {
-        return s_exp_costs[current_tier];
+        return s_coin_costs[current_tier];
     }
     float cost = 100.0f * std::pow(1.6f, static_cast<float>(current_tier));
     return static_cast<int>(std::round(cost));
@@ -50,25 +50,30 @@ int UpgradeTree::get_titanium_cost(int current_tier) {
     return 3 * (current_tier + 1); // 3, 6, 9, 12, 15
 }
 
-bool UpgradeTree::can_purchase(UpgradeType type, int current_exp, int current_voidite, int current_titanium) const {
+bool UpgradeTree::can_purchase(UpgradeType type, int player_level, int current_coins, int current_voidite, int current_titanium) const {
     int tier = get_tier(type);
     if (tier >= MAX_TIER) return false;
-    int exp_needed = get_exp_cost(tier);
+    
+    // Level gating: Tier 1 requires Level 1, Tier 2 requires Level 2, etc.
+    int req_level = get_required_level_for_tier(tier);
+    if (player_level < req_level) return false;
+
+    int coin_needed = get_coin_cost(tier);
     int voidite_needed = get_voidite_cost(tier);
     int titanium_needed = get_titanium_cost(tier);
 
-    return (current_exp >= exp_needed && current_voidite >= voidite_needed && current_titanium >= titanium_needed);
+    return (current_coins >= coin_needed && current_voidite >= voidite_needed && current_titanium >= titanium_needed);
 }
 
-bool UpgradeTree::purchase(UpgradeType type, int& inout_exp, int& inout_voidite, int& inout_titanium) {
-    if (!can_purchase(type, inout_exp, inout_voidite, inout_titanium)) return false;
+bool UpgradeTree::purchase(UpgradeType type, int player_level, int& inout_coins, int& inout_voidite, int& inout_titanium) {
+    if (!can_purchase(type, player_level, inout_coins, inout_voidite, inout_titanium)) return false;
 
     int tier = get_tier(type);
-    int exp_cost = get_exp_cost(tier);
+    int coin_cost = get_coin_cost(tier);
     int voidite_cost = get_voidite_cost(tier);
     int titanium_cost = get_titanium_cost(tier);
 
-    inout_exp -= exp_cost;
+    inout_coins -= coin_cost;
     inout_voidite -= voidite_cost;
     inout_titanium -= titanium_cost;
 
@@ -76,20 +81,20 @@ bool UpgradeTree::purchase(UpgradeType type, int& inout_exp, int& inout_voidite,
     return true;
 }
 
-int UpgradeTree::get_total_spent_exp() const {
+int UpgradeTree::get_total_spent_coins() const {
     int total = 0;
     for (int t = 0; t < static_cast<int>(UpgradeType::COUNT); ++t) {
         int tier = get_tier(static_cast<UpgradeType>(t));
         for (int i = 0; i < tier; ++i) {
-            total += get_exp_cost(i);
+            total += get_coin_cost(i);
         }
     }
     return total;
 }
 
-int UpgradeTree::respec(int& out_refunded_exp) {
-    int total_spent = get_total_spent_exp();
-    out_refunded_exp = static_cast<int>(std::round(total_spent * 0.85f)); // 85% refund
+int UpgradeTree::respec(int& out_refunded_coins) {
+    int total_spent = get_total_spent_coins();
+    out_refunded_coins = static_cast<int>(std::round(total_spent * 0.85f)); // 85% refund
 
     drillSpeedTier = 0;
     drillDurabilityTier = 0;
@@ -98,7 +103,7 @@ int UpgradeTree::respec(int& out_refunded_exp) {
     sonarFrequencyTier = 0;
     reinforcedPlatingTier = 0;
 
-    return out_refunded_exp;
+    return out_refunded_coins;
 }
 
 UpgradeInfo UpgradeTree::get_info(UpgradeType type) {
@@ -144,7 +149,7 @@ UpgradeInfo UpgradeTree::get_info(UpgradeType type) {
                 type,
                 "Wide-Spectrum Sonar Transceiver",
                 "SURVEYING & DEFENSE",
-                "+2.0m scan pulse radius and -0.5s cooldown.",
+                "+2.0m scan pulse radius, -1.0s cooldown (Rank 2 unlocks HUD Rock Labels).",
                 "m",
                 2.0f
             };
@@ -172,6 +177,20 @@ UpgradeInfo UpgradeTree::get_info(UpgradeType type) {
 std::string UpgradeTree::get_stat_preview(UpgradeType type) const {
     int cur = get_tier(type);
     auto info = get_info(type);
+
+    if (type == UpgradeType::SonarFrequency) {
+        if (cur >= MAX_TIER) {
+            return "MAXED (+10m, -5s cd, Labels)";
+        }
+        if (cur == 0) {
+            return "+0m (10s cd) -> +2m (9s cd)";
+        }
+        if (cur == 1) {
+            return "+2m -> +4m (Unlocks HUD Labels)";
+        }
+        return "+" + std::to_string(cur * 2) + "m (" + std::to_string(10 - cur) + "s cd) -> +" +
+               std::to_string((cur + 1) * 2) + "m (" + std::to_string(10 - (cur + 1)) + "s cd)";
+    }
 
     if (cur >= MAX_TIER) {
         float total = cur * info.baseStatBonusPerTier;

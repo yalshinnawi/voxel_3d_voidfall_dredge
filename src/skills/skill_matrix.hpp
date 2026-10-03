@@ -85,9 +85,33 @@ public:
         }
     }
 
+    int get_surveying_rank() const {
+        if (surveying.xp >= 350) return 3;
+        if (surveying.xp >= 200) return 2;
+        if (surveying.unlocked || surveying.xp >= surveying.xp_for_unlock) return 1;
+        return 0;
+    }
+
+    bool can_identify_materials() const {
+        return get_surveying_rank() >= 2;
+    }
+
     void add_surveying_xp(int amount) {
-        if (surveying.add_xp(amount)) {
+        int old_rank = get_surveying_rank();
+        surveying.add_xp(amount);
+        int new_rank = get_surveying_rank();
+        if (old_rank < 1 && new_rank >= 1) {
             pending_unlock_notifications.push_back("SURVEYING UNLOCKED: Extended Frequency (30-Voxel Sonar)!");
+        }
+        if (old_rank < 2 && new_rank >= 2) {
+            surveying.unlock_perk_name = "Acoustic Spectroscopy";
+            surveying.unlock_description = "Acoustic harmonic analysis projects rock & mineral labels on HUD";
+            pending_unlock_notifications.push_back("SURVEYING RANK 2: Acoustic Spectroscopy (Rock Material Labels Unlocked)!");
+        }
+        if (old_rank < 3 && new_rank >= 3) {
+            surveying.unlock_perk_name = "Deep Resonance";
+            surveying.unlock_description = "Max penetration with +0.6s linger and -2.0s recharge cooldown";
+            pending_unlock_notifications.push_back("SURVEYING RANK 3: Deep Resonance Mastery!");
         }
     }
 

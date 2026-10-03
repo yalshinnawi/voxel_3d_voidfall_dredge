@@ -1,32 +1,51 @@
 # Progression Economics, EXP Curves & Voxel Yields
 
-This reference defines the mathematical models governing character upgrades, material drop rates, and respec costs.
+This reference defines the mathematical models governing character upgrades, player levels, coin rewards, and respec costs.
 
 ---
 
-## 1. Exponential Upgrade Cost Formula
-Character upgrade nodes in [src/player/upgrades.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/upgrades.cpp) follow an exponential scaling model:
+## 1. Dual Economy: Player Level & Coins
 
-$$\text{Cost}(\text{tier}) = \text{round}(100 \times 1.6^{\text{tier}-1})$$
+The progression system separates **Player Level (Rank)** from **Upgrade Purchasing Currency**:
+
+1. **Player Rank & EXP**:
+   - Total accumulated EXP advances the player's account level.
+   - EXP is **not spent** on upgrades; it serves as a persistent progression threshold.
+   - Advancing in level grants access to higher upgrade tiers, new sectors, and delver classes.
+   - Leveling up awards a **Level-Up Coin Bonus** (+150 Coins per rank gained).
+
+| Delver Rank | Required Cumulative EXP | Unlocks |
+| :--- | :--- | :--- |
+| **Level 1** | 0 EXP | Sector 1 (Perimeter Drift), Demolitionist Archetype, Tier 1 Upgrades |
+| **Level 2** | 300 EXP | Sector 2 (Volatile Fault), Vanguard Archetype, Tier 2 Upgrades |
+| **Level 3** | 700 EXP | Scout Archetype, Tier 3 Upgrades |
+| **Level 4** | 1,300 EXP | Sector 3 (Void Cradle), Tier 4 Upgrades |
+| **Level 5** | 2,200 EXP | Tier 5 Master Upgrades |
+
+2. **Upgrade Purchasing (Coins & Mineral Cores)**:
+   - Upgrades consume **Coins** (earned from completing expeditions and level-up bonuses), **Voidite**, and **Titanium**.
+   - Node costs scale exponentially:
+
+$$\text{CoinCost}(\text{tier}) = \text{round}(100 \times 1.6^{\text{tier}-1})$$
 
 ### Invariant Test Table (Verified in `test_progression.cpp`)
-| Upgrade Tier | Required EXP | Cumulative EXP |
-| :--- | :--- | :--- |
-| **Tier 1** | 100 EXP | 100 EXP |
-| **Tier 2** | 160 EXP | 260 EXP |
-| **Tier 3** | 256 EXP | 516 EXP |
-| **Tier 4** | 410 EXP | 926 EXP |
-| **Tier 5** | 656 EXP | 1,582 EXP |
+| Upgrade Tier | Required Player Level | Required Coins | Required Voidite | Required Titanium |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1** | Level 1 | 100 Coins | 4 Voidite | 3 Titanium |
+| **Tier 2** | Level 2 | 160 Coins | 8 Voidite | 6 Titanium |
+| **Tier 3** | Level 3 | 256 Coins | 12 Voidite | 9 Titanium |
+| **Tier 4** | Level 4 | 410 Coins | 16 Voidite | 12 Titanium |
+| **Tier 5** | Level 5 | 656 Coins | 20 Voidite | 15 Titanium |
 
 ---
 
 ## 2. Respec & Economy Rules
-- **Respec Refund Rate**: 85% of total invested EXP refunded on reset.
-- **Class Swapping**: Freely switchable in the Orbital Hub ([src/ui/orbital_hub.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/orbital_hub.cpp)).
+- **Respec Refund Rate**: 85% of total invested Coins refunded on reset.
+- **Class Swapping**: Freely switchable in the Orbital Hub once unlocked.
 - **Archetype Perk Bonuses**:
-  - **Vanguard**: +50% Debris damage mitigation, +20% Exosuit armor plating.
-  - **Scout**: +30% Sprint velocity, +50% Grappling hook range and reel speed.
-  - **Demolitionist**: +25% Bonus ore yield from explosive mining, +40% Blast radius.
+  - **Demolitionist** (Unlocked at Lv 1): +25% Bonus ore yield from explosive mining, +40% Blast radius.
+  - **Vanguard** (Unlocked at Lv 2): +50% Debris damage mitigation, +20% Exosuit armor plating.
+  - **Scout** (Unlocked at Lv 3): +30% Sprint velocity, +50% Grappling hook range and reel speed.
 
 ---
 

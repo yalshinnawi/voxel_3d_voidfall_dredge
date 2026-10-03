@@ -20,43 +20,132 @@ DynamicDebris::DynamicDebris(
     , m_material_id(material_id)
     , m_block_count(block_count)
 {
-    // Generate a simple debris boulder mesh
+    // Generate a complete 6-face 3D cube mesh (1x1x1 unit cube)
     std::vector<PackedVoxelVertex> verts;
     verts.reserve(36);
 
-    for (int face = 0; face < 6; ++face) {
-        PackedVoxelVertex v0 = PackedVoxelVertex::encode(0, 0, 0, face, 3, m_material_id, 1, 1, 0);
-        PackedVoxelVertex v1 = PackedVoxelVertex::encode(1, 0, 0, face, 3, m_material_id, 1, 1, 1);
-        PackedVoxelVertex v2 = PackedVoxelVertex::encode(1, 1, 0, face, 3, m_material_id, 1, 1, 2);
-        PackedVoxelVertex v3 = PackedVoxelVertex::encode(0, 1, 0, face, 3, m_material_id, 1, 1, 3);
+    // Face 0: +X (norm_idx = 0)
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 1, 0, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 0, 0, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 0, 0, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 1, 0, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 0, 0, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 1, 0, 3, m_material_id, 1, 1, 3));
 
-        verts.push_back(v0);
-        verts.push_back(v1);
-        verts.push_back(v2);
+    // Face 1: -X (norm_idx = 1)
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 0, 1, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 1, 1, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 1, 1, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 0, 1, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 1, 1, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 0, 1, 3, m_material_id, 1, 1, 3));
 
-        verts.push_back(v0);
-        verts.push_back(v2);
-        verts.push_back(v3);
-    }
+    // Face 2: +Y (norm_idx = 2)
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 1, 2, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 1, 2, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 0, 2, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 1, 2, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 0, 2, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 0, 2, 3, m_material_id, 1, 1, 3));
+
+    // Face 3: -Y (norm_idx = 3)
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 0, 3, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 0, 3, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 1, 3, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 0, 3, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 1, 3, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 1, 3, 3, m_material_id, 1, 1, 3));
+
+    // Face 4: +Z (norm_idx = 4)
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 1, 4, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 1, 4, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 1, 4, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 1, 4, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 1, 4, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 1, 4, 3, m_material_id, 1, 1, 3));
+
+    // Face 5: -Z (norm_idx = 5)
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 0, 5, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(0, 0, 0, 5, 3, m_material_id, 1, 1, 1));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 0, 5, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(1, 0, 0, 5, 3, m_material_id, 1, 1, 0));
+    verts.push_back(PackedVoxelVertex::encode(0, 1, 0, 5, 3, m_material_id, 1, 1, 2));
+    verts.push_back(PackedVoxelVertex::encode(1, 1, 0, 5, 3, m_material_id, 1, 1, 3));
 
     m_vertex_count = verts.size();
 
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(PackedVoxelVertex)), verts.data(), GL_STATIC_DRAW);
+    if (glad_glGenVertexArrays && glad_glGenBuffers) {
+        glGenVertexArrays(1, &m_vao);
+        glGenBuffers(1, &m_vbo);
+        glBindVertexArray(m_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(PackedVoxelVertex)), verts.data(), GL_STATIC_DRAW);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribIPointer(0, 2, GL_UNSIGNED_INT, sizeof(PackedVoxelVertex), reinterpret_cast<const void*>(0));
+        glEnableVertexAttribArray(0);
+        glVertexAttribIPointer(0, 2, GL_UNSIGNED_INT, sizeof(PackedVoxelVertex), reinterpret_cast<const void*>(0));
 
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
 }
 
 DynamicDebris::~DynamicDebris() {
-    if (m_vao != 0) glDeleteVertexArrays(1, &m_vao);
-    if (m_vbo != 0) glDeleteBuffers(1, &m_vbo);
+    if (glad_glDeleteVertexArrays && m_vao != 0) {
+        glDeleteVertexArrays(1, &m_vao);
+        m_vao = 0;
+    }
+    if (glad_glDeleteBuffers && m_vbo != 0) {
+        glDeleteBuffers(1, &m_vbo);
+        m_vbo = 0;
+    }
+}
+
+DynamicDebris::DynamicDebris(DynamicDebris&& other) noexcept
+    : m_id(other.m_id)
+    , m_position(other.m_position)
+    , m_velocity(other.m_velocity)
+    , m_rotation(other.m_rotation)
+    , m_angular_velocity(other.m_angular_velocity)
+    , m_material_id(other.m_material_id)
+    , m_block_count(other.m_block_count)
+    , m_sleeping(other.m_sleeping)
+    , m_destroyed(other.m_destroyed)
+    , m_life_time(other.m_life_time)
+    , m_vao(other.m_vao)
+    , m_vbo(other.m_vbo)
+    , m_vertex_count(other.m_vertex_count)
+    , has_dealt_damage(other.has_dealt_damage)
+{
+    other.m_vao = 0;
+    other.m_vbo = 0;
+    other.m_vertex_count = 0;
+}
+
+DynamicDebris& DynamicDebris::operator=(DynamicDebris&& other) noexcept {
+    if (this != &other) {
+        if (glad_glDeleteVertexArrays && m_vao != 0) glDeleteVertexArrays(1, &m_vao);
+        if (glad_glDeleteBuffers && m_vbo != 0) glDeleteBuffers(1, &m_vbo);
+
+        m_id = other.m_id;
+        m_position = other.m_position;
+        m_velocity = other.m_velocity;
+        m_rotation = other.m_rotation;
+        m_angular_velocity = other.m_angular_velocity;
+        m_material_id = other.m_material_id;
+        m_block_count = other.m_block_count;
+        m_sleeping = other.m_sleeping;
+        m_destroyed = other.m_destroyed;
+        m_life_time = other.m_life_time;
+        m_vao = other.m_vao;
+        m_vbo = other.m_vbo;
+        m_vertex_count = other.m_vertex_count;
+        has_dealt_damage = other.has_dealt_damage;
+
+        other.m_vao = 0;
+        other.m_vbo = 0;
+        other.m_vertex_count = 0;
+    }
+    return *this;
 }
 
 DynamicDebris::CollisionResult DynamicDebris::update(
@@ -76,7 +165,6 @@ DynamicDebris::CollisionResult DynamicDebris::update(
     glm::vec3 next_pos = m_position + m_velocity * dt;
 
     // Sweeping AABB against player capsule / bounding box
-    // Player extents: half_extents = (0.3f, 0.9f, 0.3f), height = 1.8f
     glm::vec3 p_min = glm::vec3(player_pos.x - 0.35f, std::min(player_pos.y - 0.95f, player_pos.y - 1.6f), player_pos.z - 0.35f);
     glm::vec3 p_max = glm::vec3(player_pos.x + 0.35f, std::max(player_pos.y + 0.95f, player_pos.y + 0.2f), player_pos.z + 0.35f);
 
@@ -87,78 +175,104 @@ DynamicDebris::CollisionResult DynamicDebris::update(
                         (p_min.y <= d_max.y && p_max.y >= d_min.y) &&
                         (p_min.z <= d_max.z && p_max.z >= d_min.z);
 
-    // If an active falling block impacts the player capsule with vertical velocity |v_y| > 4.0 m/s
-    if (aabb_overlap && !has_dealt_damage && std::abs(m_velocity.y) > 4.0f) {
+    // If an active falling block impacts the player capsule with downward vertical velocity
+    if (aabb_overlap && !has_dealt_damage && m_velocity.y < -3.0f) {
         has_dealt_damage = true;
-        m_destroyed = true;
-        res.shattered = true;
-        res.shatter_pos = next_pos;
-        res.shatter_mat = m_material_id;
-
         if (is_player_sheltered) {
             // Bulkhead shelter utility: falling debris strikes bulkhead harmlessly
+            m_destroyed = true;
+            res.shattered = true;
             res.hit_bulkhead = true;
+            res.shatter_pos = next_pos;
+            res.shatter_mat = m_material_id;
+            return res;
         } else {
-            // Player takes crushing damage: 20 Suit Integrity damage
+            // Player takes crushing damage: 18 Suit Integrity damage
             res.hit_player = true;
-            res.damage = 20.0f;
+            res.damage = 18.0f;
+            m_velocity.x += ((static_cast<float>(rand() % 100) / 50.0f) - 1.0f) * 1.5f;
+            m_velocity.z += ((static_cast<float>(rand() % 100) / 50.0f) - 1.0f) * 1.5f;
         }
+    }
+
+    // Check collision against cavern floor and static voxels along downward trajectory
+    int bx = static_cast<int>(std::floor(next_pos.x));
+    int bz = static_cast<int>(std::floor(next_pos.z));
+    int curr_bottom_y = static_cast<int>(std::floor(m_position.y - 0.45f));
+    int next_bottom_y = static_cast<int>(std::floor(next_pos.y - 0.45f));
+
+    bool hit_ground = false;
+    int hit_solid_y = next_bottom_y;
+
+    for (int check_y = curr_bottom_y; check_y >= next_bottom_y; --check_y) {
+        if (check_y < 0) {
+            hit_ground = true;
+            hit_solid_y = 0;
+            break;
+        }
+        if (world.is_solid(bx, check_y, bz)) {
+            hit_ground = true;
+            hit_solid_y = check_y;
+            break;
+        }
+    }
+
+    if (hit_ground) {
+        Voxel hit_v = world.get_voxel(bx, hit_solid_y, bz);
+        if (hit_v.material_id == MAT_INDUSTRIAL_BULKHEAD) {
+            // Shatter harmlessly on industrial bulkhead fortification
+            m_destroyed = true;
+            res.shattered = true;
+            res.hit_bulkhead = true;
+            res.shatter_pos = glm::vec3(bx + 0.5f, hit_solid_y + 1.0f, bz + 0.5f);
+            res.shatter_mat = m_material_id;
+            return res;
+        }
+
+        // Find the lowest unoccupied air block resting directly on the solid terrain
+        int place_x = bx;
+        int place_z = bz;
+        int place_y = hit_solid_y + 1;
+        while (place_y < 127 && world.is_solid(place_x, place_y, place_z)) {
+            place_y++;
+        }
+
+        // Avoid embedding the placed block inside the player's occupied space
+        int px = static_cast<int>(std::floor(player_pos.x));
+        int py = static_cast<int>(std::floor(player_pos.y));
+        int pz = static_cast<int>(std::floor(player_pos.z));
+        if (place_x == px && place_z == pz && std::abs(place_y - py) <= 1) {
+            const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (const auto& off : offsets) {
+                int nx = place_x + off[0];
+                int nz = place_z + off[1];
+                if (!world.is_solid(nx, place_y, nz) && world.is_solid(nx, place_y - 1, nz)) {
+                    place_x = nx;
+                    place_z = nz;
+                    break;
+                }
+            }
+        }
+
+        // Place the physical block permanently on the ground
+        if (place_y >= 0 && place_y < 128) {
+            world.set_voxel(place_x, place_y, place_z, Voxel{m_material_id, 0}, true);
+            res.placed_on_ground = true;
+            res.place_pos = glm::ivec3(place_x, place_y, place_z);
+        }
+
+        m_destroyed = true;
+        res.shattered = false;
+        res.shatter_pos = glm::vec3(place_x + 0.5f, place_y + 0.5f, place_z + 0.5f);
+        res.shatter_mat = m_material_id;
         return res;
     }
 
-    // Check collision against cavern floor and static voxels
-    int bx = static_cast<int>(std::floor(next_pos.x));
-    int by = static_cast<int>(std::floor(next_pos.y));
-    int bz = static_cast<int>(std::floor(next_pos.z));
-    Voxel hit_v = world.get_voxel(bx, by, bz);
-
-    if (hit_v.is_solid()) {
-        if (hit_v.material_id == MAT_INDUSTRIAL_BULKHEAD) {
-            // Shatter harmlessly on industrial bulkhead
-            m_destroyed = true;
-            res.shattered = true;
-            res.hit_bulkhead = true;
-            res.shatter_pos = next_pos;
-            res.shatter_mat = m_material_id;
-            return res;
-        }
-
-        if (hit_v.material_id == MAT_DREDGE_BEDROCK || std::abs(m_velocity.y) > 10.0f) {
-            // High velocity impact on hard bedrock or deep crust -> shatter into particles
-            m_destroyed = true;
-            res.shattered = true;
-            res.shatter_pos = next_pos;
-            res.shatter_mat = m_material_id;
-            return res;
-        }
-
-        // Moderate velocity impact on standard rock -> can lodge as new terrain block
-        int lodge_x = static_cast<int>(std::floor(m_position.x));
-        int lodge_y = static_cast<int>(std::floor(m_position.y));
-        int lodge_z = static_cast<int>(std::floor(m_position.z));
-        if (lodge_y >= 0 && lodge_y < 128 && !world.get_voxel(lodge_x, lodge_y, lodge_z).is_solid()) {
-            world.set_voxel(lodge_x, lodge_y, lodge_z, Voxel{m_material_id, 0}, true);
-            m_destroyed = true;
-            return res;
-        }
-
-        // Bounce with energy loss
-        m_velocity.y = -m_velocity.y * 0.35f;
-        m_velocity.x *= 0.6f;
-        m_velocity.z *= 0.6f;
-        m_angular_velocity *= 0.7f;
-
-        if (std::abs(m_velocity.y) < 0.8f && glm::length(glm::vec2(m_velocity.x, m_velocity.z)) < 0.5f) {
-            m_sleeping = true;
-            m_velocity = glm::vec3(0.0f);
-        }
-    } else {
-        m_position = next_pos;
-    }
-
+    m_position = next_pos;
     m_rotation += m_angular_velocity * dt;
-    if (m_life_time > 20.0f) {
-        m_sleeping = true;
+
+    if (m_life_time > 15.0f || m_position.y < 0.0f) {
+        m_destroyed = true;
     }
 
     return res;

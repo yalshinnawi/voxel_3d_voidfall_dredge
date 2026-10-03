@@ -26,6 +26,7 @@ struct CharacterAttributes {
     float suitIntegrity{100.0f};        // Base maximum health points
     float grapplePullSpeed{1.0f};       // Reel velocity factor
     float sonarRadius{14.0f};           // Scan query sphere radius (voxels)
+    float sonarCooldown{10.0f};         // Base acoustic pulse recharge cooldown (seconds)
     int maxBulkheads{10};               // Base inventory limit for placed supports
     float fallingDamageReduction{0.0f}; // Percentage damage mitigation from falling rocks (0.0 to 1.0)
     float scanLingerBonus{0.0f};        // Extra linger duration for surveyed outlines (seconds)

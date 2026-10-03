@@ -30,6 +30,26 @@ TESTS = {
         "target": "test_e2e_expeditions",
         "exe": f"test_e2e_expeditions{EXE_EXT}",
         "name": "E2E Expeditions Lifecycle (5 scenarios)"
+    },
+    "collision": {
+        "target": "test_level_collision",
+        "exe": f"test_level_collision{EXE_EXT}",
+        "name": "Level Design, Base Shapes, Sightlines & Mesh Integrity (9 modules)"
+    },
+    "enemy": {
+        "target": "test_enemy_stalker",
+        "exe": f"test_enemy_stalker{EXE_EXT}",
+        "name": "Void Stalker Enemy AI, Combat, Perception & Waves (6 modules)"
+    },
+    "burrower": {
+        "target": "test_enemy_burrower",
+        "exe": f"test_enemy_burrower{EXE_EXT}",
+        "name": "Seismic Burrower Voxel Excavation, Kinetic Charges & Cave-Ins (6 modules)"
+    },
+    "audio": {
+        "target": "test_audio",
+        "exe": f"test_audio{EXE_EXT}",
+        "name": "Audio Engine, 3D Spatial SFX & Ear Safety Mastering (9 modules)"
     }
 }
 
@@ -64,7 +84,7 @@ def execute_single_test(key):
     t0 = time.time()
     code, out, err = run_cmd([bin_path], cwd=os.path.dirname(bin_path))
     dt = time.time() - t0
-    output_msg = out if code != 0 else ""
+    output_msg = (out + ("\n" + err if err else "")).strip() if code != 0 else ""
     return key, (code == 0), dt, output_msg
 
 def run_tests_parallel(test_keys, fail_fast=False):

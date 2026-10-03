@@ -39,7 +39,7 @@ A high-performance subterranean sci-fi voxel action game and multiplayer engine 
 ### 4. Gameplay Loop
 - **Cavern Descent:** Drop into procedurally generated 3D noise cavern networks with winding tunnels, ore pockets, and ancient industrial vault ruins.
 - **Void Hazard Clock:** Escalating radiation levels cause suit HUD glitching and trigger synchronized seismic cave tremors that shake the camera and trigger dynamic cave-ins.
-- **90-Second Beacon Defense:** Deploy the emergency extraction beacon (`B`), hold off subterranean hazards under pulsating red emergency flares, and evacuate into the landing pod.
+- **40-Second Beacon Defense:** Deploy the emergency extraction beacon (`B`), hold off subterranean hazards under pulsating red emergency flares, and evacuate into the landing pod.
 
 ---
 
@@ -47,52 +47,62 @@ A high-performance subterranean sci-fi voxel action game and multiplayer engine 
 
 ```
 d:/Projects/voxel_3d_voidfall_dredge/
-├── CMakeLists.txt              # Root build configuration (C++20, OpenGL 4.5, GLFW, GLAD, GLM)
+├── CMakeLists.txt              # Root build configuration (C++20, static core, PCH, CTest, /MP)
 ├── README.md                   # Technical documentation & architecture manual
+├── GEMINI.md                   # Agent guidelines & fast TDD execution protocols
+├── play.bat                    # Fast Windows launcher
 ├── .gitignore                  # Build artifact and compiler filters
+├── include/                    # External single-header dependencies
+│   ├── font8x8.h               # 8x8 bitmap font renderer for UI & montage overlays
+│   ├── stb_image_write.h       # PNG/JPEG image exporter
+│   └── glad/                   # OpenGL 4.5 Core function loader
+├── scripts/                    # Developer, TDD, and diagnostic automation
+│   ├── tdd.py                  # High-speed parallel test runner & live watch mode
+│   ├── analyze_screenshots.py  # Instant visual test metrics parser (<0.1s)
+│   └── simulate_economy.py     # Progression & economy mathematical model simulator
+├── tests/                      # Automated test targets
+│   ├── test_unit_all.cpp       # 19 comprehensive unit test modules
+│   ├── test_progression.cpp    # Archetypes, respec refunds, and upgrade tree tests
+│   └── test_e2e_expeditions.cpp# 5 end-to-end mission lifecycle scenarios
+├── saves/                      # Player profile persistence
+│   └── save_data.json          # Active expedition progress, unlocked tiers, and resources
+├── screenshots/                # Visual verification & automated test captures
+│   ├── 00_all_phases_montage.jpg # 4x3 consolidated contact sheet of all 10 test screens
+│   ├── visual_report.txt/.json # Luminance & health diagnostic matrix
+│   └── previews/               # 800x450 lightweight JPEG frame previews (~40KB each)
+├── wiki/                       # Living Game Design Wiki
+│   ├── index.md                # Central wiki landing page
+│   ├── mechanics/              # Hazard clock, evacuation holdouts
+│   └── entities/               # Enemy profiles and voxel material tables
 ├── assets/
-│   ├── shaders/
-│   │   ├── voxel_pbr.vert      # Bit-packed vertex input, AO & sonar wave calculation
-│   │   ├── voxel_pbr.frag      # PBR texture array, forward clustered lights & bloom MRT
-│   │   ├── volumetric_fog.comp # Half-res raymarched dust fog & light shaft compute shader
-│   │   ├── ssao.frag           # Screen-Space Ambient Occlusion
-│   │   ├── sonar_pulse.frag    # Seismic Sonar pulse wireframe edge overlay
-│   │   ├── bloom.frag          # Gaussian blur downsampling/upsampling passes
-│   │   ├── postprocess.frag    # ACES tonemapping, fog composite & radiation glitch
-│   │   ├── ui.vert             # HUD orthographic vertex shader
-│   │   └── ui.frag             # HUD gauge fragment shader
+│   ├── shaders/                # PBR voxel, compute fog, bloom, SSAO, viewmodel, UI shaders
 │   ├── textures/               # PBR material layers
 │   └── sounds/                 # Subterranean audio cues
 └── src/
-    ├── core/
-    │   ├── glad/               # OpenGL 4.5 Core loader
-    │   ├── window.hpp/.cpp     # GLFW windowing & input system
-    │   └── application.hpp/.cpp# Game loop, 60 Hz physics tick & rendering orchestrator
-    ├── graphics/
-    │   ├── shader.hpp/.cpp     # Graphics & compute shader compiler/linker
-    │   ├── texture_array.hpp/.cpp # 2D Texture Array loader & procedural material generator
-    │   └── renderer.hpp/.cpp   # Framebuffer orchestration, HDR pipeline & post-processing
-    ├── voxel/
-    │   ├── packed_vertex.hpp   # 8-byte vertex format & 16-bit packed voxel state
-    │   ├── chunk.hpp/.cpp      # 32x32x32 voxel container with GPU buffer management
-    │   ├── greedy_mesher.hpp/.cpp # 6-face greedy mesher with baked vertex AO
-    │   ├── world.hpp/.cpp      # Procedural 3D noise caverns & DDA raycasting
-    │   └── structural_check.hpp/.cpp # Anchored Island BFS cave-in solver
-    ├── player/
-    │   └── controller.hpp/.cpp # First-person controller, jetpack & grapple physics
-    ├── entities/
-    │   └── dynamic_debris.hpp/.cpp # Rigid-body falling boulder entities
-    ├── systems/
-    │   ├── hazard_clock.hpp/.cpp # Radiation clock & seismic cave tremor generator
-    │   └── extraction.hpp/.cpp   # 90-second extraction beacon sequence
-    ├── ui/
-    │   └── hud.hpp/.cpp        # Suit gauges, depth meter, radiation bar & crosshair
-    ├── net/
-    │   ├── packet_types.hpp    # Binary packet serialization & player inputs
-    │   ├── net_host.hpp/.cpp   # Authoritative UDP host session manager
-    │   └── net_client.hpp/.cpp # Client connection & delta synchronization
+    ├── core/                   # Application lifecycle, window, logger, screenshot, saves, PCH
+    ├── graphics/               # HDR Framebuffer, PBR voxel renderer, viewmodel, post-processing
+    ├── voxel/                  # Chunk storage (32x32x32), greedy mesher, world, structural BFS
+    ├── player/                 # First-person controller, class archetypes, upgrade tree
+    ├── entities/               # Rigid-body dynamic debris boulder entities
+    ├── systems/                # Hazard clock, radiation buildup, extraction beacons
+    ├── skills/                 # Delver surveying sonar, mineral outlines, skill matrix
+    ├── ui/                     # Orbital hub carousel, HUD gauges, pause menu
+    ├── net/                    # UDP sockets, packet serialization, delta sync
     └── main.cpp                # CLI entry point
 ```
+
+---
+
+## 👥 3D Characters, Enemies & Models Visual Catalog
+
+All in-game models (enemies, delver contractor classes, tools) have up-to-date reference captures stored in [`docs/models/`](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/):
+
+![3D Model Roster Showcase](docs/models/models_roster_showcase.jpg)
+
+- **Hostile Entities**: Void Stalker ([docs/models/enemy_void_stalker.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/enemy_void_stalker.png)), Seismic Burrower ([docs/models/enemy_seismic_burrower.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/enemy_seismic_burrower.png))
+- **Delver Contractors**: Demolitionist Kaelen ([docs/models/character_demolitionist_kaelen.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/character_demolitionist_kaelen.png)), Vanguard Rhodes ([docs/models/character_vanguard_rhodes.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/character_vanguard_rhodes.png)), Scout Vesper ([docs/models/character_scout_vesper.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/character_scout_vesper.png))
+- **Primary Tool Rig**: Modular Mining Drill Rig ([docs/models/system_viewmodel_drill.png](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/system_viewmodel_drill.png))
+- **Regenerate Anytime**: `python scripts/capture_models.py` (or `./build/Release/VoidfallDredge.exe --capture-models`)
 
 ---
 
@@ -108,7 +118,7 @@ d:/Projects/voxel_3d_voidfall_dredge/
 | **`F` / `MIDDLE CLICK`** | Fire Tension-Cable Grappling Hook |
 | **`E`** | Reel In Grappling Hook Cable |
 | **`Q`** | Seismic Sonar Pulse Scan (Surveying skill wireframe highlight) |
-| **`B`** | Deploy 90-Second Emergency Extraction Beacon |
+| **`B`** | Deploy 40-Second Emergency Extraction Beacon |
 | **`H`** | Toggle Headlamp Spotlight |
 | **`TAB` / `ESC`** | Toggle Mouse Cursor Capture |
 

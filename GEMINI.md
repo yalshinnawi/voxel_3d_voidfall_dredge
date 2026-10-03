@@ -6,10 +6,11 @@
 - **Graphics & API**: OpenGL (Core Profile via GLAD), GLFW for windowing/input, GLM for mathematics.
 - **Shaders**: GLSL (vertex, fragment, and compute shaders in [assets/shaders/](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/shaders/)).
 - **Subsystems**:
-  - `src/core/`: Application lifecycle, GLFW window management, logger, save system ([save_data.json](file:///d:/Projects/voxel_3d_voidfall_dredge/save_data.json)).
+  - `src/core/`: Application lifecycle, GLFW window management, logger, save system ([save_data.json](file:///d:/Projects/voxel_3d_voidfall_dredge/saves/save_data.json)).
   - `src/graphics/`: PBR voxel renderer, post-processing (SSAO, Bloom, Tone mapping), viewmodel, volumetric fog compute shaders.
   - `src/voxel/`: Chunk data structures, greedy mesher (`src/voxel/greedy_mesher.cpp`), world management, structural integrity checks (`src/voxel/structural_check.cpp`).
   - `src/player/`: First-person controller, class archetypes, progression/upgrades.
+  - `src/skills/`: Delver skill matrix, proficiency branches, seismic sonar pulse scanner.
   - `src/entities/`: Dynamic debris physics and extraction items.
   - `src/systems/`: Hazard clock, expedition timer, extraction beacons.
   - `src/ui/`: Orbital hub, in-game HUD, pause menu, text rendering (bitmap/atlas font renderer).
@@ -54,28 +55,34 @@
   - Runtime logs, OpenGL errors, and stack traces are written to [voidfall.log](file:///d:/Projects/voxel_3d_voidfall_dredge/voidfall.log). Always inspect this log when investigating runtime crashes.
 
 ### 2.1 Automated Visual Testing & Screenshot Inspection
-The engine includes an automated playthrough and visual test harness ([src/core/screenshot.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/screenshot.hpp), [src/core/screenshot.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/screenshot.cpp)) that executes all 7 gameplay phases, calculates luminance/health metrics, and writes both a consolidated contact sheet montage and individual frames.
+The engine includes an automated playthrough and visual test harness ([src/core/screenshot.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/screenshot.hpp), [src/core/screenshot.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/screenshot.cpp)) that executes all 10 gameplay phases, calculates luminance/health metrics, and writes both a consolidated contact sheet montage and individual frames.
 
 - **Run Full Automated Visual Playthrough**:
   ```bash
   ./build/Release/VoidfallDredge.exe --auto-play-test
   ```
 - **Accelerated Screenshot Analysis Protocol (Fastest Method)**:
-  Instead of sequentially inspecting all 7 multi-megabyte PNG files across 7 separate tool calls (which takes minutes and bloats context):
-  1. **Instant Metrics**: Run `python scripts/analyze_screenshots.py` or inspect `screenshots/visual_report.txt` (completes in 0.1s).
-  2. **Single-Turn Visual Verification**: Call `view_file` on `screenshots/00_all_phases_montage.jpg` (or `.png`). This displays all 7 phases side-by-side in a 4x2 grid with slot labels and health status in a single instant glance!
-  3. **Targeted Deep-Dive**: If a specific anomaly is spotted in a phase, inspect that frame's lightweight preview in `screenshots/previews/0X_*.jpg` (~40KB).
+  Instead of sequentially inspecting multi-megabyte PNG files across separate tool calls:
+  1. **Instant Metrics & Preview Auto-Cleanup**: Run `python scripts/analyze_screenshots.py` (completes in 0.1s). This parses all 10 phase metrics, verifies luminance, and automatically cleans up temporary files in `screenshots/previews/` to save disk space (pass `--keep-previews` to retain them).
+  2. **Single-Turn Visual Verification**: Call `view_file` on `screenshots/00_all_phases_montage.jpg` (or `.png`). This displays all 10 screens side-by-side in a 4x3 grid with slot labels, subsystem health, and visual matrix in a single instant glance!
+  3. **Targeted Deep-Dive**: If a specific anomaly is spotted in a phase, inspect that frame's lightweight preview in `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg` (~40KB, stamped with in-image date/time label) using `--keep-previews`.
 - **Master Captured Files**:
-  - `screenshots/00_all_phases_montage.jpg` / `.png`: 4x2 contact sheet of all 7 phases + matrix card.
-  - `screenshots/visual_report.txt` / `.json`: Luminance and non-black sanity check reports.
-  - `screenshots/previews/01_*.jpg` to `07_*.jpg`: Fast lightweight 800x450 previews.
-  - `screenshots/01_main_menu.png` to `07_extraction_beacon.png`: Uncompressed 1600x900 masters.
+  - `screenshots/00_all_phases_montage.jpg` / `.png`: 4x3 contact sheet of all 10 game screens + system telemetry + visual matrix card.
+  - `screenshots/visual_report.txt` / `.json`: Luminance, timestamp, and non-black sanity check reports.
+  - `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg`: Lightweight 800x450 previews stamped with date/time banners (auto-cleaned after analysis).
+  - `screenshots/01_main_menu.png` to `10_mission_debrief.png`: Uncompressed 1600x900 masters.
 - **Single Screenshot Capture Flag**:
   ```bash
   ./build/Release/VoidfallDredge.exe --screenshot screenshots/target_view.png
   ```
-- **Live In-Game Hotkey**:
-  Pressing **F12** at any time during gameplay saves a timestamped PNG to `screenshots/screenshot_YYYYMMDD_HHMMSS.png`.
+- **Live In-Game Testing Hotkeys (Active ONLY in Test Mode via `--test`, `--test-save`, or `--auto-play-test`)**:
+  - **F5**: Grant Testing EXP & Resources (+1000 EXP, +25 Voidite, +10 Titanium).
+  - **F6**: Execute Diagnostic Upgrade & Respec Cycle (purchases upgrades, validates stats, tests 85% refund).
+  - **F7**: Force Seismic Tremor (triggers screen trauma, HUD warning, ceiling debris).
+  - **F8**: Force Evac Pod Touchdown (drops beacon holdout countdown to $\le 1\,\text{s}$).
+  - **F9**: Force Escape Evacuation (extracts squad immediately into Debrief screen).
+- **Global Screenshot Hotkey (Always Active)**:
+  - **F12**: Capture timestamped PNG to `screenshots/screenshot_YYYYMMDD_HHMMSS.png`.
 
 ---
 
@@ -103,5 +110,5 @@ The engine includes an automated playthrough and visual test harness ([src/core/
 
 ## 4. Game Design Wiki & Systems Balancing
 - **Living Game Design Wiki**: Game mechanics, lore, enemies, and voxel tables reside in [wiki/](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/) (`wiki/index.md`). Maintain traceability whenever changing balance.
-- **Progression Math**: Upgrade costs scale exponentially via $100 \times 1.6^{\text{tier}-1}$. Run [simulate_economy.py](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-design-and-balancing/scripts/simulate_economy.py) to verify progression math.
+- **Progression Math**: Upgrade costs scale exponentially via $100 \times 1.6^{\text{tier}-1}$. Run [simulate_economy.py](file:///d:/Projects/voxel_3d_voidfall_dredge/scripts/simulate_economy.py) (`python scripts/simulate_economy.py`) to verify progression math.
 - **Hazard Clock**: 15-minute 4-phase escalation curve and 40s beacon holdouts are documented in [wiki/mechanics/hazard_clock.md](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/hazard_clock.md).

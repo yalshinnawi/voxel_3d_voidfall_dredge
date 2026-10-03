@@ -5,6 +5,7 @@
 #include "../skills/skill_matrix.hpp"
 #include "../systems/hazard_clock.hpp"
 #include "../systems/extraction.hpp"
+#include "../systems/noise_meter.hpp"
 #include "../voxel/world.hpp"
 #include <glm/glm.hpp>
 #include <string>
@@ -47,6 +48,13 @@ public:
     void show_warning(const std::string& msg, float duration = 2.0f);
     void trigger_damage_flash(float intensity = 0.5f) { m_damage_flash_timer = intensity; }
     void clear_target_info();
+    void toggle_help_briefing() { m_show_help_briefing = !m_show_help_briefing; }
+    bool is_help_briefing_visible() const { return m_show_help_briefing; }
+    void set_death_sequence(bool active, float timer = 0.0f, float max_duration = 3.5f) {
+        m_death_active = active;
+        m_death_timer = timer;
+        m_death_duration = max_duration;
+    }
 
     void render(
         const PlayerController& player,
@@ -57,7 +65,10 @@ public:
         const SkillMatrix& skills,
         int current_level,
         const glm::mat4& view,
-        const glm::mat4& proj
+        const glm::mat4& proj,
+        const class SurveyingSystem* surveying = nullptr,
+        const NoiseMeter* noise_meter = nullptr,
+        int enemy_count = 0
     );
 
 private:
@@ -66,6 +77,7 @@ private:
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
     void draw_pill(float x, float y, float w, float h, const glm::vec4& border_col = glm::vec4(0.0f, 0.95f, 1.0f, 0.35f));
     void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
+    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
     void render_crosshair(const PlayerController& player, const World& world);
     void render_floating_loot(const glm::mat4& view, const glm::mat4& proj);
     void render_loot_toasts();
@@ -89,6 +101,11 @@ private:
     std::string m_warning_message;
     float m_damage_flash_timer{0.0f};
     float m_total_time{0.0f};
+    bool m_show_help_briefing{false};
+    float m_briefing_auto_timer{0.0f};
+    bool m_death_active{false};
+    float m_death_timer{0.0f};
+    float m_death_duration{3.5f};
 };
 
 } // namespace Voidfall

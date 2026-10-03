@@ -40,4 +40,21 @@ void ExtractionSystem::update(float dt, const glm::vec3& player_pos) {
     }
 }
 
+void ExtractionSystem::force_evacuation_pod() {
+    if (m_phase == ExtractionPhase::Dormant) {
+        deploy_beacon(m_beacon_pos);
+    }
+    m_phase = ExtractionPhase::PodLanded;
+    m_countdown = 0.0f;
+    std::cout << "[Extraction] Evacuation pod touchdown forced for testing!" << std::endl;
+}
+
+void ExtractionSystem::force_escape() {
+    m_phase = ExtractionPhase::Complete;
+    std::cout << "[Extraction] Squad escape evacuation forced for testing! Returning to debrief." << std::endl;
+    if (m_on_complete) {
+        m_on_complete();
+    }
+}
+
 } // namespace Voidfall

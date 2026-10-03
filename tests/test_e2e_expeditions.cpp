@@ -43,17 +43,19 @@ void run_e2e_sector1_scout_lifecycle() {
     std::cout << "  E2E SCENARIO 1: Sector 1 Scout Full Expedition Lifecycle" << std::endl;
     std::cout << "========================================================" << std::endl;
 
-    // 1. Initialize fresh User Profile & Select Scout
+    // 1. Initialize fresh User Profile & Select Scout (requires Level 3)
     UserProfile profile;
-    profile.total_exp = 500;
+    profile.total_exp = 750;
+    profile.total_coins = 500;
     profile.total_voidite = 20;
     profile.total_titanium = 15;
     profile.selected_class_id = static_cast<int>(CharacterClass::Scout);
+    E2E_CHECK(profile.is_class_unlocked(CharacterClass::Scout), "Scout must be unlocked at Level 3");
 
     // 2. Hub Terminal Upgrade Purchase: Thruster Tank & Sonar Frequency
-    bool buy_tank = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.total_exp, profile.total_voidite, profile.total_titanium);
+    bool buy_tank = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
     E2E_CHECK(buy_tank, "Scout must purchase Thruster Tank Tier 1");
-    bool buy_sonar = profile.upgrades.purchase(UpgradeType::SonarFrequency, profile.total_exp, profile.total_voidite, profile.total_titanium);
+    bool buy_sonar = profile.upgrades.purchase(UpgradeType::SonarFrequency, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
     E2E_CHECK(buy_sonar, "Scout must purchase Sonar Frequency Tier 1");
 
     // 3. Save profile to disk and reload
@@ -136,7 +138,9 @@ void run_e2e_sector1_scout_lifecycle() {
 
     // Bank rewards into account pool
     int run_score = inventory.total_run_score;
-    loaded_profile.total_exp += run_score;
+    int lvls = 0, bonus = 0;
+    loaded_profile.add_exp(run_score, lvls, bonus);
+    loaded_profile.grant_coins(inventory.run_coins_earned);
     loaded_profile.total_voidite += inventory.voidite;
     loaded_profile.sector_records[1] = {100, "CLEARED (100%)"};
     SaveSystem::save_profile(loaded_profile, e2e_save);
@@ -229,8 +233,8 @@ void run_e2e_sector3_vanguard_survival() {
     PlayerController player(glm::vec3(16.0f, 15.0f, 16.0f));
     player.apply_attributes_and_upgrades(CharacterClass::Vanguard, profile.upgrades);
 
-    // Vanguard base 160 HP + 2 * 15 = 190 HP
-    E2E_CHECK(player.max_health() == 190.0f, "Vanguard with Plating Tier 2 must have 190 HP");
+    // Vanguard base 135 HP + 2 * 15 = 165 HP
+    E2E_CHECK(player.max_health() == 165.0f, "Vanguard with Plating Tier 2 must have 165 HP");
 
     // 1. Overhead Bulkhead Shelter Deflection Test
     // Place industrial bulkhead directly above player
@@ -245,7 +249,7 @@ void run_e2e_sector3_vanguard_survival() {
     float raw_damage = 50.0f;
     float applied_dmg = player.take_damage(raw_damage, true);
     E2E_CHECK(std::abs(applied_dmg - 15.0f) < 0.01f, "Vanguard 70% total debris damage mitigation mismatch");
-    E2E_CHECK(player.health() == (190.0f - 15.0f), "Player health after mitigated debris hit mismatch");
+    E2E_CHECK(player.health() == (165.0f - 15.0f), "Player health after mitigated debris hit mismatch");
 
     // 3. Level 3 180s Countdown Simulation
     float level3_timer = 180.0f;
@@ -376,11 +380,19 @@ int main() {
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE END-TO-END (E2E) TEST SUITE" << std::endl;
     std::cout << "==========================================================" << std::endl;
 
-    run_e2e_sector1_scout_lifecycle();
-    run_e2e_sector2_demolitionist_vault();
-    run_e2e_sector3_vanguard_survival();
-    run_e2e_anti_exploit_and_abandon();
-    run_e2e_multiplayer_simulation();
+    try {
+        run_e2e_sector1_scout_lifecycle();
+        run_e2e_sector2_demolitionist_vault();
+        run_e2e_sector3_vanguard_survival();
+        run_e2e_anti_exploit_and_abandon();
+        run_e2e_multiplayer_simulation();
+    } catch (const std::exception& e) {
+        std::cerr << "\n[E2E EXCEPTION] " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "\n[E2E UNKNOWN EXCEPTION]" << std::endl;
+        return 1;
+    }
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_e2e_scenarios << " END-TO-END SCENARIOS EXECUTED & PASSED WITH 0 ERRORS!" << std::endl;

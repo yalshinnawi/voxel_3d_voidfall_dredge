@@ -18,6 +18,7 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.suitIntegrity = 100.0f;
             attr.grapplePullSpeed = 1.00f;
             attr.sonarRadius = 14.0f;
+            attr.sonarCooldown = 10.0f;
             attr.maxBulkheads = 8;
             attr.fallingDamageReduction = 0.00f;
             attr.scanLingerBonus = 0.0f;
@@ -34,9 +35,10 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.traitDescription = "50% damage reduction against falling rocks. Placed overhead bulkheads deflect debris safely.";
             attr.baseMineSpeed = 1.00f;
             attr.moveSpeed = 0.88f;
-            attr.suitIntegrity = 160.0f;
+            attr.suitIntegrity = 135.0f;
             attr.grapplePullSpeed = 1.00f;
             attr.sonarRadius = 14.0f;
+            attr.sonarCooldown = 10.0f;
             attr.maxBulkheads = 12;
             attr.fallingDamageReduction = 0.50f; // 50% damage mitigation from falling ceiling rocks
             attr.scanLingerBonus = 0.0f;
@@ -50,12 +52,13 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.role = "SCOUT // ACOUSTIC PATHFINDER";
             attr.abilityDescription = "Agile recon specialist equipped with wide-spectrum seismic sonar and high-speed winch.";
             attr.traitName = "Acoustic Resonance & High-Tension Winch";
-            attr.traitDescription = "Sonar radius expanded to 22 voxels (+1.0s outline linger). Grapple reels 50% faster.";
+            attr.traitDescription = "Sonar radius expanded to 22 voxels (+1.0s outline linger, -2s cooldown). Grapple reels 50% faster.";
             attr.baseMineSpeed = 1.00f;
             attr.moveSpeed = 1.20f;
             attr.suitIntegrity = 80.0f;
             attr.grapplePullSpeed = 1.50f;
             attr.sonarRadius = 22.0f;
+            attr.sonarCooldown = 8.0f;
             attr.maxBulkheads = 6;
             attr.fallingDamageReduction = 0.00f;
             attr.scanLingerBonus = 1.0f;

@@ -15,7 +15,7 @@ ViewModel::ViewModel() {
     if (!ok) {
         VF_LOG_ERROR("ViewModel", "Failed to compile viewmodel shaders!");
     } else {
-        VF_LOG_INFO("ViewModel", "Viewmodel shader compiled successfully.");
+        VF_LOG_INFO("ViewModel", "Viewmodel PBR shaders compiled successfully.");
     }
 
     init_geometry();
@@ -28,42 +28,149 @@ ViewModel::~ViewModel() {
     if (m_bit_vbo) glDeleteBuffers(1, &m_bit_vbo);
     if (m_piston_vao) glDeleteVertexArrays(1, &m_piston_vao);
     if (m_piston_vbo) glDeleteBuffers(1, &m_piston_vbo);
+    if (m_carbine_vao) glDeleteVertexArrays(1, &m_carbine_vao);
+    if (m_carbine_vbo) glDeleteBuffers(1, &m_carbine_vbo);
+    if (m_scattergun_vao) glDeleteVertexArrays(1, &m_scattergun_vao);
+    if (m_scattergun_vbo) glDeleteBuffers(1, &m_scattergun_vbo);
+    if (m_railgun_vao) glDeleteVertexArrays(1, &m_railgun_vao);
+    if (m_railgun_vbo) glDeleteBuffers(1, &m_railgun_vbo);
 }
 
 void ViewModel::on_tool_switched() {
-    m_switch_timer = 0.20f;
+    m_switch_timer = 0.50f;  // Two-phase lower-out / raise-in animation
 }
 
-void ViewModel::add_box(std::vector<ViewmodelVertex>& verts, const glm::vec3& min_p, const glm::vec3& max_p, const glm::vec4& color) {
-    // 6 faces * 2 triangles * 3 vertices = 36 vertices
+void ViewModel::add_box(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& min_p,
+    const glm::vec3& max_p,
+    const glm::vec4& color,
+    const glm::vec4& material
+) {
     glm::vec3 p0 = min_p;
     glm::vec3 p1 = max_p;
 
-    auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n, const glm::vec4& col) {
-        verts.push_back({a, n, col});
-        verts.push_back({b, n, col});
-        verts.push_back({c, n, col});
-        verts.push_back({a, n, col});
-        verts.push_back({c, n, col});
-        verts.push_back({d, n, col});
+    auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
+        verts.push_back({a, n, color, material});
+        verts.push_back({b, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({a, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({d, n, color, material});
     };
 
     // Front (+Z)
-    push_quad({p0.x, p0.y, p1.z}, {p1.x, p0.y, p1.z}, {p1.x, p1.y, p1.z}, {p0.x, p1.y, p1.z}, {0, 0, 1}, color);
+    push_quad({p0.x, p0.y, p1.z}, {p1.x, p0.y, p1.z}, {p1.x, p1.y, p1.z}, {p0.x, p1.y, p1.z}, {0.0f, 0.0f, 1.0f});
     // Back (-Z)
-    push_quad({p1.x, p0.y, p0.z}, {p0.x, p0.y, p0.z}, {p0.x, p1.y, p0.z}, {p1.x, p1.y, p0.z}, {0, 0, -1}, color);
+    push_quad({p1.x, p0.y, p0.z}, {p0.x, p0.y, p0.z}, {p0.x, p1.y, p0.z}, {p1.x, p1.y, p0.z}, {0.0f, 0.0f, -1.0f});
     // Right (+X)
-    push_quad({p1.x, p0.y, p1.z}, {p1.x, p0.y, p0.z}, {p1.x, p1.y, p0.z}, {p1.x, p1.y, p1.z}, {1, 0, 0}, color);
+    push_quad({p1.x, p0.y, p1.z}, {p1.x, p0.y, p0.z}, {p1.x, p1.y, p0.z}, {p1.x, p1.y, p1.z}, {1.0f, 0.0f, 0.0f});
     // Left (-X)
-    push_quad({p0.x, p0.y, p0.z}, {p0.x, p0.y, p1.z}, {p0.x, p1.y, p1.z}, {p0.x, p1.y, p0.z}, {-1, 0, 0}, color);
+    push_quad({p0.x, p0.y, p0.z}, {p0.x, p0.y, p1.z}, {p0.x, p1.y, p1.z}, {p0.x, p1.y, p0.z}, {-1.0f, 0.0f, 0.0f});
     // Top (+Y)
-    push_quad({p0.x, p1.y, p1.z}, {p1.x, p1.y, p1.z}, {p1.x, p1.y, p0.z}, {p0.x, p1.y, p0.z}, {0, 1, 0}, color);
+    push_quad({p0.x, p1.y, p1.z}, {p1.x, p1.y, p1.z}, {p1.x, p1.y, p0.z}, {p0.x, p1.y, p0.z}, {0.0f, 1.0f, 0.0f});
     // Bottom (-Y)
-    push_quad({p0.x, p0.y, p0.z}, {p1.x, p0.y, p0.z}, {p1.x, p0.y, p1.z}, {p0.x, p0.y, p1.z}, {0, -1, 0}, color);
+    push_quad({p0.x, p0.y, p0.z}, {p1.x, p0.y, p0.z}, {p1.x, p0.y, p1.z}, {p0.x, p0.y, p1.z}, {0.0f, -1.0f, 0.0f});
 }
 
-void ViewModel::add_cylinder(std::vector<ViewmodelVertex>& verts, const glm::vec3& base, float radius, float length, int segments, const glm::vec4& color, int axis) {
-    // axis: 0=X, 1=Y, 2=Z (extends down -Z by default for axis=2)
+void ViewModel::add_transformed_box(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::mat4& transform,
+    const glm::vec3& half_extents,
+    const glm::vec4& color,
+    const glm::vec4& material
+) {
+    glm::mat3 normal_mat = glm::transpose(glm::inverse(glm::mat3(transform)));
+    auto xform_pt = [&](float x, float y, float z) -> glm::vec3 {
+        return glm::vec3(transform * glm::vec4(x * half_extents.x, y * half_extents.y, z * half_extents.z, 1.0f));
+    };
+    auto xform_n = [&](const glm::vec3& n) -> glm::vec3 {
+        return glm::normalize(normal_mat * n);
+    };
+
+    auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
+        verts.push_back({a, n, color, material});
+        verts.push_back({b, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({a, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({d, n, color, material});
+    };
+
+    push_quad(xform_pt(-1, -1,  1), xform_pt( 1, -1,  1), xform_pt( 1,  1,  1), xform_pt(-1,  1,  1), xform_n({0, 0, 1}));
+    push_quad(xform_pt( 1, -1, -1), xform_pt(-1, -1, -1), xform_pt(-1,  1, -1), xform_pt( 1,  1, -1), xform_n({0, 0, -1}));
+    push_quad(xform_pt( 1, -1,  1), xform_pt( 1, -1, -1), xform_pt( 1,  1, -1), xform_pt( 1,  1,  1), xform_n({1, 0, 0}));
+    push_quad(xform_pt(-1, -1, -1), xform_pt(-1, -1,  1), xform_pt(-1,  1,  1), xform_pt(-1,  1, -1), xform_n({-1, 0, 0}));
+    push_quad(xform_pt(-1,  1,  1), xform_pt( 1,  1,  1), xform_pt( 1,  1, -1), xform_pt(-1,  1, -1), xform_n({0, 1, 0}));
+    push_quad(xform_pt(-1, -1, -1), xform_pt( 1, -1, -1), xform_pt( 1, -1,  1), xform_pt(-1, -1,  1), xform_n({0, -1, 0}));
+}
+
+void ViewModel::add_capsule(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& p1,
+    const glm::vec3& p2,
+    float r1,
+    float r2,
+    int segments,
+    const glm::vec4& color,
+    const glm::vec4& material
+) {
+    glm::vec3 diff = p2 - p1;
+    float len = glm::length(diff);
+    if (len < 0.001f) return;
+    glm::vec3 dir = diff / len;
+
+    glm::vec3 up = (std::abs(dir.y) < 0.95f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 right = glm::normalize(glm::cross(up, dir));
+    up = glm::cross(dir, right);
+
+    float step = 2.0f * 3.14159265f / static_cast<float>(segments);
+    for (int i = 0; i < segments; ++i) {
+        float a1 = i * step;
+        float a2 = (i + 1) * step;
+        float c1 = std::cos(a1), s1 = std::sin(a1);
+        float c2 = std::cos(a2), s2 = std::sin(a2);
+
+        glm::vec3 rad1 = right * c1 + up * s1;
+        glm::vec3 rad2 = right * c2 + up * s2;
+
+        glm::vec3 v1 = p1 + rad1 * r1;
+        glm::vec3 v2 = p1 + rad2 * r1;
+        glm::vec3 v3 = p2 + rad2 * r2;
+        glm::vec3 v4 = p2 + rad1 * r2;
+
+        glm::vec3 n1 = rad1;
+        glm::vec3 n2 = rad2;
+
+        verts.push_back({v1, n1, color, material});
+        verts.push_back({v2, n2, color, material});
+        verts.push_back({v3, n2, color, material});
+        verts.push_back({v1, n1, color, material});
+        verts.push_back({v3, n2, color, material});
+        verts.push_back({v4, n1, color, material});
+
+        // Caps
+        verts.push_back({p1, -dir, color, material});
+        verts.push_back({v2, -dir, color, material});
+        verts.push_back({v1, -dir, color, material});
+
+        verts.push_back({p2, dir, color, material});
+        verts.push_back({v4, dir, color, material});
+        verts.push_back({v3, dir, color, material});
+    }
+}
+
+void ViewModel::add_cylinder(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& base,
+    float radius,
+    float length,
+    int segments,
+    const glm::vec4& color,
+    const glm::vec4& material,
+    int axis,
+    bool cap_ends
+) {
     float step = 2.0f * 3.14159265f / static_cast<float>(segments);
     for (int i = 0; i < segments; ++i) {
         float a1 = i * step;
@@ -72,42 +179,97 @@ void ViewModel::add_cylinder(std::vector<ViewmodelVertex>& verts, const glm::vec
         float c2 = std::cos(a2), s2 = std::sin(a2);
 
         glm::vec3 p1, p2, p3, p4, n1, n2;
-        if (axis == 2) { // Z axis, extending towards -Z
+        if (axis == 2) {
             p1 = base + glm::vec3(radius * c1, radius * s1, 0.0f);
             p2 = base + glm::vec3(radius * c2, radius * s2, 0.0f);
             p3 = base + glm::vec3(radius * c2, radius * s2, -length);
             p4 = base + glm::vec3(radius * c1, radius * s1, -length);
             n1 = glm::vec3(c1, s1, 0.0f);
             n2 = glm::vec3(c2, s2, 0.0f);
-        } else if (axis == 1) { // Y axis
+
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p2, n2, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p4, n1, color, material});
+
+            if (cap_ends) {
+                verts.push_back({base, {0, 0, 1}, color, material});
+                verts.push_back({p2, {0, 0, 1}, color, material});
+                verts.push_back({p1, {0, 0, 1}, color, material});
+
+                glm::vec3 end_c = base + glm::vec3(0.0f, 0.0f, -length);
+                verts.push_back({end_c, {0, 0, -1}, color, material});
+                verts.push_back({p4, {0, 0, -1}, color, material});
+                verts.push_back({p3, {0, 0, -1}, color, material});
+            }
+        } else if (axis == 1) {
             p1 = base + glm::vec3(radius * c1, 0.0f, radius * s1);
             p2 = base + glm::vec3(radius * c2, 0.0f, radius * s2);
             p3 = base + glm::vec3(radius * c2, length, radius * s2);
             p4 = base + glm::vec3(radius * c1, length, radius * s1);
             n1 = glm::vec3(c1, 0.0f, s1);
             n2 = glm::vec3(c2, 0.0f, s2);
-        } else { // X axis
+
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p2, n2, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p4, n1, color, material});
+
+            if (cap_ends) {
+                verts.push_back({base, {0, -1, 0}, color, material});
+                verts.push_back({p1, {0, -1, 0}, color, material});
+                verts.push_back({p2, {0, -1, 0}, color, material});
+
+                glm::vec3 end_c = base + glm::vec3(0.0f, length, 0.0f);
+                verts.push_back({end_c, {0, 1, 0}, color, material});
+                verts.push_back({p4, {0, 1, 0}, color, material});
+                verts.push_back({p3, {0, 1, 0}, color, material});
+            }
+        } else {
             p1 = base + glm::vec3(0.0f, radius * c1, radius * s1);
             p2 = base + glm::vec3(0.0f, radius * c2, radius * s2);
             p3 = base + glm::vec3(length, radius * c2, radius * s2);
             p4 = base + glm::vec3(length, radius * c1, radius * s1);
             n1 = glm::vec3(0.0f, c1, s1);
             n2 = glm::vec3(0.0f, c2, s2);
-        }
 
-        verts.push_back({p1, n1, color});
-        verts.push_back({p2, n2, color});
-        verts.push_back({p3, n2, color});
-        verts.push_back({p1, n1, color});
-        verts.push_back({p3, n2, color});
-        verts.push_back({p4, n1, color});
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p2, n2, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p1, n1, color, material});
+            verts.push_back({p3, n2, color, material});
+            verts.push_back({p4, n1, color, material});
+
+            if (cap_ends) {
+                verts.push_back({base, {-1, 0, 0}, color, material});
+                verts.push_back({p1, {-1, 0, 0}, color, material});
+                verts.push_back({p2, {-1, 0, 0}, color, material});
+
+                glm::vec3 end_c = base + glm::vec3(length, 0.0f, 0.0f);
+                verts.push_back({end_c, {1, 0, 0}, color, material});
+                verts.push_back({p4, {1, 0, 0}, color, material});
+                verts.push_back({p3, {1, 0, 0}, color, material});
+            }
+        }
     }
 }
 
-void ViewModel::add_cone(std::vector<ViewmodelVertex>& verts, const glm::vec3& base, float radius, float length, int segments, const glm::vec4& color) {
-    // Cone pointing along -Z (drill bit tip)
+void ViewModel::add_cone(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& base,
+    float radius_base,
+    float radius_tip,
+    float length,
+    int segments,
+    const glm::vec4& color,
+    const glm::vec4& material
+) {
     float step = 2.0f * 3.14159265f / static_cast<float>(segments);
-    glm::vec3 tip = base + glm::vec3(0.0f, 0.0f, -length);
+    glm::vec3 tip_c = base + glm::vec3(0.0f, 0.0f, -length);
 
     for (int i = 0; i < segments; ++i) {
         float a1 = i * step;
@@ -115,16 +277,25 @@ void ViewModel::add_cone(std::vector<ViewmodelVertex>& verts, const glm::vec3& b
         float c1 = std::cos(a1), s1 = std::sin(a1);
         float c2 = std::cos(a2), s2 = std::sin(a2);
 
-        glm::vec3 p1 = base + glm::vec3(radius * c1, radius * s1, 0.0f);
-        glm::vec3 p2 = base + glm::vec3(radius * c2, radius * s2, 0.0f);
+        glm::vec3 p1 = base + glm::vec3(radius_base * c1, radius_base * s1, 0.0f);
+        glm::vec3 p2 = base + glm::vec3(radius_base * c2, radius_base * s2, 0.0f);
+        glm::vec3 p3 = tip_c + glm::vec3(radius_tip * c2, radius_tip * s2, 0.0f);
+        glm::vec3 p4 = tip_c + glm::vec3(radius_tip * c1, radius_tip * s1, 0.0f);
 
-        glm::vec3 normal = glm::normalize(glm::cross(p2 - tip, p1 - tip));
-        // Fluted drill bit teeth color alternation
-        glm::vec4 flute_col = (i % 2 == 0) ? color : glm::vec4(color.r * 0.75f, color.g * 0.75f, color.b * 0.75f, color.a);
+        glm::vec3 side_n = glm::normalize(glm::vec3((c1 + c2) * 0.5f, (s1 + s2) * 0.5f, (radius_base - radius_tip) / std::max(0.001f, length)));
 
-        verts.push_back({p1, normal, flute_col});
-        verts.push_back({p2, normal, flute_col});
-        verts.push_back({tip, normal, flute_col});
+        if (radius_tip <= 0.001f) {
+            verts.push_back({p1, side_n, color, material});
+            verts.push_back({p2, side_n, color, material});
+            verts.push_back({tip_c, side_n, color, material});
+        } else {
+            verts.push_back({p1, side_n, color, material});
+            verts.push_back({p2, side_n, color, material});
+            verts.push_back({p3, side_n, color, material});
+            verts.push_back({p1, side_n, color, material});
+            verts.push_back({p3, side_n, color, material});
+            verts.push_back({p4, side_n, color, material});
+        }
     }
 }
 
@@ -142,64 +313,217 @@ void ViewModel::init_geometry() {
     if (m_bit_vbo) { glDeleteBuffers(1, &m_bit_vbo); m_bit_vbo = 0; }
     if (m_piston_vao) { glDeleteVertexArrays(1, &m_piston_vao); m_piston_vao = 0; }
     if (m_piston_vbo) { glDeleteBuffers(1, &m_piston_vbo); m_piston_vbo = 0; }
+    if (m_carbine_vao) { glDeleteVertexArrays(1, &m_carbine_vao); m_carbine_vao = 0; }
+    if (m_carbine_vbo) { glDeleteBuffers(1, &m_carbine_vbo); m_carbine_vbo = 0; }
+    if (m_scattergun_vao) { glDeleteVertexArrays(1, &m_scattergun_vao); m_scattergun_vao = 0; }
+    if (m_scattergun_vbo) { glDeleteBuffers(1, &m_scattergun_vbo); m_scattergun_vbo = 0; }
+    if (m_railgun_vao) { glDeleteVertexArrays(1, &m_railgun_vao); m_railgun_vao = 0; }
+    if (m_railgun_vbo) { glDeleteBuffers(1, &m_railgun_vbo); m_railgun_vbo = 0; }
 
-    // -------------------------------------------------------------
-    // 1. CHASSIS + HANDS / FOREARMS + RIG
-    // -------------------------------------------------------------
-    std::vector<ViewmodelVertex> chassis_verts;
-
-    // Archetype dynamic palette:
     CharacterAttributes char_attr = get_character_attributes(m_character_class);
     glm::vec4 col_suit_arm = char_attr.suitSleeveColor;
     glm::vec4 col_suit_glove = char_attr.gloveColor;
     glm::vec4 col_suit_accent = char_attr.primaryAccentColor;
-    glm::vec4 col_chassis_dark(0.13f, 0.14f, 0.16f, 1.0f); // Heavy pneumatic casing
-    glm::vec4 col_chassis_body(0.22f, 0.24f, 0.28f, 1.0f); // Industrial chassis
-    glm::vec4 col_chassis_metal(0.48f, 0.52f, 0.56f, 1.0f);// Machined alloy collar
-    glm::vec4 col_hazard_black(0.08f, 0.08f, 0.09f, 1.0f); // Striping black
-    glm::vec4 col_status_led = (m_character_class == CharacterClass::Scout) ? glm::vec4(0.0f, 0.95f, 1.0f, 1.0f) :
-                               (m_character_class == CharacterClass::Demolitionist) ? glm::vec4(1.0f, 0.45f, 0.05f, 1.0f) :
-                               glm::vec4(0.95f, 0.85f, 0.15f, 1.0f);
+    glm::vec4 col_glove_rubber(0.12f, 0.13f, 0.15f, 1.0f);
+    glm::vec4 col_armor_plate(0.25f, 0.28f, 0.32f, 1.0f);
 
-    // Right Forearm & Hand (extending from lower-right screen space at (0.28, -0.24, -0.45))
-    add_box(chassis_verts, {0.22f, -0.38f, -0.20f}, {0.34f, -0.10f, -0.45f}, col_suit_arm);
-    // Right Glove (holding rear grip)
-    add_box(chassis_verts, {0.18f, -0.22f, -0.25f}, {0.30f, -0.06f, -0.35f}, col_suit_glove);
-    add_box(chassis_verts, {0.17f, -0.20f, -0.35f}, {0.21f, -0.08f, -0.28f}, col_suit_accent); // Cuff ring
+    glm::vec4 col_chassis_dark(0.13f, 0.14f, 0.16f, 1.0f);
+    glm::vec4 col_chassis_body(0.24f, 0.26f, 0.29f, 1.0f);
+    glm::vec4 col_chassis_metal(0.50f, 0.54f, 0.58f, 1.0f);
+    glm::vec4 col_steel_bright(0.80f, 0.84f, 0.88f, 1.0f);
+    glm::vec4 col_brass(0.78f, 0.64f, 0.28f, 1.0f);
+    glm::vec4 col_hazard_yellow(0.96f, 0.80f, 0.12f, 1.0f);
+    glm::vec4 col_hazard_black(0.08f, 0.08f, 0.09f, 1.0f);
+    glm::vec4 col_hud_display(0.04f, 0.15f, 0.22f, 1.0f);
+    glm::vec4 col_hud_cyan(0.15f, 0.95f, 1.0f, 1.0f);
+    glm::vec4 col_hud_amber(1.0f, 0.65f, 0.10f, 1.0f);
+    glm::vec4 col_heat_coil(1.0f, 0.45f, 0.10f, 1.0f);
 
-    // Left Forearm (reaching from lower-left to side stabilizer bar)
-    add_box(chassis_verts, {-0.30f, -0.42f, 0.05f}, {-0.14f, -0.18f, -0.30f}, col_suit_arm);
-    // Left Glove (gripping side stabilization handle)
-    add_box(chassis_verts, {-0.16f, -0.14f, -0.38f}, {-0.04f, -0.02f, -0.48f}, col_suit_glove);
+    glm::vec4 mat_cloth(0.02f, 0.88f, 0.0f, 0.85f);
+    glm::vec4 mat_rubber(0.05f, 0.75f, 0.0f, 0.80f);
+    glm::vec4 mat_armor(0.45f, 0.40f, 0.0f, 0.90f);
+    glm::vec4 mat_metal(0.72f, 0.35f, 0.0f, 0.90f);
+    glm::vec4 mat_dark_polymer(0.15f, 0.55f, 0.0f, 0.80f);
+    glm::vec4 mat_chrome(0.96f, 0.08f, 0.0f, 1.0f);
+    glm::vec4 mat_led_emissive(0.0f, 0.20f, 0.95f, 1.0f);
+    glm::vec4 mat_screen_bg(0.05f, 0.30f, 0.60f, 1.0f);
 
-    // Drill Rear Grip & Trigger Housing
-    add_box(chassis_verts, {0.19f, -0.20f, -0.20f}, {0.25f, -0.05f, -0.34f}, col_chassis_dark);
-    add_box(chassis_verts, {0.19f, -0.12f, -0.34f}, {0.25f, -0.06f, -0.38f}, col_suit_accent); // Trigger
+    // =============================================================
+    // 1. CHASSIS + HANDS & DELVER GAUNTLETS + MINING RIG
+    // (Local space: +X = Right, +Y = Up, -Z = Forward along spindle)
+    // =============================================================
+    std::vector<ViewmodelVertex> chassis_verts;
 
-    // Main Industrial Drill Body (Center-Right in view)
-    add_box(chassis_verts, {0.02f, -0.16f, -0.35f}, {0.22f, 0.06f, -0.65f}, col_chassis_body);
+    // -------------------------------------------------------------
+    // A. SLEEK INDUSTRIAL MOTOR CASING & ENGINE BLOCK
+    // (Compact 9cm x 9cm profile so the drill bit out front is fully visible!)
+    // -------------------------------------------------------------
+    add_box(chassis_verts, {-0.046f, -0.052f, -0.16f}, {0.046f, 0.042f, 0.02f}, col_chassis_body, mat_dark_polymer);
+    add_box(chassis_verts, {-0.038f, 0.042f, -0.15f}, {0.038f, 0.054f, 0.01f}, col_chassis_dark, mat_armor);
+    add_box(chassis_verts, {-0.040f, -0.065f, -0.15f}, {0.040f, -0.052f, 0.01f}, col_chassis_dark, mat_armor);
 
-    // Side Stabilizer Handle (left side of drill)
-    add_cylinder(chassis_verts, {0.02f, -0.06f, -0.43f}, 0.022f, 0.16f, 10, col_chassis_dark, 0); // X-axis handle
-
-    // Top Air Intake / Exhaust Heatsink
-    add_box(chassis_verts, {0.05f, 0.06f, -0.42f}, {0.19f, 0.11f, -0.62f}, col_chassis_dark);
-
-    // Hazard Stripes on Drill Top Cover (alternating yellow and black slashes)
-    float stripe_z = -0.44f;
-    for (int s = 0; s < 4; ++s) {
-        glm::vec4 scol = (s % 2 == 0) ? col_suit_accent : col_hazard_black;
-        add_box(chassis_verts, {0.048f, 0.062f, stripe_z - 0.038f}, {0.192f, 0.112f, stripe_z}, scol);
-        stripe_z -= 0.042f;
+    // Left and Right Radiator Cooling Vents & Internal Glowing Heat Coils
+    for (int v = 0; v < 3; ++v) {
+        float vz = -0.12f + v * 0.045f;
+        // Left
+        add_box(chassis_verts, {-0.048f, -0.035f, vz - 0.012f}, {-0.045f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
+        add_box(chassis_verts, {-0.050f, -0.040f, vz - 0.003f}, {-0.046f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
+        // Right
+        add_box(chassis_verts, {0.045f, -0.035f, vz - 0.012f}, {0.048f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
+        add_box(chassis_verts, {0.046f, -0.040f, vz - 0.003f}, {0.050f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
     }
 
-    // Status LED Panel (Tachometer / Pressure Indicator)
-    add_box(chassis_verts, {0.10f, 0.07f, -0.38f}, {0.18f, 0.095f, -0.36f}, col_status_led);
+    // Top Hazard Caution Stripes
+    float hz_z = 0.01f;
+    for (int h = 0; h < 4; ++h) {
+        glm::vec4 h_col = (h % 2 == 0) ? col_hazard_yellow : col_hazard_black;
+        add_box(chassis_verts, {-0.036f, 0.055f, hz_z - 0.025f}, {0.036f, 0.056f, hz_z}, h_col, mat_armor);
+        hz_z -= 0.034f;
+    }
 
-    // Front Heavy Chuck Collar (holding the drill spindle)
-    add_cylinder(chassis_verts, {0.12f, -0.05f, -0.65f}, 0.075f, 0.08f, 16, col_chassis_metal, 2);
-    // Spindle Hub ring
-    add_cylinder(chassis_verts, {0.12f, -0.05f, -0.73f}, 0.052f, 0.04f, 16, col_chassis_dark, 2);
+    // Top Protective Tubular Roll-Cage
+    add_capsule(chassis_verts, {-0.038f, 0.048f, 0.01f}, {-0.038f, 0.058f, -0.15f}, 0.006f, 0.006f, 8, col_chassis_dark, mat_armor);
+    add_capsule(chassis_verts, { 0.038f, 0.048f, 0.01f}, { 0.038f, 0.058f, -0.15f}, 0.006f, 0.006f, 8, col_chassis_dark, mat_armor);
+
+    // Left Pneumatic Pressure Canister
+    add_capsule(chassis_verts, {-0.062f, -0.015f, 0.01f}, {-0.062f, -0.015f, -0.13f}, 0.019f, 0.019f, 12, col_chassis_dark, mat_armor);
+    add_capsule(chassis_verts, {-0.062f, -0.015f, 0.01f}, {-0.062f, -0.015f, 0.025f}, 0.011f, 0.011f, 10, col_brass, mat_metal);
+    add_capsule(chassis_verts, {-0.062f, -0.015f, -0.045f}, {-0.062f, -0.015f, -0.065f}, 0.0205f, 0.0205f, 12, col_suit_accent, mat_metal);
+
+    // Left Forward Stabilizer Support Arm
+    add_capsule(chassis_verts, {-0.046f, -0.015f, -0.08f}, {-0.13f, -0.015f, -0.08f}, 0.011f, 0.011f, 10, col_chassis_dark, mat_armor);
+    add_capsule(chassis_verts, {-0.075f, -0.015f, -0.08f}, {-0.12f, -0.015f, -0.08f}, 0.014f, 0.014f, 12, col_glove_rubber, mat_rubber);
+    add_capsule(chassis_verts, {-0.125f, -0.015f, -0.08f}, {-0.135f, -0.015f, -0.08f}, 0.016f, 0.016f, 12, col_steel_bright, mat_metal);
+
+    // -------------------------------------------------------------
+    // B. COMPACT REAR DELVER OLED TELEMETRY DISPLAY
+    // -------------------------------------------------------------
+    glm::mat4 hud_m = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.052f, 0.015f));
+    hud_m = glm::rotate(hud_m, glm::radians(32.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+    add_transformed_box(chassis_verts, hud_m, glm::vec3(0.040f, 0.022f, 0.008f), col_chassis_dark, mat_dark_polymer);
+    add_transformed_box(chassis_verts, hud_m, glm::vec3(0.035f, 0.018f, 0.009f), col_hud_display, mat_screen_bg);
+
+    // 5-Segment Dynamic Tachometer across top
+    float seg_start_x = -0.025f;
+    for (int s = 0; s < 5; ++s) {
+        glm::vec4 seg_col = (s < 3) ? col_hud_cyan : col_hud_amber;
+        glm::mat4 seg_m = glm::translate(hud_m, glm::vec3(seg_start_x + s * 0.0125f, 0.010f, 0.010f));
+        add_transformed_box(chassis_verts, seg_m, glm::vec3(0.0045f, 0.003f, 0.001f), seg_col, mat_led_emissive);
+    }
+    // Telemetry crosshair
+    glm::mat4 reticle_m = glm::translate(hud_m, glm::vec3(0.0f, -0.004f, 0.010f));
+    add_transformed_box(chassis_verts, reticle_m, glm::vec3(0.022f, 0.002f, 0.001f), col_hud_cyan, mat_led_emissive);
+    add_transformed_box(chassis_verts, reticle_m, glm::vec3(0.002f, 0.007f, 0.001f), col_hud_cyan, mat_led_emissive);
+
+    // -------------------------------------------------------------
+    // C. REAR ERGONOMIC GRIP & TRIGGER
+    // -------------------------------------------------------------
+    glm::vec3 grip_top(0.0f, -0.045f, 0.005f);
+    glm::vec3 grip_bot(0.0f, -0.165f, 0.045f);
+    add_capsule(chassis_verts, grip_top, grip_bot, 0.016f, 0.014f, 10, col_chassis_dark, mat_dark_polymer);
+    add_capsule(chassis_verts, grip_top + glm::vec3(0, -0.02f, 0), grip_bot + glm::vec3(0, 0.015f, 0), 0.0175f, 0.0155f, 10, col_glove_rubber, mat_rubber);
+
+    // Trigger guard
+    add_capsule(chassis_verts, {0.0f, -0.06f, 0.00f}, {0.0f, -0.11f, -0.025f}, 0.005f, 0.005f, 6, col_chassis_dark, mat_metal);
+    add_capsule(chassis_verts, {0.0f, -0.11f, -0.025f}, {0.0f, -0.12f, 0.025f}, 0.005f, 0.005f, 6, col_chassis_dark, mat_metal);
+
+    // Pneumatic Trigger Blade
+    add_capsule(chassis_verts, {0.0f, -0.075f, 0.00f}, {0.0f, -0.098f, -0.015f}, 0.005f, 0.004f, 6, col_suit_accent, mat_metal);
+
+    // -------------------------------------------------------------
+    // D. TRANSMISSION BELL HOUSING & HEAVY ROTARY CHUCK COLLAR
+    // -------------------------------------------------------------
+    // Tapered transition from motor block to chuck collar
+    add_cone(chassis_verts, {0.0f, 0.0f, -0.16f}, 0.052f, 0.048f, 0.04f, 16, col_chassis_dark, mat_metal);
+
+    // Front Rotary Chuck Collar
+    add_cylinder(chassis_verts, {0.0f, 0.0f, -0.20f}, 0.048f, 0.06f, 16, col_chassis_metal, mat_metal, 2);
+
+    // 4 Locking Jaws bolted around the chuck
+    for (int j = 0; j < 4; ++j) {
+        float j_angle = j * 1.5707963f;
+        glm::mat4 jaw_m = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -0.23f));
+        jaw_m = glm::rotate(jaw_m, j_angle, glm::vec3(0.0f, 0.0f, 1.0f));
+        jaw_m = glm::translate(jaw_m, glm::vec3(0.045f, 0.0f, 0.0f));
+        add_transformed_box(chassis_verts, jaw_m, glm::vec3(0.009f, 0.012f, 0.018f), col_steel_bright, mat_metal);
+    }
+
+    // Spindle seal hub
+    add_cylinder(chassis_verts, {0.0f, 0.0f, -0.26f}, 0.034f, 0.015f, 16, col_chassis_dark, mat_metal, 2);
+
+    // -------------------------------------------------------------
+    // E. RIGHT ARM, GAUNTLET & HAND (Operating rear handle & trigger)
+    // -------------------------------------------------------------
+    glm::vec3 r_palm(0.015f, -0.10f, 0.03f);
+    glm::vec3 r_wrist(0.06f, -0.15f, 0.12f);
+    glm::vec3 r_elbow(0.20f, -0.32f, 0.36f);
+
+    // Forearm sleeve
+    add_capsule(chassis_verts, r_elbow, r_wrist, 0.048f, 0.036f, 10, col_suit_arm, mat_cloth);
+
+    // Composite forearm armor plate
+    glm::vec3 r_mid_arm = (r_elbow + r_wrist) * 0.5f + glm::vec3(0.015f, 0.015f, 0.0f);
+    add_capsule(chassis_verts, r_mid_arm + glm::vec3(0.015f, 0.02f, 0.06f), r_mid_arm - glm::vec3(0.015f, -0.015f, 0.06f), 0.018f, 0.015f, 8, col_armor_plate, mat_armor);
+    add_capsule(chassis_verts, r_mid_arm + glm::vec3(0.017f, 0.022f, 0.05f), r_mid_arm - glm::vec3(0.013f, -0.013f, 0.05f), 0.006f, 0.005f, 6, col_suit_accent, mat_metal);
+
+    // Wrist cuff seal ring
+    add_capsule(chassis_verts, r_wrist + glm::vec3(0.008f, -0.008f, 0.015f), r_wrist - glm::vec3(0.008f, -0.008f, 0.015f), 0.038f, 0.038f, 12, col_chassis_dark, mat_metal);
+    add_capsule(chassis_verts, r_wrist + glm::vec3(0.004f, -0.004f, 0.008f), r_wrist - glm::vec3(0.004f, -0.004f, 0.008f), 0.040f, 0.040f, 12, col_suit_accent, mat_metal);
+
+    // Hand palm
+    add_capsule(chassis_verts, r_wrist, r_palm, 0.032f, 0.028f, 8, col_suit_glove, mat_rubber);
+    // Knuckle guard
+    add_capsule(chassis_verts, r_palm + glm::vec3(0.018f, 0.012f, 0.015f), r_palm + glm::vec3(0.018f, -0.020f, 0.015f), 0.012f, 0.010f, 6, col_armor_plate, mat_armor);
+
+    // Thumb wrapped over upper handle
+    add_capsule(chassis_verts, r_palm + glm::vec3(0.008f, 0.015f, -0.008f), glm::vec3(-0.015f, -0.06f, 0.015f), 0.010f, 0.009f, 6, col_suit_glove, mat_rubber);
+
+    // Index finger curled on trigger
+    add_capsule(chassis_verts, r_palm + glm::vec3(-0.008f, 0.01f, -0.015f), glm::vec3(0.0f, -0.085f, -0.015f), 0.009f, 0.007f, 6, col_suit_glove, mat_rubber);
+    add_capsule(chassis_verts, glm::vec3(0.0f, -0.085f, -0.015f), glm::vec3(-0.015f, -0.095f, 0.005f), 0.007f, 0.006f, 6, col_suit_accent, mat_rubber);
+
+    // Middle, Ring, Pinky curled tightly around grip
+    add_capsule(chassis_verts, r_palm + glm::vec3(-0.008f, -0.008f, -0.008f), glm::vec3(-0.016f, -0.11f, 0.015f), 0.009f, 0.007f, 6, col_suit_glove, mat_rubber);
+    add_capsule(chassis_verts, r_palm + glm::vec3(-0.008f, -0.024f, 0.000f), glm::vec3(-0.015f, -0.13f, 0.022f), 0.008f, 0.007f, 6, col_suit_glove, mat_rubber);
+    add_capsule(chassis_verts, r_palm + glm::vec3(-0.008f, -0.040f, 0.008f), glm::vec3(-0.014f, -0.15f, 0.030f), 0.007f, 0.006f, 6, col_suit_glove, mat_rubber);
+
+    // -------------------------------------------------------------
+    // F. LEFT ARM, GAUNTLET & HAND (Gripping forward stabilizer bar)
+    // -------------------------------------------------------------
+    glm::vec3 l_palm(-0.095f, -0.015f, -0.08f);
+    glm::vec3 l_wrist(-0.16f, -0.08f, -0.02f);
+    glm::vec3 l_elbow(-0.30f, -0.26f, 0.22f);
+
+    // Forearm sleeve
+    add_capsule(chassis_verts, l_elbow, l_wrist, 0.048f, 0.036f, 10, col_suit_arm, mat_cloth);
+
+    // Composite forearm armor plate
+    glm::vec3 l_mid_arm = (l_elbow + l_wrist) * 0.5f + glm::vec3(-0.015f, 0.015f, 0.0f);
+    add_capsule(chassis_verts, l_mid_arm + glm::vec3(-0.015f, 0.02f, 0.06f), l_mid_arm - glm::vec3(-0.015f, -0.015f, 0.06f), 0.018f, 0.015f, 8, col_armor_plate, mat_armor);
+    add_capsule(chassis_verts, l_mid_arm + glm::vec3(-0.017f, 0.022f, 0.05f), l_mid_arm - glm::vec3(-0.013f, -0.013f, 0.05f), 0.006f, 0.005f, 6, col_suit_accent, mat_metal);
+
+    // Wrist cuff ring
+    add_capsule(chassis_verts, l_wrist + glm::vec3(-0.008f, -0.008f, 0.015f), l_wrist - glm::vec3(-0.008f, -0.008f, 0.015f), 0.038f, 0.038f, 12, col_chassis_dark, mat_metal);
+    add_capsule(chassis_verts, l_wrist + glm::vec3(-0.004f, -0.004f, 0.008f), l_wrist - glm::vec3(-0.004f, -0.004f, 0.008f), 0.040f, 0.040f, 12, col_suit_accent, mat_metal);
+
+    // Hand palm
+    add_capsule(chassis_verts, l_wrist, l_palm, 0.030f, 0.026f, 8, col_suit_glove, mat_rubber);
+    // Knuckle guard
+    add_capsule(chassis_verts, l_palm + glm::vec3(-0.008f, 0.018f, -0.015f), l_palm + glm::vec3(-0.008f, 0.018f, 0.015f), 0.011f, 0.011f, 6, col_armor_plate, mat_armor);
+
+    // Thumb clamped over top of stabilizer
+    add_capsule(chassis_verts, l_palm + glm::vec3(0.008f, 0.015f, 0.008f), glm::vec3(-0.090f, 0.005f, -0.075f), 0.010f, 0.008f, 6, col_suit_accent, mat_rubber);
+
+    // 4 Fingers curled around and under stabilizer handle
+    for (int f = 0; f < 4; ++f) {
+        float f_z = -0.065f - f * 0.012f;
+        glm::vec3 f_base = l_palm + glm::vec3(-0.008f, 0.008f, f_z - l_palm.z);
+        glm::vec3 f_curl1 = glm::vec3(-0.098f - f * 0.004f, -0.032f, f_z);
+        glm::vec3 f_curl2 = glm::vec3(-0.082f - f * 0.004f, -0.022f, f_z);
+        add_capsule(chassis_verts, f_base, f_curl1, 0.008f, 0.007f, 6, col_suit_glove, mat_rubber);
+        add_capsule(chassis_verts, f_curl1, f_curl2, 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
+    }
 
     m_chassis_count = chassis_verts.size();
 
@@ -209,31 +533,30 @@ void ViewModel::init_geometry() {
     glBindBuffer(GL_ARRAY_BUFFER, m_chassis_vbo);
     glBufferData(GL_ARRAY_BUFFER, m_chassis_count * sizeof(ViewmodelVertex), chassis_verts.data(), GL_STATIC_DRAW);
 
-    // aPos (vec3)
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
-    // aNormal (vec3)
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
-    // aColor (vec4)
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
     glBindVertexArray(0);
 
-    // -------------------------------------------------------------
+    // =============================================================
     // 2. RECIPROCATING DUAL PNEUMATIC PISTONS
-    // -------------------------------------------------------------
+    // =============================================================
     std::vector<ViewmodelVertex> piston_verts;
-    glm::vec4 col_piston_chrome(0.78f, 0.82f, 0.88f, 1.0f);
-    glm::vec4 col_piston_sleeve(0.18f, 0.19f, 0.21f, 1.0f);
 
-    // Left hydraulic cylinder
-    add_cylinder(piston_verts, {0.04f, 0.02f, -0.40f}, 0.018f, 0.22f, 12, col_piston_sleeve, 2);
-    add_cylinder(piston_verts, {0.04f, 0.02f, -0.58f}, 0.012f, 0.15f, 12, col_piston_chrome, 2);
+    // Left hydraulic assembly
+    add_cylinder(piston_verts, {-0.036f, 0.032f, -0.06f}, 0.012f, 0.14f, 12, col_chassis_dark, mat_armor, 2);
+    add_cylinder(piston_verts, {-0.036f, 0.032f, -0.06f}, 0.014f, 0.015f, 12, col_brass, mat_metal, 2);
+    add_cylinder(piston_verts, {-0.036f, 0.032f, -0.16f}, 0.008f, 0.12f, 12, col_steel_bright, mat_chrome, 2);
 
-    // Right hydraulic cylinder
-    add_cylinder(piston_verts, {0.20f, 0.02f, -0.40f}, 0.018f, 0.22f, 12, col_piston_sleeve, 2);
-    add_cylinder(piston_verts, {0.20f, 0.02f, -0.58f}, 0.012f, 0.15f, 12, col_piston_chrome, 2);
+    // Right hydraulic assembly
+    add_cylinder(piston_verts, { 0.036f, 0.032f, -0.06f}, 0.012f, 0.14f, 12, col_chassis_dark, mat_armor, 2);
+    add_cylinder(piston_verts, { 0.036f, 0.032f, -0.06f}, 0.014f, 0.015f, 12, col_brass, mat_metal, 2);
+    add_cylinder(piston_verts, { 0.036f, 0.032f, -0.16f}, 0.008f, 0.12f, 12, col_steel_bright, mat_chrome, 2);
 
     m_piston_count = piston_verts.size();
 
@@ -249,28 +572,82 @@ void ViewModel::init_geometry() {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
     glBindVertexArray(0);
 
-    // -------------------------------------------------------------
-    // 3. ROTATING FLUTED DRILL BIT
-    // (Centered at local origin (0,0,0) so it spins cleanly around Z)
-    // -------------------------------------------------------------
+    // =============================================================
+    // 3. ROTATING FLUTED SPIRAL AUGER DRILL BIT
+    // (Local origin: attaches to spindle at (0.0f, 0.0f, -0.275f))
+    // =============================================================
     std::vector<ViewmodelVertex> bit_verts;
-    glm::vec4 col_bit_tungsten(0.68f, 0.72f, 0.76f, 1.0f);
-    glm::vec4 col_bit_flute(0.40f, 0.44f, 0.48f, 1.0f);
-    glm::vec4 col_bit_tip(0.90f, 0.94f, 1.0f, 1.0f);
+    glm::vec4 col_tungsten(0.62f, 0.66f, 0.72f, 1.0f);
+    glm::vec4 col_carbide_flute(0.38f, 0.42f, 0.46f, 1.0f);
+    glm::vec4 col_diamond_tip(0.92f, 0.97f, 1.0f, 1.0f);
+    glm::vec4 col_cutting_edge(0.85f, 0.88f, 0.94f, 1.0f);
 
-    // Drill Bit Base Shaft
-    add_cylinder(bit_verts, {0.0f, 0.0f, 0.0f}, 0.048f, 0.08f, 16, col_bit_tungsten, 2);
+    glm::vec4 mat_bit_tungsten(0.75f, 0.30f, 0.05f, 0.95f);
+    glm::vec4 mat_bit_carbide(0.85f, 0.22f, 0.10f, 0.90f);
+    glm::vec4 mat_bit_tip(0.92f, 0.12f, 0.50f, 1.0f);
 
-    // Stepped Mid-Section with spiral grooves
-    add_cylinder(bit_verts, {0.0f, 0.0f, -0.08f}, 0.042f, 0.12f, 16, col_bit_flute, 2);
+    // Heavy Tungsten Spindle Coupling
+    add_cylinder(bit_verts, {0.0f, 0.0f, 0.0f}, 0.042f, 0.045f, 16, col_tungsten, mat_bit_tungsten, 2);
 
-    // Tapered Fluted Cutting Head
-    add_cone(bit_verts, {0.0f, 0.0f, -0.20f}, 0.042f, 0.18f, 12, col_bit_tungsten);
+    // Stepped Transition Shaft with locking notches
+    add_cylinder(bit_verts, {0.0f, 0.0f, -0.045f}, 0.038f, 0.055f, 16, col_carbide_flute, mat_bit_carbide, 2);
 
-    // Diamond Reinforced Spindle Tip
-    add_cone(bit_verts, {0.0f, 0.0f, -0.35f}, 0.015f, 0.07f, 8, col_bit_tip);
+    // Core Heavy Tapered Shaft (Extended length: 32cm!)
+    add_cone(bit_verts, {0.0f, 0.0f, -0.10f}, 0.038f, 0.014f, 0.30f, 16, col_carbide_flute, mat_bit_carbide);
+
+    // 4 Massive Sculpted Helical Auger Flutes / Spiral Blades
+    const int FLUTE_COUNT = 4;
+    const int STEPS_PER_FLUTE = 18;
+    float flute_len = 0.30f;
+    float start_z = -0.08f;
+
+    for (int f = 0; f < FLUTE_COUNT; ++f) {
+        float base_phase = f * (6.2831853f / FLUTE_COUNT);
+        for (int s = 0; s < STEPS_PER_FLUTE; ++s) {
+            float t1 = static_cast<float>(s) / STEPS_PER_FLUTE;
+            float t2 = static_cast<float>(s + 1) / STEPS_PER_FLUTE;
+
+            float z1 = start_z - t1 * flute_len;
+            float z2 = start_z - t2 * flute_len;
+
+            float angle1 = base_phase + t1 * 3.14159265f;
+            float angle2 = base_phase + t2 * 3.14159265f;
+
+            float r_inner1 = 0.036f * (1.0f - t1 * 0.52f);
+            float r_inner2 = 0.036f * (1.0f - t2 * 0.52f);
+            float r_outer1 = r_inner1 + 0.024f * (1.0f - t1 * 0.35f);
+            float r_outer2 = r_inner2 + 0.024f * (1.0f - t2 * 0.35f);
+
+            glm::vec3 in_p1(r_inner1 * std::cos(angle1), r_inner1 * std::sin(angle1), z1);
+            glm::vec3 in_p2(r_inner2 * std::cos(angle2), r_inner2 * std::sin(angle2), z2);
+            glm::vec3 out_p1(r_outer1 * std::cos(angle1), r_outer1 * std::sin(angle1), z1);
+            glm::vec3 out_p2(r_outer2 * std::cos(angle2), r_outer2 * std::sin(angle2), z2);
+
+            glm::vec3 n_edge = glm::normalize(glm::cross(out_p2 - out_p1, in_p1 - out_p1));
+
+            bit_verts.push_back({in_p1, n_edge, col_tungsten, mat_bit_tungsten});
+            bit_verts.push_back({out_p1, n_edge, col_cutting_edge, mat_bit_tungsten});
+            bit_verts.push_back({out_p2, n_edge, col_cutting_edge, mat_bit_tungsten});
+            bit_verts.push_back({in_p1, n_edge, col_tungsten, mat_bit_tungsten});
+            bit_verts.push_back({out_p2, n_edge, col_cutting_edge, mat_bit_tungsten});
+            bit_verts.push_back({in_p2, n_edge, col_tungsten, mat_bit_tungsten});
+
+            // Reinforced tungsten-carbide teeth blocks along the spiral flutes
+            if (s % 2 == 0) {
+                glm::mat4 tooth_m = glm::translate(glm::mat4(1.0f), (out_p1 + out_p2) * 0.5f);
+                tooth_m = glm::rotate(tooth_m, angle1, glm::vec3(0, 0, 1));
+                add_transformed_box(bit_verts, tooth_m, glm::vec3(0.006f, 0.008f, 0.008f), col_steel_bright, mat_bit_carbide);
+            }
+        }
+    }
+
+    // Faceted Diamond Pilot Boring Spike at Apex (Z = -0.38 to -0.50)
+    add_cone(bit_verts, {0.0f, 0.0f, -0.38f}, 0.018f, 0.001f, 0.12f, 8, col_diamond_tip, mat_bit_tip);
+    add_cone(bit_verts, {0.0f, 0.0f, -0.36f}, 0.025f, 0.016f, 0.04f, 8, col_tungsten, mat_bit_carbide);
 
     m_bit_count = bit_verts.size();
 
@@ -286,6 +663,272 @@ void ViewModel::init_geometry() {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
+
+    // =============================================================
+    // 4. FIRST-PERSON PLASMA CARBINE (TACTICAL COMBAT WEAPON)
+    // =============================================================
+    std::vector<ViewmodelVertex> carbine_verts;
+
+    glm::vec4 col_carbine_body(0.16f, 0.18f, 0.22f, 1.0f);     // Dark matte tactical receiver
+    glm::vec4 col_carbine_shroud(0.24f, 0.27f, 0.31f, 1.0f);   // Anodized composite barrel shroud
+    glm::vec4 col_carbine_rails(0.68f, 0.72f, 0.78f, 1.0f);    // Chrome accelerator magnetic rails
+    glm::vec4 col_plasma_cyan(0.05f, 0.92f, 1.0f, 1.0f);      // Bright electric-cyan coils & vents
+    glm::vec4 col_plasma_white(0.85f, 0.98f, 1.0f, 1.0f);     // White-hot plasma core emitter
+    glm::vec4 col_optic_glass(0.10f, 0.85f, 0.95f, 0.70f);    // Holographic reflex sight lens
+    glm::vec4 col_carbine_grip(0.09f, 0.09f, 0.11f, 1.0f);    // Non-slip rubber grip
+    glm::vec4 col_power_cell(0.12f, 0.40f, 0.50f, 1.0f);      // High-capacity plasma battery pack
+
+    glm::vec4 mat_carbine_armor(0.55f, 0.35f, 0.05f, 0.90f);
+    glm::vec4 mat_carbine_chrome(0.95f, 0.12f, 0.10f, 0.95f);
+    glm::vec4 mat_carbine_emissive(0.10f, 0.05f, 1.00f, 1.00f);
+    glm::vec4 mat_carbine_rubber(0.05f, 0.85f, 0.00f, 0.80f);
+    glm::vec4 mat_carbine_glass(0.90f, 0.05f, 0.80f, 1.00f);
+
+    // 4.1 Receiver & Upper Housing
+    add_box(carbine_verts, {-0.026f, -0.040f, -0.20f}, {0.026f, 0.045f, 0.06f}, col_carbine_body, mat_carbine_armor);
+    add_box(carbine_verts, {-0.016f, 0.045f, -0.22f}, {0.016f, 0.056f, 0.04f}, col_chassis_dark, mat_carbine_armor); // Picatinny top rail
+
+    // Stock extension toward delver shoulder
+    add_box(carbine_verts, {-0.020f, -0.030f, 0.06f}, {0.020f, 0.035f, 0.20f}, col_carbine_body, mat_carbine_armor);
+    add_box(carbine_verts, {-0.022f, -0.055f, 0.18f}, {0.022f, 0.045f, 0.23f}, col_carbine_grip, mat_carbine_rubber); // Recoil buttpad
+
+    // 4.2 Twin Magnetic Accelerator Rails & Plasma Chamber
+    // Upper & Lower chrome acceleration guide rods
+    add_cylinder(carbine_verts, {0.0f, 0.018f, -0.19f}, 0.010f, 0.28f, 12, col_carbine_rails, mat_carbine_chrome, 2);
+    add_cylinder(carbine_verts, {0.0f, -0.014f, -0.19f}, 0.010f, 0.28f, 12, col_carbine_rails, mat_carbine_chrome, 2);
+
+    // Vented Barrel Shroud surrounding rails
+    add_box(carbine_verts, {-0.024f, -0.028f, -0.42f}, {0.024f, 0.032f, -0.19f}, col_carbine_shroud, mat_carbine_armor);
+
+    // Emissive Heat Vents / Cooling Gills along Left and Right
+    for (int vent = 0; vent < 4; ++vent) {
+        float vz = -0.22f - vent * 0.045f;
+        add_box(carbine_verts, {-0.026f, -0.006f, vz - 0.014f}, {-0.022f, 0.012f, vz + 0.014f}, col_plasma_cyan, mat_carbine_emissive);
+        add_box(carbine_verts, { 0.022f, -0.006f, vz - 0.014f}, { 0.026f, 0.012f, vz + 0.014f}, col_plasma_cyan, mat_carbine_emissive);
+    }
+
+    // Heavy Muzzle Brake & Concentric Plasma Emitter Spindle
+    add_cylinder(carbine_verts, {0.0f, 0.002f, -0.42f}, 0.018f, 0.050f, 14, col_carbine_rails, mat_carbine_chrome, 2);
+    add_cylinder(carbine_verts, {0.0f, 0.002f, -0.44f}, 0.008f, 0.035f, 12, col_plasma_white, mat_carbine_emissive, 2); // White-hot plasma nozzle orifice
+
+    // 4.3 High-Capacity Plasma Power Battery Cell
+    add_box(carbine_verts, {-0.018f, -0.145f, -0.16f}, {0.018f, -0.040f, -0.08f}, col_power_cell, mat_carbine_armor);
+    // Glowing Charge Indicator Level bars
+    add_box(carbine_verts, {-0.019f, -0.130f, -0.13f}, {-0.017f, -0.060f, -0.11f}, col_plasma_cyan, mat_carbine_emissive);
+    add_box(carbine_verts, { 0.017f, -0.130f, -0.13f}, { 0.019f, -0.060f, -0.11f}, col_plasma_cyan, mat_carbine_emissive);
+
+    // 4.4 Reflex Holographic Sight
+    add_box(carbine_verts, {-0.014f, 0.056f, -0.11f}, {0.014f, 0.076f, -0.03f}, col_chassis_dark, mat_carbine_armor);   // Sight base
+    add_box(carbine_verts, {-0.022f, 0.076f, -0.13f}, {0.022f, 0.120f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Sight hood
+    add_box(carbine_verts, {-0.016f, 0.082f, -0.12f}, {0.016f, 0.114f, -0.03f}, col_optic_glass, mat_carbine_glass);    // Glass lens
+    // Floating Holographic Dot
+    add_box(carbine_verts, {-0.002f, 0.096f, -0.078f}, {0.002f, 0.100f, -0.074f}, col_plasma_cyan, mat_carbine_emissive);
+
+    // 4.5 Pistol Grip & Trigger Assembly
+    glm::mat4 grip_mat = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.085f, 0.02f));
+    grip_mat = glm::rotate(grip_mat, glm::radians(20.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    add_transformed_box(carbine_verts, grip_mat, glm::vec3(0.014f, 0.055f, 0.022f), col_carbine_grip, mat_carbine_rubber);
+    // Trigger guard & curved trigger blade
+    add_box(carbine_verts, {-0.004f, -0.070f, -0.045f}, {0.004f, -0.040f, 0.0f}, col_carbine_rails, mat_carbine_chrome);
+    add_box(carbine_verts, {-0.003f, -0.062f, -0.025f}, {0.003f, -0.044f, -0.015f}, col_carbine_rails, mat_carbine_chrome);
+
+    // 4.6 Delver Heavy Gauntleted Hands Holding the Carbine
+    // Right hand gripping pistol grip:
+    glm::vec3 r_grip_palm(0.0f, -0.085f, 0.02f);
+    add_capsule(carbine_verts, r_grip_palm + glm::vec3(0.015f, 0.010f, 0.05f), r_grip_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.024f, 0.020f, 8, col_suit_glove, mat_rubber);
+    add_capsule(carbine_verts, r_grip_palm + glm::vec3(0.018f, 0.015f, 0.04f), r_grip_palm + glm::vec3(0.014f, 0.015f, -0.005f), 0.012f, 0.010f, 6, col_armor_plate, mat_armor); // Knuckle plate
+    // Right index trigger finger extended onto receiver
+    add_capsule(carbine_verts, r_grip_palm + glm::vec3(-0.014f, 0.018f, 0.01f), glm::vec3(-0.012f, -0.055f, -0.025f), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
+
+    // Left hand holding forward tactical shroud under barrel:
+    glm::vec3 l_fore_palm(-0.032f, -0.048f, -0.26f);
+    add_capsule(carbine_verts, l_fore_palm + glm::vec3(-0.020f, -0.025f, 0.04f), l_fore_palm, 0.022f, 0.019f, 8, col_suit_glove, mat_rubber);
+    // Left fingers clamped under shroud:
+    for (int lf = 0; lf < 4; ++lf) {
+        float lz = -0.24f - lf * 0.014f;
+        add_capsule(carbine_verts, l_fore_palm + glm::vec3(-0.005f, 0.005f, lz - l_fore_palm.z), glm::vec3(0.022f, -0.038f, lz), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
+    }
+
+    m_carbine_count = carbine_verts.size();
+
+    glGenVertexArrays(1, &m_carbine_vao);
+    glGenBuffers(1, &m_carbine_vbo);
+    glBindVertexArray(m_carbine_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_carbine_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_carbine_count * sizeof(ViewmodelVertex), carbine_verts.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
+
+    // =============================================================
+    // 5. FIRST-PERSON MAGMA SCATTERGUN (DEMOLITIONIST HEAVY SHOTGUN)
+    // =============================================================
+    std::vector<ViewmodelVertex> scatter_verts;
+    glm::vec4 col_scatter_body(0.18f, 0.17f, 0.16f, 1.0f);     // Dark cast iron receiver
+    glm::vec4 col_scatter_shroud(0.26f, 0.23f, 0.20f, 1.0f);   // Heat-treated steel barrel shroud
+    glm::vec4 col_scatter_drum(0.35f, 0.32f, 0.28f, 1.0f);     // Revolving cylinder drum
+    glm::vec4 col_scatter_flame(1.0f, 0.55f, 0.08f, 1.0f);     // Molten thermite orange chambers
+    glm::vec4 col_scatter_amber(1.0f, 0.80f, 0.20f, 1.0f);     // Burning heat vents
+    glm::vec4 col_scatter_grip(0.10f, 0.09f, 0.08f, 1.0f);     // Heat-resistant grip
+
+    // 5.1 Heavy Receiver Box
+    add_box(scatter_verts, {-0.034f, -0.052f, -0.16f}, {0.034f, 0.050f, 0.08f}, col_scatter_body, mat_carbine_armor);
+    add_box(scatter_verts, {-0.024f, 0.050f, -0.18f}, {0.024f, 0.062f, 0.06f}, col_chassis_dark, mat_carbine_armor); // Top shield rib
+    // Heavy stock butt
+    add_box(scatter_verts, {-0.026f, -0.040f, 0.08f}, {0.026f, 0.040f, 0.22f}, col_scatter_body, mat_carbine_armor);
+    add_box(scatter_verts, {-0.028f, -0.065f, 0.20f}, {0.028f, 0.050f, 0.25f}, col_scatter_grip, mat_carbine_rubber);
+
+    // 5.2 Heavy 6-Round Revolving Cylinder Drum
+    add_cylinder(scatter_verts, {0.0f, -0.005f, -0.08f}, 0.036f, 0.095f, 16, col_scatter_drum, mat_carbine_chrome, 2);
+    // 6 Chamber Flutes & Thermite Cores
+    for (int c = 0; c < 6; ++c) {
+        float angle = c * (6.2831853f / 6.0f);
+        float cx = std::cos(angle) * 0.022f;
+        float cy = std::sin(angle) * 0.022f - 0.005f;
+        add_cylinder(scatter_verts, {cx, cy, -0.085f}, 0.009f, 0.098f, 8, col_scatter_flame, mat_carbine_emissive, 2);
+    }
+
+    // 5.3 Dual Over-Under Heavy Breaker Barrels
+    add_cylinder(scatter_verts, {0.0f, 0.022f, -0.16f}, 0.016f, 0.28f, 14, col_chassis_dark, mat_carbine_chrome, 2);
+    add_cylinder(scatter_verts, {0.0f, -0.014f, -0.16f}, 0.016f, 0.28f, 14, col_chassis_dark, mat_carbine_chrome, 2);
+    // Muzzle compensator ports
+    add_box(scatter_verts, {-0.026f, -0.028f, -0.45f}, {0.026f, 0.036f, -0.42f}, col_scatter_shroud, mat_carbine_armor);
+    add_cylinder(scatter_verts, {0.0f, 0.022f, -0.46f}, 0.010f, 0.025f, 10, col_scatter_amber, mat_carbine_emissive, 2);
+    add_cylinder(scatter_verts, {0.0f, -0.014f, -0.46f}, 0.010f, 0.025f, 10, col_scatter_amber, mat_carbine_emissive, 2);
+
+    // Vented Heat Radiator Plates along Barrels
+    add_box(scatter_verts, {-0.030f, -0.004f, -0.38f}, {0.030f, 0.012f, -0.18f}, col_suit_accent, mat_carbine_armor);
+    for (int vent = 0; vent < 3; ++vent) {
+        float vz = -0.22f - vent * 0.055f;
+        add_box(scatter_verts, {-0.032f, -0.002f, vz - 0.012f}, {-0.028f, 0.010f, vz + 0.012f}, col_scatter_flame, mat_carbine_emissive);
+        add_box(scatter_verts, { 0.028f, -0.002f, vz - 0.012f}, { 0.032f, 0.010f, vz + 0.012f}, col_scatter_flame, mat_carbine_emissive);
+    }
+
+    // 5.4 Heavy Pump Fore-End Slide & Grip
+    add_box(scatter_verts, {-0.028f, -0.058f, -0.32f}, {0.028f, -0.028f, -0.20f}, col_scatter_grip, mat_carbine_rubber);
+    // Pistol grip
+    glm::mat4 scat_grip = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.088f, 0.03f));
+    scat_grip = glm::rotate(scat_grip, glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    add_transformed_box(scatter_verts, scat_grip, glm::vec3(0.016f, 0.055f, 0.024f), col_scatter_grip, mat_carbine_rubber);
+
+    // 5.5 Demolitionist Hands Holding Scattergun
+    glm::vec3 r_scat_palm(0.0f, -0.088f, 0.03f);
+    add_capsule(scatter_verts, r_scat_palm + glm::vec3(0.016f, 0.010f, 0.05f), r_scat_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.025f, 0.022f, 8, col_suit_glove, mat_rubber);
+    add_capsule(scatter_verts, r_scat_palm + glm::vec3(0.020f, 0.015f, 0.04f), r_scat_palm + glm::vec3(0.014f, 0.015f, -0.005f), 0.014f, 0.012f, 6, col_suit_accent, mat_armor); // Hazard Orange plate
+
+    // Left hand gripping pump fore-end slide
+    glm::vec3 l_scat_palm(-0.032f, -0.060f, -0.26f);
+    add_capsule(scatter_verts, l_scat_palm + glm::vec3(-0.020f, -0.025f, 0.04f), l_scat_palm, 0.024f, 0.020f, 8, col_suit_glove, mat_rubber);
+    for (int lf = 0; lf < 4; ++lf) {
+        float lz = -0.23f - lf * 0.015f;
+        add_capsule(scatter_verts, l_scat_palm + glm::vec3(-0.005f, 0.005f, lz - l_scat_palm.z), glm::vec3(0.026f, -0.048f, lz), 0.008f, 0.007f, 6, col_suit_accent, mat_rubber);
+    }
+
+    m_scattergun_count = scatter_verts.size();
+
+    glGenVertexArrays(1, &m_scattergun_vao);
+    glGenBuffers(1, &m_scattergun_vbo);
+    glBindVertexArray(m_scattergun_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_scattergun_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_scattergun_count * sizeof(ViewmodelVertex), scatter_verts.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
+
+    // =============================================================
+    // 6. FIRST-PERSON NEEDLER RAILGUN (SCOUT MARKSMAN SNIPER)
+    // =============================================================
+    std::vector<ViewmodelVertex> rail_verts;
+    glm::vec4 col_rail_body(0.12f, 0.14f, 0.15f, 1.0f);        // Carbon weave chassis
+    glm::vec4 col_rail_conductors(0.75f, 0.80f, 0.85f, 1.0f);  // Chrome superconductor rails
+    glm::vec4 col_rail_emerald(0.15f, 1.0f, 0.45f, 1.0f);     // Superconducting emerald magnetic rings
+    glm::vec4 col_rail_optic(0.08f, 0.92f, 0.50f, 0.75f);      // Emerald sniper scope lens
+    glm::vec4 col_rail_grip(0.08f, 0.09f, 0.10f, 1.0f);
+
+    // 6.1 Slender Precision Receiver
+    add_box(rail_verts, {-0.022f, -0.038f, -0.22f}, {0.022f, 0.038f, 0.10f}, col_rail_body, mat_carbine_armor);
+    add_box(rail_verts, {-0.018f, -0.030f, 0.10f}, {0.018f, 0.030f, 0.24f}, col_rail_body, mat_carbine_armor); // Slender stock
+    add_box(rail_verts, {-0.020f, -0.050f, 0.22f}, {0.020f, 0.035f, 0.26f}, col_rail_grip, mat_carbine_rubber); // Cheekrest/butt
+
+    // 6.2 Extended Dual Magnetic Accelerator Guide Rails
+    add_cylinder(rail_verts, {-0.010f, 0.005f, -0.20f}, 0.007f, 0.46f, 10, col_rail_conductors, mat_carbine_chrome, 2);
+    add_cylinder(rail_verts, { 0.010f, 0.005f, -0.20f}, 0.007f, 0.46f, 10, col_rail_conductors, mat_carbine_chrome, 2);
+    // Center Needle Chamber Core
+    add_cylinder(rail_verts, {0.0f, 0.005f, -0.20f}, 0.004f, 0.48f, 10, col_rail_emerald, mat_carbine_emissive, 2);
+
+    // 5 Glowing Superconductor Field Rings along the barrel
+    for (int ring = 0; ring < 5; ++ring) {
+        float rz = -0.24f - ring * 0.085f;
+        add_box(rail_verts, {-0.020f, -0.005f, rz - 0.010f}, {0.020f, 0.015f, rz + 0.010f}, col_rail_emerald, mat_carbine_emissive);
+    }
+
+    // Needle Muzzle Stabilizer Tip
+    add_cylinder(rail_verts, {0.0f, 0.005f, -0.66f}, 0.014f, 0.035f, 12, col_rail_conductors, mat_carbine_chrome, 2);
+
+    // 6.3 Elevated High-Precision Sniper Scope
+    add_box(rail_verts, {-0.008f, 0.038f, -0.14f}, {0.008f, 0.058f, -0.02f}, col_chassis_dark, mat_carbine_armor); // Mount
+    add_cylinder(rail_verts, {0.0f, 0.070f, -0.22f}, 0.015f, 0.24f, 14, col_rail_body, mat_carbine_armor, 2);      // Scope tube
+    add_cylinder(rail_verts, {0.0f, 0.070f, -0.22f}, 0.018f, 0.025f, 14, col_chassis_dark, mat_carbine_chrome, 2); // Objective bell
+    add_cylinder(rail_verts, {0.0f, 0.070f, 0.00f},  0.017f, 0.025f, 14, col_chassis_dark, mat_carbine_chrome, 2); // Ocular bell
+    // Lenses
+    add_cylinder(rail_verts, {0.0f, 0.070f, -0.225f}, 0.013f, 0.006f, 12, col_rail_optic, mat_carbine_glass, 2);
+    add_cylinder(rail_verts, {0.0f, 0.070f, 0.020f},  0.013f, 0.006f, 12, col_rail_optic, mat_carbine_glass, 2);
+
+    // 6.4 Linear Needle Battery Cell
+    add_box(rail_verts, {-0.014f, -0.115f, -0.10f}, {0.014f, -0.035f, -0.04f}, col_rail_body, mat_carbine_armor);
+    add_box(rail_verts, {-0.015f, -0.105f, -0.08f}, {0.015f, -0.055f, -0.06f}, col_rail_emerald, mat_carbine_emissive);
+
+    // 6.5 Pistol Grip & Scout Gauntleted Hands
+    glm::mat4 rail_grip = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.080f, 0.02f));
+    rail_grip = glm::rotate(rail_grip, glm::radians(18.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    add_transformed_box(rail_verts, rail_grip, glm::vec3(0.013f, 0.052f, 0.020f), col_rail_grip, mat_carbine_rubber);
+
+    // Right hand
+    glm::vec3 r_rail_palm(0.0f, -0.080f, 0.02f);
+    add_capsule(rail_verts, r_rail_palm + glm::vec3(0.014f, 0.010f, 0.05f), r_rail_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.022f, 0.018f, 8, col_suit_glove, mat_rubber);
+    add_capsule(rail_verts, r_rail_palm + glm::vec3(0.016f, 0.015f, 0.04f), r_rail_palm + glm::vec3(0.012f, 0.015f, -0.005f), 0.011f, 0.009f, 6, col_suit_accent, mat_armor);
+
+    // Left hand steadying forward shroud
+    glm::vec3 l_rail_palm(-0.028f, -0.042f, -0.28f);
+    add_capsule(rail_verts, l_rail_palm + glm::vec3(-0.018f, -0.020f, 0.035f), l_rail_palm, 0.020f, 0.017f, 8, col_suit_glove, mat_rubber);
+    for (int lf = 0; lf < 4; ++lf) {
+        float lz = -0.26f - lf * 0.012f;
+        add_capsule(rail_verts, l_rail_palm + glm::vec3(-0.004f, 0.004f, lz - l_rail_palm.z), glm::vec3(0.018f, -0.032f, lz), 0.006f, 0.005f, 6, col_suit_accent, mat_rubber);
+    }
+
+    m_railgun_count = rail_verts.size();
+
+    glGenVertexArrays(1, &m_railgun_vao);
+    glGenBuffers(1, &m_railgun_vbo);
+    glBindVertexArray(m_railgun_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_railgun_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_railgun_count * sizeof(ViewmodelVertex), rail_verts.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
     glBindVertexArray(0);
 }
 
@@ -295,72 +938,51 @@ void ViewModel::render(
     bool is_drilling,
     bool is_in_range,
     ToolSlot active_tool,
-    const glm::vec3& drill_target_pos
+    const glm::vec3& drill_target_pos,
+    bool is_firing
 ) {
-    if (m_chassis_vao == 0) return;
+    if (m_chassis_vao == 0 || m_carbine_vao == 0) return;
 
     m_total_time += dt;
 
-    // Detect tool switch
     if (active_tool != m_last_tool) {
         on_tool_switched();
         m_last_tool = active_tool;
     }
 
-    // Update switch transition timer
-    float switch_dip_y = 0.0f;
+    float switch_dip_y   = 0.0f;
+    float switch_push_z  = 0.0f;
+    float switch_roll_deg = 0.0f;
     if (m_switch_timer > 0.0f) {
         m_switch_timer -= dt;
-        float progress = 1.0f - (std::max(0.0f, m_switch_timer) / 0.20f);
-        switch_dip_y = -0.16f * std::sin(progress * 3.14159265f);
-    }
-
-    // 1. Dedicated Projection Matrix (FOV = 68.0f, near = 0.05f, far = 10.0f) to prevent cavern wall clipping
-    glm::mat4 proj = glm::perspective(glm::radians(68.0f), aspect, 0.05f, 10.0f);
-    glm::mat4 view = glm::mat4(1.0f); // Screen / Camera Space
-
-    // 2. Idle Lissajous curve breathing sway: dx = sin(t * 1.8) * 0.008, dy = cos(t * 3.6) * 0.006
-    float lissajous_x = std::sin(m_total_time * 1.8f) * 0.008f;
-    float lissajous_y = std::cos(m_total_time * 3.6f) * 0.006f;
-
-    // 3. Active Drilling state: rotation, stochastic recoil jitter, spark particle triggers
-    float recoil_z = 0.0f;
-    float piston_z = 0.0f;
-    float jitter_x = 0.0f;
-    float jitter_y = 0.0f;
-
-    if (is_drilling) {
-        // Continuously spin drill bit (1500 deg/s scaled by drillSpeedTier)
-        float rot_speed = 1500.0f * (1.0f + 0.15f * m_drill_speed_tier);
-        m_drill_rotation += rot_speed * dt;
-        if (m_drill_rotation > 360000.0f) m_drill_rotation -= 360000.0f;
-
-        // Rapid stochastic backward recoil jitter along view vector: ((rand() % 100) / 1000.0f - 0.05f) * 0.4f
-        recoil_z = std::sin(m_total_time * 60.0f) * 0.02f + ((static_cast<float>(rand() % 100) / 1000.0f) - 0.05f) * 0.4f;
-        jitter_x = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.006f;
-        jitter_y = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.006f;
-
-        // Reciprocating pistons (counter-phase oscillation along Z)
-        piston_z = std::sin(m_total_time * 50.0f) * 0.035f;
-
-        // Drill tip spark emission when in range (<= 4.5m)
-        if (is_in_range && m_on_spark) {
-            m_spark_timer += dt;
-            if (m_spark_timer >= 0.045f) {
-                m_spark_timer = 0.0f;
-                // Emit spark towards player / impact site
-                glm::vec3 spark_origin = drill_target_pos;
-                glm::vec3 spark_dir(
-                    ((rand() % 100) / 50.0f - 1.0f) * 1.5f,
-                    ((rand() % 100) / 50.0f) * 2.0f + 0.5f,
-                    ((rand() % 100) / 50.0f - 1.0f) * 1.5f
-                );
-                m_on_spark(spark_origin, spark_dir);
-            }
+        float progress = 1.0f - (std::max(0.0f, m_switch_timer) / 0.50f); // 0→1
+        if (progress < 0.5f) {
+            // Phase 1: Lower old weapon out — ease-in (acceleration)
+            float p    = progress / 0.5f;           // 0→1 over first 0.25s
+            float ease = p * p;                     // Quadratic ease-in
+            switch_dip_y    = -0.28f * ease;        // Drop down
+            switch_push_z   =  0.06f * ease;        // Pull slightly toward screen
+            switch_roll_deg = -18.0f * ease;        // Tilt CW as it drops away
+        } else {
+            // Phase 2: Raise new weapon in — ease-out (deceleration to rest)
+            float p    = (progress - 0.5f) / 0.5f; // 0→1 over second 0.25s
+            float ease = 1.0f - (1.0f - p) * (1.0f - p); // Quadratic ease-out
+            switch_dip_y    = -0.28f * (1.0f - ease);     // Rise from below
+            switch_push_z   =  0.06f * (1.0f - ease);     // Settle forward
+            // Slight counter-roll as weapon springs into place then settles
+            switch_roll_deg =  9.0f * (1.0f - ease) * (1.0f - ease);
         }
-    } else {
-        m_spark_timer = 0.0f;
     }
+
+    // 1. Dedicated Projection Matrix (FOV = 68.0f, near = 0.05f, far = 10.0f)
+    glm::mat4 proj = glm::perspective(glm::radians(68.0f), aspect, 0.05f, 10.0f);
+    glm::mat4 view = glm::mat4(1.0f);
+
+    // 2. Idle Lissajous breathing sway
+    float lissajous_x = std::sin(m_total_time * 1.8f) * 0.005f;
+    float lissajous_y = std::cos(m_total_time * 3.6f) * 0.004f;
+
+    glDisable(GL_CULL_FACE);
 
     // Dedicated depth pass with glDepthRange(0.0f, 0.15f) so viewmodel never clips cavern walls
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -372,43 +994,128 @@ void ViewModel::render(
     m_shader.set_mat4("uProjection", proj);
     m_shader.set_mat4("uView", view);
 
-    // Base root transform: positioned slightly right and down in first-person camera space
-    glm::vec3 base_pos(
-        0.04f + lissajous_x + jitter_x,
-        -0.12f + lissajous_y + switch_dip_y + jitter_y,
-        -0.45f + recoil_z
-    );
+    if (active_tool == ToolSlot::CombatWeapon) {
+        // =============================================================
+        // COMBAT VIEWMODEL: CLASS ARHETYPE FIREARMS
+        // (Demolitionist: Magma Scattergun, Vanguard: Plasma Carbine, Scout: Needler Railgun)
+        // =============================================================
+        if (is_firing) {
+            m_muzzle_flash_timer = 0.09f;
+        }
+        if (m_muzzle_flash_timer > 0.0f) {
+            m_muzzle_flash_timer -= dt;
+        }
 
-    glm::mat4 root_model = glm::translate(glm::mat4(1.0f), base_pos);
+        float kick_mult = (m_character_class == CharacterClass::Demolitionist) ? 1.6f :
+                          (m_character_class == CharacterClass::Scout) ? 1.25f : 1.0f;
+        float recoil_kick = (m_muzzle_flash_timer > 0.0f) ? (0.045f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
+        float kick_pitch = (m_muzzle_flash_timer > 0.0f) ? (3.8f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
 
-    // A. Render Chassis and Arms
-    m_shader.set_mat4("uModel", root_model);
-    m_shader.set_float("uEmissive", is_drilling ? (0.35f + 0.08f * m_drill_speed_tier) : 0.15f);
+        glm::vec3 gun_pos(
+            0.15f + lissajous_x,
+            -0.14f + lissajous_y + switch_dip_y,
+            -0.34f + recoil_kick + switch_push_z
+        );
 
-    glBindVertexArray(m_chassis_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_chassis_count));
+        glm::mat4 gun_model = glm::translate(glm::mat4(1.0f), gun_pos);
+        gun_model = glm::rotate(gun_model, glm::radians(-14.0f), glm::vec3(0.0f, 1.0f, 0.0f));           // Inward yaw
+        gun_model = glm::rotate(gun_model, glm::radians(2.0f - kick_pitch), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
+        gun_model = glm::rotate(gun_model, glm::radians(3.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Cant + switch roll
 
-    // B. Render Reciprocating Pistons
-    glm::mat4 piston_model = glm::translate(root_model, glm::vec3(0.0f, 0.0f, piston_z));
-    m_shader.set_mat4("uModel", piston_model);
-    glBindVertexArray(m_piston_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_piston_count));
+        m_shader.set_mat4("uModel", gun_model);
+        float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : 0.35f;
+        m_shader.set_float("uEmissive", emissive);
 
-    // C. Render Rotating Fluted Drill Bit
-    // Bit spindle origin relative to chassis is at (0.12f, -0.05f, -0.77f)
-    glm::vec3 bit_origin(0.12f, -0.05f, -0.77f);
-    glm::mat4 bit_model = root_model;
-    bit_model = glm::translate(bit_model, bit_origin);
-    bit_model = glm::rotate(bit_model, glm::radians(m_drill_rotation), glm::vec3(0.0f, 0.0f, 1.0f));
+        if (m_character_class == CharacterClass::Demolitionist) {
+            glBindVertexArray(m_scattergun_vao);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_scattergun_count));
+        } else if (m_character_class == CharacterClass::Scout) {
+            glBindVertexArray(m_railgun_vao);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_railgun_count));
+        } else {
+            glBindVertexArray(m_carbine_vao);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_carbine_count));
+        }
+        glBindVertexArray(0);
+    } else {
+        // =============================================================
+        // UTILITY VIEWMODEL: MINING DRILL RIG
+        // =============================================================
+        float recoil_z = 0.0f;
+        float piston_z = 0.0f;
+        float jitter_x = 0.0f;
+        float jitter_y = 0.0f;
 
-    m_shader.set_mat4("uModel", bit_model);
-    float bit_emissive = is_drilling ? (0.65f + 0.12f * m_drill_speed_tier) : (0.10f + 0.06f * m_drill_speed_tier);
-    m_shader.set_float("uEmissive", bit_emissive); // Incandescent cutting shine boosted by tier
-    glBindVertexArray(m_bit_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_bit_count));
+        if (is_drilling) {
+            float rot_speed = 1800.0f * (1.0f + 0.15f * m_drill_speed_tier);
+            m_drill_rotation += rot_speed * dt;
+            if (m_drill_rotation > 360000.0f) m_drill_rotation -= 360000.0f;
 
-    glBindVertexArray(0);
+            recoil_z = std::sin(m_total_time * 65.0f) * 0.016f + ((static_cast<float>(rand() % 100) / 1000.0f) - 0.05f) * 0.25f;
+            jitter_x = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.004f;
+            jitter_y = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.004f;
+
+            piston_z = std::sin(m_total_time * 55.0f) * 0.030f;
+
+            if (is_in_range && m_on_spark) {
+                m_spark_timer += dt;
+                if (m_spark_timer >= 0.040f) {
+                    m_spark_timer = 0.0f;
+                    glm::vec3 spark_origin = drill_target_pos;
+                    glm::vec3 spark_dir(
+                        ((rand() % 100) / 50.0f - 1.0f) * 1.8f,
+                        ((rand() % 100) / 50.0f) * 2.2f + 0.4f,
+                        ((rand() % 100) / 50.0f - 1.0f) * 1.8f
+                    );
+                    m_on_spark(spark_origin, spark_dir);
+                }
+            }
+        } else {
+            m_spark_timer = 0.0f;
+        }
+
+        glm::vec3 base_pos(
+            0.18f + lissajous_x + jitter_x,
+            -0.16f + lissajous_y + switch_dip_y + jitter_y,
+            -0.42f + recoil_z + switch_push_z
+        );
+
+        glm::mat4 root_model = glm::translate(glm::mat4(1.0f), base_pos);
+        root_model = glm::rotate(root_model, glm::radians(-22.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
+        root_model = glm::rotate(root_model, glm::radians(3.0f), glm::vec3(1.0f, 0.0f, 0.0f));   // Pitch down
+        root_model = glm::rotate(root_model, glm::radians(4.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Natural cant + switch roll
+
+        // A. Render Chassis, Hands & Gauntlets
+        m_shader.set_mat4("uModel", root_model);
+        m_shader.set_float("uEmissive", is_drilling ? (0.45f + 0.10f * m_drill_speed_tier) : 0.18f);
+
+        glBindVertexArray(m_chassis_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_chassis_count));
+
+        // B. Render Reciprocating Dual Pneumatic Pistons
+        glm::mat4 piston_model = glm::translate(root_model, glm::vec3(0.0f, 0.0f, piston_z));
+        m_shader.set_mat4("uModel", piston_model);
+        glBindVertexArray(m_piston_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_piston_count));
+
+        // C. Render Rotating Fluted Spiral Auger Drill Bit
+        glm::vec3 bit_origin(0.0f, 0.0f, -0.26f);
+        glm::mat4 bit_model = root_model;
+        bit_model = glm::translate(bit_model, bit_origin);
+        bit_model = glm::rotate(bit_model, glm::radians(m_drill_rotation), glm::vec3(0.0f, 0.0f, 1.0f));
+
+        m_shader.set_mat4("uModel", bit_model);
+        float bit_emissive = is_drilling ? (0.75f + 0.15f * m_drill_speed_tier) : (0.12f + 0.05f * m_drill_speed_tier);
+        m_shader.set_float("uEmissive", bit_emissive);
+
+        glBindVertexArray(m_bit_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_bit_count));
+
+        glBindVertexArray(0);
+    }
+
     glDepthRange(0.0f, 1.0f);
+    glEnable(GL_CULL_FACE);
 }
 
 } // namespace Voidfall

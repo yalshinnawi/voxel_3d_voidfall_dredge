@@ -1,0 +1,67 @@
+{
+  "total_phases": 6,
+  "all_healthy": true,
+  "montage_png": "screenshots/enemy_visual_montage.png",
+  "phases": [
+    {
+      "slot": 0,
+      "phase_id": "SHADOW STALK",
+      "timestamp": "2026-10-03 11:10:26",
+      "master_file": "screenshots/enemy_01_shadow_stalk.png",
+      "mean_luminance": 0.271134,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 1,
+      "phase_id": "HEADLAMP REVEAL",
+      "timestamp": "2026-10-03 11:10:26",
+      "master_file": "screenshots/enemy_02_headlamp_reveal.png",
+      "mean_luminance": 0.296464,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 2,
+      "phase_id": "CIRCLING FLANK",
+      "timestamp": "2026-10-03 11:10:26",
+      "master_file": "screenshots/enemy_03_circling_flank.png",
+      "mean_luminance": 0.311428,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 3,
+      "phase_id": "AGGRESSIVE LUNGE",
+      "timestamp": "2026-10-03 11:10:26",
+      "master_file": "screenshots/enemy_04_aggressive_lunge.png",
+      "mean_luminance": 0.301151,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 4,
+      "phase_id": "SONAR STUN",
+      "timestamp": "2026-10-03 11:10:27",
+      "master_file": "screenshots/enemy_05_sonar_stun.png",
+      "mean_luminance": 0.53002,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    },
+    {
+      "slot": 5,
+      "phase_id": "RETREAT FLEEING",
+      "timestamp": "2026-10-03 11:10:27",
+      "master_file": "screenshots/enemy_06_retreat_fleeing.png",
+      "mean_luminance": 0.293029,
+      "non_black_ratio": 1,
+      "is_healthy": true,
+      "status": "PASS"
+    }
+  ]
+}

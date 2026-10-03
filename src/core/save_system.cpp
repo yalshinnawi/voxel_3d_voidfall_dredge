@@ -41,6 +41,7 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"last_saved_time\": \"" << profile.last_saved_time << "\",\n";
     out << "  \"player_name\": \"" << profile.player_name << "\",\n";
     out << "  \"total_exp\": " << profile.total_exp << ",\n";
+    out << "  \"total_coins\": " << profile.total_coins << ",\n";
     out << "  \"total_voidite\": " << profile.total_voidite << ",\n";
     int class_val = (profile.selected_class_id != 0) ? profile.selected_class_id : static_cast<int>(profile.selectedClass);
     out << "  \"total_titanium\": " << profile.total_titanium << ",\n";
@@ -57,7 +58,15 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"sector2_rate\": " << profile.sector_records[2].highest_completion_rate << ",\n";
     out << "  \"sector2_badge\": \"" << profile.sector_records[2].best_badge << "\",\n";
     out << "  \"sector3_rate\": " << profile.sector_records[3].highest_completion_rate << ",\n";
-    out << "  \"sector3_badge\": \"" << profile.sector_records[3].best_badge << "\"\n";
+    out << "  \"sector3_badge\": \"" << profile.sector_records[3].best_badge << "\",\n";
+    out << "  \"master_volume\": " << profile.settings.master_volume << ",\n";
+    out << "  \"sfx_volume\": " << profile.settings.sfx_volume << ",\n";
+    out << "  \"enemy_volume\": " << profile.settings.enemy_volume << ",\n";
+    out << "  \"ambient_volume\": " << profile.settings.ambient_volume << ",\n";
+    out << "  \"ui_volume\": " << profile.settings.ui_volume << ",\n";
+    out << "  \"mute_all\": " << (profile.settings.mute_all ? "true" : "false") << ",\n";
+    out << "  \"mouse_sensitivity\": " << profile.settings.mouse_sensitivity << ",\n";
+    out << "  \"fov\": " << profile.settings.fov << "\n";
     out << "}\n";
 
     out.close();
@@ -111,6 +120,7 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_str("last_saved_time", profile.last_saved_time);
         parse_str("player_name", profile.player_name);
         parse_int("total_exp", profile.total_exp);
+        parse_int("total_coins", profile.total_coins);
         parse_int("total_voidite", profile.total_voidite);
         parse_int("total_titanium", profile.total_titanium);
         parse_int("selected_class_id", profile.selected_class_id);
@@ -129,9 +139,39 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_int("sector2_rate", profile.sector_records[2].highest_completion_rate);
         parse_str("sector2_badge", profile.sector_records[2].best_badge);
 
+        auto parse_float = [&](const std::string& key, float& val) {
+            auto pos = line.find("\"" + key + "\":");
+            if (pos != std::string::npos) {
+                auto comma = line.find(',', pos);
+                std::string num_str = line.substr(pos + key.length() + 3, (comma != std::string::npos ? comma : line.length()) - (pos + key.length() + 3));
+                try {
+                    val = std::stof(num_str);
+                } catch (...) {}
+            }
+        };
+
+        auto parse_bool = [&](const std::string& key, bool& val) {
+            auto pos = line.find("\"" + key + "\":");
+            if (pos != std::string::npos) {
+                if (line.find("true", pos) != std::string::npos) val = true;
+                else if (line.find("false", pos) != std::string::npos) val = false;
+            }
+        };
+
         parse_int("sector3_rate", profile.sector_records[3].highest_completion_rate);
         parse_str("sector3_badge", profile.sector_records[3].best_badge);
+
+        parse_float("master_volume", profile.settings.master_volume);
+        parse_float("sfx_volume", profile.settings.sfx_volume);
+        parse_float("enemy_volume", profile.settings.enemy_volume);
+        parse_float("ambient_volume", profile.settings.ambient_volume);
+        parse_float("ui_volume", profile.settings.ui_volume);
+        parse_bool("mute_all", profile.settings.mute_all);
+        parse_float("mouse_sensitivity", profile.settings.mouse_sensitivity);
+        parse_float("fov", profile.settings.fov);
     }
+
+    profile.settings.sanitize();
 
     in.close();
 
@@ -141,7 +181,10 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
     }
 
     VF_LOG_INFO("SaveSystem", "Successfully loaded user profile from " << filepath
-                << " (EXP: " << profile.total_exp << ", Class: " << profile.selected_class_id
+                << " (Level: " << profile.get_player_level()
+                << ", EXP: " << profile.total_exp
+                << ", Coins: " << profile.total_coins
+                << ", Class: " << profile.selected_class_id
                 << ", Saved: " << (profile.last_saved_time.empty() ? "None" : profile.last_saved_time) << ")");
     return true;
 }

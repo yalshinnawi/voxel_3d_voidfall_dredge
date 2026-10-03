@@ -26,6 +26,8 @@ static inline int floor_mod(int a, int b) {
 World::World(uint32_t seed)
     : m_seed(seed)
 {
+    m_level_gen = std::make_unique<LevelGenerator>(1, seed);
+
     // Start background meshing worker threads
     unsigned int num_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
     for (unsigned int i = 0; i < num_threads; ++i) {
@@ -44,22 +46,81 @@ World::~World() {
 }
 
 void World::set_seed(uint32_t seed) {
-    m_seed = seed;
-    std::lock_guard<std::mutex> lock(m_world_mutex);
-    m_chunks.clear();
+    generate_world(m_sector_index, seed);
 }
 
 void World::generate_world(int sector_index, uint32_t seed) {
     m_sector_index = sector_index;
-    uint32_t effective_seed = (seed ^ (static_cast<uint32_t>(sector_index) * 2654435761u)) + static_cast<uint32_t>(time(nullptr));
+    uint32_t effective_seed = (seed != 0) ? seed : (static_cast<uint32_t>(sector_index) * 2654435761u + static_cast<uint32_t>(time(nullptr)));
     m_seed = effective_seed;
-    m_noise_offset = glm::vec3(
-        static_cast<float>(effective_seed % 10000),
-        static_cast<float>((effective_seed / 10000) % 10000),
-        static_cast<float>((effective_seed / 100) % 10000)
-    );
-    std::lock_guard<std::mutex> lock(m_world_mutex);
-    m_chunks.clear();
+    m_level_gen = std::make_unique<LevelGenerator>(sector_index, effective_seed);
+
+    // Flush stale mesh queue requests
+    {
+        std::lock_guard<std::mutex> lock(m_queue_mutex);
+        std::queue<ChunkPos> empty_queue;
+        std::swap(m_mesh_queue, empty_queue);
+    }
+
+    std::vector<ChunkPos> to_mesh;
+    {
+        std::lock_guard<std::mutex> lock(m_world_mutex);
+        m_chunks.clear();
+        m_radioactive_sources.clear();
+
+        int chunk_count_x = (m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        int chunk_count_z = (m_level_gen->world_depth() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        for (int cz = 0; cz < chunk_count_z; ++cz) {
+            for (int cx = 0; cx < chunk_count_x; ++cx) {
+                ChunkPos pos{cx, 0, cz};
+                auto chunk = std::make_shared<Chunk>(pos);
+                generate_chunk_terrain(*chunk);
+                m_chunks[pos] = std::move(chunk);
+                to_mesh.push_back(pos);
+            }
+        }
+    }
+
+    for (const auto& pos : to_mesh) {
+        queue_chunk_for_meshing(pos);
+    }
+}
+
+void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
+    // Flush stale mesh queue requests
+    {
+        std::lock_guard<std::mutex> lock(m_queue_mutex);
+        std::queue<ChunkPos> empty_queue;
+        std::swap(m_mesh_queue, empty_queue);
+    }
+
+    std::vector<ChunkPos> to_mesh;
+    {
+        std::lock_guard<std::mutex> lock(m_world_mutex);
+        if (gen) {
+            m_sector_index = gen->sector_index();
+            m_seed = gen->seed();
+        }
+        m_level_gen = std::move(gen);
+        m_chunks.clear();
+        m_radioactive_sources.clear();
+
+        int chunk_count_x = m_level_gen ? ((m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 3;
+        int chunk_count_z = m_level_gen ? ((m_level_gen->world_depth() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 3;
+        for (int cz = 0; cz < chunk_count_z; ++cz) {
+            for (int cx = 0; cx < chunk_count_x; ++cx) {
+                ChunkPos pos{cx, 0, cz};
+                auto chunk = std::make_shared<Chunk>(pos);
+                generate_chunk_terrain(*chunk);
+                m_chunks[pos] = std::move(chunk);
+                to_mesh.push_back(pos);
+            }
+        }
+    }
+
+    for (const auto& pos : to_mesh) {
+        queue_chunk_for_meshing(pos);
+    }
 }
 
 Chunk* World::get_chunk(const ChunkPos& pos) {
@@ -87,7 +148,7 @@ Chunk* World::get_or_create_chunk(const ChunkPos& pos) {
         return it->second.get();
     }
 
-    auto chunk = std::make_unique<Chunk>(pos);
+    auto chunk = std::make_shared<Chunk>(pos);
     generate_chunk_terrain(*chunk);
     Chunk* raw = chunk.get();
     m_chunks[pos] = std::move(chunk);
@@ -104,7 +165,12 @@ Voxel World::get_voxel(int world_x, int world_y, int world_z) const {
     };
 
     const Chunk* chunk = get_chunk(cpos);
-    if (!chunk) return Voxel{MAT_AIR, 0};
+    if (!chunk) {
+        if (m_level_gen) {
+            return m_level_gen->sample_voxel(world_x, world_y, world_z);
+        }
+        return Voxel{MAT_AIR, 0};
+    }
 
     int lx = floor_mod(world_x, CHUNK_SIZE);
     int ly = floor_mod(world_y, CHUNK_SIZE);
@@ -126,7 +192,24 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
     int ly = floor_mod(world_y, CHUNK_SIZE);
     int lz = floor_mod(world_z, CHUNK_SIZE);
 
+    Voxel old_vox = chunk->get_voxel(lx, ly, lz);
     chunk->set_voxel(lx, ly, lz, v);
+
+    // Track active radioactive ore sources dynamically
+    bool old_is_rad = (old_vox.material_id == MAT_RADIOACTIVE_ORE || old_vox.material_id == MAT_RADIOACTIVE);
+    bool new_is_rad = (v.material_id == MAT_RADIOACTIVE_ORE || v.material_id == MAT_RADIOACTIVE);
+    if (old_is_rad != new_is_rad) {
+        std::lock_guard<std::mutex> lock(m_world_mutex);
+        if (old_is_rad && !new_is_rad) {
+            auto it = std::find(m_radioactive_sources.begin(), m_radioactive_sources.end(), glm::ivec3(world_x, world_y, world_z));
+            if (it != m_radioactive_sources.end()) {
+                m_radioactive_sources.erase(it);
+            }
+        } else if (!old_is_rad && new_is_rad) {
+            m_radioactive_sources.push_back(glm::ivec3(world_x, world_y, world_z));
+        }
+    }
+
     queue_chunk_for_meshing(cpos);
 
     if (mark_neighbors) {
@@ -150,21 +233,38 @@ uint8_t World::get_block_flags(const glm::ivec3& pos) const {
 }
 
 bool World::is_solid(const glm::ivec3& pos) const {
-    if (pos.y <= 0) return true; // Bedrock base layer is always solid
+    if (pos.y < 0) return false;  // Out-of-bounds below is the lethal void singularity chasm, NOT solid!
+    if (pos.y >= 26) return true; // Ceiling mantle layer is always solid
 
     int cx = (pos.x < 0) ? ((pos.x - 31) / 32) : (pos.x / 32);
     int cy = (pos.y < 0) ? ((pos.y - 31) / 32) : (pos.y / 32);
     int cz = (pos.z < 0) ? ((pos.z - 31) / 32) : (pos.z / 32);
 
     const Chunk* chunk = get_chunk(ChunkPos{cx, cy, cz});
-    if (!chunk) return false;
+    if (chunk) {
+        int lx = floor_mod(pos.x, CHUNK_SIZE);
+        int ly = floor_mod(pos.y, CHUNK_SIZE);
+        int lz = floor_mod(pos.z, CHUNK_SIZE);
 
-    int lx = floor_mod(pos.x, CHUNK_SIZE);
-    int ly = floor_mod(pos.y, CHUNK_SIZE);
-    int lz = floor_mod(pos.z, CHUNK_SIZE);
+        Voxel v = chunk->get_voxel(lx, ly, lz);
+        return v.material_id != MAT_AIR && v.material_id != MAT_GAS && v.material_id != MAT_VOLATILE_SMOKE;
+    }
 
-    Voxel v = chunk->get_voxel(lx, ly, lz);
-    return v.material_id != MAT_AIR && v.material_id != MAT_GAS && v.material_id != MAT_VOLATILE_SMOKE;
+    int world_w = m_level_gen ? m_level_gen->world_width() : LevelGenerator::WORLD_WIDTH;
+    int world_d = m_level_gen ? m_level_gen->world_depth() : LevelGenerator::WORLD_DEPTH;
+
+    // Enforce impenetrable outer sector perimeter bounds when no explicit chunk voxel is present
+    if (pos.x <= 3 || pos.x >= world_w - 4 ||
+        pos.z <= 3 || pos.z >= world_d - 4) {
+        return true;
+    }
+
+    if (pos.y <= 3) return true;  // Uncarved bedrock base layer
+
+    if (m_level_gen) {
+        return m_level_gen->sample_voxel(pos.x, pos.y, pos.z).is_solid();
+    }
+    return true;
 }
 
 bool World::is_solid(int world_x, int world_y, int world_z) const {
@@ -172,50 +272,22 @@ bool World::is_solid(int world_x, int world_y, int world_z) const {
 }
 
 float World::get_highest_solid_surface(int x, int z) const {
-    for (int y = 64; y >= 0; --y) {
+    for (int y = 25; y >= 0; --y) {
         if (is_solid(glm::ivec3(x, y, z))) {
             if (!is_solid(glm::ivec3(x, y + 1, z)) && !is_solid(glm::ivec3(x, y + 2, z))) {
                 return static_cast<float>(y + 1);
             }
         }
     }
-    return 1.0f;
+    return 4.0f;
 }
 
-// 3D procedural noise synthesis for subterranean caverns
+// Retained for backward compatibility
 float World::sample_cavern_noise(float x, float y, float z) const {
-    float ox = x + m_noise_offset.x;
-    float oy = y + m_noise_offset.y;
-    float oz = z + m_noise_offset.z;
-
-    if (m_sector_index == 1) {
-        // Broad open hollow chambers (smoother, lower frequency)
-        float nx = ox * 0.025f;
-        float ny = oy * 0.025f;
-        float nz = oz * 0.025f;
-        float n1 = std::sin(nx) * std::cos(ny) + std::sin(ny) * std::cos(nz) + std::sin(nz) * std::cos(nx);
-        float n2 = (std::sin(nx * 1.8f + 1.2f) * std::cos(ny * 1.8f) +
-                    std::sin(ny * 1.8f + 0.7f) * std::cos(nz * 1.8f)) * 0.4f;
-        return n1 + n2;
-    } else if (m_sector_index == 3) {
-        // Narrow vertical fissures (elongated vertically, high horizontal frequency)
-        float nx = ox * 0.07f;
-        float ny = oy * 0.015f; // stretched vertically
-        float nz = oz * 0.07f;
-        float n1 = std::sin(nx) * std::cos(nz) + std::sin(nz * 1.4f) * std::cos(nx * 1.4f);
-        float n2 = std::sin(nx * 2.1f + oy * 0.04f) * 0.5f;
-        return n1 + n2;
-    } else {
-        // Sector 2 / default
-        float nx = ox * 0.04f;
-        float ny = oy * 0.04f;
-        float nz = oz * 0.04f;
-        float n1 = std::sin(nx) * std::cos(ny) + std::sin(ny) * std::cos(nz) + std::sin(nz) * std::cos(nx);
-        float n2 = (std::sin(nx * 2.3f + 1.2f) * std::cos(ny * 2.3f) +
-                    std::sin(ny * 2.3f + 0.7f) * std::cos(nz * 2.3f)) * 0.5f;
-        float n3 = (std::sin(nx * 4.7f) * std::cos(nz * 4.7f)) * 0.25f;
-        return n1 + n2 + n3;
+    if (m_level_gen) {
+        return m_level_gen->sample_voxel(static_cast<int>(x), static_cast<int>(y), static_cast<int>(z)).is_solid() ? 1.0f : -1.0f;
     }
+    return 0.0f;
 }
 
 void World::generate_chunk_terrain(Chunk& chunk) {
@@ -231,124 +303,37 @@ void World::generate_chunk_terrain(Chunk& chunk) {
                 int wy = world_base_y + y;
                 int wz = world_base_z + z;
 
-                // Bedrock base layer
-                if (wy <= 0) {
-                    chunk.set_voxel(x, y, z, Voxel{MAT_DREDGE_BEDROCK, 0x10});
-                    continue;
-                }
+                Voxel v = m_level_gen ? m_level_gen->sample_voxel(wx, wy, wz) : Voxel{MAT_DREDGE_BEDROCK, 0};
+                chunk.set_voxel(x, y, z, v);
 
-                // Guarantee open landing cavern around spawn point (16, 20, 16)
-                float dist_to_spawn_sq = static_cast<float>((wx - 16)*(wx - 16) + (wy - 20)*(wy - 20) + (wz - 16)*(wz - 16));
-                if (dist_to_spawn_sq < 64.0f && wy > 1) {
-                    chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                    continue;
-                }
-
-                float noise = sample_cavern_noise(static_cast<float>(wx), static_cast<float>(wy), static_cast<float>(wz));
-
-                if (m_sector_index == 1) {
-                    // Level 1 (Crystalline Caverns): Broad open hollow chambers, high MAT_VOIDITE crystal clusters
-                    if (noise < 0.10f) {
-                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                        continue;
-                    }
-
-                    uint8_t mat = MAT_FRACTURED_GRANITE;
-                    if (wy < 8) {
-                        mat = MAT_VOLCANIC_BASALT;
-                    }
-
-                    // High voidite crystal clusters
-                    float crystal_noise = std::sin((wx + m_noise_offset.x) * 0.16f) *
-                                          std::cos((wy + m_noise_offset.y) * 0.16f) *
-                                          std::sin((wz + m_noise_offset.z) * 0.16f);
-                    if (crystal_noise > 0.58f) {
-                        mat = MAT_VOIDITE_CRYSTAL;
-                    } else if (crystal_noise < -0.85f) {
-                        mat = MAT_TITANIUM;
-                    }
-
-                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
-                }
-                else if (m_sector_index == 2) {
-                    // Level 2 (Subterranean Vault): Linear corridors cut through dense basalt, embedded metal plates (MAT_TITANIUM), reinforced vault bulkheads (MAT_VAULT_DOOR)
-                    int off_x = wx + static_cast<int>(m_noise_offset.x);
-                    int off_z = wz + static_cast<int>(m_noise_offset.z);
-                    int mod_x = floor_mod(off_x, 24);
-                    int mod_z = floor_mod(off_z, 24);
-
-                    bool is_corridor_x = (mod_z >= 10 && mod_z <= 14 && wy >= 4 && wy <= 16);
-                    bool is_corridor_z = (mod_x >= 10 && mod_x <= 14 && wy >= 4 && wy <= 16);
-                    bool is_corridor = is_corridor_x || is_corridor_z;
-
-                    if (is_corridor) {
-                        // Check for reinforced vault doors blocking corridor sections
-                        bool is_door_x = is_corridor_x && (floor_mod(off_x, 48) == 0);
-                        bool is_door_z = is_corridor_z && (floor_mod(off_z, 48) == 0);
-                        if (is_door_x || is_door_z) {
-                            chunk.set_voxel(x, y, z, Voxel{MAT_REINFORCED_VAULT_DOOR, 0x10});
-                            continue;
-                        }
-                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                        continue;
-                    }
-
-                    // Organic caverns
-                    if (noise < -0.25f) {
-                        chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                        continue;
-                    }
-
-                    uint8_t mat = MAT_VOLCANIC_BASALT; // dense basalt
-
-                    // Embedded metal plates / titanium lining
-                    bool near_corridor_wall = (mod_z == 9 || mod_z == 15 || mod_x == 9 || mod_x == 15) && (wy >= 4 && wy <= 16);
-                    if (near_corridor_wall) {
-                        mat = MAT_TITANIUM;
-                    } else {
-                        float v_noise = std::sin((wx + m_noise_offset.x) * 0.20f) * std::sin((wz + m_noise_offset.z) * 0.20f);
-                        if (v_noise > 0.72f) {
-                            mat = MAT_TITANIUM;
-                        } else if (v_noise < -0.80f) {
-                            mat = MAT_VOIDITE_CRYSTAL;
-                        }
-                    }
-
-                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
-                }
-                else {
-                    // Level 3 (Fault-Line Collapse): Narrow vertical fissures, sparse ground paths, frequent falling stalactites
-                    float fissure = std::abs(std::sin((wx + m_noise_offset.x) * 0.08f) +
-                                             std::cos((wz + m_noise_offset.z) * 0.08f));
-                    if (fissure < 0.38f || noise < -0.22f) {
-                        bool is_ledge = (wy % 12 == 1 && ((wx + wz) % 5 == 0));
-                        if (!is_ledge) {
-                            chunk.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
-                            continue;
-                        }
-                    }
-
-                    uint8_t mat = MAT_FRACTURED_GRANITE;
-                    if (wy < 14) {
-                        mat = MAT_VOLCANIC_BASALT;
-                    }
-
-                    if (wy >= 18 && (wx % 6 == 0 && wz % 6 == 0)) {
-                        mat = MAT_RADIOACTIVE_ORE;
-                    } else {
-                        float ore_noise = std::sin((wx + m_noise_offset.x) * 0.22f) * std::cos((wy + m_noise_offset.y) * 0.22f);
-                        if (ore_noise > 0.75f) {
-                            mat = MAT_VOIDITE_CRYSTAL;
-                        } else if (ore_noise < -0.65f) {
-                            mat = MAT_RADIOACTIVE_ORE;
-                        }
-                    }
-
-                    chunk.set_voxel(x, y, z, Voxel{mat, 0});
+                if (v.material_id == MAT_RADIOACTIVE_ORE || v.material_id == MAT_RADIOACTIVE) {
+                    m_radioactive_sources.push_back(glm::ivec3(wx, wy, wz));
                 }
             }
         }
     }
+}
+
+float World::query_radiation_proximity(const glm::vec3& pos, float max_radius) const {
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    if (m_radioactive_sources.empty()) return 0.0f;
+
+    float total_intensity = 0.0f;
+    float max_r2 = max_radius * max_radius;
+
+    for (const auto& src : m_radioactive_sources) {
+        glm::vec3 src_center = glm::vec3(src) + glm::vec3(0.5f);
+        glm::vec3 diff = pos - src_center;
+        float d2 = glm::dot(diff, diff);
+        if (d2 < max_r2) {
+            float dist = std::sqrt(d2);
+            float falloff = std::max(0.0f, 1.0f - (dist / max_radius));
+            total_intensity += falloff * falloff;
+        }
+    }
+
+    // Normalized intensity scaling: standing 1 block away from an ore cluster yields ~0.75-1.0
+    return std::clamp(total_intensity * 0.45f, 0.0f, 1.0f);
 }
 
 // Fast DDA (Digital Differential Analyzer) voxel raycasting
@@ -452,12 +437,12 @@ void World::worker_thread_loop() {
             m_mesh_queue.pop();
         }
 
-        Chunk* chunk = nullptr;
+        std::shared_ptr<Chunk> chunk;
         {
             std::lock_guard<std::mutex> lock(m_world_mutex);
             auto it = m_chunks.find(target_pos);
             if (it != m_chunks.end()) {
-                chunk = it->second.get();
+                chunk = it->second;
             }
         }
 
@@ -498,6 +483,24 @@ void World::upload_dirty_chunks() {
     std::lock_guard<std::mutex> lock(m_world_mutex);
     for (auto& [pos, chunk] : m_chunks) {
         chunk->upload_mesh();
+    }
+}
+
+void World::force_mesh_all_sync() {
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    auto get_neighbor = [this](const ChunkPos& npos) -> const Chunk* {
+        auto it = m_chunks.find(npos);
+        if (it != m_chunks.end()) {
+            return it->second.get();
+        }
+        return nullptr;
+    };
+    for (auto& [pos, chunk] : m_chunks) {
+        if (chunk) {
+            std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, get_neighbor);
+            chunk->stage_mesh(std::move(mesh));
+            chunk->upload_mesh();
+        }
     }
 }
 

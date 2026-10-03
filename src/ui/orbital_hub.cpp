@@ -106,7 +106,7 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_font_tex);
     m_text_shader.set_int("uFontTexture", 0);
-    m_text_shader.set_vec2("uShadowOffset", glm::vec2(-1.5f / 4096.0f, -1.5f / 32.0f));
+    m_text_shader.set_vec2("uShadowOffset", glm::vec2(0.0f, 0.0f));
     m_text_shader.set_vec4("uTextColor", color);
 
     glBindVertexArray(m_text_vao);
@@ -122,6 +122,38 @@ void OrbitalHubUI::draw_text(const std::string& text, float x, float y, float sc
     }
 
     glBindVertexArray(0);
+}
+
+void OrbitalHubUI::draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color) {
+    if (text.empty()) return;
+    float text_w = FontRenderer::get_rendered_width(text, scale);
+    float text_h = FontRenderer::get_rendered_height(scale);
+    float tx = box_x + (box_w - text_w) * 0.5f;
+    float ty = box_y + (box_h - text_h) * 0.5f;
+    draw_text(text, tx, ty, scale, color);
+}
+
+void OrbitalHubUI::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale) {
+    if (text.empty()) return;
+    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale);
+    draw_text(text, x, y, scale, color);
+}
+
+void OrbitalHubUI::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale) {
+    if (text.empty()) return;
+    float pad = 4.0f;
+    float scale = FontRenderer::fit_scale(text, std::max(20.0f, box_w - pad * 2.0f), base_scale, min_scale);
+    draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color);
+}
+
+void OrbitalHubUI::draw_panel_with_border(float x, float y, float w, float h, const glm::vec4& bg_col, const glm::vec4& border_col, float border_width) {
+    draw_rect(x, y, w, h, bg_col);
+    if (border_width > 0.0f) {
+        draw_rect(x, y, w, border_width, border_col);
+        draw_rect(x, y + h - border_width, w, border_width, border_col);
+        draw_rect(x, y, border_width, h, border_col);
+        draw_rect(x + w - border_width, y, border_width, h, border_col);
+    }
 }
 
 bool OrbitalHubUI::render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x, float mouse_y, bool mouse_clicked) {
@@ -148,6 +180,7 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
 
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
     MainMenuAction action = MainMenuAction::None;
 
@@ -157,48 +190,72 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
         return action;
+    } else if (m_subview == MenuSubView::Settings) {
+        render_audio_settings(profile, mouse_x, mouse_y, mouse_clicked);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        return action;
     } else if (m_subview == MenuSubView::Upgrades) {
         // Dark backdrop for upgrades
         draw_rect(0.0f, 0.0f, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.95f));
 
         // Back button
-        float back_w = 180.0f;
-        float back_h = 42.0f;
-        float back_x = 40.0f;
-        float back_y = 24.0f;
+        float back_w = std::clamp(150.0f * ui_scale, 110.0f, 170.0f);
+        float back_h = 38.0f * ui_scale;
+        float back_x = 24.0f * ui_scale;
+        float back_y = 16.0f * ui_scale;
         bool back_hover = (mouse_x >= back_x && mouse_x <= back_x + back_w && mouse_y >= back_y && mouse_y <= back_y + back_h);
         if (back_hover && mouse_clicked) {
             m_subview = MenuSubView::Main;
         }
-        draw_rect(back_x, back_y, back_w, back_h, back_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG);
-        draw_rect(back_x, back_y, back_w, 1.0f, back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-        draw_rect(back_x, back_y + back_h - 1.0f, back_w, 1.0f, back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-        draw_rect(back_x, back_y, 1.0f, back_h, back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-        draw_rect(back_x + back_w - 1.0f, back_y, 1.0f, back_h, back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-        draw_text("< MAIN MENU", back_x + 20.0f, back_y + 12.0f, 1.35f, back_hover ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+        draw_panel_with_border(back_x, back_y, back_w, back_h,
+                               back_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG,
+                               back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f),
+                               back_hover ? 2.0f : 1.0f);
+        draw_text_centered_fitted("< MAIN MENU", back_x, back_y, back_w, back_h, 1.20f * ui_scale, back_hover ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
-        // Subtabs for Delvers and Upgrades
-        float tab1_x = back_x + back_w + 32.0f;
-        float tab_w = 200.0f;
+        // Subtabs for Delvers, Upgrades, and Audio Settings
+        float tab_gap = 10.0f * ui_scale;
+        float tab1_x = back_x + back_w + 16.0f * ui_scale;
+        float avail_tab_w = w - tab1_x - 24.0f * ui_scale;
+        float tab_w = std::clamp((avail_tab_w - 2.0f * tab_gap) / 3.0f, 120.0f, 220.0f * ui_scale);
+
         bool t1_hov = (mouse_x >= tab1_x && mouse_x <= tab1_x + tab_w && mouse_y >= back_y && mouse_y <= back_y + back_h);
         if (t1_hov && mouse_clicked) m_active_tab = HubTab::DelverRoster;
         bool t1_act = (m_active_tab == HubTab::DelverRoster);
-        draw_rect(tab1_x, back_y, tab_w, back_h, t1_act ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) : (t1_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG));
-        draw_rect(tab1_x, back_y + back_h - 2.0f, tab_w, 2.0f, t1_act ? Typography::COLOR_CYAN : glm::vec4(0.3f, 0.4f, 0.5f, 0.4f));
-        draw_text("[ DELVER ROSTER ]", tab1_x + 16.0f, back_y + 12.0f, 1.25f, t1_act ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+        draw_panel_with_border(tab1_x, back_y, tab_w, back_h,
+                               t1_act ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) : (t1_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
+                               t1_act ? Typography::COLOR_CYAN : glm::vec4(0.3f, 0.4f, 0.5f, 0.4f),
+                               t1_act ? 2.0f : 1.0f);
+        draw_text_centered_fitted("[ DELVER ROSTER ]", tab1_x, back_y, tab_w, back_h, 1.10f * ui_scale, t1_act ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
-        float tab2_x = tab1_x + tab_w + 16.0f;
+        float tab2_x = tab1_x + tab_w + tab_gap;
         bool t2_hov = (mouse_x >= tab2_x && mouse_x <= tab2_x + tab_w && mouse_y >= back_y && mouse_y <= back_y + back_h);
         if (t2_hov && mouse_clicked) m_active_tab = HubTab::UpgradeTerminal;
         bool t2_act = (m_active_tab == HubTab::UpgradeTerminal);
-        draw_rect(tab2_x, back_y, tab_w, back_h, t2_act ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) : (t2_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG));
-        draw_rect(tab2_x, back_y + back_h - 2.0f, tab_w, 2.0f, t2_act ? Typography::COLOR_CYAN : glm::vec4(0.3f, 0.4f, 0.5f, 0.4f));
-        draw_text("[ UPGRADE TERMINAL ]", tab2_x + 12.0f, back_y + 12.0f, 1.25f, t2_act ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+        draw_panel_with_border(tab2_x, back_y, tab_w, back_h,
+                               t2_act ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) : (t2_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
+                               t2_act ? Typography::COLOR_CYAN : glm::vec4(0.3f, 0.4f, 0.5f, 0.4f),
+                               t2_act ? 2.0f : 1.0f);
+        draw_text_centered_fitted("[ UPGRADES ]", tab2_x, back_y, tab_w, back_h, 1.10f * ui_scale, t2_act ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+
+        float tab3_x = tab2_x + tab_w + tab_gap;
+        bool t3_hov = (mouse_x >= tab3_x && mouse_x <= tab3_x + tab_w && mouse_y >= back_y && mouse_y <= back_y + back_h);
+        if (t3_hov && mouse_clicked) m_active_tab = HubTab::AudioSettings;
+        bool t3_act = (m_active_tab == HubTab::AudioSettings);
+        draw_panel_with_border(tab3_x, back_y, tab_w, back_h,
+                               t3_act ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) : (t3_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
+                               t3_act ? Typography::COLOR_CYAN : glm::vec4(0.3f, 0.4f, 0.5f, 0.4f),
+                               t3_act ? 2.0f : 1.0f);
+        draw_text_centered_fitted("[ SETTINGS ]", tab3_x, back_y, tab_w, back_h, 1.10f * ui_scale, t3_act ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
         if (m_active_tab == HubTab::DelverRoster) {
             render_delver_roster(profile, mouse_x, mouse_y, mouse_clicked);
-        } else {
+        } else if (m_active_tab == HubTab::UpgradeTerminal) {
             render_upgrade_terminal(profile, mouse_x, mouse_y, mouse_clicked);
+        } else {
+            render_audio_settings(profile, mouse_x, mouse_y, mouse_clicked);
         }
 
         glDisable(GL_BLEND);
@@ -208,20 +265,20 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
     }
 
     // Default Main Menu View
-    draw_rect(0.0f, 0.0f, std::min(w * 0.45f, 600.0f), h, glm::vec4(0.02f, 0.03f, 0.05f, 0.85f));
+    draw_rect(0.0f, 0.0f, std::min(w * 0.45f, 600.0f * ui_scale), h, glm::vec4(0.02f, 0.03f, 0.05f, 0.85f));
     draw_rect(0.0f, 0.0f, w, h, glm::vec4(0.01f, 0.02f, 0.03f, 0.25f));
 
-    float start_x = 100.0f;
-    float title_y = h * 0.20f;
+    float start_x = std::max(60.0f * ui_scale, 36.0f);
+    float title_y = std::max(h * 0.16f, 36.0f);
 
     // Bold Game Title banner
-    draw_text("VOIDFALL: DREDGE", start_x, title_y, 3.4f, Typography::COLOR_CYAN);
-    draw_text("SUBTERRANEAN EXPEDITION PROTOCOL", start_x + 4.0f, title_y + 44.0f, 1.35f, Typography::COLOR_PRIMARY);
+    draw_text("VOIDFALL: DREDGE", start_x, title_y, 3.2f * ui_scale, Typography::COLOR_CYAN);
+    draw_text("SUBTERRANEAN EXPEDITION PROTOCOL", start_x + 4.0f, title_y + 44.0f * ui_scale, 1.25f * ui_scale, Typography::COLOR_PRIMARY);
 
     // Accent line beneath title
-    draw_rect(start_x, title_y + 70.0f, 440.0f, 2.0f, glm::vec4(0.0f, 0.90f, 1.0f, 0.60f));
+    draw_rect(start_x, title_y + 68.0f * ui_scale, 420.0f * ui_scale, 2.0f, glm::vec4(0.0f, 0.90f, 1.0f, 0.60f));
 
-    // Clean Action List (Only 4 Primary Buttons)
+    // Clean Action List
     struct MenuItem {
         MainMenuAction act;
         std::string label;
@@ -233,13 +290,14 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
         { MainMenuAction::Continue,        "[ CONTINUE ]",             has_save, "Resume operations in Sector " + std::to_string(selected_level) },
         { MainMenuAction::NewExpedition,   "[ NEW EXPEDITION ]",        true,     "Choose sector & deploy immediately" },
         { MainMenuAction::UpgradeTerminal, "[ UPGRADES / DELVERS ]",    true,     "Delver roster & drill modifications" },
+        { MainMenuAction::Settings,        "[ AUDIO & RIG SETTINGS ]",  true,     "Acoustic comfort, sound mixer & controls" },
         { MainMenuAction::Exit,            "[ EXIT ]",                  true,     "Quit to desktop cleanly" }
     };
 
-    float btn_y = title_y + 96.0f;
-    float btn_w = 420.0f;
-    float btn_h = 56.0f; // Scaled button height for >= 28px text
-    float btn_gap = 14.0f;
+    float btn_y = title_y + 82.0f * ui_scale;
+    float btn_w = std::clamp(380.0f * ui_scale, 280.0f, 440.0f);
+    float btn_h = std::clamp(46.0f * ui_scale, 36.0f, 52.0f);
+    float btn_gap = std::clamp(10.0f * ui_scale, 6.0f, 14.0f);
 
     for (size_t i = 0; i < items.size(); ++i) {
         float y = btn_y + i * (btn_h + btn_gap);
@@ -248,13 +306,15 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
         bool is_hovered = item.enabled && (mouse_x >= start_x && mouse_x <= start_x + btn_w + 10.0f &&
                                            mouse_y >= y && mouse_y <= y + btn_h);
 
-        float current_btn_x = is_hovered ? (start_x + 6.0f) : start_x;
+        float current_btn_x = is_hovered ? (start_x + 6.0f * ui_scale) : start_x;
 
         if (is_hovered && mouse_clicked) {
             if (item.act == MainMenuAction::NewExpedition) {
                 m_subview = MenuSubView::SectorSelect;
             } else if (item.act == MainMenuAction::UpgradeTerminal) {
                 m_subview = MenuSubView::Upgrades;
+            } else if (item.act == MainMenuAction::Settings) {
+                m_subview = MenuSubView::Settings;
             } else {
                 action = item.act;
             }
@@ -264,37 +324,28 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
         glm::vec4 bg_col = !item.enabled ? glm::vec4(0.04f, 0.05f, 0.07f, 0.65f) :
                            is_hovered    ? Typography::COLOR_BUTTON_HOV :
                                            Typography::COLOR_BUTTON_BG;
-        draw_rect(current_btn_x, y, btn_w, btn_h, bg_col);
-
-        // Button border
         glm::vec4 border_col = !item.enabled ? Typography::COLOR_MUTED * 0.4f :
                                is_hovered    ? Typography::COLOR_CYAN_GLOW :
                                                glm::vec4(0.0f, 0.85f, 1.0f, 0.35f);
 
-        draw_rect(current_btn_x, y, btn_w, is_hovered ? 2.0f : 1.0f, border_col);
-        draw_rect(current_btn_x, y + btn_h - (is_hovered ? 2.0f : 1.0f), btn_w, is_hovered ? 2.0f : 1.0f, border_col);
-        draw_rect(current_btn_x, y, is_hovered ? 4.0f : 2.0f, btn_h, border_col);
-        draw_rect(current_btn_x + btn_w - (is_hovered ? 2.0f : 1.0f), y, is_hovered ? 2.0f : 1.0f, btn_h, border_col);
+        draw_panel_with_border(current_btn_x, y, btn_w, btn_h, bg_col, border_col, is_hovered ? 2.0f : 1.0f);
 
-        // Centered button text at >= 28px height
-        float text_scale = 1.75f;
-        float text_w = FontRenderer::get_text_width(item.label, text_scale * 0.45f);
-        float text_x = current_btn_x + (btn_w - text_w) * 0.5f;
-        float text_y = y + (btn_h - 32.0f * text_scale * 0.45f) * 0.5f;
-
+        float text_scale = 1.6f * ui_scale;
         glm::vec4 text_col = !item.enabled ? Typography::COLOR_MUTED :
                              is_hovered    ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) :
                                              Typography::COLOR_PRIMARY;
-        draw_text(item.label, text_x, text_y, text_scale, text_col);
+        draw_text_centered(item.label, current_btn_x, y, btn_w, btn_h, text_scale, text_col);
 
         if (is_hovered) {
-            draw_text(item.tip, current_btn_x + btn_w + 24.0f, y + (btn_h - 16.0f) * 0.5f, 1.25f, Typography::COLOR_CYAN);
+            float tip_scale = 1.15f * ui_scale;
+            float tip_y = y + (btn_h - FontRenderer::get_rendered_height(tip_scale)) * 0.5f;
+            draw_text(item.tip, current_btn_x + btn_w + 20.0f * ui_scale, tip_y, tip_scale, Typography::COLOR_CYAN);
         }
     }
 
     // Status watermark at bottom
     std::string ver_info = "VOIDFALL // DEEP EXPEDITION ENGINE v1.0.4";
-    draw_text(ver_info, start_x, h - 40.0f, 1.1f, Typography::COLOR_MUTED);
+    draw_text(ver_info, start_x, h - 34.0f * ui_scale, 1.05f * ui_scale, Typography::COLOR_MUTED);
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
@@ -304,198 +355,354 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
 }
 
 void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, MainMenuAction& action) {
-    (void)profile;
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
     // Dark backdrop tint
     draw_rect(0.0f, 0.0f, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.94f));
 
     // Header
-    float header_x = 80.0f;
-    float header_y = 40.0f;
-    draw_text("SELECT EXPEDITION SECTOR", header_x, header_y, 2.6f, Typography::COLOR_CYAN);
-    draw_text("CHOOSE A SECTOR TO COMMENCE EXTRACTION DESCENT", header_x + 4.0f, header_y + 36.0f, 1.25f, Typography::COLOR_PRIMARY);
-    draw_rect(header_x, header_y + 58.0f, w - 160.0f, 2.0f, glm::vec4(0.0f, 0.90f, 1.0f, 0.40f));
+    float header_x = std::max(40.0f * ui_scale, 24.0f);
+    float header_y = 28.0f * ui_scale;
+    draw_text("SELECT EXPEDITION SECTOR", header_x, header_y, 2.4f * ui_scale, Typography::COLOR_CYAN);
+    draw_text("CHOOSE A SECTOR TO COMMENCE EXTRACTION DESCENT", header_x + 4.0f, header_y + 32.0f * ui_scale, 1.15f * ui_scale, Typography::COLOR_PRIMARY);
+    draw_rect(header_x, header_y + 52.0f * ui_scale, w - 2.0f * header_x, 2.0f, glm::vec4(0.0f, 0.90f, 1.0f, 0.40f));
 
-    // 3 Sector Cards - generous width and spacing
-    float card_w = 440.0f;
-    float card_h = h - 240.0f;
-    float card_gap = 24.0f;
-    float total_cards_w = card_w * 3.0f + card_gap * 2.0f;
-    float start_x = (w - total_cards_w) * 0.5f;
-    float start_y = 125.0f;
+    // --- Endless sector data generation ---
+    // Visible sectors: 1 through (highest_cleared + 1), capped at MAX_SECTOR_RECORDS-1
+    const int MAX_VISIBLE = UserProfile::MAX_SECTOR_RECORDS - 1;
+    int max_available = std::min(profile.highest_cleared_sector + 1, MAX_VISIBLE);
+    max_available = std::max(max_available, 1); // Always show at least Sector 1
 
-    struct SectorCardData {
-        int level;
-        std::string title;
-        std::string tier;
-        std::string depth;
-        std::string objective;
-        std::string hazard;
-        std::string desc;
-        std::string bonus;
-        glm::vec4 accent;
+    // 3 cards per page
+    static constexpr int CARDS_PER_PAGE = 3;
+    int total_pages = (max_available + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+
+    // Clamp page index
+    m_carousel_page = std::clamp(m_carousel_page, 0, total_pages - 1);
+
+    int page_start = m_carousel_page * CARDS_PER_PAGE + 1; // 1-indexed sector
+    int page_end   = std::min(page_start + CARDS_PER_PAGE - 1, max_available);
+    (void)page_end;
+
+    // --- Layout ---
+    float avail_w       = w - 2.0f * header_x;
+    float card_gap      = std::clamp(20.0f * ui_scale, 12.0f, 26.0f);
+    float card_w        = (avail_w - 2.0f * card_gap) / static_cast<float>(CARDS_PER_PAGE);
+    float total_cards_w = card_w * CARDS_PER_PAGE + card_gap * (CARDS_PER_PAGE - 1);
+    float start_x       = header_x;
+    float start_y       = header_y + 68.0f * ui_scale;
+    float bar_h         = std::clamp(48.0f * ui_scale, 38.0f, 54.0f);
+    float card_h        = h - start_y - bar_h - 24.0f * ui_scale;
+    float pad           = 16.0f * ui_scale;
+
+    // --- Procedural sector descriptor helpers ---
+    auto get_tier_str = [](int s) -> std::string {
+        if (s <= 1)  return "[ TIER I  // LOW HAZARD ]";
+        if (s == 2)  return "[ TIER II // MEDIUM HAZARD ]";
+        if (s == 3)  return "[ TIER III // CRITICAL HAZARD ]";
+        if (s <= 6)  return "[ TIER IV // EXTREME HAZARD ]";
+        if (s <= 10) return "[ TIER V  // VOID-CLASS HAZARD ]";
+        return               "[ TIER VI // ABYSS-CLASS HAZARD ]";
     };
-
-    SectorCardData sectors[3] = {
-        {
-            1,
-            "SECTOR 1: PERIMETER DRIFT",
-            "[ TIER I // LOW HAZARD ]",
-            "ESTIMATED DEPTH: 800 METERS",
-            "OBJECTIVE: EXTRACT 25 VOIDITE",
-            "HAZARD: 4-PHASE ESCALATION CURVE",
-            "Porous crystalline caverns with stable geological anchor points. Rich in unrefined voidite deposits.",
-            "EXP MULTIPLIER: 1.0x",
-            Typography::COLOR_CYAN
-        },
-        {
-            2,
-            "SECTOR 2: VOLATILE FAULT",
-            "[ TIER II // MEDIUM HAZARD ]",
-            "ESTIMATED DEPTH: 1,800 METERS",
-            "OBJECTIVE: BREACH VAULT & RECOVER RELIC",
-            "HAZARD: ACID GAS & SEISMIC TREMORS",
-            "Reinforced basalt subterranean chambers holding pre-fall research vaults. High titanium concentration.",
-            "EXP MULTIPLIER: 1.5x",
-            Typography::COLOR_AMBER
-        },
-        {
-            3,
-            "SECTOR 3: VOID CRADLE",
-            "[ TIER III // CRITICAL HAZARD ]",
-            "ESTIMATED DEPTH: 3,200 METERS",
-            "OBJECTIVE: 50 VOIDITE / EXTRACTION POD",
-            "HAZARD: 3-MINUTE TECTONIC COLLAPSE",
-            "Extreme abyss fissures bordering bedrock mantle. Unstable tectonic gravity causes imminent total cave-in.",
-            "EXP MULTIPLIER: 2.5x",
-            Typography::COLOR_CRIMSON
+    auto get_title = [](int s) -> std::string {
+        static const char* names[] = {
+            "PERIMETER DRIFT", "VOLATILE FAULT", "VOID CRADLE",
+            "MAGMA UNDERCROFT", "CRYSTALLINE RIFT", "ECHO ABYSS",
+            "TECTONIC MAW", "ASHEN SANCTUM", "OBSIDIAN DEEP",
+            "NECROTIC VEIN", "WARP FISSURE", "RESONANCE VAULT"
+        };
+        int idx = (s - 1) % 12;
+        int cycle = (s - 1) / 12;
+        char buf[80];
+        if (cycle == 0) std::snprintf(buf, sizeof(buf), "SECTOR %d: %s", s, names[idx]);
+        else            std::snprintf(buf, sizeof(buf), "SECTOR %d: %s [CYCLE %d]", s, names[idx], cycle + 1);
+        return std::string(buf);
+    };
+    auto get_depth = [](int s) -> std::string {
+        int depth_m = 800 + (s - 1) * 600;
+        char buf[64];
+        if (depth_m < 10000)
+            std::snprintf(buf, sizeof(buf), "ESTIMATED DEPTH: %d METERS", depth_m);
+        else
+            std::snprintf(buf, sizeof(buf), "ESTIMATED DEPTH: %.1f KM", depth_m / 1000.0f);
+        return std::string(buf);
+    };
+    auto get_objective = [](int s) -> std::string {
+        int voidite = (s <= 1) ? 25 : (s == 2) ? 35 : (s == 3) ? 50 : std::min(50 + (s - 3) * 15, 200);
+        if (s == 2) return "OBJECTIVE: BREACH VAULT & RECOVER RELIC";
+        if (s % 5 == 0) {
+            char buf[72];
+            std::snprintf(buf, sizeof(buf), "OBJECTIVE: NEUTRALIZE ALPHA UNIT (x%d)", std::min(1 + (s / 5), 4));
+            return std::string(buf);
         }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "OBJECTIVE: EXTRACT %d VOIDITE", voidite);
+        return std::string(buf);
+    };
+    auto get_hazard = [](int s) -> std::string {
+        static const char* hazards[] = {
+            "HAZARD: 4-PHASE ESCALATION CURVE",
+            "HAZARD: ACID GAS & SEISMIC TREMORS",
+            "HAZARD: 3-MIN TECTONIC COLLAPSE",
+            "HAZARD: MAGMA VENTS & HEAT SURGE",
+            "HAZARD: VOID RADIATION & PSYCHIC PULSE",
+            "HAZARD: ECHO SWARM & RESONANCE SHOCKWAVE",
+            "HAZARD: GRAVITATIONAL SHIFT ZONES",
+            "HAZARD: SPORE BLOOM & SUFFOCATION TIDE",
+            "HAZARD: WARP RIFT CASCADES",
+            "HAZARD: NECROTIC GAS FLOODS",
+            "HAZARD: TEMPORAL DISPLACEMENT BURSTS",
+            "HAZARD: FULL ABYSS DESTABILIZATION"
+        };
+        return hazards[(s - 1) % 12];
+    };
+    auto get_desc = [](int s) -> std::string {
+        static const char* descs[] = {
+            "Porous crystalline caverns with stable geological anchor points. Rich in unrefined voidite deposits.",
+            "Reinforced basalt subterranean chambers holding pre-fall research vaults. High titanium concentration.",
+            "Extreme abyss fissures bordering bedrock mantle. Unstable tectonic gravity causes imminent total cave-in.",
+            "Molten rock channels beneath volcanic substrata. Lava flows block critical extraction corridors.",
+            "Refracted prismatic tunnels warping spatial perception. Crystalline growths block sonar pulses.",
+            "Resonating hollow chambers amplifying Void Stalker aggression. Echo-silence corridors suppress sonar.",
+            "Shifting tectonic plates open and close pathways mid-expedition. Platform stability is never guaranteed.",
+            "Ashen biome fossilized in ancient combustion event. Spore clouds reduce suit visibility to near zero.",
+            "Obsidian-lined deep fissure columns with zero ambient light. Structural integrity is critically compromised.",
+            "Corrupted biological substrate fused into voxel matrix. Necrotic gas dissolves bulkhead plating rapidly.",
+            "Reality weave is unstable; warp rifts teleport delvers to random cavern nodes.",
+            "Pure void substrate bordering the planetary core. No geological rules apply beyond this depth."
+        };
+        return descs[(s - 1) % 12];
+    };
+    auto get_bonus = [](int s) -> std::string {
+        float mult = 1.0f + (s - 1) * 0.25f;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "EXP MULTIPLIER: %.1fx", mult);
+        return std::string(buf);
+    };
+    auto get_accent = [](int s) -> glm::vec4 {
+        if (s <= 1)  return Typography::COLOR_CYAN;
+        if (s == 2)  return Typography::COLOR_AMBER;
+        if (s <= 4)  return Typography::COLOR_CRIMSON;
+        if (s <= 7)  return glm::vec4(0.9f, 0.35f, 1.0f, 1.0f);  // Violet
+        if (s <= 10) return glm::vec4(1.0f, 0.6f,  0.1f, 1.0f);  // Orange
+        return               glm::vec4(0.4f, 1.0f,  0.5f, 1.0f);  // Neon Green (Abyss)
     };
 
-    for (int i = 0; i < 3; ++i) {
-        float cx = start_x + i * (card_w + card_gap);
-        const auto& sec = sectors[i];
-        bool is_selected = (selected_level == sec.level);
-        bool is_hovered = (mouse_x >= cx && mouse_x <= cx + card_w &&
-                           mouse_y >= start_y && mouse_y <= start_y + card_h);
+    // --- Render Cards ---
+    for (int slot = 0; slot < CARDS_PER_PAGE; ++slot) {
+        int sec_num = page_start + slot;
+        float cx = start_x + slot * (card_w + card_gap);
+
+        bool is_unlocked = profile.is_sector_unlocked(sec_num);
+        int  req_lvl     = UserProfile::get_required_level_for_sector(sec_num);
+        bool is_selected = (selected_level == sec_num);
+        bool is_hovered  = (mouse_x >= cx && mouse_x <= cx + card_w &&
+                            mouse_y >= start_y && mouse_y <= start_y + card_h);
+
+        // Ghost slot when this page has fewer than 3 valid sectors
+        if (sec_num > max_available) {
+            draw_panel_with_border(cx, start_y, card_w, card_h,
+                                   glm::vec4(0.02f, 0.02f, 0.03f, 0.55f),
+                                   glm::vec4(0.12f, 0.15f, 0.18f, 0.25f));
+            draw_text_centered("-- UNCHARTED TERRITORY --", cx, start_y, card_w, card_h,
+                                1.0f * ui_scale, glm::vec4(0.3f, 0.35f, 0.4f, 0.5f));
+            continue;
+        }
 
         if (is_hovered && mouse_clicked) {
-            selected_level = sec.level;
+            if (is_unlocked) {
+                selected_level = sec_num;
+            } else {
+                m_terminal_msg = "SECTOR LOCKED: REQUIRES DELVER LEVEL " + std::to_string(req_lvl);
+                m_terminal_msg_col = glm::vec4(1.0f, 0.35f, 0.35f, 1.0f);
+            }
         }
 
-        glm::vec4 bg_col = is_selected ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) :
-                           is_hovered  ? glm::vec4(0.06f, 0.11f, 0.17f, 0.90f) :
-                                         glm::vec4(0.03f, 0.05f, 0.08f, 0.85f);
-        draw_rect(cx, start_y, card_w, card_h, bg_col);
+        glm::vec4 accent     = get_accent(sec_num);
+        glm::vec4 bg_col     = !is_unlocked ? glm::vec4(0.04f, 0.04f, 0.05f, 0.88f) :
+                               is_selected  ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) :
+                               is_hovered   ? glm::vec4(0.06f, 0.11f, 0.17f, 0.90f) :
+                                              glm::vec4(0.03f, 0.05f, 0.08f, 0.85f);
+        glm::vec4 border_col = !is_unlocked ? glm::vec4(0.35f, 0.2f, 0.25f, 0.45f) :
+                               is_selected  ? accent :
+                               is_hovered   ? glm::vec4(0.4f, 0.85f, 1.0f, 0.8f) :
+                                              glm::vec4(0.2f, 0.35f, 0.45f, 0.4f);
 
-        glm::vec4 border_col = is_selected ? sec.accent :
-                               is_hovered  ? glm::vec4(0.4f, 0.85f, 1.0f, 0.8f) :
-                                             glm::vec4(0.2f, 0.35f, 0.45f, 0.4f);
-
-        draw_rect(cx, start_y, card_w, is_selected ? 3.0f : 1.0f, border_col);
-        draw_rect(cx, start_y + card_h - (is_selected ? 3.0f : 1.0f), card_w, is_selected ? 3.0f : 1.0f, border_col);
-        draw_rect(cx, start_y, is_selected ? 4.0f : 2.0f, card_h, border_col);
-        draw_rect(cx + card_w - (is_selected ? 4.0f : 2.0f), start_y, is_selected ? 4.0f : 2.0f, card_h, border_col);
+        draw_panel_with_border(cx, start_y, card_w, card_h, bg_col, border_col,
+                               is_selected ? 3.0f : (is_hovered ? 2.0f : 1.0f));
 
         // Header
-        draw_text(sec.tier, cx + 18.0f, start_y + 18.0f, 1.25f, sec.accent);
-        draw_text(sec.title, cx + 18.0f, start_y + 40.0f, 1.55f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        draw_text(sec.depth, cx + 18.0f, start_y + 68.0f, 1.15f, Typography::COLOR_MUTED);
-
-        draw_rect(cx + 18.0f, start_y + 88.0f, card_w - 36.0f, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.4f));
+        draw_text(get_tier_str(sec_num), cx + pad, start_y + 14.0f * ui_scale, 1.05f * ui_scale,
+                  is_unlocked ? accent : glm::vec4(0.5f, 0.5f, 0.55f, 0.8f));
+        draw_text(get_title(sec_num), cx + pad, start_y + 32.0f * ui_scale, 1.30f * ui_scale,
+                  is_unlocked ? glm::vec4(1.0f) : glm::vec4(0.6f, 0.6f, 0.65f, 0.8f));
+        draw_text(get_depth(sec_num), cx + pad, start_y + 54.0f * ui_scale, 1.00f * ui_scale, Typography::COLOR_MUTED);
+        draw_rect(cx + pad, start_y + 70.0f * ui_scale, card_w - 2.0f * pad, 1.0f,
+                  glm::vec4(0.25f, 0.4f, 0.55f, 0.4f));
 
         // Mission parameters
-        draw_text(sec.objective, cx + 18.0f, start_y + 104.0f, 1.30f, Typography::COLOR_PRIMARY);
-        draw_text(sec.hazard, cx + 18.0f, start_y + 132.0f, 1.20f, sec.accent);
+        float param_y = start_y + 82.0f * ui_scale;
+        draw_text(get_objective(sec_num), cx + pad, param_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY);
+        draw_text(get_hazard(sec_num), cx + pad, param_y + 22.0f * ui_scale, 1.00f * ui_scale, accent);
+        draw_text("TOPOLOGICAL SCAN:", cx + pad, param_y + 50.0f * ui_scale, 1.05f * ui_scale, Typography::COLOR_MUTED);
 
-        draw_text("TOPOLOGICAL SCAN:", cx + 18.0f, start_y + 168.0f, 1.15f, Typography::COLOR_MUTED);
-        
-        // Multi-line wrapped description
-        float line_y = start_y + 194.0f;
-        std::string remaining = sec.desc;
-        while (!remaining.empty()) {
-            size_t max_chars = 42;
-            size_t len = std::min(max_chars, remaining.size());
-            if (len < remaining.size()) {
-                size_t space = remaining.rfind(' ', len);
-                if (space != std::string::npos && space > 0) len = space;
-            }
-            std::string line = remaining.substr(0, len);
-            draw_text(line, cx + 18.0f, line_y, 1.10f, glm::vec4(0.85f, 0.90f, 0.95f, 0.90f));
-            line_y += 22.0f;
-            if (len >= remaining.size()) break;
-            remaining = remaining.substr(len + (remaining[len] == ' ' ? 1 : 0));
+        float desc_w = card_w - 2.0f * pad;
+        auto  desc_lines = FontRenderer::wrap_text(get_desc(sec_num), desc_w, 0.95f * ui_scale);
+        float line_y = param_y + 72.0f * ui_scale;
+        float line_h = FontRenderer::get_line_height(0.95f * ui_scale, 3.0f);
+        for (const auto& line : desc_lines) {
+            draw_text(line, cx + pad, line_y, 0.95f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.90f));
+            line_y += line_h;
         }
 
-        draw_rect(cx + 18.0f, start_y + card_h - 70.0f, card_w - 36.0f, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.4f));
-        draw_text(sec.bonus, cx + 18.0f, start_y + card_h - 52.0f, 1.3f, Typography::COLOR_GREEN);
+        // EXP multiplier & best badge
+        float bonus_y = start_y + card_h - 58.0f * ui_scale;
+        draw_rect(cx + pad, bonus_y - 6.0f * ui_scale, card_w - 2.0f * pad, 1.0f,
+                  glm::vec4(0.25f, 0.4f, 0.55f, 0.4f));
+        draw_text(get_bonus(sec_num), cx + pad, bonus_y, 1.10f * ui_scale,
+                  is_unlocked ? Typography::COLOR_GREEN : glm::vec4(0.5f, 0.55f, 0.5f, 0.7f));
+        if (sec_num < UserProfile::MAX_SECTOR_RECORDS &&
+            profile.sector_records[sec_num].highest_completion_rate > 0) {
+            std::string badge_str = "BEST: " + profile.sector_records[sec_num].best_badge +
+                                    "  (" + std::to_string(profile.sector_records[sec_num].highest_completion_rate) + "%)";
+            draw_text(badge_str, cx + pad, bonus_y + 18.0f * ui_scale, 0.90f * ui_scale,
+                      glm::vec4(0.6f, 1.0f, 0.75f, 0.9f));
+        }
 
-        if (is_selected) {
-            float badge_w = 210.0f;
-            draw_rect(cx + card_w - badge_w - 12.0f, start_y + 12.0f, badge_w, 24.0f, glm::vec4(0.0f, 0.85f, 1.0f, 0.20f));
-            draw_rect(cx + card_w - badge_w - 12.0f, start_y + 12.0f, badge_w, 1.0f, Typography::COLOR_CYAN);
-            draw_rect(cx + card_w - badge_w - 12.0f, start_y + 35.0f, badge_w, 1.0f, Typography::COLOR_CYAN);
-            draw_text("[ ACTIVE SECTOR ]", cx + card_w - badge_w - 4.0f, start_y + 16.0f, 1.15f, Typography::COLOR_CYAN);
+        float badge_w = card_w - 2.0f * pad;
+        float badge_h = 26.0f * ui_scale;
+        float badge_x = cx + pad;
+        float badge_y = start_y + card_h - badge_h - 10.0f * ui_scale;
+
+        if (!is_unlocked) {
+            draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
+                                   glm::vec4(0.3f, 0.1f, 0.12f, 0.85f), glm::vec4(1.0f, 0.35f, 0.35f, 0.8f));
+            draw_text_centered("[ LOCKED // REQUIRES LEVEL " + std::to_string(req_lvl) + " ]",
+                               badge_x, badge_y, badge_w, badge_h, 0.98f * ui_scale,
+                               glm::vec4(1.0f, 0.5f, 0.5f, 1.0f));
+        } else if (is_selected) {
+            draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
+                                   glm::vec4(0.0f, 0.85f, 1.0f, 0.20f), Typography::COLOR_CYAN, 1.0f);
+            draw_text_centered("[ ACTIVE SECTOR ]", badge_x, badge_y, badge_w, badge_h,
+                               1.05f * ui_scale, Typography::COLOR_CYAN);
         }
     }
 
-    // Bottom Navigation Bar
-    float bar_y = start_y + card_h + 16.0f;
+    // --- Bottom Navigation Bar ---
+    float bar_y = start_y + card_h + 12.0f * ui_scale;
 
-    // Back Button
-    float back_w = 160.0f;
-    float back_h = 52.0f;
+    // < BACK button
+    float back_w = 140.0f * ui_scale;
+    float back_h = bar_h;
     float back_x = start_x;
     bool back_hov = (mouse_x >= back_x && mouse_x <= back_x + back_w &&
-                     mouse_y >= bar_y && mouse_y <= bar_y + back_h);
+                     mouse_y >= bar_y  && mouse_y <= bar_y + back_h);
     if (back_hov && mouse_clicked) {
         m_subview = MenuSubView::Main;
     }
-    draw_rect(back_x, bar_y, back_w, back_h, back_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG);
-    draw_rect(back_x, bar_y, back_w, 1.0f, back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-    draw_rect(back_x, bar_y + back_h - 1.0f, back_w, 1.0f, back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-    draw_rect(back_x, bar_y, 1.0f, back_h, back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-    draw_rect(back_x + back_w - 1.0f, bar_y, 1.0f, back_h, back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-    draw_text("< BACK", back_x + 40.0f, bar_y + 16.0f, 1.35f, back_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+    draw_panel_with_border(back_x, bar_y, back_w, back_h,
+                           back_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG,
+                           back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f),
+                           back_hov ? 2.0f : 1.0f);
+    draw_text_centered("< BACK", back_x, bar_y, back_w, back_h, 1.25f * ui_scale,
+                       back_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
-    // Prominent LAUNCH Button (Immediately starts game!)
-    float launch_w = 420.0f;
-    float launch_h = 52.0f;
+    // Page indicator (centred on bar)
+    {
+        char page_buf[32];
+        std::snprintf(page_buf, sizeof(page_buf), "PAGE %d / %d", m_carousel_page + 1, total_pages);
+        float pi_scale = 1.10f * ui_scale;
+        float pi_w = FontRenderer::get_rendered_width(page_buf, pi_scale);
+        float pi_x = start_x + (total_cards_w - pi_w) * 0.5f;
+        float pi_y = bar_y + (bar_h - FontRenderer::get_rendered_height(pi_scale)) * 0.5f;
+        draw_text(page_buf, pi_x, pi_y, pi_scale, Typography::COLOR_MUTED);
+    }
+
+    // < PREV page arrow
+    float nav_btn_w = std::clamp(110.0f * ui_scale, 85.0f, 130.0f);
+    float prev_x = back_x + back_w + 10.0f * ui_scale;
+    bool prev_en  = (total_pages > 1 && m_carousel_page > 0);
+    bool prev_hov = prev_en &&
+                    mouse_x >= prev_x && mouse_x <= prev_x + nav_btn_w &&
+                    mouse_y >= bar_y  && mouse_y <= bar_y + bar_h;
+    if (prev_hov && mouse_clicked) {
+        m_carousel_page = std::max(0, m_carousel_page - 1);
+    }
+    {
+        glm::vec4 pb = prev_en && prev_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG;
+        glm::vec4 bd = prev_en && prev_hov ? Typography::COLOR_CYAN_GLOW  : glm::vec4(0.0f, 0.85f, 1.0f, 0.3f);
+        if (!prev_en) { pb = glm::vec4(0.05f, 0.06f, 0.08f, 0.4f); bd = glm::vec4(0.2f, 0.2f, 0.2f, 0.2f); }
+        draw_panel_with_border(prev_x, bar_y, nav_btn_w, bar_h, pb, bd, prev_hov ? 2.0f : 1.0f);
+        glm::vec4 tc = !prev_en ? glm::vec4(0.4f, 0.4f, 0.4f, 0.4f) :
+                        prev_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY;
+        draw_text_centered("< PREV", prev_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
+    }
+
+    // NEXT > page arrow
+    float launch_w = std::clamp(380.0f * ui_scale, 260.0f, 440.0f);
+    float next_x = start_x + total_cards_w - launch_w - nav_btn_w - 10.0f * ui_scale;
+    bool next_en  = (total_pages > 1 && m_carousel_page < total_pages - 1);
+    bool next_hov = next_en &&
+                    mouse_x >= next_x && mouse_x <= next_x + nav_btn_w &&
+                    mouse_y >= bar_y  && mouse_y <= bar_y + bar_h;
+    if (next_hov && mouse_clicked) {
+        m_carousel_page = std::min(total_pages - 1, m_carousel_page + 1);
+    }
+    {
+        glm::vec4 nb = next_en && next_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG;
+        glm::vec4 bd = next_en && next_hov ? Typography::COLOR_CYAN_GLOW  : glm::vec4(0.0f, 0.85f, 1.0f, 0.3f);
+        if (!next_en) { nb = glm::vec4(0.05f, 0.06f, 0.08f, 0.4f); bd = glm::vec4(0.2f, 0.2f, 0.2f, 0.2f); }
+        draw_panel_with_border(next_x, bar_y, nav_btn_w, bar_h, nb, bd, next_hov ? 2.0f : 1.0f);
+        glm::vec4 tc = !next_en ? glm::vec4(0.4f, 0.4f, 0.4f, 0.4f) :
+                        next_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY;
+        draw_text_centered("NEXT >", next_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
+    }
+
+    // LAUNCH button
+    bool cur_unlocked = profile.is_sector_unlocked(selected_level);
+    int  cur_req_lvl  = UserProfile::get_required_level_for_sector(selected_level);
+
+    float launch_h = bar_h;
     float launch_x = start_x + total_cards_w - launch_w;
     bool launch_hov = (mouse_x >= launch_x && mouse_x <= launch_x + launch_w &&
-                      mouse_y >= bar_y && mouse_y <= bar_y + launch_h);
+                       mouse_y >= bar_y     && mouse_y <= bar_y + launch_h);
 
-    if (launch_hov && mouse_clicked) {
+    if (launch_hov && mouse_clicked && cur_unlocked) {
         action = MainMenuAction::NewExpedition;
     }
 
-    glm::vec4 launch_bg = launch_hov ? glm::vec4(0.08f, 0.32f, 0.18f, 0.95f) : glm::vec4(0.05f, 0.22f, 0.12f, 0.90f);
-    draw_rect(launch_x, bar_y, launch_w, launch_h, launch_bg);
-    glm::vec4 launch_border = launch_hov ? Typography::COLOR_GREEN : glm::vec4(0.18f, 0.80f, 0.44f, 0.50f);
-    draw_rect(launch_x, bar_y, launch_w, launch_hov ? 3.0f : 2.0f, launch_border);
-    draw_rect(launch_x, bar_y + launch_h - (launch_hov ? 3.0f : 2.0f), launch_w, launch_hov ? 3.0f : 2.0f, launch_border);
-    draw_rect(launch_x, bar_y, launch_hov ? 4.0f : 2.0f, launch_h, launch_border);
-    draw_rect(launch_x + launch_w - (launch_hov ? 4.0f : 2.0f), bar_y, launch_hov ? 4.0f : 2.0f, launch_h, launch_border);
+    glm::vec4 launch_bg = !cur_unlocked ? glm::vec4(0.25f, 0.10f, 0.12f, 0.85f) :
+                          launch_hov    ? glm::vec4(0.08f, 0.32f, 0.18f, 0.95f) : glm::vec4(0.05f, 0.22f, 0.12f, 0.90f);
+    glm::vec4 launch_border = !cur_unlocked ? glm::vec4(0.7f, 0.25f, 0.25f, 0.7f) :
+                              launch_hov    ? Typography::COLOR_GREEN : glm::vec4(0.18f, 0.80f, 0.44f, 0.50f);
+    draw_panel_with_border(launch_x, bar_y, launch_w, launch_h, launch_bg, launch_border,
+                           launch_hov ? 2.5f : 1.5f);
 
-    // Centered button text
-    float text_scale = 1.75f;
-    float text_w = FontRenderer::get_text_width("[ LAUNCH EXPEDITION ]", text_scale * 0.45f);
-    float text_x = launch_x + (launch_w - text_w) * 0.5f;
-    float text_y = bar_y + (launch_h - 32.0f * text_scale * 0.45f) * 0.5f;
-    draw_text("[ LAUNCH EXPEDITION ]", text_x, text_y, text_scale, launch_hov ? glm::vec4(1.0f) : Typography::COLOR_GREEN);
+    std::string launch_text = cur_unlocked
+        ? "[ LAUNCH SECTOR " + std::to_string(selected_level) + " ]"
+        : "[ LOCKED // LEVEL " + std::to_string(cur_req_lvl) + " REQUIRED ]";
+    float text_scale = cur_unlocked ? 1.55f * ui_scale : 1.25f * ui_scale;
+    draw_text_centered(launch_text, launch_x, bar_y, launch_w, launch_h, text_scale,
+                       !cur_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) :
+                       launch_hov    ? glm::vec4(1.0f) : Typography::COLOR_GREEN);
 }
+
 
 void OrbitalHubUI::render_delver_roster(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked) {
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
-    float card_w = std::min((w - 100.0f) / 3.0f, 380.0f);
-    float card_h = h - 215.0f;
-    float total_roster_w = card_w * 3.0f + 32.0f;
+    float avail_w = w - 80.0f * ui_scale;
+    float card_gap = std::clamp(20.0f * ui_scale, 12.0f, 26.0f);
+    float card_w = (avail_w - 2.0f * card_gap) / 3.0f;
+    float total_roster_w = card_w * 3.0f + card_gap * 2.0f;
     float start_x = (w - total_roster_w) * 0.5f;
-    float start_y = 148.0f;
+    float start_y = 76.0f * ui_scale;
+    float card_h = h - start_y - 24.0f * ui_scale;
+    float pad = 16.0f * ui_scale;
 
     CharacterClass classes[3] = {
         CharacterClass::Demolitionist,
@@ -504,41 +711,47 @@ void OrbitalHubUI::render_delver_roster(UserProfile& profile, float mouse_x, flo
     };
 
     for (int i = 0; i < 3; ++i) {
-        float cx = start_x + i * (card_w + 16.0f);
+        float cx = start_x + i * (card_w + card_gap);
         auto attr = get_character_attributes(classes[i]);
+        bool is_unlocked = profile.is_class_unlocked(classes[i]);
+        int req_lvl = UserProfile::get_required_level_for_class(classes[i]);
         bool is_selected = (profile.selected_class_id == i);
         bool is_hovered = (mouse_x >= cx && mouse_x <= cx + card_w &&
                            mouse_y >= start_y && mouse_y <= start_y + card_h);
 
         if (is_hovered && mouse_clicked) {
-            profile.selected_class_id = i;
-            m_profile_dirty = true;
+            if (is_unlocked) {
+                profile.selected_class_id = i;
+                m_profile_dirty = true;
+            } else {
+                m_terminal_msg = "DELVER LOCKED: REQUIRES PLAYER LEVEL " + std::to_string(req_lvl);
+                m_terminal_msg_col = glm::vec4(1.0f, 0.35f, 0.35f, 1.0f);
+            }
         }
 
-        glm::vec4 bg_col = is_selected ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) :
-                           is_hovered  ? glm::vec4(0.06f, 0.12f, 0.18f, 0.90f) :
-                                         glm::vec4(0.03f, 0.05f, 0.08f, 0.85f);
-        draw_rect(cx, start_y, card_w, card_h, bg_col);
+        glm::vec4 bg_col = !is_unlocked ? glm::vec4(0.04f, 0.04f, 0.06f, 0.88f) :
+                           is_selected  ? glm::vec4(0.08f, 0.16f, 0.24f, 0.95f) :
+                           is_hovered   ? glm::vec4(0.06f, 0.12f, 0.18f, 0.90f) :
+                                          glm::vec4(0.03f, 0.05f, 0.08f, 0.85f);
+        glm::vec4 border_col = !is_unlocked ? glm::vec4(0.4f, 0.2f, 0.25f, 0.45f) :
+                               is_selected  ? attr.primaryAccentColor :
+                               is_hovered   ? glm::vec4(0.4f, 0.85f, 1.0f, 0.9f) :
+                                              glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
 
-        glm::vec4 border_col = is_selected ? attr.primaryAccentColor :
-                               is_hovered  ? glm::vec4(0.4f, 0.85f, 1.0f, 0.9f) :
-                                             glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
-        draw_rect(cx, start_y, card_w, is_selected ? 3.0f : 1.0f, border_col);
-        draw_rect(cx, start_y + card_h - 3.0f, card_w, is_selected ? 3.0f : 1.0f, border_col);
-        draw_rect(cx, start_y, is_selected ? 4.0f : 2.0f, card_h, border_col);
-        draw_rect(cx + card_w - (is_selected ? 4.0f : 2.0f), start_y, is_selected ? 4.0f : 2.0f, card_h, border_col);
+        draw_panel_with_border(cx, start_y, card_w, card_h, bg_col, border_col, is_selected ? 3.0f : (is_hovered ? 2.0f : 1.0f));
 
         // Header: Emblem & Delver Name
         std::string emblem = (i == 0) ? "[ DEMOLITIONIST ]" :
                              (i == 1) ? "[ VANGUARD ]" : "[ SCOUT ]";
-        draw_text(emblem, cx + 16.0f, start_y + 16.0f, 1.3f, attr.primaryAccentColor);
-        draw_text(attr.name, cx + 16.0f, start_y + 36.0f, 1.8f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        draw_text(attr.role, cx + 16.0f, start_y + 58.0f, 1.15f, glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
-        draw_rect(cx + 16.0f, start_y + 74.0f, card_w - 32.0f, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
+        draw_text(emblem, cx + pad, start_y + 14.0f * ui_scale, 1.15f * ui_scale, is_unlocked ? attr.primaryAccentColor : glm::vec4(0.5f, 0.5f, 0.55f, 0.8f));
+        draw_text(attr.name, cx + pad, start_y + 32.0f * ui_scale, 1.60f * ui_scale, is_unlocked ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.65f, 0.8f));
+        draw_text(attr.role, cx + pad, start_y + 54.0f * ui_scale, 1.05f * ui_scale, glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
+        draw_rect(cx + pad, start_y + 70.0f * ui_scale, card_w - 2.0f * pad, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
 
         // Stat Bars Section
-        float stat_y = start_y + 86.0f;
-        draw_text("DELVER BASELINE SPECIFICATIONS:", cx + 16.0f, stat_y, 1.15f, glm::vec4(0.2f, 0.95f, 1.0f, 1.0f));
+        float stat_y = start_y + 80.0f * ui_scale;
+        draw_text("DELVER BASELINE SPECIFICATIONS:", cx + pad, stat_y, 1.05f * ui_scale, glm::vec4(0.2f, 0.95f, 1.0f, 1.0f));
+        stat_y += 18.0f * ui_scale;
 
         struct StatBar {
             std::string label;
@@ -553,66 +766,61 @@ void OrbitalHubUI::render_delver_roster(UserProfile& profile, float mouse_x, flo
             {"Utility Rating", (i == 0) ? "Demolitions" : (i == 1) ? "Fortification" : "Surveying", 0.95f}
         };
 
-        stat_y += 20.0f;
+        float font_h = FontRenderer::get_rendered_height(1.00f * ui_scale);
         for (int s = 0; s < 4; ++s) {
-            draw_text(stats[s].label + ": " + stats[s].val_str, cx + 16.0f, stat_y, 1.1f, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
-            stat_y += 14.0f;
-            draw_rect(cx + 16.0f, stat_y, card_w - 32.0f, 6.0f, glm::vec4(0.1f, 0.15f, 0.2f, 0.8f));
-            draw_rect(cx + 16.0f, stat_y, (card_w - 32.0f) * std::clamp(stats[s].ratio, 0.0f, 1.0f), 6.0f, attr.primaryAccentColor);
-            stat_y += 14.0f;
+            draw_text(stats[s].label, cx + pad, stat_y, 1.00f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+            float val_w = FontRenderer::get_rendered_width(stats[s].val_str, 1.00f * ui_scale);
+            draw_text(stats[s].val_str, cx + card_w - pad - val_w, stat_y, 1.00f * ui_scale, is_unlocked ? attr.primaryAccentColor : glm::vec4(0.6f));
+            stat_y += font_h + 3.0f * ui_scale;
+            float bar_h = 6.0f * ui_scale;
+            draw_rect(cx + pad, stat_y, card_w - 2.0f * pad, bar_h, glm::vec4(0.1f, 0.15f, 0.2f, 0.8f));
+            draw_rect(cx + pad, stat_y, (card_w - 2.0f * pad) * std::clamp(stats[s].ratio, 0.0f, 1.0f), bar_h, is_unlocked ? attr.primaryAccentColor : glm::vec4(0.4f, 0.45f, 0.5f, 0.6f));
+            stat_y += bar_h + 7.0f * ui_scale;
         }
 
         // Traits & Ability Description
-        draw_rect(cx + 16.0f, stat_y + 4.0f, card_w - 32.0f, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
-        stat_y += 14.0f;
-        draw_text("TRAIT: " + attr.traitName, cx + 16.0f, stat_y, 1.2f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-        stat_y += 18.0f;
+        draw_rect(cx + pad, stat_y + 2.0f * ui_scale, card_w - 2.0f * pad, 1.0f, glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
+        stat_y += 10.0f * ui_scale;
+        draw_text("TRAIT: " + attr.traitName, cx + pad, stat_y, 1.10f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+        stat_y += font_h + 4.0f * ui_scale;
 
-        // Wrapped trait description
-        std::string desc = attr.traitDescription;
-        std::vector<std::string> lines;
-        std::string cur_line;
-        for (char c : desc) {
-            cur_line += c;
-            if (cur_line.length() >= 34 && c == ' ') {
-                lines.push_back(cur_line);
-                cur_line.clear();
-            }
-        }
-        if (!cur_line.empty()) lines.push_back(cur_line);
-
-        for (const auto& l : lines) {
-            draw_text(l, cx + 16.0f, stat_y, 1.05f, glm::vec4(0.75f, 0.8f, 0.85f, 0.9f));
-            stat_y += 15.0f;
+        auto trait_lines = FontRenderer::wrap_text(attr.traitDescription, card_w - 2.0f * pad, 0.95f * ui_scale);
+        float line_h = FontRenderer::get_line_height(0.95f * ui_scale, 3.0f);
+        for (const auto& l : trait_lines) {
+            draw_text(l, cx + pad, stat_y, 0.95f * ui_scale, glm::vec4(0.75f, 0.8f, 0.85f, 0.9f));
+            stat_y += line_h;
         }
 
         // Selection Action Button at card bottom
-        float btn_h = 38.0f;
-        float btn_y = start_y + card_h - btn_h - 16.0f;
-        float btn_w = card_w - 32.0f;
-        float btn_x = cx + 16.0f;
+        float btn_h = std::clamp(38.0f * ui_scale, 32.0f, 44.0f);
+        float btn_y = start_y + card_h - btn_h - 12.0f * ui_scale;
+        float btn_w = card_w - 2.0f * pad;
+        float btn_x = cx + pad;
 
-        glm::vec4 sel_col = is_selected ? glm::vec4(0.15f, 0.65f, 0.4f, 1.0f) :
-                            is_hovered  ? glm::vec4(0.2f, 0.45f, 0.75f, 1.0f) :
-                                          glm::vec4(0.1f, 0.2f, 0.3f, 0.85f);
-        draw_rect(btn_x, btn_y, btn_w, btn_h, sel_col);
-        draw_rect(btn_x, btn_y, btn_w, 1.0f, is_selected ? glm::vec4(0.4f, 1.0f, 0.6f, 1.0f) : border_col);
+        glm::vec4 sel_col = !is_unlocked ? glm::vec4(0.25f, 0.10f, 0.12f, 0.85f) :
+                            is_selected  ? glm::vec4(0.15f, 0.65f, 0.4f, 1.0f) :
+                            is_hovered   ? glm::vec4(0.2f, 0.45f, 0.75f, 1.0f) :
+                                           glm::vec4(0.1f, 0.2f, 0.3f, 0.85f);
+        glm::vec4 b_border = !is_unlocked ? glm::vec4(0.7f, 0.25f, 0.25f, 0.7f) :
+                             is_selected  ? glm::vec4(0.4f, 1.0f, 0.6f, 1.0f) : border_col;
+        draw_panel_with_border(btn_x, btn_y, btn_w, btn_h, sel_col, b_border);
 
-        std::string btn_txt = is_selected ? "[ ACTIVE DELVER SELECTED ]" :
-                              is_hovered  ? "[ CLICK TO SELECT DELVER ]" : "[ SELECT DELVER ]";
-        float txt_len = static_cast<float>(btn_txt.length()) * 8.0f * 1.15f;
-        draw_text(btn_txt, btn_x + (btn_w - txt_len) * 0.5f, btn_y + 12.0f, 1.15f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        std::string btn_txt = !is_unlocked ? "[ LOCKED // REQUIRES LEVEL " + std::to_string(req_lvl) + " ]" :
+                              is_selected  ? "[ ACTIVE DELVER SELECTED ]" :
+                              is_hovered   ? "[ CLICK TO SELECT DELVER ]" : "[ SELECT DELVER ]";
+        draw_text_centered(btn_txt, btn_x, btn_y, btn_w, btn_h, 1.05f * ui_scale,
+                           !is_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     }
 }
 
 void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked) {
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
-    float cx = w / 2.0f;
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
-    float terminal_w = std::min(w * 0.88f, 1080.0f);
+    float terminal_w = std::clamp(w * 0.94f, 640.0f, 1420.0f);
     float start_x = (w - terminal_w) * 0.5f;
-    float start_y = 142.0f;
+    float start_y = 76.0f * ui_scale;
 
     // Pulse feedback overlay
     if (m_purchase_pulse_timer > 0.0f) {
@@ -623,48 +831,115 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     }
 
     // Top Balance & Respec Strip
-    float top_h = 44.0f;
-    draw_rect(start_x, start_y, terminal_w, top_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f));
-    draw_rect(start_x, start_y, terminal_w, 1.0f, glm::vec4(0.2f, 0.45f, 0.65f, 0.6f));
+    float top_h = 46.0f * ui_scale;
+    draw_panel_with_border(start_x, start_y, terminal_w, top_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.2f, 0.45f, 0.65f, 0.6f));
 
-    std::string bal_str = "STOCKPILED: " + std::to_string(profile.total_exp) + " EXP  |  " +
-                          std::to_string(profile.total_voidite) + " VOIDITE  |  " +
-                          std::to_string(profile.total_titanium) + " TITANIUM";
-    draw_text(bal_str, start_x + 18.0f, start_y + 14.0f, 1.35f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-
-    // Respec Button
-    float respec_w = 230.0f;
-    float respec_h = 30.0f;
-    float respec_x = start_x + terminal_w - respec_w - 12.0f;
-    float respec_y = start_y + 7.0f;
+    // Respec Button: Sleek, high-contrast, well-padded tactical button
+    float respec_w = std::clamp(175.0f * ui_scale, 140.0f, 210.0f);
+    float respec_h = 32.0f * ui_scale;
+    float respec_x = start_x + terminal_w - respec_w - 12.0f * ui_scale;
+    float respec_y = start_y + (top_h - respec_h) * 0.5f;
     bool respec_hov = (mouse_x >= respec_x && mouse_x <= respec_x + respec_w &&
                        mouse_y >= respec_y && mouse_y <= respec_y + respec_h);
 
     if (respec_hov && mouse_clicked) {
         int refunded = 0;
         profile.upgrades.respec(refunded);
-        profile.total_exp += refunded;
+        profile.total_coins += refunded;
         m_profile_dirty = true;
         m_purchase_pulse_timer = 1.0f;
-        m_terminal_msg = "RESPEC COMPLETE: REFUNDED " + std::to_string(refunded) + " EXP (85% RECOVERY)";
+        m_terminal_msg = "RESPEC COMPLETE: REFUNDED " + std::to_string(refunded) + " COINS (85% RECOVERY)";
         m_terminal_msg_col = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
     }
 
-    glm::vec4 respec_bg = respec_hov ? glm::vec4(0.6f, 0.2f, 0.2f, 1.0f) : glm::vec4(0.35f, 0.12f, 0.15f, 0.9f);
-    draw_rect(respec_x, respec_y, respec_w, respec_h, respec_bg);
-    draw_rect(respec_x, respec_y, respec_w, 1.0f, glm::vec4(1.0f, 0.4f, 0.4f, 0.8f));
-    draw_text("[RESPEC UPGRADES (-15% EXP)]", respec_x + 8.0f, respec_y + 8.0f, 1.15f, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
+    glm::vec4 respec_bg = respec_hov ? glm::vec4(0.52f, 0.16f, 0.18f, 0.98f) : glm::vec4(0.18f, 0.08f, 0.10f, 0.92f);
+    glm::vec4 respec_border = respec_hov ? Typography::COLOR_CRIMSON : glm::vec4(0.85f, 0.35f, 0.35f, 0.75f);
+    draw_panel_with_border(respec_x, respec_y, respec_w, respec_h, respec_bg, respec_border);
+    draw_text_centered("[RESET UPGRADES]", respec_x, respec_y, respec_w, respec_h, 0.88f * ui_scale,
+                       respec_hov ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.85f, 0.85f, 0.95f));
 
-    // Terminal Status Feedback Line
+    // Full-Width Delver Balance Line (Given pristine breathing room without dev crowding)
+    float avail_bal_w = respec_x - start_x - 18.0f * ui_scale;
+    int player_lvl = profile.get_player_level();
+    float bal_scale = 1.15f * ui_scale;
+
+    std::string bal_str = "DELVER RANK: LVL " + std::to_string(player_lvl) +
+                          "  |  EXP: " + std::to_string(profile.total_exp) + "/" + std::to_string(profile.get_next_level_exp_req()) +
+                          "  |  COINS: " + std::to_string(profile.total_coins) +
+                          "  |  VOIDITE: " + std::to_string(profile.total_voidite) +
+                          "  |  TITANIUM: " + std::to_string(profile.total_titanium);
+
+    if (FontRenderer::get_rendered_width(bal_str, bal_scale) > avail_bal_w) {
+        bal_scale = std::max(0.85f * ui_scale, 0.72f);
+    }
+    if (FontRenderer::get_rendered_width(bal_str, bal_scale) > avail_bal_w) {
+        bal_str = "LVL " + std::to_string(player_lvl) + " | EXP " + std::to_string(profile.total_exp) +
+                  " | " + std::to_string(profile.total_coins) + "C | " +
+                  std::to_string(profile.total_voidite) + "V | " +
+                  std::to_string(profile.total_titanium) + "T";
+    }
+    draw_text(bal_str, start_x + 14.0f * ui_scale, start_y + (top_h - FontRenderer::get_rendered_height(bal_scale)) * 0.5f, bal_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+
+    // Terminal Status Feedback Line & Test Mode Action Badges
+    float subrow_y = start_y + top_h + 5.0f * ui_scale;
     if (!m_terminal_msg.empty()) {
-        draw_text(">> " + m_terminal_msg, start_x + 18.0f, start_y + top_h + 8.0f, 1.2f, m_terminal_msg_col);
+        draw_text(">> " + m_terminal_msg, start_x + 14.0f * ui_scale, subrow_y, 1.02f * ui_scale, m_terminal_msg_col);
+    }
+
+    // Test Mode Badges cleanly positioned in the sub-row to keep the balance bar pristine
+    if (m_test_mode) {
+        float grant_w = std::clamp(130.0f * ui_scale, 100.0f, 150.0f);
+        float grant_h = 20.0f * ui_scale;
+        float grant_x = start_x + terminal_w - grant_w - 12.0f * ui_scale;
+        float grant_y = subrow_y;
+        bool grant_hov = (mouse_x >= grant_x && mouse_x <= grant_x + grant_w &&
+                          mouse_y >= grant_y && mouse_y <= grant_y + grant_h);
+
+        if (grant_hov && mouse_clicked) {
+            profile.grant_resources(1000, 500, 20, 10);
+            m_profile_dirty = true;
+            m_purchase_pulse_timer = 1.0f;
+            m_terminal_msg = "TEST GRANT: +1000 EXP, +500 COINS, +20 VOIDITE, +10 TITANIUM ADDED";
+            m_terminal_msg_col = glm::vec4(0.2f, 0.95f, 0.4f, 1.0f);
+        }
+
+        glm::vec4 grant_bg = grant_hov ? glm::vec4(0.15f, 0.45f, 0.25f, 1.0f) : glm::vec4(0.08f, 0.22f, 0.14f, 0.85f);
+        draw_panel_with_border(grant_x, grant_y, grant_w, grant_h, grant_bg, glm::vec4(0.3f, 0.85f, 0.45f, 0.7f));
+        draw_text_centered("[+1000 EXP (F5)]", grant_x, grant_y, grant_w, grant_h, 0.80f * ui_scale, glm::vec4(0.6f, 1.0f, 0.7f, 1.0f));
+
+        float cycle_w = std::clamp(135.0f * ui_scale, 105.0f, 155.0f);
+        float cycle_h = grant_h;
+        float cycle_x = grant_x - cycle_w - 8.0f * ui_scale;
+        float cycle_y = subrow_y;
+        bool cycle_hov = (mouse_x >= cycle_x && mouse_x <= cycle_x + cycle_w &&
+                          mouse_y >= cycle_y && mouse_y <= cycle_y + cycle_h);
+
+        if (cycle_hov && mouse_clicked) {
+            if (profile.total_coins < 500) profile.grant_resources(1000, 500, 30, 15);
+            bool p1 = profile.upgrades.purchase(UpgradeType::DrillSpeed, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+            bool p2 = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+            (void)p1; (void)p2;
+            int refunded = 0;
+            profile.upgrades.respec(refunded);
+            profile.total_coins += refunded;
+            m_profile_dirty = true;
+            m_purchase_pulse_timer = 1.0f;
+            m_terminal_msg = "TEST CYCLE: PURCHASED & RESPECCED (REFUNDED " + std::to_string(refunded) + " COINS)";
+            m_terminal_msg_col = glm::vec4(0.3f, 0.85f, 1.0f, 1.0f);
+        }
+
+        glm::vec4 cycle_bg = cycle_hov ? glm::vec4(0.2f, 0.32f, 0.48f, 1.0f) : glm::vec4(0.10f, 0.18f, 0.28f, 0.85f);
+        draw_panel_with_border(cycle_x, cycle_y, cycle_w, cycle_h, cycle_bg, glm::vec4(0.35f, 0.65f, 0.9f, 0.7f));
+        draw_text_centered("[TEST RESPEC (F6)]", cycle_x, cycle_y, cycle_w, cycle_h, 0.80f * ui_scale, glm::vec4(0.8f, 0.9f, 1.0f, 1.0f));
     }
 
     // 6 Upgrade Nodes (2 Columns of 3 Nodes)
-    float grid_y = start_y + top_h + 30.0f;
-    float col_w = (terminal_w - 20.0f) * 0.5f;
-    float row_h = 102.0f;
-    float row_gap = 14.0f;
+    float grid_y = start_y + top_h + 30.0f * ui_scale;
+    float avail_grid_h = h - grid_y - 18.0f * ui_scale;
+    float row_gap = std::clamp(10.0f * ui_scale, 6.0f, 14.0f);
+    float row_h = std::clamp((avail_grid_h - 2.0f * row_gap) / 3.0f, 105.0f, 180.0f);
+    float col_gap = std::clamp(18.0f * ui_scale, 10.0f, 22.0f);
+    float col_w = (terminal_w - col_gap) * 0.5f;
 
     UpgradeType types[6] = {
         UpgradeType::DrillSpeed,
@@ -680,31 +955,49 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
         int col = idx / 3;
         int row = idx % 3;
 
-        float ux = start_x + col * (col_w + 20.0f);
+        float ux = start_x + col * (col_w + col_gap);
         float uy = grid_y + row * (row_h + row_gap);
 
         auto info = UpgradeTree::get_info(type);
         int cur_tier = profile.upgrades.get_tier(type);
+        int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
         bool is_maxed = (cur_tier >= UpgradeTree::MAX_TIER);
+        bool level_locked = (!is_maxed && player_lvl < req_lvl);
 
-        int exp_cost = UpgradeTree::get_exp_cost(cur_tier);
+        int coin_cost = UpgradeTree::get_coin_cost(cur_tier);
         int void_cost = UpgradeTree::get_voidite_cost(cur_tier);
         int tit_cost = UpgradeTree::get_titanium_cost(cur_tier);
-        bool can_buy = profile.upgrades.can_purchase(type, profile.total_exp, profile.total_voidite, profile.total_titanium);
+        bool can_buy = profile.upgrades.can_purchase(type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
 
         draw_rect(ux, uy, col_w, row_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
-        draw_rect(ux, uy, 4.0f, row_h, is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.2f, 0.85f, 1.0f, 0.9f));
+        draw_rect(ux, uy, 4.0f, row_h, is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
+                                       level_locked ? glm::vec4(0.6f, 0.25f, 0.25f, 0.8f) :
+                                       glm::vec4(0.2f, 0.85f, 1.0f, 0.9f));
         draw_rect(ux, uy, col_w, 1.0f, glm::vec4(0.18f, 0.3f, 0.4f, 0.5f));
 
+        // Purchase Button (Well-padded proportions)
+        float btn_w = std::clamp(170.0f * ui_scale, 140.0f, 200.0f);
+        float btn_h = std::clamp(52.0f * ui_scale, 44.0f, 58.0f);
+        float bx = ux + col_w - btn_w - 12.0f * ui_scale;
+        float by = uy + (row_h - btn_h) * 0.5f;
+
+        float text_max_w = bx - ux - 18.0f * ui_scale;
+
         // Title and Category
-        draw_text(info.category + " // " + info.name, ux + 14.0f, uy + 10.0f, 1.25f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-        draw_text(info.description, ux + 14.0f, uy + 28.0f, 1.05f, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
+        draw_text(info.category + " // " + info.name, ux + 12.0f * ui_scale, uy + 8.0f * ui_scale, 1.05f * ui_scale, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+
+        // Description wrapped to text area
+        auto desc_lines = FontRenderer::wrap_text(info.description, text_max_w, 0.92f * ui_scale);
+        float desc_y = uy + 26.0f * ui_scale;
+        if (!desc_lines.empty()) {
+            draw_text(desc_lines[0], ux + 12.0f * ui_scale, desc_y, 0.92f * ui_scale, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
+        }
 
         // Progress Pips [ ■ ■ ■ □ □ ]
-        float pip_start_x = ux + 14.0f;
-        float pip_y = uy + 48.0f;
-        float pip_size = 14.0f;
-        float pip_gap = 5.0f;
+        float pip_start_x = ux + 12.0f * ui_scale;
+        float pip_y = uy + 45.0f * ui_scale;
+        float pip_size = 12.0f * ui_scale;
+        float pip_gap = 4.0f * ui_scale;
 
         for (int p = 0; p < UpgradeTree::MAX_TIER; ++p) {
             float px = pip_start_x + p * (pip_size + pip_gap);
@@ -715,23 +1008,22 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
         }
 
         std::string tier_text = "TIER " + std::to_string(cur_tier) + "/" + std::to_string(UpgradeTree::MAX_TIER);
-        draw_text(tier_text, pip_start_x + UpgradeTree::MAX_TIER * (pip_size + pip_gap) + 8.0f, pip_y + 2.0f, 1.15f,
-                  is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+        if (!is_maxed) {
+            tier_text += " [REQ LVL " + std::to_string(req_lvl) + "]";
+        }
+        glm::vec4 tier_col = is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
+                             level_locked ? glm::vec4(1.0f, 0.55f, 0.4f, 0.9f) :
+                             glm::vec4(0.85f, 0.9f, 0.95f, 0.9f);
+        draw_text(tier_text, pip_start_x + UpgradeTree::MAX_TIER * (pip_size + pip_gap) + 8.0f * ui_scale, pip_y + 1.0f, 1.00f * ui_scale, tier_col);
 
         // Stat Delta Preview
         std::string delta_preview = profile.upgrades.get_stat_preview(type);
-        draw_text("Effect: " + delta_preview, ux + 14.0f, uy + 72.0f, 1.15f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-
-        // Purchase Button
-        float btn_w = 170.0f;
-        float btn_h = 36.0f;
-        float bx = ux + col_w - btn_w - 12.0f;
-        float by = uy + 52.0f;
+        draw_text("Effect: " + delta_preview, ux + 12.0f * ui_scale, uy + row_h - 22.0f * ui_scale, 1.08f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
 
         bool btn_hov = (mouse_x >= bx && mouse_x <= bx + btn_w && mouse_y >= by && mouse_y <= by + btn_h);
 
         if (btn_hov && mouse_clicked && can_buy && !is_maxed) {
-            profile.upgrades.purchase(type, profile.total_exp, profile.total_voidite, profile.total_titanium);
+            profile.upgrades.purchase(type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
             m_profile_dirty = true;
             m_purchase_pulse_timer = 1.0f;
             m_terminal_msg = "UPGRADE ACQUIRED: " + info.name + " [TIER " + std::to_string(cur_tier + 1) + "]";
@@ -739,22 +1031,26 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
         }
 
         glm::vec4 b_bg = is_maxed ? glm::vec4(0.1f, 0.14f, 0.18f, 0.5f) :
+                         level_locked ? glm::vec4(0.22f, 0.10f, 0.12f, 0.7f) :
                          can_buy  ? (btn_hov ? glm::vec4(0.2f, 0.65f, 0.95f, 1.0f) : glm::vec4(0.12f, 0.4f, 0.7f, 0.9f)) :
                                     glm::vec4(0.15f, 0.18f, 0.22f, 0.6f);
-        draw_rect(bx, by, btn_w, btn_h, b_bg);
-        if (can_buy && !is_maxed) {
-            draw_rect(bx, by, btn_w, 1.0f, glm::vec4(0.4f, 0.85f, 1.0f, 0.8f));
-        }
+        glm::vec4 b_border = (can_buy && !is_maxed) ? (btn_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.4f, 0.85f, 1.0f, 0.8f)) :
+                             glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
+        draw_panel_with_border(bx, by, btn_w, btn_h, b_bg, b_border);
 
         if (is_maxed) {
-            draw_text("MAX TIER", bx + 45.0f, by + 12.0f, 1.2f, glm::vec4(0.5f, 0.55f, 0.6f, 0.8f));
+            draw_text_centered("MAX TIER", bx, by, btn_w, btn_h, 1.05f * ui_scale, glm::vec4(0.5f, 0.55f, 0.6f, 0.8f));
+        } else if (level_locked) {
+            std::string lock_str = "[REQ LEVEL " + std::to_string(req_lvl) + "]";
+            draw_text_centered(lock_str, bx, by, btn_w, btn_h, 0.95f * ui_scale, glm::vec4(1.0f, 0.45f, 0.45f, 0.9f));
         } else {
-            std::string cost_str = std::to_string(exp_cost) + " EXP";
-            std::string mat_str = std::to_string(void_cost) + "V " + std::to_string(tit_cost) + "T";
-            draw_text("UPGRADE: " + cost_str, bx + 12.0f, by + 6.0f, 1.1f,
-                      can_buy ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
-            draw_text(mat_str, bx + 12.0f, by + 20.0f, 1.0f,
-                      can_buy ? glm::vec4(0.0f, 0.94f, 1.0f, 1.0f) : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
+            std::string cost_str = std::to_string(coin_cost) + " COINS";
+            std::string mat_str = std::to_string(void_cost) + "V  " + std::to_string(tit_cost) + "T";
+            float half_h = btn_h * 0.5f;
+            draw_text_centered("UPGRADE: " + cost_str, bx, by + 3.0f * ui_scale, btn_w, half_h, 0.90f * ui_scale,
+                              can_buy ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
+            draw_text_centered(mat_str, bx, by + half_h - 1.0f * ui_scale, btn_w, half_h, 0.88f * ui_scale,
+                              can_buy ? Typography::COLOR_CYAN : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
         }
     }
 }
@@ -775,14 +1071,15 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
     float cx = w / 2.0f;
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
     draw_rect(0, 0, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.96f));
 
     // Header
-    float back_btn_w = 160.0f;
-    float back_btn_h = 28.0f;
-    float back_btn_x = 40.0f;
-    float back_btn_y = 22.0f;
+    float back_btn_w = std::clamp(160.0f * ui_scale, 130.0f, 180.0f);
+    float back_btn_h = std::clamp(28.0f * ui_scale, 24.0f, 34.0f);
+    float back_btn_x = 30.0f * ui_scale;
+    float back_btn_y = 18.0f * ui_scale;
     bool back_hovered = (mouse_x >= back_btn_x && mouse_x <= back_btn_x + back_btn_w &&
                          mouse_y >= back_btn_y && mouse_y <= back_btn_y + back_btn_h);
     if (back_hovered && mouse_clicked) {
@@ -790,22 +1087,22 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
     }
 
     glm::vec4 back_bg = back_hovered ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG;
-    draw_rect(back_btn_x, back_btn_y, back_btn_w, back_btn_h, back_bg);
-    glm::vec4 back_border = back_hovered ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f);
-    draw_rect(back_btn_x, back_btn_y, back_btn_w, 1.0f, back_border);
-    draw_rect(back_btn_x, back_btn_y + back_btn_h - 1.0f, back_btn_w, 1.0f, back_border);
-    draw_rect(back_btn_x, back_btn_y, back_hovered ? 3.0f : 1.0f, back_btn_h, back_border);
-    draw_rect(back_btn_x + back_btn_w - 1.0f, back_btn_y, 1.0f, back_btn_h, back_border);
-    draw_text("< TITLE SCREEN", back_btn_x + 16.0f, back_btn_y + 8.0f, 1.15f, back_hovered ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+    draw_panel_with_border(back_btn_x, back_btn_y, back_btn_w, back_btn_h, back_bg,
+                           back_hovered ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f),
+                           back_hovered ? 2.0f : 1.0f);
+    draw_text_centered("< TITLE SCREEN", back_btn_x, back_btn_y, back_btn_w, back_btn_h, 1.10f * ui_scale,
+                       back_hovered ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
-    draw_text("ORBITAL HUB // EXPEDITION STAGING & UPGRADE TERMINAL", back_btn_x + back_btn_w + 20.0f, 26.0f, 1.75f, Typography::COLOR_CYAN);
-    draw_rect(40.0f, 56.0f, w - 80.0f, 2.0f, glm::vec4(0.15f, 0.85f, 1.0f, 0.6f));
+    float title_x = back_btn_x + back_btn_w + 16.0f * ui_scale;
+    float title_h = FontRenderer::get_rendered_height(1.55f * ui_scale);
+    draw_text("ORBITAL HUB // EXPEDITION STAGING & UPGRADE TERMINAL", title_x, back_btn_y + (back_btn_h - title_h) * 0.5f, 1.55f * ui_scale, Typography::COLOR_CYAN);
+    draw_rect(30.0f * ui_scale, back_btn_y + back_btn_h + 8.0f * ui_scale, w - 60.0f * ui_scale, 2.0f, glm::vec4(0.15f, 0.85f, 1.0f, 0.6f));
 
     // Navigation Tabs Header
-    float tab_y = 66.0f;
-    float tab_h = 32.0f;
-    float tab_w = 230.0f;
-    float tab_gap = 12.0f;
+    float tab_y = back_btn_y + back_btn_h + 16.0f * ui_scale;
+    float tab_h = std::clamp(32.0f * ui_scale, 26.0f, 38.0f);
+    float tab_w = std::clamp(230.0f * ui_scale, 175.0f, 260.0f);
+    float tab_gap = 12.0f * ui_scale;
     float tabs_total_w = 3.0f * tab_w + 2.0f * tab_gap;
     float tab_start_x = cx - tabs_total_w * 0.5f;
 
@@ -827,19 +1124,13 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
         glm::vec4 bg_col = is_cur ? glm::vec4(0.14f, 0.40f, 0.60f, 0.95f) :
                            is_hov ? glm::vec4(0.08f, 0.22f, 0.35f, 0.85f) :
                                     glm::vec4(0.04f, 0.08f, 0.12f, 0.75f);
-        draw_rect(tx, tab_y, tab_w, tab_h, bg_col);
-
         glm::vec4 border_col = is_cur ? glm::vec4(0.2f, 0.95f, 1.0f, 1.0f) :
                                is_hov ? glm::vec4(0.5f, 0.85f, 1.0f, 0.8f) :
                                         glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
-        draw_rect(tx, tab_y, tab_w, is_cur ? 2.0f : 1.0f, border_col);
-        draw_rect(tx, tab_y + tab_h - 2.0f, tab_w, 2.0f, border_col);
-        draw_rect(tx, tab_y, 2.0f, tab_h, border_col);
-        draw_rect(tx + tab_w - 2.0f, tab_y, 2.0f, tab_h, border_col);
+        draw_panel_with_border(tx, tab_y, tab_w, tab_h, bg_col, border_col, is_cur ? 2.0f : 1.0f);
 
-        float text_len = static_cast<float>(std::string(tab_names[t]).length()) * 8.0f * 1.15f;
-        draw_text(tab_names[t], tx + (tab_w - text_len) * 0.5f, tab_y + 9.0f, 1.15f,
-                  is_cur ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : is_hov ? glm::vec4(0.85f, 0.95f, 1.0f, 0.9f) : glm::vec4(0.6f, 0.7f, 0.8f, 0.8f));
+        draw_text_centered(tab_names[t], tx, tab_y, tab_w, tab_h, 1.10f * ui_scale,
+                           is_cur ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : is_hov ? glm::vec4(0.85f, 0.95f, 1.0f, 0.9f) : glm::vec4(0.6f, 0.7f, 0.8f, 0.8f));
     }
 
     bool launch_triggered = false;
@@ -850,21 +1141,35 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
         render_upgrade_terminal(profile, mouse_x, mouse_y, mouse_clicked);
     } else {
         // Tab 0: Sector Intel & Skill Matrix
-        float col1_x = 40.0f;
-        float col1_w = (w - 110.0f) * 0.45f;
-        float col_y = 112.0f;
-        float col_h = h - 190.0f;
+        float total_margin = 60.0f * ui_scale;
+        float col_gap = 24.0f * ui_scale;
+        float avail_w = w - total_margin * 2.0f - col_gap;
+        float col1_x = total_margin;
+        float col1_w = avail_w * 0.46f;
+        float col2_x = col1_x + col1_w + col_gap;
+        float col2_w = avail_w * 0.54f;
 
-        draw_rect(col1_x, col_y, col1_w, col_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f));
+        float col_y = tab_y + tab_h + 12.0f * ui_scale;
+        float btn_h = std::clamp(42.0f * ui_scale, 36.0f, 48.0f);
+        float btn_margin = 16.0f * ui_scale;
+        float col_h = h - col_y - btn_h - btn_margin - 12.0f * ui_scale;
+
+        // LEFT COLUMN: SECTOR BRIEFING
+        draw_panel_with_border(col1_x, col_y, col1_w, col_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f), glm::vec4(0.2f, 0.35f, 0.45f, 0.5f));
         draw_rect(col1_x, col_y, 4.0f, col_h, glm::vec4(0.2f, 0.85f, 1.0f, 0.95f));
 
-        draw_text("EXPEDITION SECTOR BRIEFING", col1_x + 20.0f, col_y + 16.0f, 1.5f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-        draw_rect(col1_x + 20.0f, col_y + 36.0f, col1_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+        float pad = 16.0f * ui_scale;
+        float text_y = col_y + 14.0f * ui_scale;
+        draw_text("EXPEDITION SECTOR BRIEFING", col1_x + pad, text_y, 1.40f * ui_scale, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+        text_y += 24.0f * ui_scale;
+        draw_rect(col1_x + pad, text_y, col1_w - 2.0f * pad, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+        text_y += 10.0f * ui_scale;
 
         std::string sec_name = (selected_level == 1) ? "SECTOR 1: CRYSTALLINE CAVERNS" :
                                (selected_level == 2) ? "SECTOR 2: SUBTERRANEAN VAULT" :
                                                        "SECTOR 3: FAULT-LINE COLLAPSE";
-        draw_text(sec_name, col1_x + 20.0f, col_y + 48.0f, 1.35f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+        draw_text(sec_name, col1_x + pad, text_y, 1.25f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+        text_y += 20.0f * ui_scale;
 
         std::string sec_badge = profile.sector_records[selected_level].best_badge;
         int sec_rate = profile.sector_records[selected_level].highest_completion_rate;
@@ -873,42 +1178,62 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
                             (sec_badge.find("PARTIAL") != std::string::npos) ? glm::vec4(1.0f, 0.75f, 0.0f, 1.0f) :
                             (sec_badge.find("ABANDONED") != std::string::npos || sec_badge == "EXPEDITION ABANDONED") ? glm::vec4(1.0f, 0.35f, 0.35f, 1.0f) :
                                                                    glm::vec4(0.5f, 0.7f, 0.8f, 0.85f);
-        draw_text(rec_str, col1_x + 20.0f, col_y + 68.0f, 1.15f, rec_col);
+        draw_text(rec_str, col1_x + pad, text_y, 1.10f * ui_scale, rec_col);
+        text_y += 22.0f * ui_scale;
 
+        float line_step = 20.0f * ui_scale;
         if (selected_level == 1) {
-            draw_text("Target Depth: 120m | Crust Stability: 85%", col1_x + 20.0f, col_y + 90.0f, 1.2f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-            draw_text("Tactical: ANY DELVER (Standard Cavern Survey)", col1_x + 20.0f, col_y + 110.0f, 1.15f, glm::vec4(0.2f, 0.95f, 0.4f, 1.0f));
-            draw_text("Directives:", col1_x + 20.0f, col_y + 134.0f, 1.3f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-            draw_text("  1. Mine 25 Voidite Crystals using Subterranean Drill [LMB]", col1_x + 20.0f, col_y + 156.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  2. Use Sonar Pulse [Q] to locate rich mineral veins", col1_x + 20.0f, col_y + 178.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  3. Deploy Extraction Beacon [B] when quota met", col1_x + 20.0f, col_y + 200.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  4. Defend zone for 40s until evacuation landing pod arrives", col1_x + 20.0f, col_y + 222.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            draw_text("Target Depth: 120m | Crust Stability: 85%", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+            text_y += line_step;
+            draw_text("Tactical: ANY DELVER (Standard Cavern Survey)", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(0.2f, 0.95f, 0.4f, 1.0f));
+            text_y += line_step + 4.0f * ui_scale;
+            draw_text("Directives:", col1_x + pad, text_y, 1.20f * ui_scale, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+            text_y += line_step;
+            draw_text("  1. Mine 25 Voidite Crystals using Subterranean Drill [LMB]", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  2. Use Sonar Pulse [Q] to locate rich mineral veins", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  3. Deploy Extraction Beacon [B] when quota met", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  4. Defend zone for 40s until evacuation landing pod arrives", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         } else if (selected_level == 2) {
-            draw_text("Target Depth: 340m | Crust Stability: 65%", col1_x + 20.0f, col_y + 90.0f, 1.2f, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-            draw_text("Tactical: DEMOLITIONIST (Vault Breach Specialist)", col1_x + 20.0f, col_y + 110.0f, 1.15f, glm::vec4(1.0f, 0.65f, 0.2f, 1.0f));
-            draw_text("Directives:", col1_x + 20.0f, col_y + 134.0f, 1.3f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-            draw_text("  1. Track subterranean vault signatures using Sonar [Q]", col1_x + 20.0f, col_y + 156.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  2. Equip Demolition Charges [3] to blast Reinforced Doors", col1_x + 20.0f, col_y + 178.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  3. Breach the vault chamber and extract the Hyper-Core Relic", col1_x + 20.0f, col_y + 200.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  4. Call beacon [B] and extract all salvaged minerals", col1_x + 20.0f, col_y + 222.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            draw_text("Target Depth: 340m | Crust Stability: 65%", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+            text_y += line_step;
+            draw_text("Tactical: DEMOLITIONIST (Vault Breach Specialist)", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(1.0f, 0.65f, 0.2f, 1.0f));
+            text_y += line_step + 4.0f * ui_scale;
+            draw_text("Directives:", col1_x + pad, text_y, 1.20f * ui_scale, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+            text_y += line_step;
+            draw_text("  1. Track subterranean vault signatures using Sonar [Q]", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  2. Equip Demolition Charges [3] to blast Reinforced Doors", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  3. Breach the vault chamber and extract the Hyper-Core Relic", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  4. Call beacon [B] and extract all salvaged minerals", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         } else {
-            draw_text("Target Depth: 600m | Crust Stability: CRITICAL (Collapse Imminent)", col1_x + 20.0f, col_y + 90.0f, 1.2f, glm::vec4(1.0f, 0.3f, 0.3f, 0.9f));
-            draw_text("Tactical: VANGUARD (Fault-Line Seismic Defense)", col1_x + 20.0f, col_y + 110.0f, 1.15f, glm::vec4(0.4f, 0.85f, 1.0f, 1.0f));
-            draw_text("Directives:", col1_x + 20.0f, col_y + 134.0f, 1.3f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-            draw_text("  1. 180-SECOND HARD COUNTDOWN: Subterranean collapse timer active", col1_x + 20.0f, col_y + 156.0f, 1.15f, glm::vec4(1.0f, 0.35f, 0.2f, 0.95f));
-            draw_text("  2. Mine 50 Voidite Crystals while surviving recurring cave-ins", col1_x + 20.0f, col_y + 178.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
-            draw_text("  3. Reach the emergency drop pod before seismic fault collapse", col1_x + 20.0f, col_y + 200.0f, 1.15f, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            draw_text("Target Depth: 600m | Crust Stability: CRITICAL (Collapse Imminent)", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(1.0f, 0.3f, 0.3f, 0.9f));
+            text_y += line_step;
+            draw_text("Tactical: VANGUARD (Fault-Line Seismic Defense)", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(0.4f, 0.85f, 1.0f, 1.0f));
+            text_y += line_step + 4.0f * ui_scale;
+            draw_text("Directives:", col1_x + pad, text_y, 1.20f * ui_scale, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
+            text_y += line_step;
+            draw_text("  1. 180-SECOND HARD COUNTDOWN: Subterranean collapse timer active", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(1.0f, 0.35f, 0.2f, 0.95f));
+            text_y += line_step;
+            draw_text("  2. Mine 50 Voidite Crystals while surviving recurring cave-ins", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            text_y += line_step;
+            draw_text("  3. Reach the emergency drop pod before seismic fault collapse", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         }
 
-        // Right Column: Skill Matrix & Proficiency Branches
-        float col2_x = col1_x + col1_w + 30.0f;
-        float col2_w = (w - 110.0f) * 0.55f;
-
-        draw_rect(col2_x, col_y, col2_w, col_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f));
+        // RIGHT COLUMN: PROFICIENCY MATRICES
+        draw_panel_with_border(col2_x, col_y, col2_w, col_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.88f), glm::vec4(0.2f, 0.35f, 0.45f, 0.5f));
         draw_rect(col2_x, col_y, 4.0f, col_h, glm::vec4(1.0f, 0.75f, 0.2f, 0.95f));
 
-        draw_text("DELVER PROFICIENCY MATRICES", col2_x + 20.0f, col_y + 16.0f, 1.5f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-        draw_rect(col2_x + 20.0f, col_y + 36.0f, col2_w - 40.0f, 1.0f, glm::vec4(0.4f, 0.35f, 0.2f, 0.5f));
+        float r_pad = 16.0f * ui_scale;
+        float r_text_y = col_y + 14.0f * ui_scale;
+        draw_text("DELVER PROFICIENCY MATRICES", col2_x + r_pad, r_text_y, 1.40f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+        r_text_y += 24.0f * ui_scale;
+        draw_rect(col2_x + r_pad, r_text_y, col2_w - 2.0f * r_pad, 1.0f, glm::vec4(0.4f, 0.35f, 0.2f, 0.5f));
+        r_text_y += 12.0f * ui_scale;
 
         const SkillBranch* branches[4] = {
             &skills.demolitions,
@@ -917,28 +1242,34 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
             &skills.acrobatics
         };
 
-        float branch_y = col_y + 48.0f;
+        float branch_step = (col_h - 70.0f * ui_scale) / 4.0f;
         for (int i = 0; i < 4; ++i) {
             const auto& b = *branches[i];
-            draw_text(b.name + " (" + std::to_string(b.xp) + "/" + std::to_string(b.xp_for_unlock) + " XP)",
-                      col2_x + 20.0f, branch_y, 1.3f, b.unlocked ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 1.0f));
+            float by = r_text_y + i * branch_step;
+            std::string branch_title = b.name + " (" + std::to_string(b.xp) + "/" + std::to_string(b.xp_for_unlock) + " XP)";
+            if (i == 1) {
+                int rk = skills.get_surveying_rank();
+                branch_title = b.name + " [RANK " + std::to_string(rk) + "] (" + std::to_string(b.xp) + " XP)";
+            }
+            draw_text(branch_title,
+                      col2_x + r_pad, by, 1.20f * ui_scale, b.unlocked ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.85f, 0.9f, 0.95f, 1.0f));
 
-            draw_rect(col2_x + 20.0f, branch_y + 18.0f, col2_w - 40.0f, 8.0f, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
+            float bbar_y = by + 16.0f * ui_scale;
+            float bbar_h = 7.0f * ui_scale;
+            draw_rect(col2_x + r_pad, bbar_y, col2_w - 2.0f * r_pad, bbar_h, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
             glm::vec4 bar_col = b.unlocked ? glm::vec4(0.2f, 0.9f, 0.35f, 0.95f) : glm::vec4(0.2f, 0.75f, 1.0f, 0.95f);
-            draw_rect(col2_x + 20.0f, branch_y + 18.0f, (col2_w - 40.0f) * b.progress(), 8.0f, bar_col);
+            draw_rect(col2_x + r_pad, bbar_y, (col2_w - 2.0f * r_pad) * b.progress(), bbar_h, bar_col);
 
             std::string perk_status = b.unlocked ? "[UNLOCKED] " : "[LOCKED] ";
             std::string perk_line = perk_status + b.unlock_perk_name + ": " + b.unlock_description;
-            draw_text(perk_line, col2_x + 20.0f, branch_y + 32.0f, 1.1f, b.unlocked ? glm::vec4(0.3f, 0.9f, 0.5f, 0.95f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
-
-            branch_y += 76.0f;
+            draw_text(perk_line, col2_x + r_pad, bbar_y + bbar_h + 5.0f * ui_scale, 1.02f * ui_scale,
+                      b.unlocked ? glm::vec4(0.3f, 0.9f, 0.5f, 0.95f) : glm::vec4(0.6f, 0.65f, 0.7f, 0.8f));
         }
 
         // Launch expedition banner
-        float btn_y = h - 60.0f;
-        float btn_w = w - 80.0f;
-        float btn_x = 40.0f;
-        float btn_h = 42.0f;
+        float btn_y = h - btn_h - btn_margin;
+        float btn_w = w - total_margin * 2.0f;
+        float btn_x = total_margin;
 
         bool btn_hovered = (mouse_x >= btn_x && mouse_x <= btn_x + btn_w &&
                             mouse_y >= btn_y && mouse_y <= btn_y + btn_h);
@@ -947,14 +1278,10 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
         }
 
         glm::vec4 btn_col = btn_hovered ? glm::vec4(0.25f, 0.65f, 0.95f, 1.0f) : glm::vec4(0.15f, 0.45f, 0.75f, 0.95f);
-        draw_rect(btn_x, btn_y, btn_w, btn_h, btn_col);
-        if (btn_hovered) {
-            draw_rect(btn_x, btn_y, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
-            draw_rect(btn_x, btn_y + btn_h - 2.0f, btn_w, 2.0f, glm::vec4(0.8f, 1.0f, 1.0f, 1.0f));
-        }
+        draw_panel_with_border(btn_x, btn_y, btn_w, btn_h, btn_col, btn_hovered ? glm::vec4(0.8f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.3f, 0.6f, 0.9f, 0.8f), btn_hovered ? 2.0f : 1.0f);
 
-        draw_text("[CLICK OR PRESS SPACE / ENTER TO LAUNCH EXPEDITION]    |    [TAB / ESC TO RETURN TO MENU]",
-                  cx - 360.0f, btn_y + 13.0f, 1.35f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        draw_text_centered("[CLICK OR PRESS SPACE / ENTER TO LAUNCH EXPEDITION]    |    [TAB / ESC TO RETURN TO MENU]",
+                           btn_x, btn_y, btn_w, btn_h, 1.25f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     }
 
     glDisable(GL_BLEND);
@@ -979,9 +1306,23 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
         if (run_exp <= 0) {
             run_exp = inventory.voidite * 5 + inventory.titanium * 6 + inventory.salvage_parts * 2;
         }
-        profile.total_exp += run_exp;
+        int run_coins = inventory.run_coins_earned;
+        if (run_coins <= 0) {
+            run_coins = (success ? 60 : 20) + inventory.run_completion_rate + (inventory.voidite * 2 + inventory.titanium * 3);
+            if (inventory.is_abandoned) run_coins /= 2;
+        }
+
+        int lvls_gained = 0;
+        int bonus_coins = 0;
+        profile.add_exp(run_exp, lvls_gained, bonus_coins);
+        profile.grant_coins(run_coins);
         profile.total_voidite += inventory.voidite;
         profile.total_titanium += inventory.titanium;
+
+        if (lvls_gained > 0) {
+            m_terminal_msg = "LEVEL UP! REACHED DELVER RANK " + std::to_string(profile.get_player_level()) + " (+" + std::to_string(bonus_coins) + " BONUS COINS)";
+            m_terminal_msg_col = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
+        }
 
         for (int s = 1; s <= 3; ++s) {
             if (inventory.sector_records[s].highest_completion_rate > profile.sector_records[s].highest_completion_rate) {
@@ -1001,88 +1342,149 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
 
     float w = static_cast<float>(m_width);
     float h = static_cast<float>(m_height);
-    float cx = w / 2.0f;
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
-    draw_rect(0, 0, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.96f));
+    glm::vec4 bg_col = inventory.suit_failed ? glm::vec4(0.08f, 0.015f, 0.02f, 0.98f) : glm::vec4(0.02f, 0.03f, 0.05f, 0.96f);
+    draw_rect(0, 0, w, h, bg_col);
+
+    // Full-screen perimeter hazard border for Delver death / critical failure
+    if (inventory.suit_failed) {
+        float f_border = 6.0f * ui_scale;
+        glm::vec4 death_crimson(0.95f, 0.15f, 0.12f, 0.85f);
+        draw_rect(0, 0, w, f_border, death_crimson);
+        draw_rect(0, h - f_border, w, f_border, death_crimson);
+        draw_rect(0, 0, f_border, h, death_crimson);
+        draw_rect(w - f_border, 0, f_border, h, death_crimson);
+    }
 
     // Header banner
-    float banner_y = 30.0f;
+    float banner_y = 16.0f * ui_scale;
+    float banner_h = 36.0f * ui_scale;
     std::string status_text = inventory.is_abandoned ? "EXPEDITION ABANDONED // SALVAGE PENALTY (50%)" :
-                              inventory.suit_failed ? "EXPEDITION FAILED: DELVER M.I.A." :
+                              inventory.suit_failed ? "[ ! ] EXPEDITION FAILED: DELVER M.I.A. [ ! ]" :
                               success ? "EXPEDITION EXTRACTION SUCCESSFUL" : "EXPEDITION FAILED";
     glm::vec4 status_col = (success && !inventory.is_abandoned && !inventory.suit_failed) ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
                            inventory.is_abandoned ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) :
-                           glm::vec4(1.0f, 0.25f, 0.2f, 1.0f);
+                           glm::vec4(1.0f, 0.22f, 0.18f, 1.0f);
 
-    draw_text(status_text, cx - 330.0f, banner_y, 2.0f, status_col);
-    draw_rect(cx - 400.0f, banner_y + 35.0f, 800.0f, 2.0f, status_col * 0.7f);
+    draw_text_centered_fitted(status_text, 16.0f, banner_y, w - 32.0f, banner_h, 1.70f * ui_scale, status_col, 0.90f * ui_scale);
+    float div_w = std::clamp(w * 0.75f, 360.0f, 1000.0f);
+    draw_rect((w - div_w) * 0.5f, banner_y + banner_h + 2.0f * ui_scale, div_w, 2.0f, status_col * 0.7f);
 
-    float total_content_w = std::min(w * 0.88f, 1100.0f);
-    float col_w = (total_content_w - 24.0f) * 0.5f;
+    float total_content_w = std::clamp(w * 0.92f, 620.0f, std::min(w - 24.0f, 1380.0f * ui_scale));
+    float col_gap = std::clamp(16.0f * ui_scale, 10.0f, 24.0f);
+    float col_w = (total_content_w - col_gap) * 0.5f;
     float start_x = (w - total_content_w) * 0.5f;
     float col1_x = start_x;
-    float col2_x = start_x + col_w + 24.0f;
-    float panel_y = banner_y + 48.0f;
-    float panel_h = 450.0f;
+    float col2_x = start_x + col_w + col_gap;
+
+    float bot_btn_h = std::clamp(42.0f * ui_scale, 36.0f, 48.0f);
+    float bot_margin = 12.0f * ui_scale;
+    float panel_y = banner_y + banner_h + 10.0f * ui_scale;
+    float panel_h = h - panel_y - bot_btn_h - bot_margin - 10.0f * ui_scale;
 
     // LEFT COLUMN: SUBTERRANEAN EXPEDITION SUMMARY
-    draw_rect(col1_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
+    draw_panel_with_border(col1_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f), glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
     draw_rect(col1_x, panel_y, 4.0f, panel_h, status_col);
-    draw_rect(col1_x, panel_y, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
 
-    draw_text("EXPEDITION HARVEST & MANIFEST", col1_x + 20.0f, panel_y + 14.0f, 1.45f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+    float l_pad = std::clamp(14.0f * ui_scale, 10.0f, 18.0f);
+    float content_inner_w = col_w - 2.0f * l_pad;
+    float cur_y = panel_y + 10.0f * ui_scale;
+
+    draw_text_fitted("EXPEDITION HARVEST & MANIFEST", col1_x + l_pad, cur_y, content_inner_w, 1.25f * ui_scale, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+    cur_y += 22.0f * ui_scale;
+
     std::string badge_disp = "[" + inventory.run_outcome_badge + "]  --  " + std::to_string(inventory.run_completion_rate) + "% COMPLETION";
-    draw_text(badge_disp, col1_x + 20.0f, panel_y + 36.0f, 1.25f, status_col);
-    draw_rect(col1_x + 20.0f, panel_y + 54.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    draw_text_fitted(badge_disp, col1_x + l_pad, cur_y, content_inner_w, 1.15f * ui_scale, status_col);
+    cur_y += 18.0f * ui_scale;
+    draw_rect(col1_x + l_pad, cur_y, content_inner_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    cur_y += 8.0f * ui_scale;
 
-    float stat_y = panel_y + 64.0f;
-    std::string v_str = "Voidite Extracted:     " + std::to_string(inventory.voidite) + " units (" + std::to_string(inventory.voidite * 5) + " pts)";
-    draw_text(v_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    auto draw_stat_row = [&](const std::string& label, const std::string& val, const glm::vec4& lcol, const glm::vec4& vcol, float scale) {
+        float row_scale = FontRenderer::fit_scale(label + " " + val, content_inner_w, scale, 0.65f * ui_scale);
+        float val_w = FontRenderer::get_rendered_width(val, row_scale);
+        draw_text(label, col1_x + l_pad, cur_y, row_scale, lcol);
+        draw_text(val, col1_x + col_w - l_pad - val_w, cur_y, row_scale, vcol);
+    };
 
-    stat_y += 28.0f;
-    std::string t_str = "Titanium Cores:        " + std::to_string(inventory.titanium) + " cores (" + std::to_string(inventory.titanium * 6) + " pts)";
-    draw_text(t_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(1.0f, 0.70f, 0.0f, 1.0f));
+    float stat_step = std::clamp(22.0f * ui_scale, 18.0f, 26.0f);
 
-    stat_y += 28.0f;
-    std::string sc_str = "Scrap Metal Salvaged:  " + std::to_string(inventory.scrap_metal) + " scrap";
-    draw_text(sc_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.85f, 0.85f, 0.9f, 1.0f));
+    draw_stat_row("Voidite Extracted:", std::to_string(inventory.voidite) + " units (" + std::to_string(inventory.voidite * 5) + " pts)",
+                  glm::vec4(0.7f, 0.85f, 0.95f, 1.0f), glm::vec4(0.0f, 0.94f, 1.0f, 1.0f), 1.10f * ui_scale);
+    cur_y += stat_step;
 
-    stat_y += 28.0f;
-    std::string s_str = "Mineral Salvage:       " + std::to_string(inventory.salvage_parts) + " units (" + std::to_string(inventory.salvage_parts * 2) + " pts)";
-    draw_text(s_str, col1_x + 20.0f, stat_y, 1.3f, glm::vec4(0.7f, 0.75f, 0.8f, 1.0f));
+    draw_stat_row("Titanium Cores:", std::to_string(inventory.titanium) + " cores (" + std::to_string(inventory.titanium * 6) + " pts)",
+                  glm::vec4(0.7f, 0.85f, 0.95f, 1.0f), glm::vec4(1.0f, 0.70f, 0.0f, 1.0f), 1.10f * ui_scale);
+    cur_y += stat_step;
+
+    draw_stat_row("Scrap Metal Salvaged:", std::to_string(inventory.scrap_metal) + " scrap",
+                  glm::vec4(0.7f, 0.85f, 0.95f, 1.0f), glm::vec4(0.85f, 0.85f, 0.9f, 1.0f), 1.10f * ui_scale);
+    cur_y += stat_step;
+
+    draw_stat_row("Mineral Salvage:", std::to_string(inventory.salvage_parts) + " units (" + std::to_string(inventory.salvage_parts * 2) + " pts)",
+                  glm::vec4(0.7f, 0.85f, 0.95f, 1.0f), glm::vec4(0.7f, 0.75f, 0.8f, 1.0f), 1.10f * ui_scale);
+    cur_y += stat_step;
 
     if (level == 2) {
-        stat_y += 28.0f;
-        std::string r_str = inventory.relic_extracted ? "Hyper-Core Relic:      RECOVERED (+250 pts)" : "Hyper-Core Relic:      NOT RECOVERED";
-        draw_text(r_str, col1_x + 20.0f, stat_y, 1.3f, inventory.relic_extracted ? glm::vec4(1.0f, 0.0f, 0.85f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
+        std::string r_val = inventory.relic_extracted ? "RECOVERED (+250 pts)" : "NOT RECOVERED";
+        glm::vec4 r_col = inventory.relic_extracted ? glm::vec4(1.0f, 0.0f, 0.85f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f);
+        draw_stat_row("Hyper-Core Relic:", r_val, glm::vec4(0.7f, 0.85f, 0.95f, 1.0f), r_col, 1.10f * ui_scale);
+        cur_y += stat_step;
     }
 
-    stat_y += 34.0f;
-    draw_rect(col1_x + 20.0f, stat_y - 6.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    draw_rect(col1_x + l_pad, cur_y, content_inner_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    cur_y += 6.0f * ui_scale;
+
+    // Currency Rewards: Coins & Player EXP
+    int final_run_coins = inventory.run_coins_earned;
+    if (final_run_coins <= 0) {
+        final_run_coins = (success ? 60 : 20) + inventory.run_completion_rate + (inventory.voidite * 2 + inventory.titanium * 3);
+        if (inventory.is_abandoned) final_run_coins /= 2;
+    }
+    int final_run_exp = inventory.total_run_score > 0 ? inventory.total_run_score :
+                        (inventory.voidite * 5 + inventory.titanium * 6 + inventory.salvage_parts * 2);
+
+    draw_stat_row("COINS EARNED:", "+" + std::to_string(final_run_coins) + " COINS",
+                  glm::vec4(1.0f, 0.85f, 0.2f, 1.0f), glm::vec4(1.0f, 0.95f, 0.4f, 1.0f), 1.15f * ui_scale);
+    cur_y += stat_step;
+
+    draw_stat_row("EXP BANKED:", "+" + std::to_string(final_run_exp) + " EXP (RANK " + std::to_string(profile.get_player_level()) + ")",
+                  glm::vec4(0.2f, 0.95f, 0.4f, 1.0f), glm::vec4(0.35f, 1.0f, 0.5f, 1.0f), 1.15f * ui_scale);
+    cur_y += stat_step;
+
+    draw_rect(col1_x + l_pad, cur_y, content_inner_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    cur_y += 6.0f * ui_scale;
+
     std::string score_str = "TOTAL SCORE: " + std::to_string(inventory.total_run_score) + " POINTS";
-    draw_text(score_str, col1_x + 20.0f, stat_y, 1.5f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    draw_text_fitted(score_str, col1_x + l_pad, cur_y, content_inner_w, 1.25f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    cur_y += stat_step;
 
-    stat_y += 38.0f;
-    draw_text("DELVER SPECIALIZATIONS XP:", col1_x + 20.0f, stat_y, 1.25f, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
-    stat_y += 22.0f;
-    draw_text("Demolitions: " + std::to_string(skills.demolitions.xp) + " XP" + (skills.demolitions.unlocked ? " [ACTIVE]" : ""),
-              col1_x + 20.0f, stat_y, 1.15f, skills.demolitions.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
-    stat_y += 18.0f;
-    draw_text("Surveying:   " + std::to_string(skills.surveying.xp) + " XP" + (skills.surveying.unlocked ? " [ACTIVE]" : ""),
-              col1_x + 20.0f, stat_y, 1.15f, skills.surveying.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+    draw_text_fitted("DELVER SPECIALIZATIONS XP:", col1_x + l_pad, cur_y, content_inner_w, 1.10f * ui_scale, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+    cur_y += 16.0f * ui_scale;
+    draw_text_fitted("Demolitions: " + std::to_string(skills.demolitions.xp) + " XP" + (skills.demolitions.unlocked ? " [ACTIVE]" : ""),
+                     col1_x + l_pad, cur_y, content_inner_w, 0.95f * ui_scale, skills.demolitions.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
+    cur_y += 14.0f * ui_scale;
+    draw_text_fitted("Surveying:   " + std::to_string(skills.surveying.xp) + " XP (Rank " + std::to_string(skills.get_surveying_rank()) + ")" + (skills.surveying.unlocked ? " [ACTIVE]" : ""),
+                     col1_x + l_pad, cur_y, content_inner_w, 0.95f * ui_scale, skills.surveying.unlocked ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.7f, 0.75f, 0.8f, 0.9f));
 
-    // RIGHT COLUMN: PERSISTENT HUB UPGRADES TERMINAL
-    draw_rect(col2_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
+    // RIGHT COLUMN: PERSISTENT ACCOUNT POOL & QUICK UPGRADES
+    draw_panel_with_border(col2_x, panel_y, col_w, panel_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f), glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
     draw_rect(col2_x, panel_y, 4.0f, panel_h, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
-    draw_rect(col2_x, panel_y, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.45f, 0.6f));
 
-    draw_text("PERSISTENT ACCOUNT POOL", col2_x + 20.0f, panel_y + 14.0f, 1.45f, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
-    draw_rect(col2_x + 20.0f, panel_y + 36.0f, col_w - 40.0f, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    float r_pad = std::clamp(14.0f * ui_scale, 10.0f, 18.0f);
+    float r_inner_w = col_w - 2.0f * r_pad;
+    float r_y = panel_y + 10.0f * ui_scale;
+    draw_text_fitted("PERSISTENT ACCOUNT POOL", col2_x + r_pad, r_y, r_inner_w, 1.25f * ui_scale, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+    r_y += 22.0f * ui_scale;
+    draw_rect(col2_x + r_pad, r_y, r_inner_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
+    r_y += 8.0f * ui_scale;
 
-    std::string pool_str = "TOTAL: " + std::to_string(profile.total_exp) + " EXP | " +
-                           std::to_string(profile.total_voidite) + " VOID | " +
-                           std::to_string(profile.total_titanium) + " TITAN";
-    draw_text(pool_str, col2_x + 20.0f, panel_y + 44.0f, 1.2f, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    int debrief_player_lvl = profile.get_player_level();
+    std::string pool_str = "RANK: LVL " + std::to_string(debrief_player_lvl) +
+                           "  |  " + std::to_string(profile.total_coins) + " COINS  |  " +
+                           std::to_string(profile.total_exp) + " EXP";
+    draw_text_fitted(pool_str, col2_x + r_pad, r_y, r_inner_w, 1.10f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    r_y += 22.0f * ui_scale;
 
     // Show 4 Quick Upgrades in Debrief
     UpgradeType quick_types[4] = {
@@ -1092,94 +1494,101 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
         UpgradeType::ReinforcedPlating
     };
 
-    float up_y = panel_y + 68.0f;
-    float up_h = 60.0f;
-    float up_w = col_w - 40.0f;
+    float up_gap = std::clamp(8.0f * ui_scale, 6.0f, 10.0f);
+    float up_w = r_inner_w;
+    float avail_up_h = panel_h - (r_y - panel_y) - 10.0f * ui_scale;
+    float up_h = std::clamp((avail_up_h - 3.0f * up_gap) / 4.0f, 48.0f * ui_scale, 74.0f * ui_scale);
 
     for (int i = 0; i < 4; ++i) {
         UpgradeType type = quick_types[i];
         auto info = UpgradeTree::get_info(type);
         int cur_tier = profile.upgrades.get_tier(type);
+        int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
         bool is_maxed = (cur_tier >= UpgradeTree::MAX_TIER);
+        bool level_locked = (!is_maxed && debrief_player_lvl < req_lvl);
 
-        int exp_cost = UpgradeTree::get_exp_cost(cur_tier);
-        int void_cost = UpgradeTree::get_voidite_cost(cur_tier);
-        int tit_cost = UpgradeTree::get_titanium_cost(cur_tier);
-        bool can_buy = profile.upgrades.can_purchase(type, profile.total_exp, profile.total_voidite, profile.total_titanium);
+        int coin_cost = UpgradeTree::get_coin_cost(cur_tier);
+        bool can_buy = profile.upgrades.can_purchase(type, debrief_player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
 
-        float ux = col2_x + 20.0f;
-        float uy = up_y + i * (up_h + 8.0f);
+        float ux = col2_x + r_pad;
+        float uy = r_y + i * (up_h + up_gap);
 
-        draw_rect(ux, uy, up_w, up_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.85f));
-        draw_rect(ux, uy, up_w, 1.0f, glm::vec4(0.15f, 0.25f, 0.35f, 0.5f));
-
-        std::string title = info.name + " [LVL " + std::to_string(cur_tier) + "/5]";
-        draw_text(title, ux + 10.0f, uy + 8.0f, 1.15f, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f));
-        draw_text(profile.upgrades.get_stat_preview(type), ux + 10.0f, uy + 26.0f, 1.05f, glm::vec4(0.65f, 0.75f, 0.85f, 0.85f));
+        draw_panel_with_border(ux, uy, up_w, up_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.85f), glm::vec4(0.15f, 0.25f, 0.35f, 0.5f));
 
         // Upgrade button
-        float btn_w = 135.0f;
-        float btn_h = 34.0f;
-        float bx = ux + up_w - btn_w - 10.0f;
-        float by = uy + 12.0f;
+        float btn_w = std::clamp(120.0f * ui_scale, 95.0f, 150.0f);
+        float btn_h = std::clamp(up_h - 12.0f * ui_scale, 30.0f, 46.0f);
+        float bx = ux + up_w - btn_w - 6.0f * ui_scale;
+        float by = uy + (up_h - btn_h) * 0.5f;
+
+        float text_max_w = bx - ux - 12.0f * ui_scale;
+
+        // Upgrade name auto-scaled to available column width
+        std::string title = info.name + " [LVL " + std::to_string(cur_tier) + "/5]";
+        draw_text_fitted(title, ux + 8.0f * ui_scale, uy + 6.0f * ui_scale, text_max_w, 0.95f * ui_scale, glm::vec4(0.9f, 0.95f, 1.0f, 1.0f), 0.65f * ui_scale);
+
+        std::string stat_prev = profile.upgrades.get_stat_preview(type);
+        draw_text_fitted(stat_prev, ux + 8.0f * ui_scale, uy + 24.0f * ui_scale, text_max_w, 0.88f * ui_scale, glm::vec4(0.65f, 0.75f, 0.85f, 0.85f), 0.60f * ui_scale);
 
         bool btn_hov = (mouse_x >= bx && mouse_x <= bx + btn_w && mouse_y >= by && mouse_y <= by + btn_h);
 
         if (btn_hov && mouse_clicked && can_buy && !is_maxed) {
-            profile.upgrades.purchase(type, profile.total_exp, profile.total_voidite, profile.total_titanium);
+            profile.upgrades.purchase(type, debrief_player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
             m_profile_dirty = true;
         }
 
         glm::vec4 b_bg = is_maxed ? glm::vec4(0.1f, 0.12f, 0.15f, 0.5f) :
+                         level_locked ? glm::vec4(0.22f, 0.10f, 0.12f, 0.7f) :
                          can_buy  ? (btn_hov ? glm::vec4(0.2f, 0.6f, 0.85f, 1.0f) : glm::vec4(0.1f, 0.35f, 0.6f, 0.9f)) :
                                     glm::vec4(0.1f, 0.12f, 0.15f, 0.6f);
-        draw_rect(bx, by, btn_w, btn_h, b_bg);
-        if (can_buy && !is_maxed) {
-            draw_rect(bx, by, btn_w, 1.0f, glm::vec4(0.4f, 0.85f, 1.0f, 0.8f));
-        }
+        glm::vec4 b_border = (can_buy && !is_maxed) ? (btn_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.4f, 0.85f, 1.0f, 0.8f)) :
+                             glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
+        draw_panel_with_border(bx, by, btn_w, btn_h, b_bg, b_border);
 
         if (is_maxed) {
-            draw_text("MAXED", bx + 36.0f, by + 10.0f, 1.1f, glm::vec4(0.5f, 0.5f, 0.5f, 0.7f));
+            draw_text_centered_fitted("MAXED", bx, by, btn_w, btn_h, 1.05f * ui_scale, glm::vec4(0.5f, 0.5f, 0.5f, 0.7f));
+        } else if (level_locked) {
+            std::string req_str = "[REQ LVL " + std::to_string(req_lvl) + "]";
+            draw_text_centered_fitted(req_str, bx, by, btn_w, btn_h, 0.95f * ui_scale, glm::vec4(1.0f, 0.45f, 0.45f, 0.9f));
         } else {
-            std::string cost_str = std::to_string(exp_cost) + " EXP";
-            draw_text("UPGRADE", bx + 14.0f, by + 5.0f, 1.1f, can_buy ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.5f, 0.5f, 0.5f, 0.7f));
-            draw_text(cost_str, bx + 14.0f, by + 18.0f, 1.0f, can_buy ? glm::vec4(0.0f, 0.94f, 1.0f, 1.0f) : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
+            std::string cost_str = std::to_string(coin_cost) + " COINS";
+            draw_text_centered_fitted("UPGRADE", bx, by + 2.0f * ui_scale, btn_w, btn_h * 0.5f, 0.95f * ui_scale,
+                               can_buy ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.5f, 0.5f, 0.5f, 0.7f));
+            draw_text_centered_fitted(cost_str, bx, by + btn_h * 0.5f - 2.0f * ui_scale, btn_w, btn_h * 0.5f, 0.88f * ui_scale,
+                               can_buy ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f) : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
         }
     }
 
     // BOTTOM BUTTONS: LAUNCH NEXT SECTOR & RETURN TO HUB
     DebriefAction result = DebriefAction::None;
-    float bot_y = panel_y + panel_h + 14.0f;
-    float bot_btn_w = (total_content_w - 20.0f) * 0.5f;
-    float bot_btn_h = 44.0f;
+    float bot_y = panel_y + panel_h + 10.0f * ui_scale;
+    float bot_btn_w = (total_content_w - col_gap) * 0.5f;
 
-    // Button 1: [LAUNCH NEXT SECTOR]
+    // Button 1: [LAUNCH NEXT SECTOR] or [RE-DEPLOY EXPEDITION]
     float b1_x = start_x;
     bool b1_hov = (mouse_x >= b1_x && mouse_x <= b1_x + bot_btn_w && mouse_y >= bot_y && mouse_y <= bot_y + bot_btn_h);
     if (b1_hov && mouse_clicked) {
         result = DebriefAction::LaunchNextSector;
     }
-    glm::vec4 b1_col = b1_hov ? glm::vec4(0.15f, 0.65f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.45f, 0.38f, 0.95f);
-    draw_rect(b1_x, bot_y, bot_btn_w, bot_btn_h, b1_col);
-    if (b1_hov) {
-        draw_rect(b1_x, bot_y, bot_btn_w, 2.0f, glm::vec4(0.4f, 1.0f, 0.8f, 1.0f));
-        draw_rect(b1_x, bot_y + bot_btn_h - 2.0f, bot_btn_w, 2.0f, glm::vec4(0.4f, 1.0f, 0.8f, 1.0f));
-    }
-    draw_text("[LAUNCH NEXT SECTOR]", b1_x + bot_btn_w * 0.5f - 100.0f, bot_y + 14.0f, 1.35f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    std::string b1_label = (inventory.suit_failed || !success) ? "[RE-DEPLOY EXPEDITION]" : "[LAUNCH NEXT SECTOR]";
+    glm::vec4 b1_col = (inventory.suit_failed || !success)
+        ? (b1_hov ? glm::vec4(0.85f, 0.25f, 0.15f, 1.0f) : glm::vec4(0.60f, 0.15f, 0.10f, 0.95f))
+        : (b1_hov ? glm::vec4(0.15f, 0.65f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.45f, 0.38f, 0.95f));
+    glm::vec4 b1_border = (inventory.suit_failed || !success)
+        ? (b1_hov ? glm::vec4(1.0f, 0.5f, 0.3f, 1.0f) : glm::vec4(0.8f, 0.2f, 0.15f, 0.8f))
+        : (b1_hov ? glm::vec4(0.4f, 1.0f, 0.8f, 1.0f) : glm::vec4(0.2f, 0.6f, 0.5f, 0.7f));
+    draw_panel_with_border(b1_x, bot_y, bot_btn_w, bot_btn_h, b1_col, b1_border, b1_hov ? 2.0f : 1.0f);
+    draw_text_centered_fitted(b1_label, b1_x, bot_y, bot_btn_w, bot_btn_h, 1.25f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     // Button 2: [RETURN TO ORBITAL HUB]
-    float b2_x = start_x + bot_btn_w + 20.0f;
+    float b2_x = start_x + bot_btn_w + col_gap;
     bool b2_hov = (mouse_x >= b2_x && mouse_x <= b2_x + bot_btn_w && mouse_y >= bot_y && mouse_y <= bot_y + bot_btn_h);
     if (b2_hov && mouse_clicked) {
         result = DebriefAction::ReturnToHub;
     }
     glm::vec4 b2_col = b2_hov ? glm::vec4(0.2f, 0.45f, 0.75f, 1.0f) : glm::vec4(0.12f, 0.3f, 0.55f, 0.95f);
-    draw_rect(b2_x, bot_y, bot_btn_w, bot_btn_h, b2_col);
-    if (b2_hov) {
-        draw_rect(b2_x, bot_y, bot_btn_w, 2.0f, glm::vec4(0.6f, 0.85f, 1.0f, 1.0f));
-        draw_rect(b2_x, bot_y + bot_btn_h - 2.0f, bot_btn_w, 2.0f, glm::vec4(0.6f, 0.85f, 1.0f, 1.0f));
-    }
-    draw_text("[RETURN TO ORBITAL HUB]", b2_x + bot_btn_w * 0.5f - 110.0f, bot_y + 14.0f, 1.35f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    draw_panel_with_border(b2_x, bot_y, bot_btn_w, bot_btn_h, b2_col, b2_hov ? glm::vec4(0.6f, 0.85f, 1.0f, 1.0f) : glm::vec4(0.3f, 0.5f, 0.7f, 0.7f), b2_hov ? 2.0f : 1.0f);
+    draw_text_centered("[RETURN TO ORBITAL HUB]", b2_x, bot_y, bot_btn_w, bot_btn_h, 1.30f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
@@ -1188,4 +1597,207 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
     return result;
 }
 
+void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked) {
+    float w = static_cast<float>(m_width);
+    float h = static_cast<float>(m_height);
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
+
+    // Dark backdrop if in standalone subview
+    if (m_subview == MenuSubView::Settings) {
+        draw_rect(0.0f, 0.0f, w, h, glm::vec4(0.02f, 0.03f, 0.05f, 0.95f));
+
+        // Back button
+        float back_w = 160.0f * ui_scale;
+        float back_h = 38.0f * ui_scale;
+        float back_x = 36.0f * ui_scale;
+        float back_y = 20.0f * ui_scale;
+        bool back_hover = (mouse_x >= back_x && mouse_x <= back_x + back_w && mouse_y >= back_y && mouse_y <= back_y + back_h);
+        if (back_hover && mouse_clicked) {
+            m_subview = MenuSubView::Main;
+        }
+        draw_panel_with_border(back_x, back_y, back_w, back_h,
+                               back_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG,
+                               back_hover ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f),
+                               back_hover ? 2.0f : 1.0f);
+        draw_text_centered("< MAIN MENU", back_x, back_y, back_w, back_h, 1.25f * ui_scale, back_hover ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+    }
+
+    GameSettings& s = profile.settings;
+
+    // Centered audio mixer panel
+    float panel_w = std::clamp(w * 0.70f, 600.0f, 850.0f);
+    float panel_h = std::clamp(h * 0.78f, 480.0f, 640.0f);
+    float panel_x = (w - panel_w) * 0.5f;
+    float panel_y = (m_subview == MenuSubView::Settings) ? ((h - panel_h) * 0.5f + 16.0f * ui_scale) : (80.0f * ui_scale);
+
+    draw_panel_with_border(panel_x, panel_y, panel_w, panel_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.2f, 0.45f, 0.65f, 0.6f), 2.0f);
+    draw_rect(panel_x, panel_y, panel_w, 3.0f, Typography::COLOR_CYAN);
+
+    float pad = 24.0f * ui_scale;
+    float content_w = panel_w - 2.0f * pad;
+    float cur_y = panel_y + 16.0f * ui_scale;
+
+    draw_text("// TACTICAL RIG & SOUND MIXER", panel_x + pad, cur_y, 1.80f * ui_scale, Typography::COLOR_CYAN);
+    cur_y += 28.0f * ui_scale;
+    draw_text("ACOUSTIC COMFORT PROTOCOL // 5-STAGE MASTERING & SOUND CHANNEL OPTIONS", panel_x + pad, cur_y, 1.12f * ui_scale, glm::vec4(0.6f, 0.75f, 0.85f, 0.85f));
+    cur_y += 18.0f * ui_scale;
+    draw_rect(panel_x + pad, cur_y, content_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.55f, 0.6f));
+    cur_y += 14.0f * ui_scale;
+
+    float adj_btn_w = std::clamp(42.0f * ui_scale, 34.0f, 48.0f);
+    float adj_btn_h = std::clamp(24.0f * ui_scale, 20.0f, 28.0f);
+    float btn2_x = panel_x + pad + content_w - 14.0f * ui_scale - adj_btn_w;
+    float btn1_x = btn2_x - adj_btn_w - 8.0f * ui_scale;
+
+    auto draw_volume_row = [&](const std::string& name, float& vol, float row_y, bool is_master = false) {
+        char val_buf[64];
+        if (is_master && s.mute_all) {
+            std::snprintf(val_buf, sizeof(val_buf), "%s: [MUTED]", name.c_str());
+        } else {
+            std::snprintf(val_buf, sizeof(val_buf), "%s: %3d%%", name.c_str(), static_cast<int>(std::round(vol * 100.0f)));
+        }
+
+        glm::vec4 text_col = (is_master && s.mute_all) ? glm::vec4(1.0f, 0.4f, 0.4f, 1.0f) : glm::vec4(0.85f, 0.92f, 0.98f, 0.95f);
+        draw_text(val_buf, panel_x + pad + 14.0f * ui_scale, row_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f, 1.15f * ui_scale, text_col);
+
+        // Graphical Volume Level Bar
+        float meter_w = 120.0f * ui_scale;
+        float meter_h = 12.0f * ui_scale;
+        float meter_x = btn1_x - meter_w - (is_master ? (adj_btn_w * 1.6f + 16.0f * ui_scale) : 14.0f * ui_scale);
+        float meter_y = row_y + (adj_btn_h - meter_h) * 0.5f;
+
+        draw_rect(meter_x, meter_y, meter_w, meter_h, glm::vec4(0.06f, 0.10f, 0.14f, 1.0f));
+        float fill_w = meter_w * std::clamp(vol, 0.0f, 1.0f);
+        if (!is_master || !s.mute_all) {
+            glm::vec4 meter_col = (vol > 0.75f) ? glm::vec4(0.0f, 0.94f, 1.0f, 0.95f) :
+                                  (vol > 0.35f) ? glm::vec4(0.2f, 0.85f, 0.5f, 0.95f) :
+                                                  glm::vec4(1.0f, 0.75f, 0.1f, 0.95f);
+            if (fill_w > 1.0f) {
+                draw_rect(meter_x, meter_y, fill_w, meter_h, meter_col);
+            }
+        }
+
+        // Mute button for master
+        if (is_master) {
+            float mute_w = adj_btn_w * 1.55f;
+            float mute_x = btn1_x - mute_w - 8.0f * ui_scale;
+            bool m_hov = (mouse_x >= mute_x && mouse_x <= mute_x + mute_w && mouse_y >= row_y && mouse_y <= row_y + adj_btn_h);
+            glm::vec4 m_bg = s.mute_all ? glm::vec4(0.45f, 0.08f, 0.08f, 1.0f) :
+                             m_hov      ? glm::vec4(0.25f, 0.35f, 0.45f, 1.0f) :
+                                          glm::vec4(0.08f, 0.14f, 0.20f, 1.0f);
+            glm::vec4 m_border = s.mute_all ? glm::vec4(1.0f, 0.3f, 0.3f, 0.9f) :
+                                 m_hov      ? Typography::COLOR_CYAN_GLOW :
+                                              glm::vec4(0.2f, 0.5f, 0.7f, 0.6f);
+            draw_panel_with_border(mute_x, row_y, mute_w, adj_btn_h, m_bg, m_border);
+            draw_text_centered(s.mute_all ? "UNMUTE" : "MUTE", mute_x, row_y, mute_w, adj_btn_h, 1.10f * ui_scale,
+                               s.mute_all ? glm::vec4(1.0f, 0.5f, 0.5f, 1.0f) : glm::vec4(1.0f));
+            if (mouse_clicked && m_hov) {
+                s.mute_all = !s.mute_all;
+                m_profile_dirty = true;
+            }
+        }
+
+        // [-] and [+] steppers
+        bool b1_hov = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= row_y && mouse_y <= row_y + adj_btn_h);
+        bool b2_hov = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= row_y && mouse_y <= row_y + adj_btn_h);
+        draw_panel_with_border(btn1_x, row_y, adj_btn_w, adj_btn_h, b1_hov ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_panel_with_border(btn2_x, row_y, adj_btn_w, adj_btn_h, b2_hov ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_text_centered("-", btn1_x, row_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+        draw_text_centered("+", btn2_x, row_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+
+        if (mouse_clicked && b1_hov) {
+            vol = std::max(0.0f, std::round((vol - 0.10f) * 10.0f) / 10.0f);
+            if (is_master) s.mute_all = false;
+            m_profile_dirty = true;
+        }
+        if (mouse_clicked && b2_hov) {
+            vol = std::min(1.0f, std::round((vol + 0.10f) * 10.0f) / 10.0f);
+            if (is_master) s.mute_all = false;
+            m_profile_dirty = true;
+        }
+    };
+
+    float row_h = adj_btn_h + 8.0f * ui_scale;
+
+    // 1. Master Volume
+    draw_volume_row("MASTER SYNTHESIZER", s.master_volume, cur_y, true);
+    cur_y += row_h;
+
+    // 2. SFX / Mining Volume
+    draw_volume_row("SFX & MINING TOOLS", s.sfx_volume, cur_y, false);
+    cur_y += row_h;
+
+    // 3. Enemy Volume
+    draw_volume_row("HOSTILE / VOID STALKERS", s.enemy_volume, cur_y, false);
+    cur_y += row_h;
+
+    // 4. Ambience Volume
+    draw_volume_row("CAVERN & HAZARDS", s.ambient_volume, cur_y, false);
+    cur_y += row_h;
+
+    // 5. UI Volume
+    draw_volume_row("UI & SYSTEM ALARMS", s.ui_volume, cur_y, false);
+    cur_y += row_h + 6.0f * ui_scale;
+
+    draw_rect(panel_x + pad + 14.0f * ui_scale, cur_y, content_w - 28.0f * ui_scale, 1.0f, glm::vec4(0.15f, 0.3f, 0.45f, 0.4f));
+    cur_y += 10.0f * ui_scale;
+
+    // 6. Sensitivity
+    char sens_buf[32];
+    std::snprintf(sens_buf, sizeof(sens_buf), "MOUSE SENSITIVITY: %.2f", s.mouse_sensitivity);
+    draw_text(sens_buf, panel_x + pad + 14.0f * ui_scale, cur_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f, 1.15f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+    bool s_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    bool s_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    draw_panel_with_border(btn1_x, cur_y, adj_btn_w, adj_btn_h, s_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_panel_with_border(btn2_x, cur_y, adj_btn_w, adj_btn_h, s_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_text_centered("-", btn1_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    if (mouse_clicked && s_hover1) { s.mouse_sensitivity = std::max(0.04f, s.mouse_sensitivity - 0.02f); m_profile_dirty = true; }
+    if (mouse_clicked && s_hover2) { s.mouse_sensitivity = std::min(0.40f, s.mouse_sensitivity + 0.02f); m_profile_dirty = true; }
+    cur_y += row_h;
+
+    // 7. FOV
+    char fov_buf[32];
+    std::snprintf(fov_buf, sizeof(fov_buf), "FIELD OF VIEW:     %d DEG", static_cast<int>(s.fov));
+    draw_text(fov_buf, panel_x + pad + 14.0f * ui_scale, cur_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f, 1.15f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+    bool f_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    bool f_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    draw_panel_with_border(btn1_x, cur_y, adj_btn_w, adj_btn_h, f_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_panel_with_border(btn2_x, cur_y, adj_btn_w, adj_btn_h, f_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_text_centered("-", btn1_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    if (mouse_clicked && f_hover1) { s.fov = std::max(60.0f, s.fov - 5.0f); m_profile_dirty = true; }
+    if (mouse_clicked && f_hover2) { s.fov = std::min(105.0f, s.fov + 5.0f); m_profile_dirty = true; }
+    cur_y += row_h;
+
+    // 8. Cavern Brightness
+    char bright_buf[32];
+    std::snprintf(bright_buf, sizeof(bright_buf), "CAVERN BRIGHTNESS: %d%%", static_cast<int>(std::round(s.brightness * 100.0f)));
+    draw_text(bright_buf, panel_x + pad + 14.0f * ui_scale, cur_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f, 1.15f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+    bool b_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    bool b_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    draw_panel_with_border(btn1_x, cur_y, adj_btn_w, adj_btn_h, b_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_panel_with_border(btn2_x, cur_y, adj_btn_w, adj_btn_h, b_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_text_centered("-", btn1_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    if (mouse_clicked && b_hover1) { s.brightness = std::max(0.40f, s.brightness - 0.10f); m_profile_dirty = true; }
+    if (mouse_clicked && b_hover2) { s.brightness = std::min(2.00f, s.brightness + 0.10f); m_profile_dirty = true; }
+    cur_y += row_h + 10.0f * ui_scale;
+
+    // Test Audio Button
+    float tst_w = content_w - 28.0f * ui_scale;
+    float tst_h = std::clamp(32.0f * ui_scale, 26.0f, 38.0f);
+    float tst_x = panel_x + pad + 14.0f * ui_scale;
+    bool tst_hov = (mouse_x >= tst_x && mouse_x <= tst_x + tst_w && mouse_y >= cur_y && mouse_y <= cur_y + tst_h);
+    draw_panel_with_border(tst_x, cur_y, tst_w, tst_h,
+                           tst_hov ? glm::vec4(0.08f, 0.35f, 0.30f, 0.95f) : glm::vec4(0.04f, 0.18f, 0.16f, 0.85f),
+                           tst_hov ? glm::vec4(0.2f, 1.0f, 0.6f, 1.0f) : glm::vec4(0.1f, 0.6f, 0.4f, 0.6f));
+    draw_text_centered("[* PREVIEW AUDIO (PLAY TEST SOUND) *]", tst_x, cur_y, tst_w, tst_h, 1.20f * ui_scale,
+                       tst_hov ? glm::vec4(0.4f, 1.0f, 0.7f, 1.0f) : glm::vec4(0.3f, 0.85f, 0.55f, 0.9f));
+    if (mouse_clicked && tst_hov) {
+        m_test_sound_requested = true;
+    }
+}
+
 } // namespace Voidfall
+

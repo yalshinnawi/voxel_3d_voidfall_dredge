@@ -17,6 +17,8 @@ public:
 
     void deploy_beacon(const glm::vec3& beacon_pos);
     void update(float dt, const glm::vec3& player_pos);
+    void force_evacuation_pod();
+    void force_escape();
 
     ExtractionPhase phase() const { return m_phase; }
     float countdown() const { return m_countdown; }

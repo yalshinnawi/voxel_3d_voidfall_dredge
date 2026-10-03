@@ -1,6 +1,7 @@
 #pragma once
 #include "chunk.hpp"
 #include "greedy_mesher.hpp"
+#include "level_shapes.hpp"
 #include <unordered_map>
 #include <memory>
 #include <vector>
@@ -35,6 +36,7 @@ public:
     uint32_t seed() const { return m_seed; }
     void set_seed(uint32_t seed);
     void generate_world(int sector_index, uint32_t seed = 0);
+    void set_level_generator(std::unique_ptr<LevelGenerator> gen);
     int sector_index() const { return m_sector_index; }
 
     Chunk* get_chunk(const ChunkPos& pos);
@@ -67,9 +69,17 @@ public:
     // Upload newly meshed chunks to GPU (called on render thread)
     void upload_dirty_chunks();
 
-    const std::unordered_map<ChunkPos, std::unique_ptr<Chunk>, ChunkPosHash>& chunks() const {
+    // Synchronously meshes and uploads all chunks immediately (for staging/testing)
+    void force_mesh_all_sync();
+
+    const std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash>& chunks() const {
         return m_chunks;
     }
+
+    const LevelGenerator* level_generator() const { return m_level_gen.get(); }
+
+    // Spatial proximity radiation query (samples active radioactive ores & vents)
+    float query_radiation_proximity(const glm::vec3& pos, float max_radius = 12.0f) const;
 
 private:
     void generate_chunk_terrain(Chunk& chunk);
@@ -82,8 +92,10 @@ private:
     uint32_t m_seed{1337};
     int m_sector_index{1};
     glm::vec3 m_noise_offset{0.0f};
+    std::unique_ptr<LevelGenerator> m_level_gen;
     mutable std::mutex m_world_mutex;
-    std::unordered_map<ChunkPos, std::unique_ptr<Chunk>, ChunkPosHash> m_chunks;
+    std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash> m_chunks;
+    std::vector<glm::ivec3> m_radioactive_sources;
 
     // Background meshing thread pool
     std::vector<std::thread> m_workers;

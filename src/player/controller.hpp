@@ -7,6 +7,8 @@
 #include "upgrades.hpp"
 #include <glm/glm.hpp>
 #include <functional>
+#include <algorithm>
+#include <vector>
 
 namespace Voidfall {
 
@@ -51,6 +53,10 @@ public:
     glm::mat4 get_view_matrix() const;
     const glm::vec3& position() const { return m_position; }
     void set_position(const glm::vec3& pos) { m_position = pos; }
+    const glm::vec3& velocity() const { return m_velocity; }
+    void set_velocity(const glm::vec3& vel) { m_velocity = vel; }
+    glm::vec3& velocity_mut() { return m_velocity; }
+    bool is_penetrating_solid(const World& world) const;
 
     const glm::vec3& forward() const { return m_front; }
     const glm::vec3& right() const { return m_right; }
@@ -84,6 +90,24 @@ public:
     const glm::ivec3& target_normal() const { return m_target_normal; }
     bool is_drilling() const { return (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill); }
     void set_drilling(bool drilling) { if (drilling) m_current_buttons |= BTN_MINE_DRILL; else m_current_buttons &= ~BTN_MINE_DRILL; }
+
+    // Weapon methods
+    bool is_weapon_equipped() const { return m_active_tool == ToolSlot::CombatWeapon; }
+    bool is_firing_weapon() const { return (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::CombatWeapon); }
+    int weapon_ammo() const { return m_weapon_ammo; }
+    int weapon_max_ammo() const { return m_weapon_stats.max_ammo; }
+    int carbine_ammo() const { return m_weapon_ammo; }
+    int carbine_max_ammo() const { return m_weapon_stats.max_ammo; }
+    WeaponArchetype weapon_archetype() const { return m_weapon_stats.archetype; }
+    const WeaponStats& weapon_stats() const { return m_weapon_stats; }
+    const std::string& weapon_name() const { return m_weapon_stats.name; }
+    const std::string& weapon_short_name() const { return m_weapon_stats.short_name; }
+    bool is_reloading() const { return m_reload_timer > 0.0f; }
+    float reload_progress() const { return (m_weapon_stats.reload_time > 0.0f) ? (1.0f - m_reload_timer / m_weapon_stats.reload_time) : 1.0f; }
+    void reload_weapon();
+    bool try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts, float dt);
+    bool try_fire_weapon(glm::vec3& out_origin, glm::vec3& out_dir, float dt);
+
     RaycastHit get_look_target(const World& world, float max_dist = 5.0f) const;
 
     void set_character_class(CharacterClass cls);
@@ -104,6 +128,8 @@ public:
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
     void set_drill_speed_multiplier(float mul) { m_drill_speed_multiplier = mul; }
     void set_allow_micro_charges(bool allow) { m_allow_micro_charges = allow; }
+    void set_carry_weight_multiplier(float mul) { m_carry_weight_multiplier = glm::clamp(mul, 0.4f, 1.0f); }
+    float carry_weight_multiplier() const { return m_carry_weight_multiplier; }
 
     void add_trauma(float t) { m_trauma = glm::clamp(m_trauma + t, 0.0f, 1.0f); }
     void AddTrauma(float t) { add_trauma(t); }
@@ -120,6 +146,8 @@ public:
 
     PlayerInputPacket build_input_packet(uint32_t tick, float dt) const;
 
+    uint16_t current_buttons() const { return m_current_buttons; }
+
     // Callbacks for gameplay actions
     using BlockBreakCallback = std::function<void(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags)>;
     using BlockPlaceCallback = std::function<void(int x, int y, int z, uint8_t mat)>;
@@ -128,6 +156,8 @@ public:
     using ExplosiveBlastCallback = std::function<void(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro)>;
     using CanPlacePredicate = std::function<bool()>;
     using WarningCallback = std::function<void(const std::string&)>;
+    using JumpCallback = std::function<void(const glm::vec3& pos)>;
+    using LandCallback = std::function<void(const glm::vec3& pos, float impact_speed)>;
 
     void set_on_block_break(BlockBreakCallback cb) { m_on_block_break = std::move(cb); }
     void set_on_block_place(BlockPlaceCallback cb) { m_on_block_place = std::move(cb); }
@@ -136,11 +166,35 @@ public:
     void set_on_explosive_blast(ExplosiveBlastCallback cb) { m_on_explosive_blast = std::move(cb); }
     void set_can_place_predicate(CanPlacePredicate pred) { m_can_place_predicate = std::move(pred); }
     void set_on_warning(WarningCallback cb) { m_on_warning = std::move(cb); }
+    void set_on_jump(JumpCallback cb) { m_on_jump = std::move(cb); }
+    void set_on_land(LandCallback cb) { m_on_land = std::move(cb); }
+
+    // Sonar cooldown & state
+    float sonar_cooldown() const { return m_sonar_cooldown; }
+    float sonar_max_cooldown() const { return m_sonar_max_cooldown; }
+    bool is_sonar_ready() const { return m_sonar_cooldown <= 0.0f; }
+    void set_sonar_max_cooldown(float cd) { m_sonar_max_cooldown = cd; }
+    void trigger_sonar_cooldown() { m_sonar_cooldown = m_sonar_max_cooldown; }
+    void reset_sonar_cooldown() { m_sonar_cooldown = 0.0f; }
+    float sonar_recharge_progress() const { return m_sonar_max_cooldown > 0.0f ? std::clamp(1.0f - (m_sonar_cooldown / m_sonar_max_cooldown), 0.0f, 1.0f) : 1.0f; }
+
+    // Tactical class ability cooldown & state
+    using TacticalAbilityCallback = std::function<void(CharacterClass cls, const glm::vec3& pos, const glm::vec3& dir)>;
+    void set_on_tactical_ability(TacticalAbilityCallback cb) { m_on_tactical_ability = std::move(cb); }
+
+    float tactical_cooldown() const { return m_tactical_cooldown; }
+    float tactical_max_cooldown() const { return m_tactical_max_cooldown; }
+    bool is_tactical_ready() const { return m_tactical_cooldown <= 0.0f; }
+    void set_tactical_max_cooldown(float cd) { m_tactical_max_cooldown = cd; }
+    void trigger_tactical_cooldown(float cd = -1.0f) { m_tactical_cooldown = (cd > 0.0f) ? cd : m_tactical_max_cooldown; }
+    void reset_tactical_cooldown() { m_tactical_cooldown = 0.0f; }
+    float tactical_recharge_progress() const { return m_tactical_max_cooldown > 0.0f ? std::clamp(1.0f - (m_tactical_cooldown / m_tactical_max_cooldown), 0.0f, 1.0f) : 1.0f; }
 
 private:
     void update_camera_vectors();
     void resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt);
     void resolve_axis_collision(int axis, const glm::vec3& half_extents, World& world);
+    void depenetrate(const glm::vec3& half_extents, World& world);
 
     glm::vec3 m_position;
     glm::vec3 m_velocity{0.0f};
@@ -190,6 +244,17 @@ private:
     // Placement cooldown debounce (0.2s)
     float m_place_cooldown{0.0f};
 
+    // Class-specific combat firearm state
+    WeaponStats m_weapon_stats{get_class_weapon_stats(CharacterClass::Demolitionist)};
+    int m_weapon_ammo{6};
+    float m_fire_cooldown{0.0f};
+    float m_reload_timer{0.0f};
+    float m_recharge_delay{0.0f};
+
+    // Sonar pulse cooldown (seconds)
+    float m_sonar_cooldown{0.0f};
+    float m_sonar_max_cooldown{10.0f};
+
     // Camera trauma / screen shake (clamped 0..1)
     float m_trauma{0.0f};
 
@@ -204,6 +269,25 @@ private:
     ExplosiveBlastCallback m_on_explosive_blast;
     CanPlacePredicate m_can_place_predicate;
     WarningCallback m_on_warning;
+    TacticalAbilityCallback m_on_tactical_ability;
+    JumpCallback m_on_jump;
+    LandCallback m_on_land;
+
+    float m_carry_weight_multiplier{1.0f};
+    float m_tactical_cooldown{0.0f};
+    float m_tactical_max_cooldown{15.0f};
+
+    // Environmental room hazard states
+    bool m_is_in_lava{false};
+    bool m_is_in_spikes{false};
+    float m_spike_damage_timer{0.0f};
+
+    void apply_fall_impact(float impact_speed);
+
+public:
+    bool is_in_lava() const { return m_is_in_lava; }
+    bool is_in_spikes() const { return m_is_in_spikes; }
+    float spike_damage_timer() const { return m_spike_damage_timer; }
 };
 
 } // namespace Voidfall

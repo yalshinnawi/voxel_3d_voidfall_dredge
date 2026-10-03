@@ -88,6 +88,86 @@ public:
             cur_x += m.advanceX * scale;
         }
     }
+    // Base font atlas glyph height is 32. All shaders and UI draw calls pass scale * 0.45f to build_text_vertices.
+    static constexpr float DRAW_SCALE_FACTOR = 0.45f;
+
+    static float get_rendered_width(const std::string& text, float draw_scale) {
+        return get_text_width(text, draw_scale * DRAW_SCALE_FACTOR);
+    }
+
+    static float get_rendered_height(float draw_scale) {
+        return 32.0f * (draw_scale * DRAW_SCALE_FACTOR);
+    }
+
+    static float get_line_height(float draw_scale, float extra_spacing = 6.0f) {
+        return (32.0f + extra_spacing) * (draw_scale * DRAW_SCALE_FACTOR);
+    }
+
+    // Computes a scale <= base_scale so that text fits within max_width, not dropping below min_scale
+    static float fit_scale(const std::string& text, float max_width, float base_scale, float min_scale = 0.55f) {
+        if (text.empty() || max_width <= 0.0f) return base_scale;
+        float cur_w = get_rendered_width(text, base_scale);
+        if (cur_w <= max_width) return base_scale;
+        float fitted = base_scale * (max_width / cur_w);
+        return std::max(min_scale, fitted);
+    }
+
+    // Wraps text by pixel width (proportional font accurate)
+    static std::vector<std::string> wrap_text(const std::string& text, float max_width, float draw_scale) {
+        std::vector<std::string> lines;
+        if (text.empty() || max_width <= 0.0f) return lines;
+
+        std::string current_line;
+        size_t i = 0;
+        while (i < text.length()) {
+            if (text[i] == '\n') {
+                lines.push_back(current_line);
+                current_line.clear();
+                ++i;
+                continue;
+            }
+
+            size_t word_end = text.find_first_of(" \n", i);
+            if (word_end == std::string::npos) word_end = text.length();
+
+            std::string word = text.substr(i, word_end - i);
+            std::string test_line = current_line.empty() ? word : (current_line + " " + word);
+
+            if (get_rendered_width(test_line, draw_scale) <= max_width) {
+                current_line = test_line;
+                i = word_end;
+                if (i < text.length() && text[i] == ' ') ++i;
+            } else {
+                if (current_line.empty()) {
+                    for (char c : word) {
+                        std::string test_c = current_line + c;
+                        if (!current_line.empty() && get_rendered_width(test_c, draw_scale) > max_width) {
+                            lines.push_back(current_line);
+                            current_line.clear();
+                        }
+                        current_line += c;
+                    }
+                    i = word_end;
+                    if (i < text.length() && text[i] == ' ') ++i;
+                } else {
+                    lines.push_back(current_line);
+                    current_line.clear();
+                }
+            }
+        }
+        if (!current_line.empty()) {
+            lines.push_back(current_line);
+        }
+        return lines;
+    }
 };
+
+namespace UIUtils {
+    inline float compute_ui_scale(int screen_w, int screen_h) {
+        float sw = static_cast<float>(screen_w) / 1600.0f;
+        float sh = static_cast<float>(screen_h) / 900.0f;
+        return std::clamp(std::min(sw, sh), 0.65f, 1.5f);
+    }
+}
 
 } // namespace Voidfall

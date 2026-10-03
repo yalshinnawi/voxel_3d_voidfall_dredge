@@ -1,0 +1,438 @@
+{
+  "version": "1.0",
+  "license": "CC0 1.0 Universal (Creative Commons Zero)",
+  "sounds": {
+    "drill_loop": {
+      "file": "drill_loop.wav",
+      "duration_seconds": 3.71,
+      "peak_dbfs": -5.0,
+      "lowpass_cutoff_hz": 6500.0,
+      "is_loop": true,
+      "source_url": "https://sfxmint.com/dl/mechanical-engine-39.wav",
+      "description": "Continuous mechanical borer motor and rotary drill teeth"
+    },
+    "voxel_hit": {
+      "file": "voxel_hit.wav",
+      "duration_seconds": 0.4,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-metal-hit-32.wav",
+      "description": "Tactile tungsten chisel / pick impact thud"
+    },
+    "voxel_break_basalt": {
+      "file": "voxel_break_basalt.wav",
+      "duration_seconds": 0.75,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 6800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-crate-break-08.wav",
+      "description": "Crumbly basalt stone fracture and rubble collapse"
+    },
+    "voxel_break_titanium": {
+      "file": "voxel_break_titanium.wav",
+      "duration_seconds": 0.85,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-metal-hit-32.wav",
+      "description": "Resonant industrial titanium clang with ringing metallic overtone"
+    },
+    "voxel_break_voidite": {
+      "file": "voxel_break_voidite.wav",
+      "duration_seconds": 0.9,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 9000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/glass-shatter-01.wav",
+      "description": "High-energy ethereal crystalline harmonic fracture"
+    },
+    "voxel_break_bulkhead": {
+      "file": "voxel_break_bulkhead.wav",
+      "duration_seconds": 1.1,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 7000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-crash-36.wav",
+      "description": "Heavy reinforced bulkhead steel plate buckling and tear"
+    },
+    "voxel_break_radioactive": {
+      "file": "voxel_break_radioactive.wav",
+      "duration_seconds": 0.8,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 8000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/fire-electric-crackle-39.wav",
+      "description": "Brittle radioactive isotope fracture with ionizing sizzle"
+    },
+    "bulkhead_deploy": {
+      "file": "bulkhead_deploy.wav",
+      "duration_seconds": 0.65,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/door-lock-04.wav",
+      "description": "Hydraulic clamp lock and hermetic magnetic seal"
+    },
+    "bulkhead_dismantle": {
+      "file": "bulkhead_dismantle.wav",
+      "duration_seconds": 0.6,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/mechanical-servo-08.wav",
+      "description": "Mechanical latch release and pneumatic salvage catch"
+    },
+    "stalker_spotted": {
+      "file": "stalker_spotted.wav",
+      "duration_seconds": 1.2,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-growl-04.wav",
+      "description": "Predatory alien chitter and guttural throat rattle"
+    },
+    "stalker_lunge": {
+      "file": "stalker_lunge.wav",
+      "duration_seconds": 0.95,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 7200.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-growl-04.wav",
+      "description": "Visceral predatory attack shriek with chitin scrape"
+    },
+    "stalker_hit": {
+      "file": "stalker_hit.wav",
+      "duration_seconds": 0.5,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 6500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/cartoon-splat-01.wav",
+      "description": "Bio-mechanical claws striking armored chassis"
+    },
+    "stalker_die": {
+      "file": "stalker_die.wav",
+      "duration_seconds": 1.4,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 7000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/retro-game-enemy-death-08.wav",
+      "description": "Dissolving void entity dissipation hum and energy collapse"
+    },
+    "stalker_echo_screech": {
+      "file": "stalker_echo_screech.wav",
+      "duration_seconds": 1.8,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 6800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Long-range alien hunting shriek echoing through cavern shafts"
+    },
+    "stalker_chitter": {
+      "file": "stalker_chitter.wav",
+      "duration_seconds": 0.75,
+      "peak_dbfs": -8.0,
+      "lowpass_cutoff_hz": 6500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/ui-click-08.wav",
+      "description": "Subtle predatory alien chitinous clicking & mandible twitch in the dark"
+    },
+    "stalker_hiss": {
+      "file": "stalker_hiss.wav",
+      "duration_seconds": 0.7,
+      "peak_dbfs": -6.0,
+      "lowpass_cutoff_hz": 5500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-growl-04.wav",
+      "description": "Low menacing predatory throat hiss when stalking or provoked"
+    },
+    "burrower_roar": {
+      "file": "burrower_roar.wav",
+      "duration_seconds": 2.2,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 5500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-growl-04.wav",
+      "description": "Tectonic subterranean borer roar and earth rumble"
+    },
+    "burrower_grind": {
+      "file": "burrower_grind.wav",
+      "duration_seconds": 1.5,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 6000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/mechanical-machine-36.wav",
+      "description": "Tectonic grinding teeth chewing through solid stone"
+    },
+    "ambient_cavern": {
+      "file": "ambient_cavern.wav",
+      "duration_seconds": 9.75,
+      "peak_dbfs": -7.0,
+      "lowpass_cutoff_hz": 5800.0,
+      "is_loop": true,
+      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
+      "description": "Subterranean sub-bass tension drone and void airflow"
+    },
+    "ambient_sector1": {
+      "file": "ambient_sector1.wav",
+      "duration_seconds": 8.443,
+      "peak_dbfs": -7.5,
+      "lowpass_cutoff_hz": 6800.0,
+      "is_loop": true,
+      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
+      "description": "Sector 1 (Perimeter Drift): Crystalline resonant airflow and quartz harmonics"
+    },
+    "ambient_sector2": {
+      "file": "ambient_sector2.wav",
+      "duration_seconds": 9.75,
+      "peak_dbfs": -7.0,
+      "lowpass_cutoff_hz": 4500.0,
+      "is_loop": true,
+      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
+      "description": "Sector 2 (Volatile Fault): Geothermal magma hum & basalt tectonic strain"
+    },
+    "ambient_sector3": {
+      "file": "ambient_sector3.wav",
+      "duration_seconds": 9.75,
+      "peak_dbfs": -7.0,
+      "lowpass_cutoff_hz": 3800.0,
+      "is_loop": true,
+      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
+      "description": "Sector 3 (Void Cradle): Deep abyssal mantle drone, gravitational void pulse & dread"
+    },
+    "sector_arrival_1": {
+      "file": "sector_arrival_1.wav",
+      "duration_seconds": 3.0,
+      "peak_dbfs": -5.0,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Sector 1 arrival stinger: Ethereal crystalline descent harmonic triad"
+    },
+    "sector_arrival_2": {
+      "file": "sector_arrival_2.wav",
+      "duration_seconds": 3.0,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 5000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Sector 2 arrival stinger: Industrial geothermal brass & tectonic pressure swell"
+    },
+    "sector_arrival_3": {
+      "file": "sector_arrival_3.wav",
+      "duration_seconds": 3.2,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 4200.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Sector 3 arrival stinger: Terrifying abyssal void strike and sub-bass impact"
+    },
+    "crystal_chime": {
+      "file": "crystal_chime.wav",
+      "duration_seconds": 1.2,
+      "peak_dbfs": -7.0,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/instrument-bell-36.wav",
+      "description": "Sector 1 micro-ambience: Delicate quartz crystalline harmonic ring"
+    },
+    "geothermal_vent": {
+      "file": "geothermal_vent.wav",
+      "duration_seconds": 1.5,
+      "peak_dbfs": -6.5,
+      "lowpass_cutoff_hz": 5500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/ambience-wind-31.wav",
+      "description": "Sector 2 micro-ambience: Pressurized volcanic steam / gas exhaust release"
+    },
+    "void_distortion": {
+      "file": "void_distortion.wav",
+      "duration_seconds": 1.8,
+      "peak_dbfs": -6.5,
+      "lowpass_cutoff_hz": 4500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/fire-electric-zap-36.wav",
+      "description": "Sector 3 micro-ambience: Dimensional acoustic phase-warp and abyssal shimmer"
+    },
+    "cavern_drip": {
+      "file": "cavern_drip.wav",
+      "duration_seconds": 0.6,
+      "peak_dbfs": -5.0,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/water-drip-03.wav",
+      "description": "Acoustic cavern droplet strike with natural cavern reverb"
+    },
+    "cavern_groan": {
+      "file": "cavern_groan.wav",
+      "duration_seconds": 2.0,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 5500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-creak-17.wav",
+      "description": "Deep tectonic stratum compression and structural rock groan"
+    },
+    "seismic_tremor": {
+      "file": "seismic_tremor.wav",
+      "duration_seconds": 2.6,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 5000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/ambience-thunder-06.wav",
+      "description": "Low-frequency tectonic earthquake rumble and shaking rock"
+    },
+    "geiger_click": {
+      "file": "geiger_click.wav",
+      "duration_seconds": 0.15,
+      "peak_dbfs": -5.5,
+      "lowpass_cutoff_hz": 9500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/fire-electric-crackle-39.wav",
+      "description": "Poisson ionizing radiation detection click"
+    },
+    "beacon_siren": {
+      "file": "beacon_siren.wav",
+      "duration_seconds": 1.6,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/mechanical-siren-02.wav",
+      "description": "Pulsing dual-tone tactical extraction beacon siren"
+    },
+    "evac_touchdown": {
+      "file": "evac_touchdown.wav",
+      "duration_seconds": 1.864,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 6200.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/magic-scifi-rocket-01.wav",
+      "description": "Heavy retro-thruster landing roar and docking clamps"
+    },
+    "plasma_fire": {
+      "file": "plasma_fire.wav",
+      "duration_seconds": 0.45,
+      "peak_dbfs": -3.8,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/retro-game-laser-01.wav",
+      "description": "Vanguard: punchy coherent thermal plasma bolt discharge"
+    },
+    "plasma_hit": {
+      "file": "plasma_hit.wav",
+      "duration_seconds": 0.4,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-punch-05.wav",
+      "description": "Kinetic thermal plasma impact and armor scorch"
+    },
+    "scattergun_fire": {
+      "file": "scattergun_fire.wav",
+      "duration_seconds": 0.65,
+      "peak_dbfs": -3.2,
+      "lowpass_cutoff_hz": 7200.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-gunshot-08.wav",
+      "description": "Demolitionist: heavy kinetic boom and flechette blast"
+    },
+    "railgun_fire": {
+      "file": "railgun_fire.wav",
+      "duration_seconds": 0.55,
+      "peak_dbfs": -3.5,
+      "lowpass_cutoff_hz": 8800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/fire-electric-arc-36.wav",
+      "description": "Scout: supersonic electromagnetic whip crack"
+    },
+    "footstep": {
+      "file": "footstep.wav",
+      "duration_seconds": 0.35,
+      "peak_dbfs": -5.0,
+      "lowpass_cutoff_hz": 7000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/footsteps-concrete-20.wav",
+      "description": "Heavy exo-armor boot strike on cavern stone"
+    },
+    "jump": {
+      "file": "jump.wav",
+      "duration_seconds": 0.4,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/transition-whoosh-03.wav",
+      "description": "Pneumatic jump thruster boost puff"
+    },
+    "land": {
+      "file": "land.wav",
+      "duration_seconds": 0.45,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 6800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-thud-01.wav",
+      "description": "Kinetic boot impact and suspension recoil thud"
+    },
+    "sonar_pulse": {
+      "file": "sonar_pulse.wav",
+      "duration_seconds": 0.9,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/magic-scifi-hologram-08.wav",
+      "description": "Surveyor echolocation ping sweeping cavern corridors"
+    },
+    "explosive_blast": {
+      "file": "explosive_blast.wav",
+      "duration_seconds": 1.4,
+      "peak_dbfs": -3.0,
+      "lowpass_cutoff_hz": 6200.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/impact-explosion-02.wav",
+      "description": "Demolition shaped-charge concussive blast and shockwave"
+    },
+    "tactical_barricade": {
+      "file": "tactical_barricade.wav",
+      "duration_seconds": 0.8,
+      "peak_dbfs": -4.2,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/magic-scifi-shield-36.wav",
+      "description": "Vanguard deployable energy barrier anchor hiss"
+    },
+    "tactical_overcharge": {
+      "file": "tactical_overcharge.wav",
+      "duration_seconds": 0.6,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 8000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/fire-electric-zap-36.wav",
+      "description": "Scout kinetic dash burst sonic release"
+    },
+    "ui_blip": {
+      "file": "ui_blip.wav",
+      "duration_seconds": 0.18,
+      "peak_dbfs": -6.0,
+      "lowpass_cutoff_hz": 9500.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/ui-click-08.wav",
+      "description": "Crisp non-fatiguing navigation tick for HUD & terminal"
+    },
+    "ui_upgrade": {
+      "file": "ui_upgrade.wav",
+      "duration_seconds": 0.9,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 9000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/feedback-level-up-36.wav",
+      "description": "Ascending harmonic terminal upgrade chime"
+    },
+    "damage_warning": {
+      "file": "damage_warning.wav",
+      "duration_seconds": 1.1,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 5000.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-heartbeat-34.wav",
+      "description": "Cardiovascular systolic / diastolic panic pulse"
+    }
+  }
+}

@@ -71,13 +71,13 @@ static_assert(sizeof(Voxel) == 2, "Voxel struct must be exactly 2 bytes (16-bit 
 #pragma pack(push, 1)
 struct PackedVoxelVertex {
     // uint32_t data0:
-    // [0..4]   x (5 bits: 0..31)
-    // [5..9]   y (5 bits: 0..31)
-    // [10..14] z (5 bits: 0..31)
-    // [15..17] normal_idx (3 bits: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z)
-    // [18..19] ao (2 bits: 0..3 baked ambient occlusion)
-    // [20..27] tex_layer (8 bits: 0..255 texture array layer ID)
-    // [28..31] aux / pbr_flags (4 bits: e.g. metallic/roughness modifier)
+    // [0..5]   x (6 bits: 0..63, holds 0..32)
+    // [6..11]  y (6 bits: 0..63, holds 0..32)
+    // [12..17] z (6 bits: 0..63, holds 0..32)
+    // [18..20] normal_idx (3 bits: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z)
+    // [21..22] ao (2 bits: 0..3 baked ambient occlusion)
+    // [23..30] tex_layer (8 bits: 0..255 texture array layer ID)
+    // [31]     aux / surveyed_flag (1 bit: 0..1)
     uint32_t data0;
 
     // uint32_t data1:
@@ -96,13 +96,13 @@ struct PackedVoxelVertex {
         uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0
     ) {
         PackedVoxelVertex v;
-        v.data0 = (x & 0x1Fu) |
-                  ((y & 0x1Fu) << 5) |
-                  ((z & 0x1Fu) << 10) |
-                  ((normal_idx & 0x7u) << 15) |
-                  ((ao & 0x3u) << 18) |
-                  ((tex_layer & 0xFFu) << 20) |
-                  ((aux & 0xFu) << 28);
+        v.data0 = (x & 0x3Fu) |
+                  ((y & 0x3Fu) << 6) |
+                  ((z & 0x3Fu) << 12) |
+                  ((normal_idx & 0x7u) << 18) |
+                  ((ao & 0x3u) << 21) |
+                  ((tex_layer & 0xFFu) << 23) |
+                  ((aux & 0x1u) << 31);
 
         v.data1 = (u_dim & 0x3Fu) |
                   ((v_dim & 0x3Fu) << 6) |

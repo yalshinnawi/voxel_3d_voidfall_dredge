@@ -3,12 +3,20 @@
 #include "texture_array.hpp"
 #include "../voxel/chunk.hpp"
 #include "../skills/surveying.hpp"
+#include "../player/character_class.hpp"
+#include "../player/loadout.hpp"
+#include "../entities/enemies/void_stalker.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <memory>
+#include <algorithm>
 
 namespace Voidfall {
+
+class DynamicDebris;
+struct VoidStalker;
+struct SeismicBurrower;
 
 struct PointLight {
     glm::vec3 position{0.0f};
@@ -56,6 +64,12 @@ public:
 
     void begin_frame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& cam_pos);
     void render_chunk(const Chunk& chunk);
+    void render_debris(const DynamicDebris& debris);
+    void render_stalkers(const std::vector<VoidStalker>& stalkers);
+    void render_stalkers(const std::vector<VoidStalker>& stalkers, const std::vector<VoidSpikeProjectile>& projectiles);
+    void render_burrowers(const std::vector<SeismicBurrower>& burrowers);
+    void render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts);
+    void render_delver(const glm::vec3& pos, float yaw, CharacterClass cls, float anim_time = 0.0f);
     void end_frame(float delta_time, float radiation_level = 0.0f);
 
     void trigger_sonar_pulse(const glm::vec3& origin);
@@ -73,8 +87,18 @@ public:
     Headlamp& headlamp() { return m_headlamp; }
     const Headlamp& headlamp() const { return m_headlamp; }
 
+    void set_sector(int sector) { m_sector = sector; }
+    int sector() const { return m_sector; }
+
     void add_point_light(const PointLight& light);
     void clear_point_lights();
+
+    void set_brightness(float b) { m_brightness = std::clamp(b, 0.4f, 2.5f); }
+    float brightness() const { return m_brightness; }
+
+    void set_headlamp_flicker(float f) { m_headlamp_flicker = std::clamp(f, 0.0f, 1.0f); }
+    float headlamp_flicker() const { return m_headlamp_flicker; }
+    float get_effective_headlamp_intensity() const;
 
     int width() const { return m_width; }
     int height() const { return m_height; }
@@ -92,6 +116,7 @@ private:
     void init_wireframe_cube();
     void init_cable_buffer();
     void init_particle_buffers();
+    void init_stalker_buffers();
 
     int m_width{1600};
     int m_height{900};
@@ -113,6 +138,7 @@ private:
     Shader m_postprocess_shader;
     Shader m_wireframe_shader;
     Shader m_particle_shader;
+    Shader m_stalker_shader;
 
     // Textures
     std::unique_ptr<TextureArray> m_texture_array;
@@ -144,6 +170,11 @@ private:
     unsigned int m_cable_vao{0};
     unsigned int m_cable_vbo{0};
 
+    // Void Stalker 3D predator model buffers
+    unsigned int m_stalker_vao{0};
+    unsigned int m_stalker_vbo{0};
+    std::vector<float> m_stalker_staging_lines;
+
     // Break particles
     unsigned int m_particle_vao{0};
     unsigned int m_particle_vbo{0};
@@ -151,6 +182,9 @@ private:
 
     float m_total_time{0.0f};
     float m_dust_timer{0.0f};
+    int m_sector{1};
+    float m_brightness{1.0f};
+    float m_headlamp_flicker{0.0f};
 };
 
 } // namespace Voidfall

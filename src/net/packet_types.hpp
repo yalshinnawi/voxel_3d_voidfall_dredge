@@ -68,7 +68,8 @@ enum PlayerButtonFlags : uint16_t {
     BTN_SKILL_SONAR     = 1 << 11, // Seismic Sonar pulse scan
     BTN_SPRINT          = 1 << 12,
     BTN_REMOVE_BULKHEAD = 1 << 13, // Remove player-placed bulkhead cleanly
-    BTN_DETONATE_CHARGE = 1 << 14  // Detonate placed shaped charges
+    BTN_DETONATE_CHARGE = 1 << 14, // Detonate placed shaped charges
+    BTN_TACTICAL_SKILL  = 1 << 15  // Class tactical active ability (C key)
 };
 
 struct PlayerInputPacket {
