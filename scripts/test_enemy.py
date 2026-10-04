@@ -12,6 +12,9 @@ import time
 import json
 import argparse
 
+# Always enforce silent headless audio for all tests and child processes
+os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+
 CONFIG = "Release"
 BUILD_DIR = "build"
 EXE_EXT = ".exe" if sys.platform == "win32" else ""
@@ -70,7 +73,7 @@ def run_visual_staging():
     print(f"[*] Launching {ENGINE_EXE} --test-enemy...")
     t0 = time.time()
     try:
-        code, out, err = run_cmd([ENGINE_EXE, "--test-enemy"], timeout=20)
+        code, out, err = run_cmd([ENGINE_EXE, "--test-enemy", "--mute"], timeout=20)
     except subprocess.TimeoutExpired:
         print("[!] Visual staging timed out after 20s!")
         return False

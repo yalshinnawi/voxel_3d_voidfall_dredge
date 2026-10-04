@@ -26,6 +26,18 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3& pos, float difficulty_mu
     s.screech_timer = 4.0f + static_cast<float>((m_next_id * 31) % 110) * 0.1f; // Staggered initial screech
     s.just_screeched = false;
 
+    // Initialize surface climbing orientation & rig alignment
+    s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+    s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+    s.surface_state = StalkerSurfaceState::FLOOR;
+    s.target_surface_state = StalkerSurfaceState::FLOOR;
+    s.prev_surface_state = StalkerSurfaceState::FLOOR;
+    s.surface_offset = glm::vec3(0.0f, 0.05f, 0.0f);
+    glm::vec3 init_fwd(0.0f, 0.0f, 1.0f);
+    s.m_targetRotation = AberrantAI::calculate_orientation(init_fwd, s.contact_normal, init_fwd);
+    s.m_currentRotation = s.m_targetRotation;
+    s.anim_controller.set_immediate_state(StalkerSurfaceState::FLOOR);
+
     m_stalkers.push_back(s);
 }
 
@@ -213,13 +225,41 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             s.pitch = std::atan2(to_player.y, horiz_dist);
         }
 
-        // Animate procedural leg crawl cycle
-        float current_speed = glm::length(s.velocity);
-        if (current_speed > 0.1f) {
-            s.walk_cycle += current_speed * dt * 2.8f;
-        } else {
-            s.walk_cycle += dt * 1.2f; // Subtle idle twitch
+        // Dynamic Surface Sampling & Contact Normal Detection (6 orthogonal directions)
+        SurfaceContactSample sample = AberrantAI::sample_surface_normal(s.position, world, 1.4f);
+        s.contact_normal = sample.contact_normal;
+        s.m_targetUpVector = glm::normalize(s.contact_normal);
+
+        // Traversal State Machine Transition with 0.2s crossfade
+        if (sample.surface_state != s.target_surface_state) {
+            s.prev_surface_state = s.target_surface_state;
+            s.target_surface_state = sample.surface_state;
+            s.surface_state = StalkerSurfaceState::TRANSITIONING;
+            s.surface_transition_timer = 0.0f;
         }
+
+        if (s.surface_transition_timer < 0.2f) {
+            s.surface_transition_timer += dt;
+            if (s.surface_transition_timer >= 0.2f) {
+                s.surface_state = s.target_surface_state;
+            }
+        } else {
+            s.surface_state = s.target_surface_state;
+        }
+
+        // Animation controller updates & velocity-proportional play rate modulation
+        s.anim_controller.update(dt, s.target_surface_state, s.velocity, s.m_climbSpeedScalar);
+        float play_rate = s.anim_controller.calculate_play_rate(s.velocity, s.m_climbSpeedScalar);
+        s.walk_cycle += play_rate * dt;
+
+        // Smooth Transform & Model Re-Orientation (Quaternion Slerp without snapping)
+        glm::vec3 fallback_fwd(std::sin(s.yaw), 0.0f, std::cos(s.yaw));
+        s.m_targetRotation = AberrantAI::calculate_orientation(s.velocity, s.contact_normal, fallback_fwd);
+        s.m_currentRotation = AberrantAI::slerp_rotation(s.m_currentRotation, s.m_targetRotation, dt, 8.0f);
+
+        // Surface Snapping Offset
+        glm::vec3 target_offset = AberrantAI::compute_surface_snapping_offset(s.surface_state, s.contact_normal);
+        s.surface_offset = glm::mix(s.surface_offset, target_offset, std::clamp(dt * 8.0f, 0.0f, 1.0f));
 
         // Ambient Cavern Echo Screeches (subtle, rare & atmospheric - minimum 35s global cooldown)
         if (s.state != StalkerState::Dead && s.state != StalkerState::Stunned) {
@@ -753,23 +793,36 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.position.y = std::clamp(s.position.y, 4.5f, 26.0f);
         s.position.z = std::clamp(s.position.z, 4.5f, 67.5f);
 
-        // Simple gravity: stalker drops if in air
-        int sx = static_cast<int>(std::floor(s.position.x));
-        int sy = static_cast<int>(std::floor(s.position.y - 0.1f));
-        int sz = static_cast<int>(std::floor(s.position.z));
-        Voxel below = world.get_voxel(sx, sy, sz);
-        if (below.material_id == MAT_AIR) {
-            s.position.y -= 4.0f * dt; // Gravity
+        // Surface-aware gravity & attachment:
+        // Downward gravity only applies when on a floor or transitioning without wall/ceiling hold.
+        if (s.surface_state == StalkerSurfaceState::FLOOR) {
+            int sx = static_cast<int>(std::floor(s.position.x));
+            int sy = static_cast<int>(std::floor(s.position.y - 0.1f));
+            int sz = static_cast<int>(std::floor(s.position.z));
+            Voxel below = world.get_voxel(sx, sy, sz);
+            if (below.material_id == MAT_AIR) {
+                s.position.y -= 4.0f * dt; // Gravity
+            }
         }
 
-        // Don't clip into solid blocks
+        // Keep body flush with vertical and inverted voxel geometry without clipping into solid blocks
         int cx = static_cast<int>(std::floor(s.position.x));
         int cy = static_cast<int>(std::floor(s.position.y));
         int cz = static_cast<int>(std::floor(s.position.z));
         Voxel current_v = world.get_voxel(cx, cy, cz);
         if (current_v.material_id != MAT_AIR && current_v.material_id != MAT_GAS &&
             current_v.material_id != MAT_VOLATILE_SMOKE) {
-            s.position.y = static_cast<float>(cy) + 1.1f;
+            if (s.contact_normal.y > 0.7f) {
+                s.position.y = static_cast<float>(cy) + 1.05f;
+            } else if (s.contact_normal.y < -0.7f) {
+                s.position.y = static_cast<float>(cy) - 0.15f;
+            } else if (std::abs(s.contact_normal.x) > 0.5f) {
+                s.position.x = static_cast<float>(cx) + (s.contact_normal.x > 0.0f ? 1.05f : -0.05f);
+            } else if (std::abs(s.contact_normal.z) > 0.5f) {
+                s.position.z = static_cast<float>(cz) + (s.contact_normal.z > 0.0f ? 1.05f : -0.05f);
+            } else {
+                s.position += s.contact_normal * 0.15f;
+            }
         }
     }
 

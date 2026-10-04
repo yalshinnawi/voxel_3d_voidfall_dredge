@@ -15,6 +15,7 @@ struct WindowConfig {
     bool vsync{true};
     bool fullscreen{false};
     bool visible{true};
+    bool auto_screen_size{true};
 };
 
 class Window {
@@ -36,6 +37,10 @@ public:
 
     void set_cursor_locked(bool locked);
     bool is_cursor_locked() const { return m_cursor_locked; }
+
+    void toggle_fullscreen();
+    bool is_fullscreen() const;
+    void set_fullscreen(bool fullscreen);
 
     bool is_key_down(int key) const;
     bool is_mouse_button_down(int button) const;
@@ -64,6 +69,11 @@ private:
     double m_mouse_delta_x{0.0};
     double m_mouse_delta_y{0.0};
     bool m_first_mouse{true};
+
+    int m_windowed_x{100};
+    int m_windowed_y{100};
+    int m_windowed_w{1600};
+    int m_windowed_h{900};
 
     // Continuous key and button bitsets to prevent sticking
     std::bitset<512> m_keys_down;

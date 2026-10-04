@@ -12,6 +12,9 @@ import time
 import json
 import argparse
 
+# Always enforce silent headless audio for all tests and child processes
+os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+
 CONFIG = "Release"
 BUILD_DIR = "build"
 EXE_EXT = ".exe" if sys.platform == "win32" else ""
@@ -63,7 +66,7 @@ def run_model_capture():
     print(f"[*] Launching {ENGINE_EXE} --capture-models...")
     t0 = time.time()
     try:
-        code, out, err = run_cmd([ENGINE_EXE, "--capture-models"], timeout=30)
+        code, out, err = run_cmd([ENGINE_EXE, "--capture-models", "--mute"], timeout=30)
     except subprocess.TimeoutExpired:
         print("[!] Model capture staging timed out after 30s!")
         return False

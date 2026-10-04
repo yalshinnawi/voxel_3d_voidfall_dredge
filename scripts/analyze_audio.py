@@ -19,6 +19,9 @@ import json
 import subprocess
 import time
 
+# Always enforce silent headless audio for all tests and child processes
+os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+
 AUDIO_DIR = os.path.join("screenshots", "audio_samples")
 REPORT_PATH = os.path.join("screenshots", "audio_safety_report.json")
 EXE_PATH = os.path.join("build", "Release", "test_audio.exe")

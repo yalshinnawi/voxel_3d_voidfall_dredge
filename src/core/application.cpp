@@ -52,6 +52,8 @@ void Application::init_systems() {
     win_cfg.width = m_config.window_width > 0 ? m_config.window_width : 1600;
     win_cfg.height = m_config.window_height > 0 ? m_config.window_height : 900;
     win_cfg.visible = !m_config.hidden_window;
+    win_cfg.auto_screen_size = m_config.auto_screen_size && (m_config.window_width <= 0 || m_config.window_height <= 0);
+    win_cfg.fullscreen = m_config.fullscreen;
     m_window = std::make_unique<Window>(win_cfg);
 
     // Start with cursor unlocked for menus
@@ -160,9 +162,19 @@ void Application::init_systems() {
     m_hub_ui->set_test_mode(is_test_mode());
     m_pause_menu = std::make_unique<PauseMenu>(m_window->width(), m_window->height());
 
-    // 7. Audio Engine
+    // 7. Audio Engine (Runs in silent headless mode during automated testing/captures or when --mute is requested)
     m_audio = std::make_unique<AudioEngine>();
-    m_audio->init();
+    bool enable_audio = true;
+    if (m_config.mute_audio || m_config.test_mode || m_config.test_enemy ||
+        m_config.auto_play_test || m_config.capture_models || 
+        m_config.capture_level_shapes || m_config.hidden_window ||
+        !m_config.single_screenshot_path.empty() || m_config.is_test_save) {
+        enable_audio = false;
+    }
+    if (m_config.force_audible) {
+        enable_audio = true;
+    }
+    m_audio->init(enable_audio);
     m_audio->set_master_volume(m_settings.master_volume);
 
     // 8. Networking
@@ -908,6 +920,13 @@ void Application::process_input(int key, int action) {
             // In main menu: ESC does NOT exit the game.
             // Player quits intentionally via [ EXIT ] button on the title screen.
         }
+    } else if (key == GLFW_KEY_F11 || ((key == GLFW_KEY_ENTER) && (m_window && (m_window->is_key_down(GLFW_KEY_LEFT_ALT) || m_window->is_key_down(GLFW_KEY_RIGHT_ALT))))) {
+        if (m_window) {
+            m_window->toggle_fullscreen();
+            if (m_hud) {
+                m_hud->show_warning(m_window->is_fullscreen() ? "DISPLAY: FULLSCREEN" : "DISPLAY: WINDOWED (MAXIMIZED)", 1.5f);
+            }
+        }
     } else if (key == GLFW_KEY_H || key == GLFW_KEY_F1) {
         if (m_hud) {
             m_hud->toggle_help_briefing();
@@ -1147,18 +1166,21 @@ void Application::fixed_tick(float dt) {
     bool headlamp_on = m_renderer ? m_renderer->headlamp().enabled : true;
     bool is_drilling = m_player->is_drilling();
 
-    auto stalker_res = m_stalkers.update(
-        dt,
-        m_player->position(),
-        m_player->forward(),
-        headlamp_dir,
-        headlamp_on,
-        m_noise_meter.noise_percent(),
-        is_drilling,
-        *m_world,
-        m_noise_meter.recent_sounds(),
-        is_crouching
-    );
+    VoidStalkerManager::FrameResult stalker_res;
+    if (!m_config.test_enemy) {
+        stalker_res = m_stalkers.update(
+            dt,
+            m_player->position(),
+            m_player->forward(),
+            headlamp_dir,
+            headlamp_on,
+            m_noise_meter.noise_percent(),
+            is_drilling,
+            *m_world,
+            m_noise_meter.recent_sounds(),
+            is_crouching
+        );
+    }
 
     if (stalker_res.total_damage > 0.0f) {
         float applied = m_player->take_damage(stalker_res.total_damage, false);
@@ -2297,9 +2319,12 @@ void Application::run() {
         render(static_cast<float>(frame_time));
 
         // ── Single screenshot CLI flag ──
-        if (!m_config.single_screenshot_path.empty() && m_auto_test_frame >= 5) {
-            capture_screenshot_png(m_config.single_screenshot_path, m_window->width(), m_window->height());
-            break;
+        if (!m_config.single_screenshot_path.empty()) {
+            static int single_shot_frames = 0;
+            if (++single_shot_frames >= 5) {
+                capture_screenshot_png(m_config.single_screenshot_path, m_window->width(), m_window->height());
+                break;
+            }
         }
 
         // ── Testing Hotkeys (Available ONLY in Test Mode via --test, --test-save, or --auto-play-test) ──
@@ -2560,102 +2585,151 @@ void Application::run() {
         if (m_config.test_enemy) {
             m_auto_test_frame++;
 
-            // Ensure player view is stable and looking toward stalker (+Z is yaw=90)
+            // Ensure stable staging chamber, pristine studio lighting and player position
             if (m_auto_test_frame == 1) {
                 m_player->set_position(glm::vec3(16.0f, 22.0f, 16.0f));
                 m_player->clamp_to_surface(*m_world);
-                m_player->set_look_angles(90.0f, -4.0f);
-                m_renderer->headlamp().enabled = false;
-                m_stalkers.reset();
-                m_stalkers.spawn_stalker(m_player->position() + glm::vec3(0.0f, -0.1f, 3.6f));
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
-                    s.state = StalkerState::Stalking;
-                    s.target_pos = m_player->position();
-                    s.yaw = 3.14159f; // Facing player (-Z)
-                }
-                VF_LOG_INFO("EnemyTest", "Staged Void Stalker in deep shadow for Slot 0.");
-            }
-            // Frame 12: Slot 0 "01_SHADOW_STALK"
-            else if (m_auto_test_frame == 12) {
-                VisualTestHarness::instance().record_enemy_phase(0, "SHADOW STALK", "screenshots/enemy_01_shadow_stalk.png", m_window->width(), m_window->height());
-                // Switch headlamp ON for reveal
                 m_renderer->headlamp().enabled = true;
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
-                    s.position = m_player->position() + glm::vec3(0.0f, -0.1f, 2.9f);
-                    s.yaw = 3.14159f;
-                }
-                m_player->set_look_angles(90.0f, -4.0f);
-                VF_LOG_INFO("EnemyTest", "Headlamp ON: Revealing predatory chitin details for Slot 1.");
+                m_renderer->headlamp().intensity = 2.8f;
+                m_renderer->clear_point_lights();
+                // 3-point studio lighting for optimal chitin clarity
+                m_renderer->add_point_light({m_player->position() + glm::vec3(1.4f, 1.8f, 1.6f), glm::vec3(1.0f, 0.95f, 0.90f), 18.0f, 2.0f});
+                m_renderer->add_point_light({m_player->position() + glm::vec3(-1.6f, 0.9f, 1.4f), glm::vec3(0.4f, 0.65f, 0.95f), 14.0f, 1.2f});
+                m_renderer->add_point_light({m_player->position() + glm::vec3(0.0f, 2.6f, 3.8f), glm::vec3(0.85f, 0.45f, 1.0f), 20.0f, 2.2f});
+
+                m_stalkers.reset();
+                m_stalkers.spawn_stalker(m_player->position() + glm::vec3(0.0f, -0.38f, 2.5f));
+                VF_LOG_INFO("EnemyTest", "Staging Void Stalker multi-orientation visual test suite across 6 positions.");
             }
-            // Frame 24: Slot 1 "02_HEADLAMP_REVEAL"
-            else if (m_auto_test_frame == 24) {
-                VisualTestHarness::instance().record_enemy_phase(1, "HEADLAMP REVEAL", "screenshots/enemy_02_headlamp_reveal.png", m_window->width(), m_window->height());
-                // Shift to Circling Flank
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
-                    s.state = StalkerState::Circling;
-                    s.position = m_player->position() + glm::vec3(1.8f, -0.1f, 2.5f);
-                    s.target_pos = m_player->position();
-                    s.yaw = 3.8f;
+
+            // Continuous per-frame pin of the active slot configuration
+            if (!m_stalkers.stalkers().empty()) {
+                auto& s = m_stalkers.stalkers_mut()[0];
+
+                if (m_auto_test_frame < 14) {
+                    // ── Slot 0: FLOOR CRAWL ──
+                    s.position = m_player->position() + glm::vec3(0.0f, -0.38f, 2.5f);
+                    s.velocity = glm::vec3(0.0f, 0.0f, -0.01f);
+                    s.surface_state = StalkerSurfaceState::FLOOR;
+                    s.target_surface_state = StalkerSurfaceState::FLOOR;
+                    s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_currentRotation = glm::angleAxis(3.25f, glm::vec3(0.0f, 1.0f, 0.0f));
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::FLOOR, s.velocity, 3.2f);
+                    s.state = StalkerState::Stalking;
+                    s.yaw = 3.25f;
+                    s.pitch = 0.0f;
+                    m_player->set_look_angles(90.0f, -8.0f);
                 }
-                m_player->set_look_angles(55.0f, -4.0f); // Turn to flank
-                VF_LOG_INFO("EnemyTest", "Stalker circling flank for Slot 2.");
-            }
-            // Frame 38: Slot 2 "03_CIRCLING_FLANK"
-            else if (m_auto_test_frame == 38) {
-                VisualTestHarness::instance().record_enemy_phase(2, "CIRCLING FLANK", "screenshots/enemy_03_circling_flank.png", m_window->width(), m_window->height());
-                // Shift to Lunging Attack
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
+                else if (m_auto_test_frame >= 14 && m_auto_test_frame < 28) {
+                    // ── Slot 1: WALL CLIMBING ──
+                    s.position = m_player->position() + glm::vec3(0.0f, 0.65f, 2.6f);
+                    s.velocity = glm::vec3(0.0f, 2.5f, 0.0f); // Climbing upward on vertical wall
+                    s.surface_state = StalkerSurfaceState::WALL_CLIMBING;
+                    s.target_surface_state = StalkerSurfaceState::WALL_CLIMBING;
+                    s.contact_normal = glm::vec3(0.0f, 0.0f, -1.0f); // Normal pointing outward from wall
+                    s.m_targetUpVector = glm::vec3(0.0f, 0.0f, -1.0f);
+                    s.m_currentRotation = AberrantAI::calculate_orientation(s.velocity, s.contact_normal, glm::vec3(0.0f, 1.0f, 0.0f));
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::WALL_CLIMBING, s.velocity, 3.2f);
+                    s.state = StalkerState::Stalking;
+                    s.pitch = 0.0f;
+                    m_player->set_look_angles(90.0f, 14.0f);
+                }
+                else if (m_auto_test_frame >= 28 && m_auto_test_frame < 42) {
+                    // ── Slot 2: CEILING CRAWLING ──
+                    s.position = m_player->position() + glm::vec3(0.0f, 1.85f, 2.2f);
+                    s.velocity = glm::vec3(0.0f, 0.0f, -1.5f); // Inverted crawl across ceiling
+                    s.surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+                    s.target_surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+                    s.contact_normal = glm::vec3(0.0f, -1.0f, 0.0f); // Inverted normal pointing down
+                    s.m_targetUpVector = glm::vec3(0.0f, -1.0f, 0.0f);
+                    s.m_currentRotation = AberrantAI::calculate_orientation(s.velocity, s.contact_normal, glm::vec3(0.0f, 0.0f, -1.0f));
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::CEILING_CRAWLING, s.velocity, 3.2f);
+                    s.state = StalkerState::Stalking;
+                    s.pitch = 0.0f;
+                    m_player->set_look_angles(90.0f, 38.0f);
+                }
+                else if (m_auto_test_frame >= 42 && m_auto_test_frame < 56) {
+                    // ── Slot 3: SURFACE TRANSITION ──
+                    s.position = m_player->position() + glm::vec3(0.0f, 1.40f, 2.45f);
+                    s.velocity = glm::vec3(0.0f, 1.5f, -1.5f);
+                    s.surface_state = StalkerSurfaceState::TRANSITIONING;
+                    s.target_surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+                    s.contact_normal = glm::normalize(glm::vec3(0.0f, -0.7071f, -0.7071f)); // 45-deg corner normal
+                    s.m_targetUpVector = s.contact_normal;
+                    s.m_currentRotation = AberrantAI::calculate_orientation(s.velocity, s.contact_normal, s.velocity);
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::CEILING_CRAWLING, s.velocity, 3.2f);
+                    s.state = StalkerState::Stalking;
+                    s.pitch = 0.0f;
+                    m_player->set_look_angles(90.0f, 26.0f);
+                }
+                else if (m_auto_test_frame >= 56 && m_auto_test_frame < 70) {
+                    // ── Slot 4: AGGRESSIVE LUNGE ──
+                    s.position = m_player->position() + glm::vec3(0.0f, 0.12f, 2.35f);
+                    s.velocity = glm::vec3(0.0f, 0.5f, -8.0f);
+                    s.surface_state = StalkerSurfaceState::FLOOR;
+                    s.target_surface_state = StalkerSurfaceState::FLOOR;
+                    s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_currentRotation = glm::angleAxis(3.14159f, glm::vec3(0.0f, 1.0f, 0.0f));
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::FLOOR, s.velocity, 3.2f);
                     s.state = StalkerState::Lunging;
-                    s.position = m_player->position() + glm::vec3(0.0f, 0.15f, 1.8f);
-                    s.target_pos = m_player->position();
-                    s.yaw = 3.14159f;
                     s.just_lunged = true;
-                }
-                m_player->set_look_angles(90.0f, -2.0f);
-                VF_LOG_INFO("EnemyTest", "Stalker lunging attack for Slot 3.");
-            }
-            // Frame 50: Slot 3 "04_AGGRESSIVE_LUNGE"
-            else if (m_auto_test_frame == 50) {
-                VisualTestHarness::instance().record_enemy_phase(3, "AGGRESSIVE LUNGE", "screenshots/enemy_04_aggressive_lunge.png", m_window->width(), m_window->height());
-                // Cast Sonar Pulse -> triggers stun
-                on_sonar_cast(m_player->position());
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
-                    s.state = StalkerState::Stunned;
-                    s.position = m_player->position() + glm::vec3(0.0f, -0.1f, 2.3f);
                     s.yaw = 3.14159f;
+                    m_player->set_look_angles(90.0f, -4.0f);
+                }
+                else if (m_auto_test_frame >= 70 && m_auto_test_frame < 84) {
+                    // ── Slot 5: SONAR STUN REACTION ──
+                    s.position = m_player->position() + glm::vec3(0.0f, -0.32f, 2.45f);
+                    s.velocity = glm::vec3(0.0f);
+                    s.surface_state = StalkerSurfaceState::FLOOR;
+                    s.target_surface_state = StalkerSurfaceState::FLOOR;
+                    s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_currentRotation = glm::angleAxis(3.20f, glm::vec3(0.0f, 1.0f, 0.0f));
+                    s.anim_controller.update(0.016f, StalkerSurfaceState::FLOOR, s.velocity, 3.2f);
+                    s.state = StalkerState::Stunned;
                     s.stun_timer = 3.0f;
+                    s.yaw = 3.20f;
+                    m_player->set_look_angles(90.0f, -7.0f);
                 }
-                m_player->set_look_angles(90.0f, -4.0f);
-                VF_LOG_INFO("EnemyTest", "Sonar shockwave applied, stalker stunned for Slot 4.");
             }
-            // Frame 62: Slot 4 "05_SONAR_STUN"
-            else if (m_auto_test_frame == 62) {
-                VisualTestHarness::instance().record_enemy_phase(4, "SONAR STUN", "screenshots/enemy_05_sonar_stun.png", m_window->width(), m_window->height());
-                // Damage stalker and transition to Fleeing
-                if (!m_stalkers.stalkers().empty()) {
-                    auto& s = m_stalkers.stalkers_mut()[0];
-                    s.hp = 8.0f;
-                    s.state = StalkerState::Fleeing;
-                    s.position = m_player->position() + glm::vec3(0.5f, -0.1f, 3.6f);
-                    s.target_pos = m_player->position();
-                    s.yaw = 0.0f; // Turned around, fleeing away down the corridor
-                }
-                m_player->set_look_angles(85.0f, -4.0f);
-                VF_LOG_INFO("EnemyTest", "Stalker damaged & retreating for Slot 5.");
+
+            // Capture frames
+            if (m_auto_test_frame == 13) {
+                VisualTestHarness::instance().record_enemy_phase(0, "FLOOR CRAWL", "screenshots/enemy_01_floor_crawl.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_floor_crawl.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 0: FLOOR CRAWL.");
             }
-            // Frame 74: Slot 5 "06_RETREAT_FLEEING"
-            else if (m_auto_test_frame == 74) {
-                VisualTestHarness::instance().record_enemy_phase(5, "RETREAT FLEEING", "screenshots/enemy_06_retreat_fleeing.png", m_window->width(), m_window->height());
+            else if (m_auto_test_frame == 27) {
+                VisualTestHarness::instance().record_enemy_phase(1, "WALL CLIMB", "screenshots/enemy_02_wall_climb.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_wall_climb.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 1: WALL CLIMB.");
             }
-            // Frame 82: Finalize dedicated enemy visual test harness & exit
-            else if (m_auto_test_frame >= 82) {
+            else if (m_auto_test_frame == 41) {
+                VisualTestHarness::instance().record_enemy_phase(2, "CEILING CRAWL", "screenshots/enemy_03_ceiling_crawl.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_ceiling_crawl.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 2: CEILING CRAWL.");
+            }
+            else if (m_auto_test_frame == 55) {
+                VisualTestHarness::instance().record_enemy_phase(3, "SURFACE TRANSITION", "screenshots/enemy_04_surface_transition.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_surface_transition.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 3: SURFACE TRANSITION.");
+            }
+            else if (m_auto_test_frame == 69) {
+                VisualTestHarness::instance().record_enemy_phase(4, "AGGRESSIVE LUNGE", "screenshots/enemy_05_aggressive_lunge.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_aggressive_lunge.png", m_window->width(), m_window->height());
+                on_sonar_cast(m_player->position());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 4: AGGRESSIVE LUNGE.");
+            }
+            else if (m_auto_test_frame == 83) {
+                VisualTestHarness::instance().record_enemy_phase(5, "SONAR STUN", "screenshots/enemy_06_sonar_stun.png", m_window->width(), m_window->height());
+                capture_screenshot_png("docs/models/stalker_sonar_stun.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyTest", "Captured Slot 5: SONAR STUN.");
+            }
+            else if (m_auto_test_frame >= 88) {
                 VisualTestHarness::instance().finalize_enemy_test();
-                VF_LOG_INFO("EnemyTest", "Dedicated Void Stalker visual test harness finalized! All 6 phases & montage generated.");
+                VF_LOG_INFO("EnemyTest", "Dedicated Void Stalker multi-orientation visual test harness finalized! All 6 phases & montage generated.");
                 break;
             }
         }

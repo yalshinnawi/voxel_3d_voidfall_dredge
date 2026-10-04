@@ -11,6 +11,7 @@ This directory contains the automated test suites for **Voidfall: Dredge**, cove
 | [`test_unit_all.cpp`](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_unit_all.cpp) | `test_unit_all.exe` | **19 Comprehensive Unit Tests**: Voxel indexing, 16-bit packing, greedy mesher AO, structural BFS, dynamic debris, grapple physics, hazard timers, extraction beacon, save serialization, network packets, and surveying sonar. |
 | [`test_progression.cpp`](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_progression.cpp) | `test_progression.exe` | **Progression & Balance Tests**: Delver class archetypes (Demolitionist/Vanguard/Scout), upgrade purchasing logic, exponential EXP curves ($100 \times 1.6^{\text{tier}-1}$), and respec refund integrity. |
 | [`test_e2e_expeditions.cpp`](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_e2e_expeditions.cpp) | `test_e2e_expeditions.exe` | **5 End-to-End Mission Scenarios**: Complete simulated runs testing mineral banking, bulkhead sheltering during cave-ins, radiation hazard breach, class loadouts, and multi-sector unlocks. |
+| [`test_audio.cpp`](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_audio.cpp) | `test_audio.exe` | **16 Audio & Ear-Safety Tests**: Limiter thresholds, ducking, 3D attenuation, sector ambience, transient anti-clicking, and procedural sound cue synthesis (runs 100% silent by default). |
 | `test_*.json` | Test Fixtures | Mock player profiles used to validate save schema migrations and edge cases without mutating real saves. |
 
 ---
@@ -27,7 +28,11 @@ Alternatively, invoke individual test binaries directly:
 ./build/Release/test_unit_all.exe
 ./build/Release/test_progression.exe
 ./build/Release/test_e2e_expeditions.exe
+./build/Release/test_audio.exe
 ```
+
+> [!NOTE]
+> **Silent / Non-Audible Policy**: `test_audio.exe` and `scripts/tdd.py` execute 100% silently in headless audio mode to protect hearing. Pass `--audible` (`./build/Release/test_audio.exe --audible`) only if physical hardware playback is explicitly needed.
 
 Or via CMake CTest:
 ```bash
@@ -38,6 +43,6 @@ ctest --test-dir build -C Release -j 3 --output-on-failure
 
 ## 🛡️ Adding New Tests
 
-- Unit tests must be fast, self-contained, and runnable in headless/CI environments without requiring an active GLFW window or OpenGL context.
+- Unit tests must be fast, self-contained, and runnable in headless/CI environments without requiring an active GLFW window, OpenGL context, or audio hardware device.
 - Use `TEST_CHECK(expr, msg)` to assert invariants.
 - Keep execution time below $100\text{ms}$ per suite.

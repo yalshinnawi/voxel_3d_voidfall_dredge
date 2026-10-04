@@ -998,30 +998,34 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         if (s.is_dead()) continue;
         active_stalker_count++;
 
-        // Base transform: translate to stalker world position and rotate to facing yaw + pitch
-        glm::mat4 base_model = glm::translate(glm::mat4(1.0f), s.position);
-        base_model = glm::rotate(base_model, s.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-        base_model = glm::rotate(base_model, -s.pitch * 0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
+        // Pose computation from dynamic animation controller
+        StalkerPoseParameters pose = s.anim_controller.compute_blended_pose(s.pitch);
+
+        // Base transform: translate to stalker world position + surface snapping offset,
+        // and apply smooth quaternion orientation slerp (supporting floor, vertical wall, and inverted ceiling traversal)
+        glm::mat4 base_model = glm::translate(glm::mat4(1.0f), s.position + s.surface_offset);
+        base_model = base_model * glm::mat4_cast(s.m_currentRotation);
 
         // State-based body posture modifier
-        float crouch_y = 0.0f;
+        float crouch_y = pose.carapace_offset_y;
         float lunge_forward = 0.0f;
         float mandible_spread = 0.0f;
 
         if (s.state == StalkerState::Lunging) {
-            crouch_y = -0.1f;
+            crouch_y -= 0.1f;
             lunge_forward = 0.35f;
             mandible_spread = 0.35f; // Jaws flared wide open to strike!
         } else if (s.state == StalkerState::Stalking) {
-            crouch_y = -0.15f; // Low predatory stalk
+            crouch_y -= 0.15f; // Low predatory stalk
         } else if (s.state == StalkerState::Stunned) {
             // Violent shivering spasm
             float jitter = std::sin(s.glow_phase * 35.0f) * 0.08f;
             base_model = glm::rotate(base_model, jitter, glm::vec3(0.0f, 0.0f, 1.0f));
-            crouch_y = -0.2f;
+            crouch_y -= 0.2f;
         }
 
-        // Apply scale & crouch
+        // Apply scale, surface pose pitch & crouch
+        base_model = glm::rotate(base_model, pose.carapace_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
         base_model = glm::scale(base_model, glm::vec3(s.scale));
         base_model = glm::translate(base_model, glm::vec3(0.0f, crouch_y, lunge_forward));
 
@@ -1095,8 +1099,9 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             add_stalker_box(s_stalker_verts, stinger_m, glm::vec3(0.05f, 0.05f, 0.14f), claw_color, claw_mat);
         }
 
-        // E. Armored Head / Cranial Skull
+        // E. Armored Head / Cranial Skull (with downward-arching predatory neck tracking toward player)
         glm::mat4 head_base = glm::translate(base_model, glm::vec3(0.0f, 0.32f, 0.40f));
+        head_base = glm::rotate(head_base, pose.head_pitch_offset, glm::vec3(1.0f, 0.0f, 0.0f));
         {
             glm::mat4 skull_m = glm::rotate(head_base, 0.15f, glm::vec3(1.0f, 0.0f, 0.0f));
             add_stalker_box(s_stalker_verts, skull_m, glm::vec3(0.22f, 0.14f, 0.22f), chitin_color, chitin_mat);
@@ -1141,14 +1146,14 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             add_stalker_box(s_stalker_verts, mand_r, glm::vec3(0.04f, 0.04f, 0.18f), claw_color, claw_mat);
         }
 
-        // H. 6 Articulated Arachnid / Mantis Legs
+        // H. 6 Articulated Arachnid / Mantis Legs (with distinct wall-climb and ceiling splay adaptations)
         for (int l = 0; l < 6; ++l) {
             bool is_left = (l % 2 == 0);
             int row = l / 2; // 0=front, 1=mid, 2=rear
             float side = is_left ? -1.0f : 1.0f;
 
             float root_z = (row == 0) ? 0.20f : (row == 1) ? 0.0f : -0.22f;
-            float root_x = side * 0.24f;
+            float root_x = side * 0.24f * pose.limb_splay_multiplier;
             float root_y = 0.26f;
 
             glm::mat4 hip_m = glm::translate(base_model, glm::vec3(root_x, root_y, root_z));
@@ -1159,21 +1164,23 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
             if (row == 0) {
                 // FRONT LEGS: Predatory Mantis Scythe Claws!
-                float strike_pitch = (s.state == StalkerState::Lunging) ? -0.85f : (-0.35f + crawl_swing * 0.2f);
-                float strike_yaw = side * (0.6f + (s.state == StalkerState::Lunging ? 0.3f : 0.0f));
+                float strike_pitch = (s.state == StalkerState::Lunging)
+                    ? -0.85f
+                    : (-0.35f + pose.front_claw_pitch_offset + crawl_swing * 0.2f);
+                float strike_yaw = side * (pose.front_claw_yaw + (s.state == StalkerState::Lunging ? 0.3f : 0.0f));
 
                 glm::mat4 femur_m = glm::rotate(hip_m, strike_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
                 femur_m = glm::rotate(femur_m, strike_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                femur_m = glm::translate(femur_m, glm::vec3(0.0f, 0.18f, 0.14f));
-                add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.045f, 0.18f, 0.05f), chitin_color, chitin_mat);
+                femur_m = glm::translate(femur_m, glm::vec3(0.0f, 0.18f * pose.front_claw_reach, 0.14f * pose.front_claw_reach));
+                add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.045f, 0.18f * pose.front_claw_reach, 0.05f), chitin_color, chitin_mat);
 
-                float tibia_pitch = (s.state == StalkerState::Lunging) ? 1.4f : 1.05f;
-                glm::mat4 tibia_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f, 0.08f));
+                float tibia_pitch = (s.state == StalkerState::Lunging) ? 1.4f : (1.05f + pose.tibia_pitch_offset);
+                glm::mat4 tibia_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f * pose.front_claw_reach, 0.08f));
                 tibia_m = glm::rotate(tibia_m, tibia_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                tibia_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.18f, 0.0f));
-                add_stalker_box(s_stalker_verts, tibia_m, glm::vec3(0.035f, 0.20f, 0.04f), claw_color, claw_mat);
+                tibia_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.18f * pose.front_claw_reach, 0.0f));
+                add_stalker_box(s_stalker_verts, tibia_m, glm::vec3(0.035f, 0.20f * pose.front_claw_reach, 0.04f), claw_color, claw_mat);
 
-                glm::mat4 tip_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.20f, 0.02f));
+                glm::mat4 tip_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.20f * pose.front_claw_reach, 0.02f));
                 tip_m = glm::rotate(tip_m, -0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
                 add_stalker_box(s_stalker_verts, tip_m, glm::vec3(0.025f, 0.08f, 0.03f), claw_color, claw_mat);
 
@@ -1189,15 +1196,16 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             } else {
                 // MID & REAR LEGS: Splayed arachnid legs with crawling IK
                 float leg_base_yaw = (row == 1) ? (side * 1.57f) : (side * 2.35f);
+                leg_base_yaw *= (1.0f + (pose.limb_splay_multiplier - 1.0f) * 0.25f);
                 leg_base_yaw += crawl_swing * 0.25f;
 
-                float femur_pitch = -0.55f + crawl_lift;
+                float femur_pitch = -0.55f + pose.femur_pitch_offset + crawl_lift;
                 glm::mat4 femur_m = glm::rotate(hip_m, leg_base_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
                 femur_m = glm::rotate(femur_m, femur_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
                 femur_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f, 0.10f));
                 add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.04f, 0.18f, 0.045f), chitin_color, chitin_mat);
 
-                float tibia_pitch = 1.35f - crawl_lift * 0.8f;
+                float tibia_pitch = 1.35f + pose.tibia_pitch_offset - crawl_lift * 0.8f;
                 glm::mat4 tibia_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f, 0.06f));
                 tibia_m = glm::rotate(tibia_m, tibia_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
                 tibia_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.22f, 0.0f));

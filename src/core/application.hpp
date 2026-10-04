@@ -43,8 +43,12 @@ struct AppConfig {
     bool test_enemy{false};
     bool capture_models{false};
     bool capture_level_shapes{false};
-    int window_width{1600};
-    int window_height{900};
+    bool mute_audio{false};
+    bool force_audible{false};
+    int window_width{0};
+    int window_height{0};
+    bool auto_screen_size{true};
+    bool fullscreen{false};
 };
 
 constexpr GameState STATE_MAIN_MENU   = GameState::MainMenu;

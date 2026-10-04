@@ -91,7 +91,18 @@ This executes an automated 10-phase gameplay loop, computes visual metrics, and 
 
 ---
 
-## 4. Investigating Runtime Crashes & Invariants
+## 4. Silent Testing & Non-Audible Execution Policy
+
+To protect developer hearing and prevent audio driver contention:
+- **All automated tests run non-audible by default**: `python scripts/tdd.py`, `test_audio.exe`, and `python scripts/analyze_audio.py` render to internal memory buffers without opening the physical hardware audio device.
+- **Automated game playthroughs are muted**: Running `VoidfallDredge.exe --auto-play-test`, `--capture-models`, or `--capture-level-shapes` automatically suppresses sound output.
+- **Silent Game Launch**: Use `./build/Release/VoidfallDredge.exe --mute` or `--silent` to launch the game client with zero audio.
+- **Global Environment Override**: Set `export VOIDFALL_MUTE_AUDIO=1` to disable hardware audio engine-wide.
+- **Opt-in Audible Playback**: Pass `--audible` to `test_audio.exe` or `VoidfallDredge.exe` only when explicitly intending to listen through speakers/headset.
+
+---
+
+## 5. Investigating Runtime Crashes & Invariants
 
 When investigating crashes, assertion failures, or OpenGL state bugs, consult:
 - Reference Guide: [references/diagnostics_guide.md](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-build-and-test/references/diagnostics_guide.md)

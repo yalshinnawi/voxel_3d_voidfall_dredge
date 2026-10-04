@@ -11,6 +11,9 @@ import time
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 
+# Always enforce silent headless audio for all tests and child processes
+os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+
 CONFIG = "Release"
 BUILD_DIR = "build"
 EXE_EXT = ".exe" if sys.platform == "win32" else ""
@@ -190,7 +193,7 @@ def main():
         if not ok: return 1
         print("[*] Running automated 7-phase visual playthrough...")
         exe = os.path.join(BUILD_DIR, CONFIG, f"VoidfallDredge{EXE_EXT}")
-        run_cmd([exe, "--auto-play-test"])
+        run_cmd([exe, "--auto-play-test", "--mute"])
         # Run visual analyzer
         analyzer = os.path.join("scripts", "analyze_screenshots.py")
         subprocess.run([sys.executable, analyzer])

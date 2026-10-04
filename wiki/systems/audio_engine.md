@@ -90,7 +90,7 @@ $$\text{Attenuation} = \frac{1.0}{1.0 + 0.08 \cdot d + 0.015 \cdot d^2}$$
 
 ## 5. Automated Verification & Testing
 
-### Running C++ Audio Test Suite
+### Running C++ Audio Test Suite (Silent Headless Mode by Default)
 ```bash
 ./build/Release/test_audio.exe
 ```
@@ -98,6 +98,22 @@ Or via the parallel TDD runner:
 ```bash
 python scripts/tdd.py
 ```
+> [!NOTE]
+> **Developer Ear Protection**: `test_audio.exe` runs 100% silently by default. All 16 testing modules, ear-safety limiters, and DSP filters evaluate against in-memory PCM buffers without opening the physical sound card.
+> - To opt-in to audible playback through your headset:
+>   ```bash
+>   ./build/Release/test_audio.exe --audible
+>   ```
+> - To launch the game client silently:
+>   ```bash
+>   ./build/Release/VoidfallDredge.exe --mute
+>   # or:
+>   ./build/Release/VoidfallDredge.exe --silent
+>   ```
+> - To enforce silent audio across the entire engine via environment variable:
+>   ```bash
+>   export VOIDFALL_MUTE_AUDIO=1
+>   ```
 
 ### Running Ear Safety & Acoustic Analysis
 ```bash

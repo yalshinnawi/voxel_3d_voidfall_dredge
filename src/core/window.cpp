@@ -18,6 +18,23 @@ Window::Window(const WindowConfig& config)
         throw std::runtime_error("Failed to initialize GLFW");
     }
 
+    GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* video_mode = primary_monitor ? glfwGetVideoMode(primary_monitor) : nullptr;
+
+    if (config.auto_screen_size && primary_monitor && video_mode) {
+        int work_x = 0, work_y = 0, work_w = 0, work_h = 0;
+        glfwGetMonitorWorkarea(primary_monitor, &work_x, &work_y, &work_w, &work_h);
+        if (work_w > 0 && work_h > 0) {
+            m_width = work_w;
+            m_height = work_h;
+        } else if (video_mode->width > 0 && video_mode->height > 0) {
+            m_width = video_mode->width;
+            m_height = video_mode->height;
+        }
+        VF_LOG_INFO("Window", "Auto-detected primary monitor resolution: " << video_mode->width << "x" << video_mode->height
+                    << " (Desktop workarea: " << m_width << "x" << m_height << ")");
+    }
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -28,18 +45,38 @@ Window::Window(const WindowConfig& config)
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 #endif
 
-    m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
+    if (config.auto_screen_size && !config.fullscreen) {
+        glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
+    }
+
+    GLFWmonitor* target_monitor = config.fullscreen ? primary_monitor : nullptr;
+    m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), target_monitor, nullptr);
     if (!m_window) {
         VF_LOG_WARN("Window", "OpenGL 4.5 window creation failed, attempting fallback to OpenGL 4.3...");
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
+        m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), target_monitor, nullptr);
         if (!m_window) {
             glfwTerminate();
             VF_LOG_FATAL("Window", "Failed to create GLFW OpenGL 4.3+ window context");
             throw std::runtime_error("Failed to create GLFW OpenGL 4.3+ window");
         }
     }
+
+    if (config.auto_screen_size && !config.fullscreen) {
+        glfwMaximizeWindow(m_window);
+    }
+
+    int fb_w = 0, fb_h = 0;
+    glfwGetFramebufferSize(m_window, &fb_w, &fb_h);
+    if (fb_w > 0 && fb_h > 0) {
+        m_width = fb_w;
+        m_height = fb_h;
+    }
+    VF_LOG_INFO("Window", "Window initialized with framebuffer resolution: " << m_width << "x" << m_height);
+
+    glfwGetWindowPos(m_window, &m_windowed_x, &m_windowed_y);
+    glfwGetWindowSize(m_window, &m_windowed_w, &m_windowed_h);
 
     glfwMakeContextCurrent(m_window);
     glfwSetWindowUserPointer(m_window, this);
@@ -62,6 +99,8 @@ Window::Window(const WindowConfig& config)
     VF_LOG_INFO("Hardware", "GLSL Version: " << (glsl_version ? reinterpret_cast<const char*>(glsl_version) : "Unknown"));
 
     Logger::setup_gl_debug();
+
+    glViewport(0, 0, m_width, m_height);
 
     glfwSwapInterval(config.vsync ? 1 : 0);
 
@@ -112,6 +151,47 @@ void Window::set_cursor_locked(bool locked) {
     } else {
         glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
+}
+
+bool Window::is_fullscreen() const {
+    return m_window && glfwGetWindowMonitor(m_window) != nullptr;
+}
+
+void Window::set_fullscreen(bool fullscreen) {
+    if (!m_window) return;
+    bool currently_fs = is_fullscreen();
+    if (currently_fs == fullscreen) return;
+
+    if (fullscreen) {
+        glfwGetWindowPos(m_window, &m_windowed_x, &m_windowed_y);
+        glfwGetWindowSize(m_window, &m_windowed_w, &m_windowed_h);
+
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        if (monitor) {
+            const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+            if (mode) {
+                glfwSetWindowMonitor(m_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+            }
+        }
+    } else {
+        glfwSetWindowMonitor(m_window, nullptr, m_windowed_x, m_windowed_y, m_windowed_w, m_windowed_h, 0);
+        glfwMaximizeWindow(m_window);
+    }
+
+    int fb_w = 0, fb_h = 0;
+    glfwGetFramebufferSize(m_window, &fb_w, &fb_h);
+    if (fb_w > 0 && fb_h > 0) {
+        m_width = fb_w;
+        m_height = fb_h;
+        glViewport(0, 0, m_width, m_height);
+        if (m_resize_cb) {
+            m_resize_cb(m_width, m_height);
+        }
+    }
+}
+
+void Window::toggle_fullscreen() {
+    set_fullscreen(!is_fullscreen());
 }
 
 bool Window::is_key_down(int key) const {

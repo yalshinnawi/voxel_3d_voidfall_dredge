@@ -1,8 +1,11 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <cstdint>
 #include "../../systems/noise_meter.hpp"
+#include "../../ai/aberrant_ai.hpp"
+#include "../../graphics/animation_controller.hpp"
 
 namespace Voidfall {
 
@@ -95,6 +98,26 @@ struct VoidStalker {
     float glow_phase{0.0f};         // Pulsing emissive glow animation
     float pitch{0.0f};              // Vertical tilt angle toward target (radians)
     float walk_cycle{0.0f};         // Articulated leg crawl cycle phase
+
+    // Surface Traversal, Rig Alignment & Quaternion Orientation
+    StalkerSurfaceState surface_state{StalkerSurfaceState::FLOOR};
+    StalkerSurfaceState target_surface_state{StalkerSurfaceState::FLOOR};
+    StalkerSurfaceState prev_surface_state{StalkerSurfaceState::FLOOR};
+    glm::vec3 m_targetUpVector{0.0f, 1.0f, 0.0f};
+    glm::vec3 contact_normal{0.0f, 1.0f, 0.0f};
+    glm::quat m_currentRotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::quat m_targetRotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 surface_offset{0.0f};
+    float m_climbSpeedScalar{3.2f};
+    float surface_transition_timer{0.2f};
+    StalkerAnimationController anim_controller;
+
+    // Helper references & accessors
+    const glm::quat& current_rotation() const { return m_currentRotation; }
+    const glm::vec3& target_up_vector() const { return m_targetUpVector; }
+    bool is_wall_climbing() const { return surface_state == StalkerSurfaceState::WALL_CLIMBING; }
+    bool is_ceiling_crawling() const { return surface_state == StalkerSurfaceState::CEILING_CRAWLING; }
+    bool is_transitioning() const { return surface_state == StalkerSurfaceState::TRANSITIONING || anim_controller.is_transitioning(); }
 
     // Audio cue indicators (for HUD/SFX system)
     float screech_timer{0.0f};      // Timer between ambient cavern echo screeches

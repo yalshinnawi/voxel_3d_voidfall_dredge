@@ -77,6 +77,8 @@ set(ENGINE_CORE_SOURCES
     src/entities/enemies/void_stalker.cpp
     src/entities/enemies/seismic_burrower.cpp
     src/audio/audio_engine.cpp
+    src/ai/aberrant_ai.cpp
+    src/graphics/animation_controller.cpp
 )
 
 add_library(voidfall_engine_core STATIC ${ENGINE_CORE_SOURCES})

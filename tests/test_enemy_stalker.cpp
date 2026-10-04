@@ -442,7 +442,208 @@ int main() {
         std::cout << " -> Retaliation pursuit and prolonged escape break verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 11 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 12: Surface Normal Detection, 6-Directional Sampling & Traversal State Machine
+    {
+        std::cout << "[Test 12] Testing Surface Normal Detection, 6-Directional Sampling & State Machine..." << std::endl;
+        
+        // 12a: Direct Normal Classification:
+        // Floor: n · up > 0.7
+        // Wall:  |n · up| <= 0.7
+        // Ceiling: n · up < -0.7
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.0f, 1.0f, 0.0f)) == StalkerSurfaceState::FLOOR, "Upward normal (0,1,0) must be FLOOR");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.2f, 0.95f, 0.0f)) == StalkerSurfaceState::FLOOR, "Slightly angled floor normal must be FLOOR");
+        CHECK(AberrantAI::classify_normal(glm::vec3(1.0f, 0.0f, 0.0f)) == StalkerSurfaceState::WALL_CLIMBING, "East wall normal (1,0,0) must be WALL_CLIMBING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(-1.0f, 0.0f, 0.0f)) == StalkerSurfaceState::WALL_CLIMBING, "West wall normal (-1,0,0) must be WALL_CLIMBING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.0f, 0.0f, 1.0f)) == StalkerSurfaceState::WALL_CLIMBING, "South wall normal (0,0,1) must be WALL_CLIMBING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.0f, 0.0f, -1.0f)) == StalkerSurfaceState::WALL_CLIMBING, "North wall normal (0,0,-1) must be WALL_CLIMBING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.707f, 0.707f, 0.0f)) == StalkerSurfaceState::FLOOR, "45-degree slope (>0.7) should classify as FLOOR");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.707f, 0.5f, 0.0f)) == StalkerSurfaceState::WALL_CLIMBING, "Steep wall slope (<=0.7) must be WALL_CLIMBING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.0f, -1.0f, 0.0f)) == StalkerSurfaceState::CEILING_CRAWLING, "Inverted normal (0,-1,0) must be CEILING_CRAWLING");
+        CHECK(AberrantAI::classify_normal(glm::vec3(0.1f, -0.95f, 0.0f)) == StalkerSurfaceState::CEILING_CRAWLING, "Angled ceiling normal must be CEILING_CRAWLING");
+
+        // 12b: Dynamic 6-Directional Sampling against Voxel Geometry
+        World test_world;
+        test_world.generate_world(1, 42);
+        // Clear a 5x5x5 chamber
+        for (int x = 20; x <= 26; ++x) {
+            for (int y = 20; y <= 26; ++y) {
+                for (int z = 20; z <= 26; ++z) {
+                    test_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+        // Floor at y=19
+        for (int x = 20; x <= 26; ++x) {
+            for (int z = 20; z <= 26; ++z) {
+                test_world.set_voxel(x, 19, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+            }
+        }
+        // East wall at x=27
+        for (int y = 20; y <= 26; ++y) {
+            for (int z = 20; z <= 26; ++z) {
+                test_world.set_voxel(27, y, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+        }
+        // Ceiling at y=27
+        for (int x = 20; x <= 26; ++x) {
+            for (int z = 20; z <= 26; ++z) {
+                test_world.set_voxel(x, 27, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+            }
+        }
+
+        // Probe near floor (y=20.2): closest solid is below
+        auto floor_sample = AberrantAI::sample_surface_normal(glm::vec3(23.0f, 20.2f, 23.0f), test_world, 1.4f);
+        CHECK(floor_sample.has_contact, "Must detect floor contact");
+        CHECK(floor_sample.contact_normal.y > 0.9f, "Floor contact normal must point up (+Y)");
+        CHECK(floor_sample.surface_state == StalkerSurfaceState::FLOOR, "Must classify as FLOOR");
+
+        // Probe near east wall (x=26.7): closest solid is at +X (x=27), normal points -X
+        auto wall_sample = AberrantAI::sample_surface_normal(glm::vec3(26.7f, 23.0f, 23.0f), test_world, 1.4f);
+        CHECK(wall_sample.has_contact, "Must detect wall contact");
+        CHECK(wall_sample.contact_normal.x < -0.9f, "Wall contact normal must point west (-X)");
+        CHECK(wall_sample.surface_state == StalkerSurfaceState::WALL_CLIMBING, "Must classify as WALL_CLIMBING");
+
+        // Probe near ceiling (y=26.8): closest solid is above (y=27), normal points -Y
+        auto ceiling_sample = AberrantAI::sample_surface_normal(glm::vec3(23.0f, 26.8f, 23.0f), test_world, 1.4f);
+        CHECK(ceiling_sample.has_contact, "Must detect ceiling contact");
+        CHECK(ceiling_sample.contact_normal.y < -0.9f, "Ceiling contact normal must point down (-Y)");
+        CHECK(ceiling_sample.surface_state == StalkerSurfaceState::CEILING_CRAWLING, "Must classify as CEILING_CRAWLING");
+
+        std::cout << " -> Surface normal detection, 6-directional sampling & state machine verified." << std::endl;
+    }
+
+    // Test 13: Smooth Transform & Model Re-Orientation (Quaternion Slerp without snapping)
+    {
+        std::cout << "[Test 13] Testing Smooth Transform & Model Re-Orientation (Quaternion Slerp)..." << std::endl;
+        
+        // 13a: Target Orientation Calculation from Velocity & Normal:
+        // forward = normalize(v - (v · n)n)
+        // right   = cross(forward, n)
+        glm::vec3 floor_vel(0.0f, 0.0f, 4.0f); // Moving forward along +Z on floor
+        glm::vec3 floor_normal(0.0f, 1.0f, 0.0f);
+        glm::quat floor_q = AberrantAI::calculate_orientation(floor_vel, floor_normal, glm::vec3(0,0,1));
+        
+        // Verify oriented basis vectors from quaternion
+        glm::mat3 rot_m = glm::mat3_cast(floor_q);
+        glm::vec3 up_vec = rot_m[1];
+        glm::vec3 fwd_vec = rot_m[2];
+        CHECK(glm::distance(up_vec, floor_normal) < 0.01f, "Up vector must match contact normal");
+        CHECK(glm::distance(fwd_vec, glm::vec3(0.0f, 0.0f, 1.0f)) < 0.01f, "Forward vector must match projected velocity");
+
+        // 13b: Smooth Slerp Transition between Floor and Wall without snapping:
+        glm::vec3 wall_normal(1.0f, 0.0f, 0.0f); // Wall facing +X
+        glm::vec3 wall_vel(0.0f, 4.0f, 0.0f);   // Climbing up (+Y)
+        glm::quat wall_q = AberrantAI::calculate_orientation(wall_vel, wall_normal, glm::vec3(0,1,0));
+
+        glm::quat current_q = floor_q;
+        float dt = 0.016f; // 60 FPS tick
+        float prev_angle_to_target = glm::angle(glm::conjugate(current_q) * wall_q);
+
+        // Step through multiple frames and ensure rotation transitions smoothly
+        for (int step = 0; step < 10; ++step) {
+            glm::quat next_q = AberrantAI::slerp_rotation(current_q, wall_q, dt, 8.0f);
+            float step_delta = glm::angle(glm::conjugate(current_q) * next_q);
+            float angle_to_target = glm::angle(glm::conjugate(next_q) * wall_q);
+
+            CHECK(step_delta > 0.0f, "Slerp must advance each frame");
+            CHECK(step_delta < 0.35f, "Slerp must not pop or jump abruptly in a single frame");
+            CHECK(angle_to_target < prev_angle_to_target, "Angle to target orientation must monotonically decrease");
+
+            current_q = next_q;
+            prev_angle_to_target = angle_to_target;
+        }
+
+        // 13c: Surface Snapping Offset Calculation
+        glm::vec3 floor_offset = AberrantAI::compute_surface_snapping_offset(StalkerSurfaceState::FLOOR, glm::vec3(0,1,0));
+        glm::vec3 wall_offset = AberrantAI::compute_surface_snapping_offset(StalkerSurfaceState::WALL_CLIMBING, glm::vec3(1,0,0));
+        glm::vec3 ceiling_offset = AberrantAI::compute_surface_snapping_offset(StalkerSurfaceState::CEILING_CRAWLING, glm::vec3(0,-1,0));
+
+        CHECK(floor_offset.y == 0.05f, "Floor offset must match 0.05m ground clearance");
+        CHECK(wall_offset.x == 0.18f, "Wall offset must match 0.18m flush wall profile");
+        CHECK(ceiling_offset.y == -0.22f, "Ceiling offset must match -0.22m flush inverted ceiling hold");
+
+        std::cout << " -> Smooth quaternion slerp and surface snapping offset verified." << std::endl;
+    }
+
+    // Test 14: Distinct Animation Poses & State Switching
+    {
+        std::cout << "[Test 14] Testing Distinct Animation Poses (Floor, Wall, Ceiling)..." << std::endl;
+        
+        auto floor_pose = StalkerAnimationController::get_floor_pose();
+        auto wall_pose = StalkerAnimationController::get_wall_climb_pose();
+        auto ceiling_pose = StalkerAnimationController::get_ceiling_inversion_pose(0.0f);
+
+        // 14a: Floor Crawl (Default):
+        // Standard forward quad/hex-pedal scuttle, body held at default ground clearance
+        CHECK(floor_pose.carapace_offset_y == 0.0f, "Floor pose body held at default ground clearance");
+        CHECK(floor_pose.limb_splay_multiplier == 1.0f, "Floor pose limb splay default = 1.0");
+        CHECK(floor_pose.front_claw_reach == 1.0f, "Floor pose front claw reach default = 1.0");
+
+        // 14b: Wall Climb:
+        // Flatten carapace closer to the surface plane (lower profile), splay limbs wider along wall normal, extend front claw reach
+        CHECK(wall_pose.carapace_offset_y < 0.0f, "Wall climb must flatten carapace closer to surface plane (lower profile)");
+        CHECK(wall_pose.limb_splay_multiplier > 1.3f, "Wall climb must splay limbs wider along wall normal");
+        CHECK(wall_pose.front_claw_reach > 1.4f, "Wall climb must extend front claw reach up the wall");
+        CHECK(wall_pose.front_claw_yaw > floor_pose.front_claw_yaw, "Wall climb front claws splay wider");
+
+        // 14c: Ceiling Inversion:
+        // Fully spread limbs anchored to ceiling voxels with downward-arching predatory neck/head tracking toward player
+        CHECK(ceiling_pose.limb_splay_multiplier > 1.5f, "Ceiling inversion must fully spread limbs anchored to ceiling");
+        CHECK(ceiling_pose.front_claw_yaw > wall_pose.front_claw_yaw, "Ceiling front claw spread widest");
+        CHECK(ceiling_pose.head_pitch_offset < -0.7f, "Ceiling inversion must feature downward-arching neck/head tracking toward player");
+
+        std::cout << " -> Distinct animation poses for Floor, Wall and Ceiling verified." << std::endl;
+    }
+
+    // Test 15: Locomotion Crossfade over 0.2s Blend Window & Velocity Modulation
+    {
+        std::cout << "[Test 15] Testing 0.2s Crossfade Blending & Velocity Play Rate Modulation..." << std::endl;
+        
+        StalkerAnimationController controller;
+        CHECK(controller.floor_weight() == 1.0f, "Controller must initialize with 100% floor weight");
+        CHECK(controller.wall_weight() == 0.0f, "Controller must initialize with 0% wall weight");
+        CHECK(controller.ceiling_weight() == 0.0f, "Controller must initialize with 0% ceiling weight");
+        CHECK(!controller.is_transitioning(), "Initial state is not transitioning");
+
+        // 15a: Transition Floor -> Wall Climbing
+        controller.update(0.01f, StalkerSurfaceState::WALL_CLIMBING, glm::vec3(0, 3, 0));
+        CHECK(controller.is_transitioning(), "Initiating state change must enter transitioning state");
+        CHECK(controller.target_state() == StalkerSurfaceState::WALL_CLIMBING, "Target state should be WALL_CLIMBING");
+
+        // Mid-transition at t = 0.10s (50% through 0.2s window)
+        controller.update(0.09f, StalkerSurfaceState::WALL_CLIMBING, glm::vec3(0, 3, 0));
+        CHECK(controller.is_transitioning(), "Should still be transitioning at t=0.10s");
+        CHECK(controller.floor_weight() > 0.2f && controller.floor_weight() < 0.8f, "Floor weight should be crossfading mid-way");
+        CHECK(controller.wall_weight() > 0.2f && controller.wall_weight() < 0.8f, "Wall weight should be crossfading mid-way");
+        CHECK(controller.transition_progress() >= 0.45f && controller.transition_progress() <= 0.55f, "Transition progress ~ 50%");
+
+        // Complete transition at t = 0.20s
+        controller.update(0.10f, StalkerSurfaceState::WALL_CLIMBING, glm::vec3(0, 3, 0));
+        CHECK(!controller.is_transitioning(), "Transition must complete after 0.2s blend window");
+        CHECK(controller.current_state() == StalkerSurfaceState::WALL_CLIMBING, "Current state must now be WALL_CLIMBING");
+        CHECK(controller.wall_weight() == 1.0f, "Wall weight must be 1.0 after transition completes");
+        CHECK(controller.floor_weight() == 0.0f, "Floor weight must be 0.0 after transition completes");
+
+        // Blended pose after transition matches wall climb pose
+        auto blended = controller.compute_blended_pose();
+        auto wall_ref = StalkerAnimationController::get_wall_climb_pose();
+        CHECK(std::abs(blended.front_claw_reach - wall_ref.front_claw_reach) < 0.001f, "Blended pose must match pure wall pose");
+
+        // 15b: Linear Velocity Play Rate Modulation:
+        // animPlayRate = glm::length(m_velocity) * m_climbSpeedScalar
+        glm::vec3 climb_vel(0.0f, 4.0f, 0.0f);
+        float scalar = 3.2f;
+        float rate = controller.calculate_play_rate(climb_vel, scalar);
+        CHECK(std::abs(rate - (4.0f * 3.2f)) < 0.001f, "Play rate must equal length(velocity) * climb_speed_scalar");
+
+        // Stationary idle maintains live breathing play rate (> 0.0f)
+        float idle_rate = controller.calculate_play_rate(glm::vec3(0.0f), scalar);
+        CHECK(idle_rate > 0.5f, "Stationary stalker must maintain subtle alive idle rate (> 0.5)");
+
+        std::cout << " -> 0.2s crossfade blending and play rate velocity modulation verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 15 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

@@ -201,7 +201,7 @@ public:
     AudioEngine& operator=(const AudioEngine&) = delete;
 
     /// Initialize audio hardware (or fallback to virtual headless mode)
-    bool init();
+    bool init(bool enable_hardware = true);
 
     /// Shutdown audio subsystem
     void shutdown();

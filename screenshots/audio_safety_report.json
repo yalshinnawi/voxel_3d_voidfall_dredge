@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-03 11:05:46",
+  "timestamp": "2026-10-03 20:47:53",
   "overall_status": "ALL AUDIO PASSES EAR SAFETY STANDARDS",
   "sample_count": 19,
   "safety_thresholds": {
@@ -81,7 +81,7 @@
       "max_slew_rate": 0.0562,
       "dc_offset": 1e-05,
       "clipped_samples": 0,
-      "zero_crossing_rate_hz": 2364.8,
+      "zero_crossing_rate_hz": 2365.6,
       "ear_safety_status": "PASS"
     },
     {
@@ -106,12 +106,12 @@
       "channels": 2,
       "peak_amplitude": 0.2182,
       "peak_dbfs": -13.22,
-      "rms_dbfs": -34.32,
+      "rms_dbfs": -34.33,
       "crest_factor_db": 21.1,
       "max_slew_rate": 0.0518,
-      "dc_offset": 4e-05,
+      "dc_offset": 0.0,
       "clipped_samples": 0,
-      "zero_crossing_rate_hz": 7380.0,
+      "zero_crossing_rate_hz": 7440.0,
       "ear_safety_status": "PASS"
     },
     {

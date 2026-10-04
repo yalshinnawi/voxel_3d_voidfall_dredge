@@ -352,9 +352,41 @@ AudioEngine::~AudioEngine() {
     shutdown();
 }
 
-bool AudioEngine::init() {
+bool AudioEngine::init(bool enable_hardware) {
     load_sound_samples();
-    init_platform_audio();
+
+    // Check Windows process command line for automatic silent headless mode
+#ifdef _WIN32
+    const char* cmdline = GetCommandLineA();
+    if (cmdline) {
+        std::string cmd(cmdline);
+        // Explicit user request to hear audio
+        if (cmd.find("--audible") != std::string::npos || cmd.find("--force-audio") != std::string::npos) {
+            enable_hardware = true;
+        }
+        // Automatic developer ear-protection: any test binary, test flag, capture, or mute flag is 100% silent
+        else if (cmd.find("--test") != std::string::npos ||
+                 cmd.find("--mute") != std::string::npos ||
+                 cmd.find("--silent") != std::string::npos ||
+                 cmd.find("--auto-test") != std::string::npos ||
+                 cmd.find("--auto-play-test") != std::string::npos ||
+                 cmd.find("--capture") != std::string::npos ||
+                 cmd.find("--hidden") != std::string::npos ||
+                 cmd.find("--headless") != std::string::npos ||
+                 cmd.find("test_") != std::string::npos) {
+            enable_hardware = false;
+        }
+    }
+#endif
+
+    const char* env_mute = std::getenv("VOIDFALL_MUTE_AUDIO");
+    if (env_mute && (std::string(env_mute) == "1" || std::string(env_mute) == "true")) {
+        enable_hardware = false;
+    }
+
+    if (enable_hardware) {
+        init_platform_audio();
+    }
     // Start continuous subterranean cavern ambience at initial volume (quiet, dreary negative space)
     play_sound_2d(SoundCue::AmbientCavern, 0.24f, 1.0f, true);
     return true;

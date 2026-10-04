@@ -19,6 +19,14 @@
 ---
 
 ## 2. Build & Execution Workflow (User Environment: Git Bash)
+
+> [!CAUTION]
+> ### 🔇 MANDATORY ZERO-AUDIO / NON-AUDIBLE TESTING POLICY FOR ALL AGENTS
+> Under NO circumstance should any test suite, automated visual harness, staging capture, or background command play audible sound through the user's headset or speakers.
+> - All test suites (`test_*.exe`, `python scripts/tdd.py`, `python scripts/test_enemy.py`, etc.) MUST run 100% silently in headless audio mode.
+> - Automated engine launches (`--test-enemy`, `--auto-play-test`, `--capture-models`, `--capture-level-shapes`, `--hidden`) automatically suppress hardware audio; always ensure `--mute` is passed if scripting.
+> - Never pass `--audible` unless explicitly requested by the user.
+
 - **Primary Shell Convention**: The user uses **Git Bash**. Always format commands with forward slashes (`/`), POSIX paths, and executable invocations formatted for bash (`./build/...`).
 - **Build with CMake (MSVC / Windows)**:
   ```bash
@@ -81,8 +89,40 @@ The engine includes an automated playthrough and visual test harness ([src/core/
   - **F7**: Force Seismic Tremor (triggers screen trauma, HUD warning, ceiling debris).
   - **F8**: Force Evac Pod Touchdown (drops beacon holdout countdown to $\le 1\,\text{s}$).
   - **F9**: Force Escape Evacuation (extracts squad immediately into Debrief screen).
-- **Global Screenshot Hotkey (Always Active)**:
+- **Global Display & Screenshot Hotkeys (Always Active)**:
+  - **F11** or **Alt+Enter**: Toggle Fullscreen / Windowed Maximized mode dynamically at any time.
   - **F12**: Capture timestamped PNG to `screenshots/screenshot_YYYYMMDD_HHMMSS.png`.
+- **Display Resolution & Screen Sizing**:
+  - The game automatically detects the user's primary monitor resolution and desktop workarea on startup, sizing and maximizing the window to fit the user's screen seamlessly.
+  - Command line overrides:
+    - `./build/Release/VoidfallDredge.exe` (Default: auto-detects screen size and maximizes).
+    - `./build/Release/VoidfallDredge.exe --fullscreen` or `-f` (Launches in native fullscreen).
+    - `./build/Release/VoidfallDredge.exe --windowed` (Launches in fixed 1600x900 windowed mode).
+    - `./build/Release/VoidfallDredge.exe --width 1920 --height 1080` (Launches with explicit resolution).
+    - Automated test suites (`--auto-play-test`, `--capture-models`, etc.) maintain deterministic 1600x900 canvas buffers.
+
+### 2.2 Silent Testing & Headless Audio Policy (Developer Ear Protection)
+All automated tests and visual playthroughs run **strictly non-audible (silent headless audio mode)** by default to protect developer hearing and prevent audio driver contention:
+- **Audio Test Suite (`test_audio.exe`)**:
+  - Runs 100% silently by default via virtual software buffers (`render_mix()`, `render_offline_samples()`). All mathematical invariants, ear-safety limiters, and frequency filters are fully validated in CPU memory without opening the physical sound card.
+  - Opt-in hardware audio (only if physical listening is desired):
+    ```bash
+    ./build/Release/test_audio.exe --audible
+    ```
+- **Automated Game Playthrough & Visual Captures**:
+  - `--auto-play-test`, `--capture-models`, `--capture-level-shapes`, and `--hidden` automatically suppress hardware sound output.
+  - To launch the game client silently at any time:
+    ```bash
+    ./build/Release/VoidfallDredge.exe --mute
+    # or:
+    ./build/Release/VoidfallDredge.exe --silent
+    ```
+  - To force audio during automated runs:
+    ```bash
+    ./build/Release/VoidfallDredge.exe --auto-play-test --audible
+    ```
+- **Global Environment Override**:
+  - Setting `export VOIDFALL_MUTE_AUDIO=1` unconditionally forces the audio engine into silent headless mode for all game and test executables.
 
 ---
 

@@ -12,6 +12,9 @@ import zipfile
 import subprocess
 from pathlib import Path
 
+# Always enforce silent headless audio for all tests and child processes
+os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT_DIR / "build" / "Release"
 EXE_PATH = BUILD_DIR / "VoidfallDredge.exe"

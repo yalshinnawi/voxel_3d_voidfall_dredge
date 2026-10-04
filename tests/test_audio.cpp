@@ -56,13 +56,29 @@ static void write_wav_file(const std::string& path, const std::vector<float>& fl
 }
 
 int main(int argc, char** argv) {
-    bool export_wav = (argc > 1 && std::string(argv[1]) == "--export-wav");
+    bool export_wav = false;
+    bool enable_hardware = false; // Default: 100% silent headless mode to protect developer hearing
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--export-wav") {
+            export_wav = true;
+        } else if (arg == "--audible" || arg == "--hardware" || arg == "--listen") {
+            enable_hardware = true;
+        }
+    }
+
     std::cout << "========================================" << std::endl;
     std::cout << "RUNNING VOIDFALL DREDGE AUDIO & EAR SAFETY TEST SUITE" << std::endl;
+    if (enable_hardware) {
+        std::cout << "Mode: HARDWARE PLAYBACK ACTIVE (--audible)" << std::endl;
+    } else {
+        std::cout << "Mode: SILENT HEADLESS MODE (Ear protection / quiet testing)" << std::endl;
+    }
     std::cout << "========================================" << std::endl;
 
     AudioEngine audio;
-    audio.init();
+    audio.init(enable_hardware);
 
     // ── Test 1: Peak Amplitude Invariant & Hearing Protection Under Simultaneous Voice Overload ──
     {
