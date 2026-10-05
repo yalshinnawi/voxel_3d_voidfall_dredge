@@ -1,6 +1,9 @@
 #include "hud.hpp"
 #include "font_renderer.hpp"
 #include "../skills/surveying.hpp"
+#include "../ai/swarm_manager.hpp"
+#include "../entities/enemies/void_stalker.hpp"
+#include "../entities/enemies/seismic_burrower.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include "../include/font8x8.h"
@@ -10,20 +13,25 @@
 
 namespace Voidfall {
 
-HUD::HUD(int screen_width, int height)
+HUD::HUD(int screen_width, int height, bool headless)
     : m_width(screen_width)
     , m_height(height)
+    , m_headless(headless)
 {
-    m_ui_shader.load_graphics("assets/shaders/ui.vert", "assets/shaders/ui.frag");
-    m_text_shader.load_graphics("assets/shaders/text.vert", "assets/shaders/text.frag");
+    if (!m_headless) {
+        m_ui_shader.load_graphics("assets/shaders/ui.vert", "assets/shaders/ui.frag");
+        m_text_shader.load_graphics("assets/shaders/text.vert", "assets/shaders/text.frag");
 
-    init_gl();
-    init_font_atlas();
+        init_gl();
+        init_font_atlas();
+    }
 }
 
 HUD::~HUD() {
     if (m_rect_vao != 0) glDeleteVertexArrays(1, &m_rect_vao);
     if (m_rect_vbo != 0) glDeleteBuffers(1, &m_rect_vbo);
+    if (m_tri_vao != 0) glDeleteVertexArrays(1, &m_tri_vao);
+    if (m_tri_vbo != 0) glDeleteBuffers(1, &m_tri_vbo);
     if (m_text_vao != 0) glDeleteVertexArrays(1, &m_text_vao);
     if (m_text_vbo != 0) glDeleteBuffers(1, &m_text_vbo);
     if (m_font_tex != 0) glDeleteTextures(1, &m_font_tex);
@@ -47,6 +55,16 @@ void HUD::init_gl() {
     glBindVertexArray(m_rect_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_rect_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(unit_quad), unit_quad, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), reinterpret_cast<void*>(0));
+    glBindVertexArray(0);
+
+    // 1b. Dynamic Triangle VAO (for alert triangles, combat chevrons and pointer carets)
+    glGenVertexArrays(1, &m_tri_vao);
+    glGenBuffers(1, &m_tri_vbo);
+    glBindVertexArray(m_tri_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_tri_vbo);
+    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), reinterpret_cast<void*>(0));
     glBindVertexArray(0);
@@ -85,14 +103,62 @@ void HUD::resize(int width, int height) {
 
 void HUD::update(float dt) {
     m_total_time += dt;
-    if (m_warning_timer > 0.0f) {
-        m_warning_timer -= dt;
+    for (auto it = m_notifications.begin(); it != m_notifications.end();) {
+        it->timer -= dt;
+        if (it->timer <= 0.0f) {
+            it = m_notifications.erase(it);
+        } else {
+            ++it;
+        }
     }
     if (m_damage_flash_timer > 0.0f) {
         m_damage_flash_timer = std::max(0.0f, m_damage_flash_timer - dt * 1.5f);
     }
+    if (m_radiation_flash_timer > 0.0f) {
+        m_radiation_flash_timer = std::max(0.0f, m_radiation_flash_timer - dt * 1.6f);
+    }
+    if (m_toxic_gas_flash_timer > 0.0f) {
+        m_toxic_gas_flash_timer = std::max(0.0f, m_toxic_gas_flash_timer - dt * 1.4f);
+    }
+    m_toxic_gas_exposure = std::max(0.0f, m_toxic_gas_exposure - dt * 2.0f);
+
+    if (m_hit_marker_timer > 0.0f) {
+        m_hit_marker_timer = std::max(0.0f, m_hit_marker_timer - dt);
+    }
+    if (m_tool_switch_toast_timer > 0.0f) {
+        m_tool_switch_toast_timer = std::max(0.0f, m_tool_switch_toast_timer - dt);
+    }
+
+    // Update screen-space visor toxic vapor particles
+    for (auto it = m_screen_toxic_particles.begin(); it != m_screen_toxic_particles.end();) {
+        it->x += it->vx * dt;
+        it->y += it->vy * dt;
+        it->life -= dt;
+        if (it->life <= 0.0f) {
+            it = m_screen_toxic_particles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update on-screen visor blood splatters (enemy attacks only)
+    for (auto it = m_blood_splatters.begin(); it != m_blood_splatters.end();) {
+        it->y += it->drip_speed * dt;
+        it->life -= dt;
+        if (it->life <= 0.0f) {
+            it = m_blood_splatters.erase(it);
+        } else {
+            ++it;
+        }
+    }
     if (m_briefing_auto_timer > 0.0f) {
         m_briefing_auto_timer = std::max(0.0f, m_briefing_auto_timer - dt);
+    }
+
+    if (m_noise_peak_timer > 0.0f) {
+        m_noise_peak_timer = std::max(0.0f, m_noise_peak_timer - dt);
+    } else if (m_noise_peak > 0.0f) {
+        m_noise_peak = std::max(0.0f, m_noise_peak - 40.0f * dt);
     }
 
     for (auto it = m_floating_loot.begin(); it != m_floating_loot.end();) {
@@ -115,9 +181,228 @@ void HUD::update(float dt) {
     }
 }
 
+void HUD::set_toxic_gas_exposure(float exposure, float dt) {
+    m_toxic_gas_exposure = std::clamp(exposure, 0.0f, 1.0f);
+    if (m_toxic_gas_exposure > 0.05f) {
+        // Continuously generate drifting on-screen smoke/vapor particles on the visor
+        if (m_screen_toxic_particles.size() < 24) {
+            float sw = static_cast<float>(m_width);
+            float sh = static_cast<float>(m_height);
+            OnScreenToxicDroplet d;
+            d.x = static_cast<float>(rand() % std::max(1, m_width));
+            d.y = sh + 12.0f;
+            d.vx = (static_cast<float>(rand() % 100) / 100.0f - 0.5f) * 60.0f;
+            d.vy = -(80.0f + static_cast<float>(rand() % 120));
+            d.size = 12.0f + static_cast<float>(rand() % 100) / 6.0f;
+            d.max_life = 0.9f + static_cast<float>(rand() % 100) / 100.0f;
+            d.life = d.max_life;
+            d.alpha = 0.60f;
+            m_screen_toxic_particles.push_back(d);
+        }
+    }
+}
+
+void HUD::trigger_enemy_blood_splatter(float intensity) {
+    if (m_headless) {
+        // Still register splatter so automated headless tests can verify count and behavior
+        OnScreenBloodSplatter s{};
+        s.x = static_cast<float>(m_width) * 0.5f;
+        s.y = static_cast<float>(m_height) * 0.5f;
+        s.size = 28.0f * intensity;
+        s.life = s.max_life = 2.0f;
+        s.droplet_count = 4;
+        m_blood_splatters.push_back(s);
+        return;
+    }
+
+    int num_splatters = std::clamp(static_cast<int>(2.0f + intensity * 2.0f), 2, 5);
+    float sw = static_cast<float>(m_width);
+    float sh = static_cast<float>(m_height);
+
+    for (int s_idx = 0; s_idx < num_splatters; ++s_idx) {
+        if (m_blood_splatters.size() >= 20) {
+            m_blood_splatters.erase(m_blood_splatters.begin());
+        }
+
+        OnScreenBloodSplatter s{};
+        float rand_u = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+        float rand_v = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+        s.x = sw * (0.12f + 0.76f * rand_u);
+        s.y = sh * (0.12f + 0.76f * rand_v);
+        s.size = (20.0f + 16.0f * (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX))) * intensity;
+        s.life = s.max_life = 1.8f + 0.8f * (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX));
+        s.alpha = std::clamp(0.85f + 0.15f * intensity, 0.70f, 1.0f);
+        s.drip_speed = 8.0f + 14.0f * (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX));
+        s.droplet_count = 3 + std::rand() % 4; // 3 to 6
+
+        for (int d = 0; d < s.droplet_count && d < 6; ++d) {
+            float angle = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) * 6.2831853f;
+            float dist = s.size * (0.6f + 0.9f * (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)));
+            s.dx[d] = std::cos(angle) * dist;
+            s.dy[d] = std::sin(angle) * dist + (s.size * 0.25f);
+            s.radii[d] = s.size * (0.14f + 0.14f * (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)));
+        }
+        m_blood_splatters.push_back(s);
+    }
+}
+
 void HUD::show_warning(const std::string& msg, float duration) {
-    m_warning_message = msg;
-    m_warning_timer = duration;
+    if (msg.empty()) return;
+
+    // Check if matching notification is already active in queue
+    for (auto it = m_notifications.begin(); it != m_notifications.end(); ++it) {
+        if (it->text == msg) {
+            it->count++;
+            it->timer = duration;
+            it->max_timer = duration;
+            if (it != m_notifications.begin()) {
+                HudNotification updated = *it;
+                m_notifications.erase(it);
+                m_notifications.push_front(updated);
+            }
+            return;
+        }
+    }
+
+    // Determine semantic color based on message intent
+    glm::vec4 color(1.0f, 0.55f, 0.15f, 1.0f); // Default amber/gold
+
+    // 1. Eliminations / Rewards / Upgrades / Success
+    if (msg.find("ELIMINATED") != std::string::npos ||
+        msg.find("DESTROYED") != std::string::npos ||
+        msg.find("FABRICATED") != std::string::npos ||
+        msg.find("REFUNDED") != std::string::npos ||
+        msg.find("GRANTED") != std::string::npos ||
+        msg.find("REPELLED") != std::string::npos ||
+        msg.find("TOUCHED DOWN") != std::string::npos ||
+        msg.find("FULLSCREEN") != std::string::npos ||
+        msg.find("WINDOWED") != std::string::npos ||
+        msg.find("BRIGHTNESS") != std::string::npos ||
+        msg.find("HEADLAMP") != std::string::npos) {
+        color = glm::vec4(0.20f, 0.95f, 0.45f, 1.0f); // Emerald / Green
+    }
+    // 2. Severe Damage / Hostile Swarms / Toxic Gas / Radiation
+    else if (msg.find("CRITICAL") != std::string::npos ||
+             msg.find("SWARM") != std::string::npos ||
+             msg.find("BREACH") != std::string::npos ||
+             msg.find("LETHAL") != std::string::npos ||
+             msg.find("RADIATION") != std::string::npos ||
+             msg.find("TOXIC") != std::string::npos ||
+             msg.find("DAMAGE") != std::string::npos ||
+             msg.find("MAUL") != std::string::npos ||
+             msg.find("PIERCE") != std::string::npos ||
+             msg.find("IMPACT") != std::string::npos ||
+             msg.find("COLLAPSE PROTOCOL") != std::string::npos ||
+             msg.find("SURGE") != std::string::npos ||
+             msg.find("M.I.A.") != std::string::npos ||
+             msg.find("SPINES") != std::string::npos ||
+             msg.find("LUNGE") != std::string::npos) {
+        color = glm::vec4(1.0f, 0.22f, 0.22f, 1.0f); // Vivid Crimson
+    }
+    // 3. Seismic / Tectonic / Spall Hazards
+    else if (msg.find("SEISMIC") != std::string::npos ||
+             msg.find("TREMOR") != std::string::npos ||
+             msg.find("TECTONIC") != std::string::npos ||
+             msg.find("SPALL") != std::string::npos ||
+             msg.find("FAULT") != std::string::npos ||
+             msg.find("BURROWER") != std::string::npos ||
+             msg.find("CAVE-IN") != std::string::npos) {
+        color = glm::vec4(1.0f, 0.72f, 0.10f, 1.0f); // Vibrant Amber
+    }
+    // 4. Tactical / Sonar / Acoustic / Fuel / Quota
+    else if (msg.find("TACTICAL") != std::string::npos ||
+             msg.find("ACOUSTIC") != std::string::npos ||
+             msg.find("AUDIO") != std::string::npos ||
+             msg.find("SONAR") != std::string::npos ||
+             msg.find("SENSOR") != std::string::npos ||
+             msg.find("THRUSTER") != std::string::npos ||
+             msg.find("QUOTA") != std::string::npos) {
+        color = glm::vec4(0.05f, 0.92f, 1.0f, 1.0f); // Electric Cyan
+    }
+
+    HudNotification notif;
+    notif.text = msg;
+    notif.timer = duration;
+    notif.max_timer = duration;
+    notif.color = color;
+    notif.count = 1;
+
+    m_notifications.push_front(notif);
+    while (m_notifications.size() > 4) {
+        m_notifications.pop_back();
+    }
+}
+
+HudTopStackLayout HUD::compute_top_stack_layout(
+    float ui_scale,
+    float screen_w,
+    bool is_tremoring,
+    bool is_warning,
+    ExtractionPhase extraction_phase
+) const {
+    HudTopStackLayout layout;
+    float cx = screen_w * 0.5f;
+
+    // 1. Top Hazard Clock Bar
+    float top_bar_y = 16.0f * ui_scale;
+    float top_bar_h = 34.0f * ui_scale;
+    layout.hazard_bar = { 0.0f, top_bar_y, screen_w, top_bar_h };
+
+    float stack_y = top_bar_y + top_bar_h + 8.0f * ui_scale;
+
+    // 2. Active Seismic Tremor or Seismic Rupture Warning
+    if (is_tremoring) {
+        float alert_w = std::clamp(540.0f * ui_scale, 400.0f, 720.0f);
+        float alert_h = 40.0f * ui_scale;
+        float alert_x = cx - alert_w * 0.5f;
+        layout.seismic_banner = { alert_x, stack_y, alert_w, alert_h };
+        layout.has_seismic_banner = true;
+        stack_y += alert_h + 8.0f * ui_scale;
+    } else if (is_warning) {
+        float alert_w = std::clamp(500.0f * ui_scale, 360.0f, 660.0f);
+        float alert_h = 36.0f * ui_scale;
+        float alert_x = cx - alert_w * 0.5f;
+        layout.seismic_banner = { alert_x, stack_y, alert_w, alert_h };
+        layout.has_seismic_banner = true;
+        stack_y += alert_h + 8.0f * ui_scale;
+    }
+
+    // 3. Evacuation Beacon / Pod Arrival Banner
+    if (extraction_phase == ExtractionPhase::BeaconDeployed) {
+        float ex_w = std::clamp(420.0f * ui_scale, 320.0f, 500.0f);
+        float ex_h = 36.0f * ui_scale;
+        float ex_x = cx - ex_w * 0.5f;
+        layout.evac_banner = { ex_x, stack_y, ex_w, ex_h };
+        layout.has_evac_banner = true;
+        stack_y += ex_h + 8.0f * ui_scale;
+    } else if (extraction_phase == ExtractionPhase::PodLanded) {
+        float ex_w = std::clamp(440.0f * ui_scale, 340.0f, 520.0f);
+        float ex_h = 36.0f * ui_scale;
+        float ex_x = cx - ex_w * 0.5f;
+        layout.evac_banner = { ex_x, stack_y, ex_w, ex_h };
+        layout.has_evac_banner = true;
+        stack_y += ex_h + 8.0f * ui_scale;
+    }
+
+    // 4. Notifications Stack (Sequential non-overlapping cards)
+    size_t count = 0;
+    for (const auto& notif : m_notifications) {
+        if (count >= 4) break;
+        std::string display_text = (notif.count > 1) ?
+            (notif.text + " [x" + std::to_string(notif.count) + "]") : notif.text;
+
+        float warn_scale = 1.10f * ui_scale;
+        float text_w = FontRenderer::get_rendered_width(display_text, warn_scale);
+        float warn_w = std::clamp(text_w + 32.0f * ui_scale, 280.0f * ui_scale, screen_w * 0.75f);
+        float warn_h = std::clamp(28.0f * ui_scale, 24.0f, 34.0f);
+        float warn_x = cx - warn_w * 0.5f;
+
+        layout.notifications.push_back({ warn_x, stack_y, warn_w, warn_h });
+        stack_y += warn_h + 6.0f * ui_scale;
+        count++;
+    }
+
+    return layout;
 }
 
 void HUD::clear_target_info() {
@@ -202,6 +487,42 @@ void HUD::draw_pill(float x, float y, float w, float h, const glm::vec4& border_
     draw_rect(x + w - 1.0f, y, 1.0f, h, border_col);
 }
 
+void HUD::draw_triangle(float x0, float y0, float x1, float y1, float x2, float y2, const glm::vec4& color) {
+    if (m_headless) return;
+    float tri_verts[6] = { x0, y0, x1, y1, x2, y2 };
+
+    glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+    m_ui_shader.use();
+    m_ui_shader.set_mat4("uProjection", proj);
+    m_ui_shader.set_vec4("uColor", color);
+
+    glBindVertexArray(m_tri_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_tri_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tri_verts), tri_verts);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+}
+
+void HUD::draw_line_segment(float x0, float y0, float x1, float y1, float thickness, const glm::vec4& color) {
+    if (m_headless) return;
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len = std::hypot(dx, dy);
+    if (len < 0.0001f) return;
+    float nx = -dy / len * (thickness * 0.5f);
+    float ny = dx / len * (thickness * 0.5f);
+
+    draw_triangle(x0 - nx, y0 - ny, x1 - nx, y1 - ny, x1 + nx, y1 + ny, color);
+    draw_triangle(x0 - nx, y0 - ny, x1 + nx, y1 + ny, x0 + nx, y0 + ny, color);
+}
+
+void HUD::trigger_hit_marker(bool is_critical, float damage) {
+    m_hit_marker_duration = is_critical ? 0.35f : 0.18f;
+    m_hit_marker_timer = m_hit_marker_duration;
+    m_hit_marker_is_crit = is_critical;
+    m_hit_marker_damage = damage;
+}
+
 void HUD::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color) {
     if (text.empty()) return;
 
@@ -237,6 +558,19 @@ void HUD::draw_text_centered(const std::string& text, float box_x, float box_y, 
     float x = box_x + (box_w - text_w) * 0.5f;
     float y = box_y + (box_h - text_h) * 0.5f;
     draw_text(text, x, y, scale, color);
+}
+
+void HUD::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale) {
+    if (text.empty()) return;
+    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale);
+    draw_text(text, x, y, scale, color);
+}
+
+void HUD::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale) {
+    if (text.empty()) return;
+    float pad = 4.0f;
+    float scale = FontRenderer::fit_scale(text, std::max(20.0f, box_w - pad * 2.0f), base_scale, min_scale);
+    draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color);
 }
 
 void HUD::render_crosshair(const PlayerController& player, const World& world) {
@@ -311,6 +645,55 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
 
         // Center point
         draw_rect(cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, ch_col);
+    }
+
+    // ── Hit Marker Rendering (Normal vs Sneak Attack Critical Hit) ──
+    if (m_hit_marker_timer > 0.0f) {
+        float alpha = std::clamp((m_hit_marker_timer / m_hit_marker_duration) * 1.35f, 0.0f, 1.0f);
+        if (m_hit_marker_is_crit) {
+            // Radiant Golden Amber-Crimson Sneak Attack Critical Hit Marker
+            glm::vec4 crit_col(1.0f, 0.82f, 0.15f, alpha);
+            glm::vec4 crit_glow(1.0f, 0.28f, 0.12f, alpha * 0.90f);
+
+            float r1 = 7.0f * ui_scale;
+            float r2 = 18.0f * ui_scale;
+            float thick = 2.4f * ui_scale;
+            float barb = 4.0f * ui_scale;
+
+            // 4 Bold Diagonal Prongs (\ / and / \)
+            draw_line_segment(cx - r1, cy - r1, cx - r2, cy - r2, thick, crit_col); // Top-left
+            draw_line_segment(cx + r1, cy - r1, cx + r2, cy - r2, thick, crit_col); // Top-right
+            draw_line_segment(cx - r1, cy + r1, cx - r2, cy + r2, thick, crit_col); // Bottom-left
+            draw_line_segment(cx + r1, cy + r1, cx + r2, cy + r2, thick, crit_col); // Bottom-right
+
+            // Perpendicular outer barb tick marks for lethal bite
+            draw_line_segment(cx - r2 - barb, cy - r2 + barb * 0.5f, cx - r2 + barb * 0.5f, cy - r2 - barb, thick * 0.85f, crit_glow);
+            draw_line_segment(cx + r2 + barb, cy - r2 + barb * 0.5f, cx + r2 - barb * 0.5f, cy - r2 - barb, thick * 0.85f, crit_glow);
+            draw_line_segment(cx - r2 - barb, cy + r2 - barb * 0.5f, cx - r2 + barb * 0.5f, cy + r2 + barb, thick * 0.85f, crit_glow);
+            draw_line_segment(cx + r2 + barb, cy + r2 - barb * 0.5f, cx + r2 - barb * 0.5f, cy + r2 + barb, thick * 0.85f, crit_glow);
+
+            // Center critical flash diamond
+            float d_sz = 3.2f * ui_scale;
+            draw_triangle(cx, cy - d_sz, cx + d_sz, cy, cx, cy + d_sz, crit_col);
+            draw_triangle(cx, cy - d_sz, cx, cy + d_sz, cx - d_sz, cy, crit_col);
+
+            // Floating "CRIT!" indicator text above crosshair
+            std::string crit_str = (m_hit_marker_damage > 0.0f) ?
+                ("CRIT! " + std::to_string(static_cast<int>(m_hit_marker_damage))) : "CRIT!";
+            float cw = FontRenderer::get_rendered_width(crit_str, 1.10f * ui_scale);
+            draw_text(crit_str, cx - cw * 0.5f, cy - r2 - 16.0f * ui_scale, 1.10f * ui_scale, crit_col);
+        } else {
+            // Crisp White Standard Hit Marker
+            glm::vec4 hit_col(1.0f, 1.0f, 1.0f, alpha * 0.95f);
+            float r1 = 5.0f * ui_scale;
+            float r2 = 12.0f * ui_scale;
+            float thick = 1.6f * ui_scale;
+
+            draw_line_segment(cx - r1, cy - r1, cx - r2, cy - r2, thick, hit_col);
+            draw_line_segment(cx + r1, cy - r1, cx + r2, cy - r2, thick, hit_col);
+            draw_line_segment(cx - r1, cy + r1, cx - r2, cy + r2, thick, hit_col);
+            draw_line_segment(cx + r1, cy + r1, cx + r2, cy + r2, thick, hit_col);
+        }
     }
 
     // Interactive target query within 5 units (Mining tools only)
@@ -425,7 +808,9 @@ void HUD::render(
     const glm::mat4& proj,
     const SurveyingSystem* surveying,
     const NoiseMeter* noise_meter,
-    int enemy_count
+    int enemy_count,
+    const std::vector<VoidStalker>* stalkers,
+    const std::vector<SeismicBurrower>* burrowers
 ) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -592,80 +977,146 @@ void HUD::render(
     draw_text(obj_str, hz_x + 12.0f * ui_scale, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, obj_col);
 
     // Subtle vertical divider line
-    float div_x = hz_x + hz_w * 0.48f;
+    float div_x = hz_x + hz_w * 0.45f;   // 45% left / 55% right — prevents long objective text overflow
     draw_rect(div_x, hz_y + 5.0f * ui_scale, 1.0f, hz_h - 10.0f * ui_scale, glm::vec4(0.2f, 0.3f, 0.4f, 0.5f));
 
-    // Right: Hazard Clock & Stress
-    float right_x = div_x + 12.0f * ui_scale;
+    // Right section: seismic readout — two-row layout avoids text / bar collision
+    float right_x     = div_x + 10.0f * ui_scale;
+    float right_end   = hz_x + hz_w - 8.0f * ui_scale;
+    float right_avail = right_end - right_x;
     if (tremoring) {
-        draw_text("! SEISMIC TREMOR !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, Typography::COLOR_CRIMSON);
+        if (hazard.is_player_in_tremor_zone()) {
+            draw_text("! SEISMIC TREMOR !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_CRIMSON);
+        } else {
+            draw_text("! REMOTE TREMOR  !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_AMBER);
+        }
     } else if (hazard.is_warning()) {
-        draw_text("! FAULT RUPTURE !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, Typography::COLOR_CRIMSON);
+        if (hazard.is_player_in_tremor_zone()) {
+            draw_text("! FAULT RUPTURE  !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_CRIMSON);
+        } else {
+            draw_text("! REMOTE RUPTURE !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_AMBER);
+        }
     } else {
         float stress = hazard.seismic_stress();
-        std::string trem_str = "SEISMIC: " + std::to_string(static_cast<int>(stress)) + "%";
         glm::vec4 trem_col = (stress >= 75.0f) ? Typography::COLOR_CRIMSON :
                              (stress >= 40.0f) ? Typography::COLOR_AMBER :
                                                  Typography::COLOR_PRIMARY;
-        draw_text(trem_str, right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, trem_col);
 
+        // Row 1 (top): "SEISMIC" label left, percentage value right — no bar on this row
+        float label_y = hz_y + 5.0f * ui_scale;
+        draw_text("SEISMIC", right_x, label_y, 0.80f * ui_scale, Typography::COLOR_MUTED);
+        std::string pct_str = std::to_string(static_cast<int>(stress)) + "%";
+        float pct_w = FontRenderer::get_rendered_width(pct_str, 0.92f * ui_scale);
+        draw_text(pct_str, right_end - pct_w, label_y, 0.92f * ui_scale, trem_col);
+
+        // Row 2 (bottom strip): full-width progress bar — completely separate from text above
+        float bar_h = std::clamp(4.0f * ui_scale, 3.0f, 6.0f);
+        float bar_y = hz_y + hz_h - bar_h - 5.0f * ui_scale;
         float t_ratio = std::clamp(stress / 100.0f, 0.0f, 1.0f);
-        float s_bar_w = std::clamp(90.0f * ui_scale, 60.0f, 110.0f);
-        float s_bar_x = hz_x + hz_w - s_bar_w - 12.0f * ui_scale;
-        float s_bar_h = 5.0f * ui_scale;
-        draw_rect(s_bar_x, hz_y + (hz_h - s_bar_h) * 0.5f, s_bar_w, s_bar_h, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
-        draw_rect(s_bar_x, hz_y + (hz_h - s_bar_h) * 0.5f, s_bar_w * t_ratio, s_bar_h, trem_col);
+        draw_rect(right_x, bar_y, right_avail, bar_h, glm::vec4(0.10f, 0.14f, 0.18f, 0.80f));
+        draw_rect(right_x, bar_y, right_avail * t_ratio, bar_h, trem_col);
     }
 
-    // 4b. SILENCE & ACOUSTIC DISTURBANCE METER (Directly below Hazard Pill)
-    float nm_h = 0.0f;
+    // 4b. BOTTOM-CENTER ACOUSTIC PROFILE STEALTH / NOISE METER
     if (noise_meter) {
         float pct = noise_meter->noise_percent();
         bool is_crouching = noise_meter->is_crouching();
         bool has_recent_sounds = !noise_meter->recent_sounds().empty();
 
-        // Display when noise >= 8%, or crouching in stealth mode, or active acoustic disturbances present
-        if (pct >= 8.0f || is_crouching || has_recent_sounds) {
-            float nm_w = std::clamp(440.0f * ui_scale, 340.0f, 480.0f);
-            nm_h = std::clamp(20.0f * ui_scale, 18.0f, 24.0f);
-            float nm_x = cx - nm_w / 2.0f;
-            float nm_y = hz_y + hz_h + 4.0f * ui_scale;
+        if (pct > m_noise_peak) {
+            m_noise_peak = pct;
+            m_noise_peak_timer = 0.8f;
+        }
 
-            float nr, ng, nb;
-            noise_meter->alert_color(nr, ng, nb);
-            glm::vec4 alert_col(nr, ng, nb, 1.0f);
+        // Threat peak is active during 100% swarming or during enrage while noise is elevated (>= 40%).
+        // Once the player stands still and the meter drains below 40% into the silent zone,
+        // threat peak clears and reverts to normal acoustic profile.
+        bool is_at_threat_peak = (noise_meter->alert_level() == NoiseMeter::AlertLevel::Swarming) ||
+                                 (SwarmManager::instance().IsEnraged() && pct >= 40.0f);
 
-            if (is_crouching) {
-                alert_col = glm::vec4(0.2f, 0.95f, 0.65f, 1.0f); // Stealth emerald
-            }
+        // Display when noise >= 5%, or crouching in stealth mode, or active acoustic disturbances present, or at threat peak.
+        // Once the meter drains to 0% and player is standing still, the entire meter cleanly goes away.
+        if (pct >= 5.0f || is_crouching || has_recent_sounds || is_at_threat_peak) {
+            float nm_w = std::clamp(340.0f * ui_scale, 280.0f, 380.0f);
+            float nm_h = std::clamp(34.0f * ui_scale, 30.0f, 38.0f);
+            float nm_x = cx - nm_w * 0.5f;
+            float nm_y = sh - nm_h - 18.0f * ui_scale;
 
-            draw_pill(nm_x, nm_y, nm_w, nm_h, alert_col * 0.35f);
+            float pulse_crimson = 0.75f + 0.25f * std::sin(m_total_time * 10.0f);
+            glm::vec4 enraged_crimson(1.0f, 30.0f / 255.0f, 39.0f / 255.0f, 1.0f); // #FF1E27
 
-            std::string noise_str;
-            if (is_crouching && pct < 15.0f) {
-                noise_str = "[STEALTH] CROUCH CONCEALED (" + std::to_string(static_cast<int>(pct)) + "%)";
+            // Dark semi-transparent pill container (rgba(8, 12, 18, 0.85)) with border
+            draw_pill(nm_x, nm_y, nm_w, nm_h, glm::vec4(8.0f / 255.0f, 12.0f / 255.0f, 18.0f / 255.0f, 0.85f));
+            glm::vec4 border_col = is_at_threat_peak ? (enraged_crimson * pulse_crimson) : glm::vec4(0.12f, 0.22f, 0.30f, 0.85f);
+            draw_rect(nm_x, nm_y, nm_w, 1.0f, border_col);
+            draw_rect(nm_x, nm_y + nm_h - 1.0f, nm_w, 1.0f, border_col);
+            draw_rect(nm_x, nm_y, 1.0f, nm_h, border_col);
+            draw_rect(nm_x + nm_w - 1.0f, nm_y, 1.0f, nm_h, border_col);
+
+            // Header: ACOUSTIC PROFILE or THREAT PEAK
+            float header_y = nm_y + 5.0f * ui_scale;
+            if (is_at_threat_peak) {
+                draw_text_fitted("// THREAT PEAK - SWARM BREACH //", nm_x + 12.0f * ui_scale, header_y, nm_w - 24.0f * ui_scale, 0.78f * ui_scale, enraged_crimson * pulse_crimson);
             } else {
-                noise_str = "ACOUSTIC: " + std::string(noise_meter->alert_string()) + " (" + std::to_string(static_cast<int>(pct)) + "%)";
+                std::string status_str = std::to_string(static_cast<int>(pct)) + "% " + std::string(noise_meter->alert_string());
+                glm::vec4 status_col = (pct <= 40.0f) ? glm::vec4(0.0f, 0.90f, 1.0f, 1.0f) :
+                                       (pct <= 75.0f) ? glm::vec4(1.0f, 0.70f, 0.0f, 1.0f) :
+                                                        glm::vec4(1.0f, 0.20f, 0.20f, 1.0f);
+                float stat_w = FontRenderer::get_rendered_width(status_str, 0.78f * ui_scale);
+                float stat_x = nm_x + nm_w - 12.0f * ui_scale - stat_w;
+
+                float max_header_w = std::max(60.0f, (stat_x - (nm_x + 12.0f * ui_scale)) - 8.0f * ui_scale);
+                if (is_crouching) {
+                    draw_text_fitted("ACOUSTIC // STEALTH (DAMPENED -65%)", nm_x + 12.0f * ui_scale, header_y, max_header_w, 0.78f * ui_scale, glm::vec4(0.20f, 0.95f, 0.55f, 1.0f));
+                } else {
+                    draw_text_fitted("ACOUSTIC PROFILE", nm_x + 12.0f * ui_scale, header_y, max_header_w, 0.78f * ui_scale, Typography::COLOR_MUTED);
+                }
+
+                draw_text(status_str, stat_x, header_y, 0.78f * ui_scale, status_col);
             }
 
-            if (enemy_count > 0) {
-                noise_str += " | FOES: " + std::to_string(enemy_count);
+            // Dynamic Segmented Bar with clear color thresholds:
+            // 0% - 40% (Silent / Crouched): Muted Cyan (#00E5FF)
+            // 41% - 75% (Walking / Drilling): Warning Amber (#FFB300)
+            // 76% - 100% (Sprinting / Blasting): Pulsing Crimson (#FF3333)
+            // Enraged (Peak Threat): High-contrast pulsing crimson (#FF1E27)
+            float bar_x = nm_x + 12.0f * ui_scale;
+            float bar_y = nm_y + 19.0f * ui_scale;
+            float bar_w = nm_w - 24.0f * ui_scale;
+            float bar_h = 7.0f * ui_scale;
+
+            constexpr int NUM_SEGMENTS = 20;
+            float seg_spacing = 2.0f * ui_scale;
+            float total_spacing = seg_spacing * (NUM_SEGMENTS - 1);
+            float seg_w = (bar_w - total_spacing) / NUM_SEGMENTS;
+
+            for (int i = 0; i < NUM_SEGMENTS; ++i) {
+                float seg_x = bar_x + i * (seg_w + seg_spacing);
+                float seg_pct = (static_cast<float>(i + 1) / NUM_SEGMENTS) * 100.0f;
+                bool is_active = (pct >= seg_pct - 2.5f);
+
+                glm::vec4 seg_col;
+                if (is_at_threat_peak) {
+                    seg_col = enraged_crimson * pulse_crimson; // High-contrast crimson #FF1E27
+                } else if (seg_pct <= 40.0f) {
+                    seg_col = glm::vec4(0.0f, 0.90f, 1.0f, 1.0f); // Muted Cyan #00E5FF
+                } else if (seg_pct <= 75.0f) {
+                    seg_col = glm::vec4(1.0f, 0.70f, 0.0f, 1.0f); // Warning Amber #FFB300
+                } else {
+                    seg_col = glm::vec4(1.0f, 0.20f, 0.20f, 1.0f) * pulse_crimson; // Pulsing Crimson #FF3333
+                }
+
+                if (is_active) {
+                    draw_rect(seg_x, bar_y, seg_w, bar_h, seg_col);
+                } else {
+                    draw_rect(seg_x, bar_y, seg_w, bar_h, glm::vec4(0.08f, 0.12f, 0.16f, 0.65f));
+                }
             }
-            if (has_recent_sounds && !is_crouching) {
-                noise_str += " | ECHOING";
-            }
 
-            float font_h = FontRenderer::get_rendered_height(0.92f * ui_scale);
-            draw_text(noise_str, nm_x + 10.0f * ui_scale, nm_y + (nm_h - font_h) * 0.5f, 0.92f * ui_scale, alert_col);
-
-            float g_w = std::clamp(85.0f * ui_scale, 65.0f, 105.0f);
-            float g_h = 5.0f * ui_scale;
-            float g_x = nm_x + nm_w - g_w - 10.0f * ui_scale;
-            float g_y = nm_y + (nm_h - g_h) * 0.5f;
-
-            draw_rect(g_x, g_y, g_w, g_h, glm::vec4(0.12f, 0.15f, 0.18f, 0.8f));
-            float fill_ratio = std::clamp(pct / 100.0f, 0.0f, 1.0f);
-            draw_rect(g_x, g_y, g_w * fill_ratio, g_h, alert_col);
+            // Trailing peak indicator needle that lingers for 0.8s on sound spikes before decaying smoothly
+            float peak_ratio = std::clamp(m_noise_peak / 100.0f, 0.0f, 1.0f);
+            float needle_x = bar_x + peak_ratio * bar_w;
+            draw_rect(needle_x - 1.0f, bar_y - 2.0f, 2.0f, bar_h + 4.0f, glm::vec4(1.0f, 1.0f, 1.0f, 0.95f));
         }
     }
 
@@ -683,7 +1134,12 @@ void HUD::render(
         draw_rect(s_x, s_y, 3.0f, s_h, hp_bar_col);
 
         float pad_x = s_x + 12.0f * ui_scale;
-        draw_text("// EXOSUIT VITALS", pad_x, s_y + 8.0f * ui_scale, 0.82f * ui_scale, Typography::COLOR_MUTED);
+        float crouch_badge_w = player.is_crouching() ? (FontRenderer::get_rendered_width("[CROUCH]", 0.78f * ui_scale) + 6.0f * ui_scale) : 0.0f;
+        float max_title_w = std::max(60.0f, s_w - 24.0f * ui_scale - crouch_badge_w);
+        draw_text_fitted("// EXOSUIT VITALS", pad_x, s_y + 8.0f * ui_scale, max_title_w, 0.82f * ui_scale, Typography::COLOR_MUTED);
+        if (player.is_crouching()) {
+            draw_text("[CROUCH]", s_x + s_w - 12.0f * ui_scale - crouch_badge_w + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, Typography::COLOR_CYAN);
+        }
 
         float bar_w = s_w - 24.0f * ui_scale;
         float bar_h = 6.0f * ui_scale;
@@ -708,90 +1164,87 @@ void HUD::render(
         draw_rect(pad_x, fuel_bar_y, bar_w, bar_h, glm::vec4(0.08f, 0.14f, 0.20f, 0.8f));
         draw_rect(pad_x, fuel_bar_y, bar_w * std::clamp(exo.power / 100.0f, 0.0f, 1.0f), bar_h, Typography::COLOR_CYAN);
 
-        // 5b. Geiger / Radiation monitor
+        // 5b. Geiger / Radiation monitor (Color-coded: Green = Safe, Yellow = Caution, Red = Danger & Damage)
         float cur_rad = exo.radiation;
         if (cur_rad > 2.0f) {
             float rad_w = s_w;
-            float rad_h = std::clamp(22.0f * ui_scale, 18.0f, 26.0f);
+            float rad_h = std::clamp(26.0f * ui_scale, 22.0f, 30.0f);
             float rad_x = s_x;
-            float rad_y = s_y - rad_h - 6.0f * ui_scale;
+            float rad_y = s_y - rad_h - 8.0f * ui_scale;
 
-            glm::vec4 rad_col = (cur_rad >= 80.0f) ? Typography::COLOR_CRIMSON :
-                                (cur_rad >= 45.0f) ? Typography::COLOR_AMBER :
-                                                     glm::vec4(0.20f, 0.95f, 0.35f, 1.0f);
+            bool is_danger = (cur_rad >= 50.0f);
+            bool is_caution = (cur_rad >= 25.0f && !is_danger);
 
-            draw_pill(rad_x, rad_y, rad_w, rad_h, rad_col * 0.45f);
+            float pulse = is_danger ? (0.75f + 0.25f * std::sin(m_total_time * 12.0f)) : 1.0f;
+            glm::vec4 rad_col;
+            std::string rad_status;
 
-            float dose = (cur_rad / 100.0f) * 8.5f;
-            char rad_buf[64];
-            if (dose < 1.0f) {
-                std::snprintf(rad_buf, sizeof(rad_buf), "[!] RAD: %.0f mSv/h (%d%%)", dose * 1000.0f, static_cast<int>(cur_rad));
+            if (is_danger) {
+                rad_col = Typography::COLOR_CRIMSON * pulse;
+                rad_status = "GEIGER: DANGER (" + std::to_string(static_cast<int>(cur_rad)) + "%) - TAKING DAMAGE!";
+            } else if (is_caution) {
+                rad_col = Typography::COLOR_AMBER;
+                rad_status = "GEIGER: CAUTION (" + std::to_string(static_cast<int>(cur_rad)) + "%) - ELEVATED";
             } else {
-                std::snprintf(rad_buf, sizeof(rad_buf), "[!] RAD: %.1f Sv/h (%d%%)", dose, static_cast<int>(cur_rad));
+                rad_col = Typography::COLOR_GREEN;
+                rad_status = "GEIGER: SAFE (" + std::to_string(static_cast<int>(cur_rad)) + "%)";
             }
 
-            float font_h = FontRenderer::get_rendered_height(0.92f * ui_scale);
-            draw_text(std::string(rad_buf), rad_x + 10.0f * ui_scale, rad_y + (rad_h - font_h) * 0.5f, 0.92f * ui_scale, rad_col);
+            draw_pill(rad_x, rad_y, rad_w, rad_h, rad_col * 0.40f);
+            draw_rect(rad_x, rad_y, rad_w, 1.0f, rad_col * 0.8f);
+            draw_rect(rad_x, rad_y + rad_h - 1.0f, rad_w, 1.0f, rad_col * 0.8f);
+            draw_rect(rad_x, rad_y, 2.0f, rad_h, rad_col * 0.8f);
+            draw_rect(rad_x + rad_w - 2.0f, rad_y, 2.0f, rad_h, rad_col * 0.8f);
 
-            float g_bar_w = std::clamp(80.0f * ui_scale, 60.0f, 100.0f);
-            float g_bar_h = 5.0f * ui_scale;
-            float g_bar_x = rad_x + rad_w - g_bar_w - 10.0f * ui_scale;
+            // Progress bar on right
+            float g_bar_w = std::clamp(70.0f * ui_scale, 50.0f, 90.0f);
+            float g_bar_h = 6.0f * ui_scale;
+            float g_bar_x = rad_x + rad_w - g_bar_w - 8.0f * ui_scale;
             float g_bar_y = rad_y + (rad_h - g_bar_h) * 0.5f;
-            draw_rect(g_bar_x, g_bar_y, g_bar_w, g_bar_h, glm::vec4(0.10f, 0.14f, 0.12f, 0.8f));
+
+            draw_rect(g_bar_x, g_bar_y, g_bar_w, g_bar_h, glm::vec4(0.08f, 0.12f, 0.15f, 0.85f));
             draw_rect(g_bar_x, g_bar_y, g_bar_w * std::clamp(cur_rad / 100.0f, 0.0f, 1.0f), g_bar_h, rad_col);
+
+            // Left text fitted
+            float max_text_w = (g_bar_x - rad_x) - 14.0f * ui_scale;
+            float font_h = FontRenderer::get_rendered_height(0.82f * ui_scale);
+            draw_text_fitted(rad_status, rad_x + 8.0f * ui_scale, rad_y + (rad_h - font_h) * 0.5f, max_text_w, 0.82f * ui_scale, rad_col);
         }
     }
 
-    // 6. BOTTOM-RIGHT (Equipment Hotbar & Tactical Abilities)
+    // 6. BOTTOM-RIGHT (Delver Tactical Abilities & Brief Weapon Equip Toast)
     {
-        float hb_w = std::clamp(380.0f * ui_scale, 300.0f, 440.0f);
-        float hb_h = std::clamp(48.0f * ui_scale, 40.0f, 54.0f);
-        float hb_x = sw - hb_w - 24.0f * ui_scale;
-        float hb_y = sh - hb_h - 24.0f * ui_scale;
+        ToolSlot current_tool = player.active_tool();
+        if (!m_tool_initialized) {
+            m_last_active_tool = current_tool;
+            m_tool_initialized = true;
+        } else if (current_tool != m_last_active_tool) {
+            m_last_active_tool = current_tool;
+            m_tool_switch_toast_timer = 2.4f;
+        }
 
-        draw_pill(hb_x, hb_y, hb_w, hb_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
-        draw_rect(hb_x + hb_w - 3.0f, hb_y, 3.0f, hb_h, Typography::COLOR_CYAN);
+        if (current_tool == ToolSlot::MiningDrill) {
+            m_tool_switch_name = "MINING DRILL";
+            m_tool_switch_details = "[LMB] MINE VOXEL  |  [RMB] QUICK BULKHEAD";
+            m_tool_switch_color = Typography::COLOR_CYAN;
+        } else if (current_tool == ToolSlot::CombatWeapon) {
+            m_tool_switch_name = player.weapon_name();
+            m_tool_switch_details = "AMMO: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo()) + "  |  [R] RELOAD";
+            m_tool_switch_color = (player.weapon_archetype() == WeaponArchetype::MagmaScattergun) ? Typography::COLOR_AMBER :
+                                  (player.weapon_archetype() == WeaponArchetype::NeedlerRailgun)  ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
+        } else {
+            m_tool_switch_name = "SATCHEL DEMOLITION CHARGE";
+            m_tool_switch_details = player.has_placed_charge() ? "[RMB] DETONATE PLACED CHARGE" : ("[LMB] PLANT CHARGE (" + std::to_string(inventory.demolition_charges) + " AVAIL)  |  [RMB] DETONATE");
+            m_tool_switch_color = Typography::COLOR_AMBER;
+        }
 
-        ToolSlot active = player.active_tool();
-        bool s1 = (active == ToolSlot::MiningDrill);
-        bool s2 = (active == ToolSlot::CombatWeapon);
-        bool s3 = (active == ToolSlot::IndustrialBulkhead);
-        bool s4 = (active == ToolSlot::DemolitionCharge);
-
-        float slot_w = (hb_w - 16.0f * ui_scale) / 4.0f;
-        float slot_scale = 0.95f * ui_scale;
-        float slot_y = hb_y + (hb_h - FontRenderer::get_rendered_height(slot_scale)) * 0.5f;
-
-        // Slot 1: Drill
-        float x1 = hb_x + 8.0f * ui_scale;
-        if (s1) draw_rect(x1, hb_y + hb_h - 2.0f, slot_w - 4.0f * ui_scale, 2.0f, Typography::COLOR_CYAN);
-        draw_text("[1] DRILL", x1, slot_y, slot_scale, s1 ? Typography::COLOR_CYAN : Typography::COLOR_MUTED);
-
-        // Slot 2: Weapon
-        float x2 = x1 + slot_w;
-        std::string w_str = player.is_reloading() ? "[2] LOAD" : ("[2] " + player.weapon_short_name() + ":" + std::to_string(player.weapon_ammo()));
-        if (s2) draw_rect(x2, hb_y + hb_h - 2.0f, slot_w - 4.0f * ui_scale, 2.0f, Typography::COLOR_CYAN);
-        draw_text(w_str, x2, slot_y, slot_scale, s2 ? Typography::COLOR_CYAN : Typography::COLOR_MUTED);
-
-        // Slot 3: Bulkhead
-        float x3 = x2 + slot_w;
-        std::string b_str = "[3] BLK:" + std::to_string(inventory.bulkheads);
-        if (s3) draw_rect(x3, hb_y + hb_h - 2.0f, slot_w - 4.0f * ui_scale, 2.0f, Typography::COLOR_AMBER);
-        draw_text(b_str, x3, slot_y, slot_scale, s3 ? Typography::COLOR_AMBER : Typography::COLOR_MUTED);
-
-        // Slot 4: Demo
-        float x4 = x3 + slot_w;
-        std::string d_str = "[4] DEM:" + std::to_string(inventory.demolition_charges);
-        if (s4) draw_rect(x4, hb_y + hb_h - 2.0f, slot_w - 4.0f * ui_scale, 2.0f, Typography::COLOR_AMBER);
-        draw_text(d_str, x4, slot_y, slot_scale, s4 ? Typography::COLOR_AMBER : Typography::COLOR_MUTED);
-
-        // 6b. DELVER TACTICAL ABILITIES (Combined single tactical pill above hotbar)
-        float ab_w = hb_w;
-        float ab_h = 24.0f * ui_scale;
-        float ab_x = hb_x;
-        float ab_y = hb_y - ab_h - 4.0f * ui_scale;
+        float ab_w = std::clamp(380.0f * ui_scale, 300.0f, 440.0f);
+        float ab_h = std::clamp(32.0f * ui_scale, 28.0f, 36.0f);
+        float ab_x = sw - ab_w - 24.0f * ui_scale;
+        float ab_y = sh - ab_h - 24.0f * ui_scale;
 
         draw_pill(ab_x, ab_y, ab_w, ab_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
+        draw_rect(ab_x + ab_w - 3.0f, ab_y, 3.0f, ab_h, Typography::COLOR_CYAN);
 
         // Center vertical divider
         float mid_x = ab_x + ab_w * 0.5f;
@@ -818,12 +1271,12 @@ void HUD::render(
             float prog = player.sonar_recharge_progress();
             draw_rect(ab_x + 4.0f, ab_y + ab_h - 2.0f, (half_w - 8.0f) * prog, 2.0f, Typography::COLOR_CYAN * 0.7f);
         }
-        draw_text_centered(q_str, ab_x, ab_y, half_w, ab_h, 0.92f * ui_scale, q_col);
+        draw_text_centered_fitted(q_str, ab_x, ab_y, half_w, ab_h, 0.92f * ui_scale, q_col);
 
         // Right Half: [C] Tactical Class Skill
         bool t_ready = player.is_tactical_ready();
         CharacterClass cls = player.character_class();
-        std::string skill_short = (cls == CharacterClass::Demolitionist) ? "BLAST" :
+        std::string skill_short = (cls == CharacterClass::Demolitionist) ? "SHOCKWAVE" :
                                   (cls == CharacterClass::Vanguard) ? "BARRICADE" : "DASH";
         std::string c_str;
         glm::vec4 c_col;
@@ -838,31 +1291,97 @@ void HUD::render(
             float t_prog = player.tactical_recharge_progress();
             draw_rect(mid_x + 4.0f, ab_y + ab_h - 2.0f, (half_w - 8.0f) * t_prog, 2.0f, Typography::COLOR_AMBER * 0.7f);
         }
-        draw_text_centered(c_str, mid_x, ab_y, half_w, ab_h, 0.92f * ui_scale, c_col);
+        draw_text_centered_fitted(c_str, mid_x, ab_y, half_w, ab_h, 0.92f * ui_scale, c_col);
+
+        // 6b. Brief Equipment Switch Toast (Appears briefly when equipping/switching weapon)
+        if (m_tool_switch_toast_timer > 0.0f) {
+            float toast_w = ab_w;
+            float toast_h = 36.0f * ui_scale;
+            float toast_x = ab_x;
+            float toast_y = ab_y - toast_h - 6.0f * ui_scale;
+            float alpha = std::clamp(m_tool_switch_toast_timer / 0.4f, 0.0f, 1.0f);
+
+            glm::vec4 bg_toast = glm::vec4(0.04f, 0.07f, 0.11f, 0.92f * alpha);
+            glm::vec4 border_toast = m_tool_switch_color * glm::vec4(1.0f, 1.0f, 1.0f, alpha);
+            draw_pill(toast_x, toast_y, toast_w, toast_h, bg_toast);
+            draw_rect(toast_x, toast_y, toast_w, 1.0f, border_toast);
+            draw_rect(toast_x, toast_y + toast_h - 1.0f, toast_w, 1.0f, border_toast);
+            draw_rect(toast_x, toast_y, 2.0f, toast_h, border_toast);
+            draw_rect(toast_x + toast_w - 2.0f, toast_y, 2.0f, toast_h, border_toast);
+
+            std::string title_str = "EQUIPPED // " + m_tool_switch_name;
+            draw_text_fitted(title_str, toast_x + 10.0f * ui_scale, toast_y + 4.0f * ui_scale, toast_w - 20.0f * ui_scale, 0.88f * ui_scale, border_toast);
+            draw_text_fitted(m_tool_switch_details, toast_x + 10.0f * ui_scale, toast_y + 19.0f * ui_scale, toast_w - 20.0f * ui_scale, 0.76f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.85f * alpha));
+        }
     }
 
-    // 7. EXTRACTION BEACON COUNTDOWN BANNER (Non-colliding positioning)
-    float top_stack_bottom = 16.0f * ui_scale + 34.0f * ui_scale + ((noise_meter != nullptr) ? (4.0f * ui_scale + nm_h) : 0.0f);
-    float ex_y = top_stack_bottom + 8.0f * ui_scale;
-    float ex_h = 36.0f * ui_scale;
-    bool has_evac_banner = (extraction.phase() == ExtractionPhase::BeaconDeployed || extraction.phase() == ExtractionPhase::PodLanded);
+    // 7. COMPUTE UNIFIED TOP-STACK LAYOUT (Seismic Alert -> Evac Banner -> Notifications Stack)
+    HudTopStackLayout top_stack = compute_top_stack_layout(ui_scale, sw, hazard.is_tremoring(), hazard.is_warning(), extraction.phase());
 
-    if (extraction.phase() == ExtractionPhase::BeaconDeployed) {
-        float ex_w = std::clamp(420.0f * ui_scale, 320.0f, 500.0f);
-        float ex_x = cx - ex_w * 0.5f;
+    // 7a. PRIMARY ENVIRONMENTAL CRISIS BANNER (Seismic Tremor / Fault Rupture)
+    if (top_stack.has_seismic_banner) {
+        float alert_x = top_stack.seismic_banner.x;
+        float alert_y = top_stack.seismic_banner.y;
+        float alert_w = top_stack.seismic_banner.w;
+        float alert_h = top_stack.seismic_banner.h;
 
-        float pulse = extraction.siren_pulse();
-        glm::vec4 banner_color = glm::mix(glm::vec4(0.85f, 0.15f, 0.1f, 0.9f), glm::vec4(1.0f, 0.4f, 0.1f, 1.0f), pulse);
-        draw_pill(ex_x, ex_y, ex_w, ex_h, banner_color);
-        draw_rect(ex_x, ex_y, ex_w * std::clamp(extraction.countdown() / 40.0f, 0.0f, 1.0f), ex_h, banner_color * 0.35f);
+        if (hazard.is_tremoring()) {
+            float pulse = 0.55f + 0.45f * std::sin(m_total_time * 14.0f);
+            if (hazard.is_player_in_tremor_zone()) {
+                draw_pill(alert_x, alert_y, alert_w, alert_h, glm::vec4(1.0f, 0.15f, 0.15f, 0.95f));
+                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.20f, 0.02f, 0.02f, 0.80f * pulse));
+                draw_text_centered("! ! ! ACTIVE SEISMIC TREMOR IN PROGRESS ! ! !", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.25f * ui_scale, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
+                draw_text_centered("LOCAL CEILING DESTABILIZED // WATCH FOR FALLING ROCKS", alert_x, alert_y + 20.0f * ui_scale, alert_w, alert_h * 0.45f, 0.95f * ui_scale, glm::vec4(1.0f, 0.70f, 0.20f, 1.0f));
+            } else {
+                draw_pill(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.95f, 0.45f, 0.15f, 0.90f));
+                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.18f, 0.08f, 0.02f, 0.75f * pulse));
+                draw_text_centered("! ! ! REMOTE SEISMIC FAULT COLLAPSE ! ! !", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.25f * ui_scale, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
+                draw_text_centered("TECTONIC STRATUM SHIFT IN EXCAVATION ZONE", alert_x, alert_y + 20.0f * ui_scale, alert_w, alert_h * 0.45f, 0.95f * ui_scale, glm::vec4(1.0f, 0.80f, 0.40f, 1.0f));
+            }
+        } else if (hazard.is_warning()) {
+            float pulse = 0.5f + 0.5f * std::sin(m_total_time * 10.0f);
+            if (hazard.is_player_in_tremor_zone()) {
+                glm::vec4 warn_col(1.0f, 0.75f, 0.10f, 0.75f * pulse);
+                draw_pill(alert_x, alert_y, alert_w, alert_h, warn_col);
+                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.18f, 0.12f, 0.02f, 0.75f * pulse));
+                draw_text_centered("[ ! ] WARNING: SEISMIC FAULT RUPTURE DETECTED [ ! ]", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.15f * ui_scale, glm::vec4(1.0f, 0.95f, 0.6f, 1.0f));
+                draw_text_centered("EARTHQUAKE IMMINENT -- SEEK REINFORCED SHELTER", alert_x, alert_y + 19.0f * ui_scale, alert_w, alert_h * 0.45f, 0.92f * ui_scale, Typography::COLOR_AMBER);
+            } else {
+                glm::vec4 warn_col(0.85f, 0.65f, 0.20f, 0.65f * pulse);
+                draw_pill(alert_x, alert_y, alert_w, alert_h, warn_col);
+                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.12f, 0.09f, 0.02f, 0.65f * pulse));
+                draw_text_centered("[ ! ] ADVISORY: REMOTE FAULT RUPTURE DETECTED [ ! ]", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.15f * ui_scale, glm::vec4(1.0f, 0.95f, 0.7f, 1.0f));
+                draw_text_centered("SUBSURFACE STRAIN IN DISTANT EXCAVATION ZONE", alert_x, alert_y + 19.0f * ui_scale, alert_w, alert_h * 0.45f, 0.92f * ui_scale, Typography::COLOR_AMBER);
+            }
+        }
+    }
 
-        std::string evac_str = "EVAC POD ARRIVING IN: " + std::to_string(static_cast<int>(extraction.countdown())) + "s";
-        draw_text_centered(evac_str, ex_x, ex_y, ex_w, ex_h, 1.22f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-    } else if (extraction.phase() == ExtractionPhase::PodLanded) {
-        float ex_w = std::clamp(440.0f * ui_scale, 340.0f, 520.0f);
-        float ex_x = cx - ex_w * 0.5f;
-        draw_pill(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
-        draw_text_centered("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x, ex_y, ex_w, ex_h, 1.18f * ui_scale, glm::vec4(0.2f, 1.0f, 0.4f, 1.0f));
+    // 7b. MISSION EXTRACTION BEACON / POD ARRIVAL BANNER
+    if (top_stack.has_evac_banner) {
+        float ex_x = top_stack.evac_banner.x;
+        float ex_y = top_stack.evac_banner.y;
+        float ex_w = top_stack.evac_banner.w;
+        float ex_h = top_stack.evac_banner.h;
+
+        if (extraction.phase() == ExtractionPhase::BeaconDeployed) {
+            float pulse = extraction.siren_pulse();
+            glm::vec4 banner_color = glm::mix(glm::vec4(0.85f, 0.15f, 0.1f, 0.9f), glm::vec4(1.0f, 0.4f, 0.1f, 1.0f), pulse);
+            draw_pill(ex_x, ex_y, ex_w, ex_h, banner_color);
+            float total_cd = std::max(1.0f, extraction.initial_countdown());
+            draw_rect(ex_x, ex_y, ex_w * std::clamp(extraction.countdown() / total_cd, 0.0f, 1.0f), ex_h, banner_color * 0.35f);
+
+            bool in_perimeter = extraction.is_player_in_perimeter(player.position());
+            int remaining_sec = static_cast<int>(std::ceil(std::max(0.0f, extraction.countdown())));
+            std::string evac_str = "EVAC POD ARRIVING IN: " + std::to_string(remaining_sec) + "s";
+            if (in_perimeter) {
+                int def_bonus = (current_level <= 1) ? 40 : (current_level == 2 ? 25 : 15);
+                evac_str += "  [LZ DEFENSE +" + std::to_string(def_bonus) + "% RESIST]";
+            }
+            draw_text_centered(evac_str, ex_x, ex_y, ex_w, ex_h, 1.15f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        } else if (extraction.phase() == ExtractionPhase::PodLanded) {
+            draw_pill(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
+            draw_text_centered("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x, ex_y, ex_w, ex_h, 1.18f * ui_scale, glm::vec4(0.2f, 1.0f, 0.4f, 1.0f));
+        }
     }
 
     // 8. 3D-to-2D SCREEN WAYPOINT DIAMOND FOR EXTRACTION BEACON / POD
@@ -915,27 +1434,44 @@ void HUD::render(
         }
     }
 
-    // 9. ON-SCREEN WARNING BANNER (Guaranteed clear vertical spacing, zero overlaps)
-    if (m_warning_timer > 0.0f && !m_warning_message.empty()) {
-        float warn_scale = 1.10f * ui_scale;
-        float text_w = FontRenderer::get_rendered_width(m_warning_message, warn_scale);
-        float warn_w = text_w + 28.0f * ui_scale;
-        float warn_h = std::clamp(28.0f * ui_scale, 24.0f, 34.0f);
-        float warn_x = cx - warn_w * 0.5f;
-        float warn_y = has_evac_banner ? (ex_y + ex_h + 8.0f * ui_scale) : (top_stack_bottom + 8.0f * ui_scale);
+    // 8b. OVERHEAD ENEMY AWARENESS INDICATORS (Yellow '!' for Investigating, Red Triangle for Engaged/Attack)
+    render_enemy_awareness_markers(view, proj, player.position(), world, stalkers, burrowers);
 
-        bool is_spall_amber = (m_warning_message.find("TECTONIC SPALL") != std::string::npos ||
-                               m_warning_message.find("SEISMIC") != std::string::npos);
-        bool is_acoustic_cyan = (m_warning_message.find("ACOUSTIC") != std::string::npos ||
-                                 m_warning_message.find("AUDIO ALERT") != std::string::npos);
-        glm::vec4 warn_col = is_acoustic_cyan ? glm::vec4(0.05f, 0.92f, 1.0f, 1.0f) :
-                             is_spall_amber ? glm::vec4(1.0f, 0.72f, 0.05f, 1.0f) :
-                                              glm::vec4(1.0f, 0.22f, 0.22f, 1.0f);
-        draw_pill(warn_x, warn_y, warn_w, warn_h, warn_col);
-        draw_text_centered(m_warning_message, warn_x, warn_y, warn_w, warn_h, warn_scale, warn_col);
+    // 9. ON-SCREEN TACTICAL NOTIFICATIONS STACK (Guaranteed non-overlapping, semantic colors)
+    for (size_t i = 0; i < top_stack.notifications.size() && i < m_notifications.size(); ++i) {
+        const auto& notif = m_notifications[i];
+        const auto& rect = top_stack.notifications[i];
+
+        std::string display_text = (notif.count > 1) ?
+            (notif.text + " [x" + std::to_string(notif.count) + "]") : notif.text;
+
+        float alpha = std::clamp(notif.timer / 0.30f, 0.0f, 1.0f);
+
+        glm::vec4 border_col = notif.color;
+        border_col.a *= (0.95f * alpha);
+
+        glm::vec4 bg_col(0.06f, 0.08f, 0.11f, 0.90f * alpha);
+        if (notif.color.r > 0.8f && notif.color.g < 0.4f) {
+            bg_col = glm::vec4(0.18f, 0.03f, 0.03f, 0.92f * alpha);
+        } else if (notif.color.g > 0.8f && notif.color.r < 0.4f) {
+            bg_col = glm::vec4(0.02f, 0.16f, 0.06f, 0.92f * alpha);
+        }
+
+        // Crisp semi-transparent tinted backdrop
+        draw_rect(rect.x, rect.y, rect.w, rect.h, bg_col);
+
+        // Vibrant 1px border with semantic accent
+        draw_rect(rect.x, rect.y, rect.w, 1.0f, border_col);
+        draw_rect(rect.x, rect.y + rect.h - 1.0f, rect.w, 1.0f, border_col);
+        draw_rect(rect.x, rect.y, 1.0f, rect.h, border_col);
+        draw_rect(rect.x + rect.w - 1.0f, rect.y, 1.0f, rect.h, border_col);
+
+        // Immediate high-contrast legible text
+        draw_text_centered(display_text, rect.x, rect.y, rect.w, rect.h, 1.10f * ui_scale,
+                           glm::vec4(notif.color.r, notif.color.g, notif.color.b, alpha));
     }
 
-    // 9. SURVEYING SONAR MINERAL LABELS (Unlocked at Rank 2+)
+    // 9b. SURVEYING SONAR MINERAL LABELS (Unlocked at Rank 2+)
     if (surveying && surveying->is_active() &&
         (surveying->is_identifying_materials() || skills.can_identify_materials() || player.upgrades().can_identify_materials())) {
         glm::mat4 vp = proj * view;
@@ -989,8 +1525,9 @@ void HUD::render(
         }
     }
 
-    // 9b. FULL-SCREEN SEISMIC TREMOR EFFECT & OBVIOUS VISUAL WARNING
-    if (hazard.is_tremoring()) {
+    // 9c. FULL-SCREEN SEISMIC TREMOR EFFECT PERIMETER BORDER
+    // Only pulses display perimeter border if the player is in or near the affected zone
+    if (hazard.is_tremoring() && hazard.is_player_in_tremor_zone()) {
         float pulse = 0.55f + 0.45f * std::sin(m_total_time * 14.0f);
         float b_thick = 10.0f * ui_scale;
 
@@ -1000,18 +1537,7 @@ void HUD::render(
         draw_rect(0.0f, sh - b_thick, sw, b_thick, tremor_col);
         draw_rect(0.0f, 0.0f, b_thick, sh, tremor_col);
         draw_rect(sw - b_thick, 0.0f, b_thick, sh, tremor_col);
-
-        // Huge, unmistakable central alert banner across top
-        float alert_w = std::clamp(540.0f * ui_scale, 400.0f, 720.0f);
-        float alert_h = 40.0f * ui_scale;
-        float alert_x = (sw - alert_w) * 0.5f;
-        float alert_y = 66.0f * ui_scale;
-
-        draw_pill(alert_x, alert_y, alert_w, alert_h, glm::vec4(1.0f, 0.15f, 0.15f, 0.95f));
-        draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.20f, 0.02f, 0.02f, 0.80f * pulse));
-        draw_text_centered("! ! ! ACTIVE SEISMIC TREMOR IN PROGRESS ! ! !", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.25f * ui_scale, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
-        draw_text_centered("CAVERN CEILING DESTABILIZED // WATCH FOR FALLING ROCKS", alert_x, alert_y + 20.0f * ui_scale, alert_w, alert_h * 0.45f, 0.95f * ui_scale, glm::vec4(1.0f, 0.70f, 0.20f, 1.0f));
-    } else if (hazard.is_warning()) {
+    } else if (hazard.is_warning() && hazard.is_player_in_tremor_zone()) {
         float pulse = 0.5f + 0.5f * std::sin(m_total_time * 10.0f);
         float b_thick = 7.0f * ui_scale;
 
@@ -1020,45 +1546,94 @@ void HUD::render(
         draw_rect(0.0f, sh - b_thick, sw, b_thick, warn_col);
         draw_rect(0.0f, 0.0f, b_thick, sh, warn_col);
         draw_rect(sw - b_thick, 0.0f, b_thick, sh, warn_col);
-
-        float alert_w = std::clamp(500.0f * ui_scale, 360.0f, 660.0f);
-        float alert_h = 36.0f * ui_scale;
-        float alert_x = (sw - alert_w) * 0.5f;
-        float alert_y = 66.0f * ui_scale;
-
-        draw_pill(alert_x, alert_y, alert_w, alert_h, warn_col);
-        draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.18f, 0.12f, 0.02f, 0.75f * pulse));
-        draw_text_centered("[ ! ] WARNING: SEISMIC FAULT RUPTURE DETECTED [ ! ]", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.15f * ui_scale, glm::vec4(1.0f, 0.95f, 0.6f, 1.0f));
-        draw_text_centered("EARTHQUAKE IMMINENT -- SEEK REINFORCED SHELTER", alert_x, alert_y + 19.0f * ui_scale, alert_w, alert_h * 0.45f, 0.92f * ui_scale, Typography::COLOR_AMBER);
-    }
-
-    // 9c. DYNAMIC TACTICAL HUD WARNING BANNER (When active and not suppressed by tremor banner)
-    if (m_warning_timer > 0.0f && !m_warning_message.empty() && !hazard.is_tremoring() && !hazard.is_warning()) {
-        float scale = 1.15f * ui_scale;
-        float text_w = FontRenderer::get_rendered_width(m_warning_message, scale);
-        float banner_w = std::clamp(text_w + 32.0f * ui_scale, 320.0f, sw * 0.75f);
-        float banner_h = 30.0f * ui_scale;
-        float banner_x = (sw - banner_w) * 0.5f;
-        float banner_y = 68.0f * ui_scale;
-
-        float alpha = std::min(1.0f, m_warning_timer / 0.3f);
-        glm::vec4 border_col(1.0f, 0.35f, 0.15f, 0.9f * alpha);
-        glm::vec4 bg_col(0.12f, 0.04f, 0.04f, 0.85f * alpha);
-
-        draw_pill(banner_x, banner_y, banner_w, banner_h, border_col);
-        draw_rect(banner_x, banner_y, banner_w, banner_h, bg_col);
-        draw_text_centered(m_warning_message, banner_x, banner_y, banner_w, banner_h, scale, glm::vec4(1.0f, 0.95f, 0.8f, alpha));
     }
 
     // 10. DIRECTIONAL DAMAGE FLASH / VIGNETTE
     if (m_damage_flash_timer > 0.0f) {
-        float f_alpha = glm::clamp(m_damage_flash_timer, 0.0f, 0.75f);
-        float b_thick = 24.0f;
-        glm::vec4 flash_col(1.0f, 0.15f, 0.1f, f_alpha);
+        float f_alpha = glm::clamp(m_damage_flash_timer, 0.0f, 0.85f);
+        float b_thick = 32.0f * ui_scale;
+        glm::vec4 flash_col(1.0f, 0.12f, 0.10f, f_alpha);
+        // Subtle red wash across full screen for immediate visual impact
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.95f, 0.08f, 0.08f, f_alpha * 0.22f));
+        // Outer intense crimson vignette border
         draw_rect(0.0f, 0.0f, sw, b_thick, flash_col);
         draw_rect(0.0f, sh - b_thick, sw, b_thick, flash_col);
         draw_rect(0.0f, 0.0f, b_thick, sh, flash_col);
         draw_rect(sw - b_thick, 0.0f, b_thick, sh, flash_col);
+        // Soft secondary inner border
+        float inner_thick = b_thick * 0.6f;
+        glm::vec4 inner_col(0.85f, 0.15f, 0.12f, f_alpha * 0.45f);
+        draw_rect(b_thick, b_thick, sw - 2.0f * b_thick, inner_thick, inner_col);
+        draw_rect(b_thick, sh - b_thick - inner_thick, sw - 2.0f * b_thick, inner_thick, inner_col);
+        draw_rect(b_thick, b_thick, inner_thick, sh - 2.0f * b_thick, inner_col);
+        draw_rect(sw - b_thick - inner_thick, b_thick, inner_thick, sh - 2.0f * b_thick, inner_col);
+    }
+
+    // 10b. RADIATION IONIZING VIGNETTE & STATIC (No screen shake)
+    if (m_radiation_flash_timer > 0.0f) {
+        float r_alpha = glm::clamp(m_radiation_flash_timer, 0.0f, 0.85f);
+        float b_thick = 28.0f * ui_scale;
+        glm::vec4 rad_edge(0.18f, 0.98f, 0.35f, r_alpha);
+        // Soft green wash
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.10f, 0.85f, 0.25f, r_alpha * 0.14f));
+        // Emerald perimeter border
+        draw_rect(0.0f, 0.0f, sw, b_thick, rad_edge);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, rad_edge);
+        draw_rect(0.0f, 0.0f, b_thick, sh, rad_edge);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, rad_edge);
+        // Ionizing static micro scanlines
+        float scanline_y = std::fmod(m_total_time * 240.0f, sh);
+        draw_rect(0.0f, scanline_y, sw, 3.0f * ui_scale, glm::vec4(0.30f, 1.0f, 0.50f, r_alpha * 0.40f));
+    }
+
+    // 10c. TOXIC GAS VISOR ASPHYXIATION VIGNETTE & ON-SCREEN PARTICLES
+    float gas_vis = std::max(m_toxic_gas_flash_timer, m_toxic_gas_exposure);
+    if (gas_vis > 0.0f) {
+        float g_alpha = glm::clamp(gas_vis, 0.0f, 0.85f);
+        float b_thick = 34.0f * ui_scale;
+        glm::vec4 gas_edge(0.45f, 0.88f, 0.12f, g_alpha);
+        // Caustic sickly yellow-green wash
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.35f, 0.75f, 0.10f, g_alpha * 0.18f));
+        // Toxic perimeter border
+        draw_rect(0.0f, 0.0f, sw, b_thick, gas_edge);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, gas_edge);
+        draw_rect(0.0f, 0.0f, b_thick, sh, gas_edge);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, gas_edge);
+
+        // Render on-screen drifting toxic gas droplets & vapor wisps on the visor
+        for (const auto& p : m_screen_toxic_particles) {
+            float p_life_frac = std::clamp(p.life / p.max_life, 0.0f, 1.0f);
+            float p_alpha = p.alpha * p_life_frac * g_alpha;
+            draw_pill(p.x, p.y, p.size * ui_scale, p.size * 0.7f * ui_scale, glm::vec4(0.48f, 0.86f, 0.15f, p_alpha));
+        }
+    }
+
+    // 10d. ON-SCREEN VISOR BLOOD SPLATTERS (Enemy Attacks Only)
+    for (const auto& s : m_blood_splatters) {
+        float life_frac = std::clamp(s.life / s.max_life, 0.0f, 1.0f);
+        float fade = (life_frac < 0.35f) ? (life_frac / 0.35f) : 1.0f;
+        float cur_alpha = s.alpha * fade;
+        if (cur_alpha <= 0.01f) continue;
+
+        // Dark coagulated visceral red border/shadow
+        glm::vec4 dark_blood(0.38f, 0.01f, 0.02f, cur_alpha * 0.95f);
+        // Rich arterial crimson core
+        glm::vec4 core_blood(0.72f, 0.04f, 0.06f, cur_alpha);
+
+        // Main splatter body (elongated drip pill)
+        float main_w = s.size * ui_scale;
+        float main_h = s.size * 0.75f * ui_scale;
+        draw_pill(s.x - main_w * 0.5f, s.y - main_h * 0.5f, main_w, main_h, dark_blood);
+        draw_rect(s.x - main_w * 0.3f, s.y - main_h * 0.3f, main_w * 0.6f, main_h * 0.6f, core_blood);
+
+        // Satellite spray droplets
+        for (int i = 0; i < s.droplet_count && i < 6; ++i) {
+            float d_x = s.x + s.dx[i] * ui_scale;
+            float d_y = s.y + s.dy[i] * ui_scale;
+            float d_rad = s.radii[i] * ui_scale;
+            draw_pill(d_x - d_rad, d_y - d_rad, d_rad * 2.0f, d_rad * 2.0f, dark_blood);
+            draw_rect(d_x - d_rad * 0.6f, d_y - d_rad * 0.6f, d_rad * 1.2f, d_rad * 1.2f, core_blood);
+        }
     }
 
     // 11. MINIMAL CONTROLS HINT (Bottom Center, Clean & Unobtrusive - auto-fades after 6s)
@@ -1147,6 +1722,172 @@ void HUD::render(
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+}
+
+std::vector<EnemyAwarenessMarker> HUD::compute_awareness_markers(
+    const glm::vec3& cam_pos,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    const std::vector<SeismicBurrower>* burrowers
+) const {
+    std::vector<EnemyAwarenessMarker> markers;
+
+    if (stalkers) {
+        for (const auto& s : *stalkers) {
+            EnemyAwarenessMarkerType m_type = get_awareness_marker_type(s);
+            if (m_type == EnemyAwarenessMarkerType::None) continue;
+
+            float v_offset = s.scale * 0.85f + 0.35f;
+            glm::vec3 head_pos = s.position + glm::vec3(0.0f, v_offset, 0.0f);
+            float dist = glm::distance(cam_pos, head_pos);
+            if (dist > 45.0f || dist < 0.3f) continue;
+
+            glm::vec3 to_head = head_pos - cam_pos;
+            glm::vec3 dir = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit = world.raycast(cam_pos, dir, dist);
+            bool has_los = (!hit.hit || hit.distance >= (dist - 0.25f));
+
+            EnemyAwarenessMarker marker;
+            marker.world_pos = head_pos;
+            marker.marker_type = static_cast<int>(m_type);
+            marker.state_timer = s.state_timer;
+            marker.has_los = has_los;
+            marker.dist = dist;
+            markers.push_back(marker);
+        }
+    }
+
+    if (burrowers) {
+        for (const auto& b : *burrowers) {
+            EnemyAwarenessMarkerType m_type = get_awareness_marker_type(b);
+            if (m_type == EnemyAwarenessMarkerType::None) continue;
+
+            float v_offset = b.scale * 1.0f + 0.5f;
+            glm::vec3 head_pos = b.position + glm::vec3(0.0f, v_offset, 0.0f);
+            float dist = glm::distance(cam_pos, head_pos);
+            if (dist > 45.0f || dist < 0.3f) continue;
+
+            glm::vec3 to_head = head_pos - cam_pos;
+            glm::vec3 dir = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit = world.raycast(cam_pos, dir, dist);
+            bool has_los = (!hit.hit || hit.distance >= (dist - 0.25f));
+
+            EnemyAwarenessMarker marker;
+            marker.world_pos = head_pos;
+            marker.marker_type = static_cast<int>(m_type);
+            marker.state_timer = b.state_timer;
+            marker.has_los = has_los;
+            marker.dist = dist;
+            markers.push_back(marker);
+        }
+    }
+
+    return markers;
+}
+
+void HUD::render_enemy_awareness_markers(
+    const glm::mat4& view,
+    const glm::mat4& proj,
+    const glm::vec3& cam_pos,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    const std::vector<SeismicBurrower>* burrowers
+) {
+    auto markers = compute_awareness_markers(cam_pos, world, stalkers, burrowers);
+    if (markers.empty()) return;
+
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
+    float screen_w = static_cast<float>(m_width);
+    float screen_h = static_cast<float>(m_height);
+
+    for (const auto& marker : markers) {
+        glm::vec4 clip = proj * view * glm::vec4(marker.world_pos, 1.0f);
+        if (clip.w <= 0.1f) continue;
+
+        glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        if (ndc.z < -1.0f || ndc.z > 1.0f) continue;
+        if (ndc.x < -1.15f || ndc.x > 1.15f || ndc.y < -1.15f || ndc.y > 1.15f) continue;
+
+        float sx = (ndc.x * 0.5f + 0.5f) * screen_w;
+        float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * screen_h;
+
+        float alpha = marker.has_los ? 1.0f : 0.50f;
+        float dist_scale = std::clamp(16.0f / std::max(marker.dist, 5.0f), 0.70f, 1.25f);
+
+        float pop_scale = 1.0f;
+        if (marker.state_timer < 0.25f) {
+            float pop_t = 1.0f - (marker.state_timer / 0.25f);
+            pop_scale += pop_t * 0.40f;
+        }
+
+        if (marker.marker_type == 2) { // RedTriangle (Engaged / Attack Mode)
+            float combat_pulse = 1.0f + 0.12f * std::sin(m_total_time * 12.0f);
+            float tri_size = 28.0f * ui_scale * dist_scale * pop_scale * combat_pulse;
+            float half_w = tri_size * 0.55f;
+            float half_h = tri_size * 0.50f;
+
+            float top_y = sy - half_h;
+            float bot_y = sy + half_h;
+
+            // Outer crimson triangle pointing down to enemy head
+            glm::vec4 red_col(1.0f, 0.14f, 0.14f, alpha);
+            draw_triangle(
+                sx - half_w, top_y,
+                sx + half_w, top_y,
+                sx, bot_y,
+                red_col
+            );
+
+            // Inset dark crimson triangle
+            float inset = 2.5f * ui_scale * dist_scale;
+            glm::vec4 dark_red(0.18f, 0.02f, 0.02f, 0.92f * alpha);
+            draw_triangle(
+                sx - half_w + inset * 1.2f, top_y + inset,
+                sx + half_w - inset * 1.2f, top_y + inset,
+                sx, bot_y - inset * 1.4f,
+                dark_red
+            );
+
+            // Centered sharp exclamation mark inside triangle
+            float text_scale = 1.25f * ui_scale * dist_scale * pop_scale;
+            draw_text_centered("!", sx - half_w, top_y + 1.0f * ui_scale, half_w * 2.0f, half_h * 1.3f, text_scale, glm::vec4(1.0f, 0.45f, 0.45f, alpha));
+        } else if (marker.marker_type == 1) { // YellowExclamation (Investigating / Alerted)
+            float bob = std::sin(m_total_time * 6.0f) * (2.5f * ui_scale);
+            float cur_sy = sy + bob;
+
+            float badge_w = 26.0f * ui_scale * dist_scale * pop_scale;
+            float badge_h = 26.0f * ui_scale * dist_scale * pop_scale;
+            float bx = sx - badge_w * 0.5f;
+            float by = cur_sy - badge_h * 0.5f;
+
+            glm::vec4 yellow_col(1.0f, 0.82f, 0.08f, alpha);
+            glm::vec4 bg_col(0.06f, 0.08f, 0.11f, 0.92f * alpha);
+
+            // 1. Dark pill backdrop
+            draw_rect(bx, by, badge_w, badge_h, bg_col);
+
+            // 2. Glowing yellow border
+            float b_thick = 1.5f * ui_scale;
+            draw_rect(bx, by, badge_w, b_thick, yellow_col);
+            draw_rect(bx, by + badge_h - b_thick, badge_w, b_thick, yellow_col);
+            draw_rect(bx, by, b_thick, badge_h, yellow_col);
+            draw_rect(bx + badge_w - b_thick, by, b_thick, badge_h, yellow_col);
+
+            // 3. Downward indicator caret pointing to enemy head
+            float caret_w = 4.0f * ui_scale * dist_scale;
+            float caret_h = 4.0f * ui_scale * dist_scale;
+            draw_triangle(
+                sx - caret_w, by + badge_h,
+                sx + caret_w, by + badge_h,
+                sx, by + badge_h + caret_h,
+                yellow_col
+            );
+
+            // 4. Vibrant Yellow "!"
+            float text_scale = 1.30f * ui_scale * dist_scale * pop_scale;
+            draw_text_centered("!", bx, by - 1.0f * ui_scale, badge_w, badge_h, text_scale, glm::vec4(1.0f, 0.90f, 0.15f, alpha));
+        }
+    }
 }
 
 } // namespace Voidfall

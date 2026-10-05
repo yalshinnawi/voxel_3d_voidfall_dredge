@@ -12,6 +12,7 @@ Welcome to the central design, mechanics, and systems knowledge base for **Voidf
 - **[Hazard Clock & Expedition Loop](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/hazard_clock.md)**: 4-phase radiation escalation, seismic tremors, and 40-second extraction beacon holdout.
 - **[Progression & Economy Architecture](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/progression_and_economy.md)**: Decoupled EXP (Player Level / Delver Rank) and Coins (skill upgrades), exponential cost curves ($100 \times 1.6^{\text{tier}-1}$), and level-gated sectors and classes.
 - **[Economy Simulator & Math](file:///d:/Projects/voxel_3d_voidfall_dredge/.agents/skills/game-design-and-balancing/references/economy_and_progression_math.md)**: Progression mathematical formulas, Voidite/Titanium costs, and respec refund mechanics.
+- **[Acoustic Stealth & Explosive Distractions](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/stealth_and_noise.md)**: Sound salience weighting, deployable satchel charges, gunfire noise, ballistic block destruction, and localized tremors.
 - **[Seismic Sonar & Surveying](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/surveying_and_sonar.md)**: Acoustic pulse scans, cooldown recharge curves, and Rank 2 spectroscopic material labels.
 
 ---

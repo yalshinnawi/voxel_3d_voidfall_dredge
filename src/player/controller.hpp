@@ -39,6 +39,10 @@ public:
     void update_physics(float dt, World& world);
     void UpdatePhysics(float dt, World& world) { update_physics(dt, world); }
     void UpdatePhysics(float dt);
+    void Update(float dt);
+    void update(float dt) { Update(dt); }
+    void Update(float dt, World& world);
+    void update(float dt, World& world) { Update(dt, world); }
 
     void ResolveAxisCollision(int axis, const glm::vec3& half_extents);
     void ResolveAxisCollision(int axis, const glm::vec3& half_extents, World& world);
@@ -47,8 +51,25 @@ public:
     void PlaceBulkhead(World& world, const glm::ivec3& place_pos);
     void clamp_to_surface(const World& world);
 
+    static constexpr float EYE_HEIGHT_STAND = 1.65f;
+    static constexpr float EYE_HEIGHT_CROUCH = 0.95f;
+
     bool is_grounded() const { return m_on_ground; }
     bool isGrounded() const { return m_on_ground; }
+
+    bool is_crouching() const { return m_is_crouching; }
+    bool IsCrouched() const { return m_is_crouching; }
+    void set_crouching(bool c) { ProcessStanceChange(c); }
+    void SetCrouched(bool c) { ProcessStanceChange(c); }
+    void ProcessStanceChange(bool crouched);
+
+    float eye_height() const { return m_eyeHeight; }
+    float GetCurrentEyeHeight() const { return m_eyeHeight; }
+    glm::vec3 eye_position() const { return m_position + glm::vec3(0.0f, m_eyeHeight - half_extents().y, 0.0f); }
+    glm::vec3 half_extents() const { return m_is_crouching ? glm::vec3(0.3f, 0.55f, 0.3f) : glm::vec3(0.3f, 0.9f, 0.3f); }
+    glm::vec3 GetHalfExtents() const { return half_extents(); }
+
+    RaycastHit QueryRaycastTarget(const World& world, float max_dist = 50.0f) const;
 
     glm::mat4 get_view_matrix() const;
     const glm::vec3& position() const { return m_position; }
@@ -57,6 +78,13 @@ public:
     void set_velocity(const glm::vec3& vel) { m_velocity = vel; }
     glm::vec3& velocity_mut() { return m_velocity; }
     bool is_penetrating_solid(const World& world) const;
+
+    struct CameraView {
+        glm::vec3 Front;
+        glm::vec3 Position;
+        glm::vec3 Up;
+    };
+    CameraView camera() const { return CameraView{m_front, eye_position(), m_up}; }
 
     const glm::vec3& forward() const { return m_front; }
     const glm::vec3& right() const { return m_right; }
@@ -69,6 +97,12 @@ public:
         m_pitch = glm::clamp(pitch, -89.0f, 89.0f);
         update_camera_vectors();
     }
+    void set_direction(const glm::vec3& dir) {
+        glm::vec3 n = glm::normalize(dir);
+        float pitch_deg = glm::degrees(std::asin(std::clamp(n.y, -1.0f, 1.0f)));
+        float yaw_deg = glm::degrees(std::atan2(n.z, n.x));
+        set_look_angles(yaw_deg, pitch_deg);
+    }
 
     const GrappleHook& grapple() const { return m_grapple; }
     GrappleHook& grapple_mut() { return m_grapple; }
@@ -77,6 +111,8 @@ public:
 
     ToolSlot active_tool() const { return m_active_tool; }
     void set_active_tool(ToolSlot tool) { m_active_tool = tool; }
+    void cycle_tool_forward();
+    void cycle_tool_backward();
 
     void MineBlock(float dt);
     void MineBlock(float dt, World& world);
@@ -119,10 +155,49 @@ public:
     void apply_attributes_and_upgrades(const CharacterAttributes& attr, const UpgradeTree& upg);
     void apply_attributes_and_upgrades(CharacterClass cls, const UpgradeTree& upg);
 
+    // Skill tree progression effects & player stat getters
+    float effective_mine_speed() const {
+        return m_char_attr.baseMineSpeed * (1.0f + m_upgrades.drillSpeedTier * 0.12f) * std::max(0.2f, m_drill_speed_multiplier);
+    }
+    float drill_heat_buildup_rate() const {
+        return 20.0f * std::max(0.25f, 1.0f - m_upgrades.drillDurabilityTier * 0.15f);
+    }
+    float drill_heat_dissipation_rate() const {
+        return 18.0f * (1.0f + m_upgrades.drillDurabilityTier * 0.20f);
+    }
+    float dynamo_multiplier(bool is_sprint_or_falling = false) const {
+        float mult = 1.0f + m_upgrades.kineticDynamoTier * 0.15f;
+        if (is_sprint_or_falling) mult += m_upgrades.kineticDynamoTier * 0.15f;
+        return mult;
+    }
+    float sonar_radius() const {
+        return m_char_attr.sonarRadius + (m_upgrades.sonarFrequencyTier * 2.0f);
+    }
+    bool can_identify_materials() const {
+        return m_upgrades.can_identify_materials();
+    }
+    float debris_damage_reduction() const {
+        return std::clamp(m_char_attr.fallingDamageReduction + (m_upgrades.reinforcedPlatingTier * 0.10f), 0.0f, 0.85f);
+    }
+
+    enum class DamageSource {
+        Kinetic,         // Standard kinetic attack (screen shake trauma, red flash)
+        EnemyAttack,     // Hostile creature claw maul / bite / spine (screen blood splatters + visceral flesh hit sound)
+        FallImpact,      // High-speed landing (bone crack noise, trauma, NO blood splatters)
+        FallingDebris,   // Heavy rock fall from ceiling / seismic activity (debris armor impact sound, NO blood splatters)
+        Radiation,       // Ionizing radiation (ZERO screen shake, geiger clicking, player groaning)
+        ToxicGas,        // Chemical/spore gas (minimal cough shudder, asphyxiation choking, on-screen particles)
+        ThermalLava,     // Molten thermite slag (thermal sizzle, heat rise, burn flash)
+        Spikes,          // Punji spike puncture (sharp crunch, recoil hop)
+        VoidSingularity  // Cosmic gravitational void (gravitational distortion)
+    };
+
     float health() const { return m_health; }
     float max_health() const { return m_max_health; }
     void set_health(float h) { m_health = glm::clamp(h, 0.0f, m_max_health); }
+    float take_damage(float dmg, DamageSource source);
     float take_damage(float dmg, bool is_falling_debris = false);
+    DamageSource last_damage_source() const { return m_last_damage_source; }
 
     void set_reel_speed_multiplier(float mul) { m_reel_speed_multiplier = mul; }
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
@@ -158,6 +233,14 @@ public:
     using WarningCallback = std::function<void(const std::string&)>;
     using JumpCallback = std::function<void(const glm::vec3& pos)>;
     using LandCallback = std::function<void(const glm::vec3& pos, float impact_speed)>;
+    /// Fired by take_damage() for every HP reduction regardless of source
+    /// (fall, stalker, burrower, radiation, gas, lava, debris…).
+    /// dmg = final HP removed after reductions; is_impact = true when kinetic/fall.
+    using DamageCallback = std::function<void(float dmg, bool is_impact)>;
+    using DamageSourceCallback = std::function<void(float dmg, DamageSource source)>;
+
+    using CanDeployChargePredicate = std::function<bool()>;
+    using ChargePlacedCallback = std::function<void(const glm::ivec3& pos, const glm::ivec3& normal)>;
 
     void set_on_block_break(BlockBreakCallback cb) { m_on_block_break = std::move(cb); }
     void set_on_block_place(BlockPlaceCallback cb) { m_on_block_place = std::move(cb); }
@@ -165,9 +248,17 @@ public:
     void set_on_sonar_cast(SonarCastCallback cb) { m_on_sonar_cast = std::move(cb); }
     void set_on_explosive_blast(ExplosiveBlastCallback cb) { m_on_explosive_blast = std::move(cb); }
     void set_can_place_predicate(CanPlacePredicate pred) { m_can_place_predicate = std::move(pred); }
+    void set_can_deploy_charge_predicate(CanDeployChargePredicate pred) { m_can_deploy_charge_predicate = std::move(pred); }
+    void set_on_charge_placed(ChargePlacedCallback cb) { m_on_charge_placed = std::move(cb); }
     void set_on_warning(WarningCallback cb) { m_on_warning = std::move(cb); }
     void set_on_jump(JumpCallback cb) { m_on_jump = std::move(cb); }
     void set_on_land(LandCallback cb) { m_on_land = std::move(cb); }
+    void set_on_damage(DamageCallback cb) { m_on_damage = std::move(cb); }
+    void set_on_damage_source(DamageSourceCallback cb) { m_on_damage_source = std::move(cb); }
+
+    // Weapon reload callback
+    using WeaponReloadCallback = std::function<void(CharacterClass cls, float reload_time)>;
+    void set_on_weapon_reload(WeaponReloadCallback cb) { m_on_weapon_reload = std::move(cb); }
 
     // Sonar cooldown & state
     float sonar_cooldown() const { return m_sonar_cooldown; }
@@ -207,6 +298,8 @@ private:
 
     bool m_on_ground{false};
     bool m_isGrounded{false};
+    bool m_is_crouching{false};
+    float m_eyeHeight{1.65f};
     World* m_current_world{nullptr};
     uint16_t m_current_buttons{0};
 
@@ -267,11 +360,17 @@ private:
     BulkheadDismantleCallback m_on_bulkhead_dismantle;
     SonarCastCallback m_on_sonar_cast;
     ExplosiveBlastCallback m_on_explosive_blast;
+    CanDeployChargePredicate m_can_deploy_charge_predicate;
+    ChargePlacedCallback m_on_charge_placed;
     CanPlacePredicate m_can_place_predicate;
     WarningCallback m_on_warning;
     TacticalAbilityCallback m_on_tactical_ability;
     JumpCallback m_on_jump;
     LandCallback m_on_land;
+    DamageCallback m_on_damage;  // Notifies HUD/application on any HP loss
+    DamageSourceCallback m_on_damage_source;
+    WeaponReloadCallback m_on_weapon_reload;
+    DamageSource m_last_damage_source{DamageSource::Kinetic};
 
     float m_carry_weight_multiplier{1.0f};
     float m_tactical_cooldown{0.0f};
@@ -282,9 +381,8 @@ private:
     bool m_is_in_spikes{false};
     float m_spike_damage_timer{0.0f};
 
-    void apply_fall_impact(float impact_speed);
-
 public:
+    void apply_fall_impact(float impact_speed);
     bool is_in_lava() const { return m_is_in_lava; }
     bool is_in_spikes() const { return m_is_in_spikes; }
     float spike_damage_timer() const { return m_spike_damage_timer; }

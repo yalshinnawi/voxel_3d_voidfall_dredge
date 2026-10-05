@@ -13,15 +13,32 @@ class World;
 
 /// Behavioral states for the Void Stalker AI finite state machine
 enum class StalkerState : uint8_t {
-    Idle,           // Clinging to wall/ceiling, ambient prowling in cavern
+    Idle = 0,           // Clinging to wall/ceiling, ambient prowling in cavern
     Investigating,  // Scurrying towards heard sound event origin (sniffing/clicking in dark)
     Stalking,       // Pursuing player while in visual contact or direct combat range
     Circling,       // Circling around player at mid-range before attack
     Lunging,        // Committed attack leap toward player (Melee only)
     Stunned,        // Temporarily disabled (sonar pulse, bright light)
     Fleeing,        // Retreating after taking critical damage
-    Dead            // Marked for removal
+    Burrowing,      // Escaping by burrowing through cavern rock walls
+    Dying,          // Death animation collapse & tumbling before carcass transition
+    Dead,           // Marked for removal
+
+    // Uppercase aliases for compatibility with AIState enum conventions
+    IDLE = Idle,
+    INVESTIGATING = Investigating,
+    STALKING = Stalking,
+    CIRCLING = Circling,
+    LUNGING = Lunging,
+    STUNNED = Stunned,
+    FLEEING = Fleeing,
+    BURROWING = Burrowing,
+    ESCAPING = Burrowing,
+    DYING = Dying,
+    DEAD = Dead
 };
+
+using AIState = StalkerState;
 
 /// Archetype combat role for hostile subterranean stalkers
 enum class StalkerRole : uint8_t {
@@ -124,6 +141,12 @@ struct VoidStalker {
     bool just_screeched{false};     // Emitted echoing screech this frame
     bool just_chittered{false};     // Emitted subtle chitinous clicking in the dark
     float chitter_timer{0.0f};      // Timer between subtle prowling clicks/chitters
+    bool just_dug{false};           // Emitted rock drilling / digging sound this frame
+    bool just_escaped{false};       // Successfully burrowed through wall and escaped
+    float drill_timer{0.0f};        // Timer between drilling/digging rock sounds
+    float burrow_duration{2.0f};    // Total time required to burrow through wall
+    glm::vec3 burrow_dir{0.0f};     // Normal direction into rock wall while burrowing
+    glm::vec3 burrow_entry{0.0f};   // World coordinates of borehole entry point on rock wall surface
     bool just_spotted_player{false};
     bool just_heard_sound{false};   // Reacted to a sound event this frame
     bool just_lunged{false};
@@ -131,10 +154,45 @@ struct VoidStalker {
     bool just_fired_spine{false};
     bool just_died{false};
 
+    // Death Animation Collapse & Ragdoll Settling
+    float death_timer{0.0f};
+    float death_duration{0.75f};
+    glm::vec3 death_impulse{0.0f};
+    glm::vec3 death_angular_velocity{0.0f};
+    glm::vec3 death_hit_dir{0.0f};
+
     /// Returns true if the stalker should be removed from the world
     bool is_dead() const { return state == StalkerState::Dead; }
+    bool is_dying() const { return state == StalkerState::Dying; }
+    bool is_burrowing() const { return state == StalkerState::Burrowing; }
+    bool is_escaping() const { return state == StalkerState::Burrowing; }
+    StalkerState GetState() const { return state; }
+    bool has_collision() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing; }
+    bool has_attack_hitbox() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing; }
+    bool IsCollisionEnabled() const { return has_collision(); }
+    bool IsAttackHitboxEnabled() const { return has_attack_hitbox(); }
     bool is_melee() const { return role == StalkerRole::Melee; }
     bool is_shooter() const { return role == StalkerRole::Shooter; }
+
+    /// Visual awareness classification for overhead indicators
+    bool is_investigating_state() const {
+        return !is_dead() && !is_dying() && (state == StalkerState::Investigating || state == StalkerState::Stunned);
+    }
+
+    bool is_engaged_state() const {
+        return !is_dead() && !is_dying() && (state == StalkerState::Stalking ||
+                                             state == StalkerState::Circling ||
+                                             state == StalkerState::Lunging ||
+                                             (role == StalkerRole::Shooter && has_player_los));
+    }
+
+    /// Returns true if the stalker is completely unalerted (unaware of player / sounds)
+    bool is_unalerted() const {
+        return !is_dead() && !is_dying() &&
+               state == StalkerState::Idle &&
+               !is_pursuing_attacker &&
+               !has_sound_target;
+    }
 
     /// Returns the active emissive eye/core color based on behavioral state and role
     glm::vec4 get_eye_color() const {
@@ -150,6 +208,7 @@ struct VoidStalker {
                 case StalkerState::Stalking:      return glm::vec4(0.10f, 1.0f, 0.30f, 1.0f);  // Toxic emerald stalking
                 case StalkerState::Circling:      return glm::vec4(0.20f, 1.0f, 0.25f, 1.0f);  // Intense glowing neon green
                 case StalkerState::Fleeing:       return glm::vec4(0.65f, 1.0f, 0.15f, 1.0f);  // Lime-chartreuse evasion
+                case StalkerState::Burrowing:     return glm::vec4(0.85f, 1.0f, 0.20f, 1.0f);  // Electric lime burrowing
                 default:                          return glm::vec4(0.18f, 0.92f, 0.30f, 1.0f); // Toxic green
             }
         } else {
@@ -161,11 +220,25 @@ struct VoidStalker {
                 case StalkerState::Lunging:       return glm::vec4(1.0f, 0.02f, 0.02f, 1.0f);  // Radiant blood red lunge
                 case StalkerState::Circling:      return glm::vec4(1.0f, 0.20f, 0.12f, 1.0f);  // Crimson-orange circling
                 case StalkerState::Fleeing:       return glm::vec4(1.0f, 0.55f, 0.10f, 1.0f);  // Amber retreat
+                case StalkerState::Burrowing:     return glm::vec4(1.0f, 0.65f, 0.15f, 1.0f);  // Intense amber burrowing
                 default:                          return glm::vec4(0.85f, 0.08f, 0.08f, 1.0f); // Predatory red
             }
         }
     }
 };
+
+/// Visual awareness state for overhead in-world indicators
+enum class EnemyAwarenessMarkerType : uint8_t {
+    None = 0,
+    YellowExclamation, // Investigating / sound heard -> Yellow "!"
+    RedTriangle        // Engaged / attack mode -> Red Triangle
+};
+
+inline EnemyAwarenessMarkerType get_awareness_marker_type(const VoidStalker& s) {
+    if (s.is_engaged_state()) return EnemyAwarenessMarkerType::RedTriangle;
+    if (s.is_investigating_state()) return EnemyAwarenessMarkerType::YellowExclamation;
+    return EnemyAwarenessMarkerType::None;
+}
 
 /// Manages all active Void Stalkers in the expedition cavern.
 /// Handles spawning, AI updates, collision with player, and rendering data.
@@ -189,6 +262,7 @@ public:
         float total_damage{0.0f};        // Sum of damage dealt to player this frame
         int stalkers_killed{0};
         int stalkers_stunned{0};
+        int stalkers_escaped{0};         // Count of stalkers that burrowed through walls and escaped
         bool any_lunge{false};           // True if any stalker lunged this frame
         bool any_spotted{false};         // True if any stalker spotted player
         bool any_heard_sound{false};     // True if any stalker reacted to an acoustic sound event
@@ -196,6 +270,8 @@ public:
         bool any_melee_hit{false};       // True if a melee attack landed
         bool any_screech{false};         // True if any stalker emitted an echoing screech
         bool any_chitter{false};         // True if any stalker clicked/chittered in the dark
+        bool any_digging{false};         // True if any stalker made drilling/digging noises into walls
+        std::vector<glm::vec3> digging_positions;
     };
 
     FrameResult update(float dt, const glm::vec3& player_pos,
@@ -211,8 +287,10 @@ public:
     /// Apply sonar pulse stun to all stalkers within radius
     void apply_sonar_stun(const glm::vec3& origin, float radius);
 
-    /// Apply damage to nearest stalker from player attack (drill hit, explosion)
-    bool damage_nearest(const glm::vec3& origin, float radius, float damage);
+    /// Apply damage to nearest stalker from player attack (drill hit, explosion, sneak attack)
+    bool damage_nearest(const glm::vec3& origin, float radius, float damage,
+                         bool allow_crit = false, bool* out_is_crit = nullptr,
+                         float* out_damage_dealt = nullptr);
 
     /// Get all active stalkers (for rendering)
     const std::vector<VoidStalker>& stalkers() const { return m_stalkers; }

@@ -17,7 +17,11 @@ enum MaterialID : uint8_t {
     MAT_DREDGE_BEDROCK = 8,        // Deep planetary crust
     MAT_GAS = 9,
     MAT_VOLATILE_SMOKE = 10,
-    MAT_COUNT
+    MAT_CRYSTAL_AQUIFER = 11,      // Clear subterranean aquifer water / cascade pool
+    MAT_BIOLUMINESCENT_FLORA = 12, // Subterranean glowing moss, fungi, and oasis flora
+    MAT_PRISMATIC_CRYSTAL = 13,    // Translucent radiant prismatic crystal spires
+    MAT_OBSIDIAN_SPIKES = 14,      // Lethal needle-sharp obsidian punji spikes
+    MAT_COUNT = 15
 };
 
 // Aliases for gameplay and surveying systems
@@ -28,6 +32,15 @@ constexpr uint8_t MAT_VAULT_DOOR = MAT_REINFORCED_VAULT_DOOR;
 constexpr uint8_t MAT_RADIOACTIVE = MAT_RADIOACTIVE_ORE;
 constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
 constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
+constexpr uint8_t MAT_WATER = MAT_CRYSTAL_AQUIFER;
+constexpr uint8_t MAT_AQUIFER = MAT_CRYSTAL_AQUIFER;
+constexpr uint8_t MAT_FLORA = MAT_BIOLUMINESCENT_FLORA;
+constexpr uint8_t MAT_MOSS = MAT_BIOLUMINESCENT_FLORA;
+constexpr uint8_t MAT_CRYSTAL = MAT_PRISMATIC_CRYSTAL;
+constexpr uint8_t MAT_TOXIC_GAS = MAT_GAS;
+constexpr uint8_t MAT_MOLTEN_MAGMA = MAT_THERMITE_SLAG;
+constexpr uint8_t MAT_LAVA = MAT_THERMITE_SLAG;
+constexpr uint8_t MAT_SPIKES = MAT_OBSIDIAN_SPIKES;
 
 // Voxel bit flags
 constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;

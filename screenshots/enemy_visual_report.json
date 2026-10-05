@@ -6,9 +6,9 @@
     {
       "slot": 0,
       "phase_id": "FLOOR CRAWL",
-      "timestamp": "2026-10-03 21:01:27",
+      "timestamp": "2026-10-03 23:14:37",
       "master_file": "screenshots/enemy_01_floor_crawl.png",
-      "mean_luminance": 0.29068,
+      "mean_luminance": 0.289838,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -16,9 +16,9 @@
     {
       "slot": 1,
       "phase_id": "WALL CLIMB",
-      "timestamp": "2026-10-03 21:01:28",
+      "timestamp": "2026-10-03 23:14:38",
       "master_file": "screenshots/enemy_02_wall_climb.png",
-      "mean_luminance": 0.29751,
+      "mean_luminance": 0.297244,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -26,9 +26,9 @@
     {
       "slot": 2,
       "phase_id": "CEILING CRAWL",
-      "timestamp": "2026-10-03 21:01:28",
+      "timestamp": "2026-10-03 23:14:38",
       "master_file": "screenshots/enemy_03_ceiling_crawl.png",
-      "mean_luminance": 0.286265,
+      "mean_luminance": 0.285411,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -36,9 +36,9 @@
     {
       "slot": 3,
       "phase_id": "SURFACE TRANSITION",
-      "timestamp": "2026-10-03 21:01:29",
+      "timestamp": "2026-10-03 23:14:39",
       "master_file": "screenshots/enemy_04_surface_transition.png",
-      "mean_luminance": 0.284669,
+      "mean_luminance": 0.283742,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -46,9 +46,9 @@
     {
       "slot": 4,
       "phase_id": "AGGRESSIVE LUNGE",
-      "timestamp": "2026-10-03 21:01:29",
+      "timestamp": "2026-10-03 23:14:39",
       "master_file": "screenshots/enemy_05_aggressive_lunge.png",
-      "mean_luminance": 0.280638,
+      "mean_luminance": 0.281112,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -56,9 +56,9 @@
     {
       "slot": 5,
       "phase_id": "SONAR STUN",
-      "timestamp": "2026-10-03 21:01:30",
+      "timestamp": "2026-10-03 23:14:40",
       "master_file": "screenshots/enemy_06_sonar_stun.png",
-      "mean_luminance": 0.355975,
+      "mean_luminance": 0.354325,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"

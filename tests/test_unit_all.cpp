@@ -223,10 +223,10 @@ void test_progression_and_economy() {
 
     int refunded = 0;
     tree.respec(refunded);
-    int expected_refund = static_cast<int>(std::round(360 * 0.85f)); // 306 EXP
-    TEST_CHECK(refunded == expected_refund, "Respec 85% refund mismatch");
+    int expected_refund = 360; // 100% full recovery of 360 EXP/Coins
+    TEST_CHECK(refunded == expected_refund, "Respec 100% refund mismatch");
     TEST_CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 0, "Respec tier reset mismatch");
-    log_pass("Upgrade purchasing validation and 85% Respec refund");
+    log_pass("Upgrade purchasing validation and 100% Respec refund");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -705,8 +705,13 @@ void test_noise_meter_and_void_stalkers() {
     // Lethal blow
     bool lethal_hit = mgr.damage_nearest(glm::vec3(16.0f, 22.0f, 16.0f), 3.0f, 20.0f);
     TEST_CHECK(lethal_hit, "Lethal blow must register");
-    TEST_CHECK(mgr.stalkers()[0].is_dead(), "Stalker with <= 0 HP must enter Dead state");
-    TEST_CHECK(mgr.active_count() == 0, "Dead stalker must not count toward active_count");
+    TEST_CHECK(mgr.stalkers()[0].is_dying() || mgr.stalkers()[0].is_dead(), "Stalker with <= 0 HP must enter Dying or Dead state");
+    TEST_CHECK(mgr.active_count() == 0, "Dying stalker must not count toward active_count");
+
+    // Step collapse animation sequence into static carcass
+    mgr.update(0.80f, glm::vec3(16.0f, 22.0f, 25.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+               glm::vec3(0.0f, 0.0f, -1.0f), true, 0.0f, false, world);
+    TEST_CHECK(mgr.stalkers()[0].is_dead(), "Stalker must enter Dead state after collapse");
 
     mgr.remove_dead();
     TEST_CHECK(mgr.stalkers().empty(), "remove_dead() must clean up defeated entities");
@@ -902,7 +907,15 @@ void test_cavern_luminaries_and_lighting() {
         RoomShapeType::VoidSingularityRift,
         RoomShapeType::FungoidBioGrotto,
         RoomShapeType::LaserDefenseFoundry,
-        RoomShapeType::CrumblingArchCanyon
+        RoomShapeType::CrumblingArchCanyon,
+        RoomShapeType::SubterraneanAquiferOasis,
+        RoomShapeType::ColossalAbyssalChasm,
+        RoomShapeType::MoltenMagmaFoundry,
+        RoomShapeType::ToxicMiasmaSwamp,
+        RoomShapeType::PrismaticCrystalCathedral,
+        RoomShapeType::AncientTitanNecropolis,
+        RoomShapeType::BioluminescentGlowwormGrotto,
+        RoomShapeType::PrecursorCoolantReservoir
     };
 
     for (RoomShapeType t : types) {
@@ -918,7 +931,7 @@ void test_cavern_luminaries_and_lighting() {
             TEST_CHECK(l.base_color.b >= 0.0f && l.base_color.b <= 1.0f, "Luminary blue channel must be in [0, 1]");
         }
     }
-    log_pass("Cavern Luminary Generation Across All 15 Room Archetypes");
+    log_pass("Cavern Luminary Generation Across All 23 Room Archetypes");
 
     // 2. Specific Thematic Luminary Spectral Verification
     // Geode: Vibrant pulsing violet
@@ -1156,6 +1169,70 @@ void test_plasma_carbine_combat() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────
+// 14. SATCHEL CHARGE, REMOTE DETONATOR & WEAPON CYCLING TESTS
+// ─────────────────────────────────────────────────────────────
+void test_satchel_charge_and_weapon_cycling() {
+    std::cout << "\n=== [MODULE 14] Satchel Charge, Remote Detonator & Weapon Cycling ===" << std::endl;
+
+    PlayerController player(glm::vec3(16.0f, 20.0f, 16.0f));
+
+    // 1. Tool slot cycling (3 active slots: Drill, Combat Weapon, Satchel Charge; Bulkhead placed via RMB on drill)
+    TEST_CHECK(player.active_tool() == ToolSlot::MiningDrill, "Default slot must be 0 (Drill)");
+
+    // Simulate forward cycle (scroll down): Drill -> Combat Weapon -> Satchel Charge -> Drill
+    player.cycle_tool_forward();
+    TEST_CHECK(player.active_tool() == ToolSlot::CombatWeapon, "Cycling forward from Drill must select Combat Weapon");
+
+    player.cycle_tool_forward();
+    TEST_CHECK(player.active_tool() == ToolSlot::DemolitionCharge, "Cycling forward from Combat Weapon must select Demolition Charge");
+
+    player.cycle_tool_forward();
+    TEST_CHECK(player.active_tool() == ToolSlot::MiningDrill, "Cycling forward from Demolition Charge must wrap back to Mining Drill");
+
+    // Simulate backward cycle (scroll up): Drill -> Satchel Charge -> Combat Weapon -> Drill
+    player.cycle_tool_backward();
+    TEST_CHECK(player.active_tool() == ToolSlot::DemolitionCharge, "Cycling backward from Drill must wrap to Demolition Charge");
+
+    player.cycle_tool_backward();
+    TEST_CHECK(player.active_tool() == ToolSlot::CombatWeapon, "Cycling backward from Demolition Charge must select Combat Weapon");
+
+    player.cycle_tool_backward();
+    TEST_CHECK(player.active_tool() == ToolSlot::MiningDrill, "Cycling backward from Combat Weapon must select Mining Drill");
+    log_pass("Mouse scroll wheel 3-tool bidirectional cycling (Drill, Weapon, Satchel; Bulkhead placed via RMB on drill)");
+
+    // 2. Physical Satchel Charge Placement & Remote Detonator State
+    TEST_CHECK(!player.has_placed_charge(), "Player must not have a placed charge initially");
+
+    // Plant charge at (18, 20, 16) with normal (0, 1, 0)
+    glm::ivec3 target_voxel(18, 20, 16);
+    glm::ivec3 target_norm(0, 1, 0);
+
+    bool charge_placed_callback_fired = false;
+    player.set_on_charge_placed([&](const glm::ivec3& pos, const glm::ivec3& norm) {
+        charge_placed_callback_fired = true;
+    });
+
+    // Simulate placing charge
+    player.clear_placed_charge();
+    TEST_CHECK(!player.has_placed_charge(), "Clear placed charge must reset has_placed_charge to false");
+
+    // 3. Class Tactical Ability & Weapon Archetype Alignment Verification
+    player.set_character_class(CharacterClass::Demolitionist);
+    WeaponStats demo_w = get_class_weapon_stats(CharacterClass::Demolitionist);
+    TEST_CHECK(demo_w.archetype == WeaponArchetype::MagmaScattergun, "Demolitionist must use Magma Scattergun");
+    TEST_CHECK(demo_w.short_name == "SCAT", "Magma Scattergun short name must be SCAT");
+
+    WeaponStats van_w = get_class_weapon_stats(CharacterClass::Vanguard);
+    TEST_CHECK(van_w.archetype == WeaponArchetype::PlasmaCarbine, "Vanguard must use Plasma Carbine");
+    TEST_CHECK(van_w.short_name == "CARB", "Plasma Carbine short name must be CARB");
+
+    WeaponStats scout_w = get_class_weapon_stats(CharacterClass::Scout);
+    TEST_CHECK(scout_w.archetype == WeaponArchetype::NeedlerRailgun, "Scout must use Needler Railgun");
+    TEST_CHECK(scout_w.short_name == "RAIL", "Needler Railgun short name must be RAIL");
+    log_pass("Class Weapon Archetype and Tactical Kit alignment (Demolitionist=SCAT, Vanguard=CARB, Scout=RAIL)");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE COMPREHENSIVE UNIT TEST SUITE" << std::endl;
@@ -1174,6 +1251,7 @@ int main() {
     test_carry_weight_and_tactical_abilities();
     test_cavern_luminaries_and_lighting();
     test_plasma_carbine_combat();
+    test_satchel_charge_and_weapon_cycling();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;

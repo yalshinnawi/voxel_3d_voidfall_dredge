@@ -20,8 +20,10 @@ void SeismicBurrowerManager::spawn_burrower(const glm::vec3& pos, float hp_multi
     b.pitch = 0.0f;
     b.roar_timer = 5.0f + static_cast<float>((b.id * 37) % 110) * 0.1f; // Staggered initial roar
     b.grind_timer = 1.5f + static_cast<float>((b.id * 17) % 30) * 0.1f;
+    b.chatter_timer = 2.0f + static_cast<float>((b.id * 29) % 35) * 0.1f;
     b.just_roared = false;
     b.just_ground = false;
+    b.just_chattered = false;
     m_burrowers.push_back(b);
     VF_LOG_INFO("SeismicBurrower", "Spawned Seismic Burrower " << b.id << " at ("
                 << pos.x << ", " << pos.y << ", " << pos.z << ") with HP=" << b.hp);
@@ -43,7 +45,8 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
     float dt,
     const glm::vec3& player_pos,
     World& world,
-    const std::vector<SoundEvent>& sound_events
+    const std::vector<SoundEvent>& sound_events,
+    bool player_is_crouching
 ) {
     FrameResult result;
     if (m_spawn_cooldown > 0.0f) {
@@ -53,6 +56,7 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
     for (auto& b : m_burrowers) {
         b.just_roared = false;
         b.just_ground = false;
+        b.just_chattered = false;
         b.just_breached = false;
         b.just_rammed = false;
         b.just_triggered_cavein = false;
@@ -83,31 +87,43 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
 
         // Acoustic hearing: Check if any heavy acoustic disturbances (drilling, explosives, footsteps) occurred
         if (b.sound_target_timer > 0.0f) {
-            b.sound_target_timer -= dt;
+            float sound_decay_rate = player_is_crouching ? 2.5f : 1.0f;
+            b.sound_target_timer -= dt * sound_decay_rate;
             if (b.sound_target_timer <= 0.0f) {
                 b.has_sound_target = false;
             }
         }
 
+        float best_salience = 0.0f;
         for (const auto& snd : sound_events) {
             float snd_dist = glm::distance(b.position, snd.position);
             // Burrowers sense seismic ground vibrations up to 1.5x sound radius through solid rock
             if (snd_dist <= snd.audible_radius * 1.5f) {
-                b.sound_target = snd.position;
-                b.has_sound_target = true;
-                b.sound_target_timer = 5.0f;
+                float salience = snd.intensity / std::max(1.0f, snd_dist);
+                if (snd.type == SoundEventType::DemolitionBlast || snd.type == SoundEventType::SeismicTremor) {
+                    salience *= 3.5f; // Heavy tectonic shocks heavily attract subterranean burrowers
+                } else if (snd.type == SoundEventType::BulletImpact) {
+                    salience *= 1.8f;
+                }
+                if (salience > best_salience) {
+                    best_salience = salience;
+                    b.sound_target = snd.position;
+                    b.has_sound_target = true;
+                    b.sound_target_timer = player_is_crouching ? 3.0f : 6.0f;
+                }
             }
         }
 
         // Retaliation pursuit and escape tracking
         float dist_to_player = glm::distance(b.position, player_pos);
         if (b.is_pursuing_attacker) {
-            if (dist_to_player > b.pursuit_break_dist) {
-                b.pursuit_lost_timer += dt;
+            if (dist_to_player > b.pursuit_break_dist || (player_is_crouching && dist_to_player > 14.0f)) {
+                float flee_rate = player_is_crouching ? 2.5f : 1.0f;
+                b.pursuit_lost_timer += dt * flee_rate;
                 if (b.pursuit_lost_timer >= b.pursuit_break_time) {
                     b.is_pursuing_attacker = false;
                     b.pursuit_lost_timer = 0.0f;
-                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " lost interest after player fled for "
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " lost interest after player fled in stealth for "
                                 << b.pursuit_break_time << "s (dist=" << dist_to_player << "m)");
                 }
             } else {
@@ -116,9 +132,9 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         }
 
         // Target selection: If pursuing an attacker, lock relentlessly onto player_pos.
-        // Otherwise, if burrowing in rock, steer towards latest sound disturbance; else towards player.
+        // Otherwise, if burrowing or breaching, steer towards latest sound disturbance; else towards player.
         glm::vec3 active_target = player_pos;
-        if (!b.is_pursuing_attacker && b.has_sound_target && b.state == BurrowerState::Burrowing) {
+        if (!b.is_pursuing_attacker && b.has_sound_target && (b.state == BurrowerState::Burrowing || b.state == BurrowerState::Breaching)) {
             active_target = b.sound_target;
         }
         b.target_pos = active_target;
@@ -166,12 +182,20 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 b.rumble_intensity = std::clamp(1.0f - (dist_to_player / 20.0f), 0.0f, 1.0f);
                 result.max_rumble = std::max(result.max_rumble, b.rumble_intensity);
 
-                // Periodic tooth grinding as cutter spins through bedrock
+                // Periodic drilling & digging noises as borer cutter spins through rock walls
                 b.grind_timer -= dt;
                 if (b.grind_timer <= 0.0f) {
-                    b.grind_timer = 2.4f + static_cast<float>((b.id * 19) % 20) * 0.1f;
+                    b.grind_timer = 1.0f + static_cast<float>((b.id * 19) % 15) * 0.05f;
                     b.just_ground = true;
                     result.any_grind = true;
+                }
+
+                // Chattering clicks as cutter teeth and mandibles chatter against rock strata
+                b.chatter_timer -= dt;
+                if (b.chatter_timer <= 0.0f) {
+                    b.chatter_timer = 2.8f + static_cast<float>((b.id * 23) % 25) * 0.1f;
+                    b.just_chattered = true;
+                    result.any_chatter = true;
                 }
 
                 // Move forward through ground
@@ -306,7 +330,9 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
     return result;
 }
 
-bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radius, float damage, bool is_explosive) {
+bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radius, float damage,
+                                            bool is_explosive, bool allow_crit,
+                                            bool* out_is_crit, float* out_damage_dealt) {
     SeismicBurrower* nearest = nullptr;
     float min_dist = radius;
 
@@ -323,10 +349,20 @@ bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radiu
 
     // Vulnerability: Explosive damage deals 2.5x damage!
     float effective_damage = is_explosive ? (damage * 2.5f) : damage;
+    bool is_crit = false;
+    if (allow_crit && nearest->is_unalerted()) {
+        is_crit = true;
+        effective_damage *= StealthSystem::SNEAK_ATTACK_CRIT_MULTIPLIER;
+        VF_LOG_INFO("SeismicBurrower", "SNEAK ATTACK CRITICAL HIT on unalerted Burrower " << nearest->id
+                    << "! Base=" << damage << " -> Crit=" << effective_damage);
+    }
+    if (out_is_crit) *out_is_crit = is_crit;
+    if (out_damage_dealt) *out_damage_dealt = effective_damage;
+
     nearest->hp -= effective_damage;
 
     VF_LOG_INFO("SeismicBurrower", "Burrower " << nearest->id << " took " << effective_damage
-                << " damage (is_explosive=" << is_explosive << "), remaining HP=" << nearest->hp);
+                << " damage (is_explosive=" << is_explosive << ", is_crit=" << is_crit << "), remaining HP=" << nearest->hp);
 
     if (nearest->hp <= 0.0f) {
         nearest->hp = 0.0f;

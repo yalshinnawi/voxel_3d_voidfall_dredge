@@ -114,6 +114,72 @@ void TextureArray::initialize_procedural_materials() {
                         r = 18; g = 18; b = 22;
                         rough = 250; metal = 40;
                         break;
+                    case 9: // Gas (Toxic Green/Yellow Wisps)
+                        r = static_cast<uint8_t>(70 + 40 * noise);
+                        g = static_cast<uint8_t>(180 + 50 * noise);
+                        b = static_cast<uint8_t>(40 + 30 * noise);
+                        rough = 240; metal = 0;
+                        er = static_cast<uint8_t>(40 + 60 * noise);
+                        eg = static_cast<uint8_t>(160 + 80 * noise);
+                        eb = 30;
+                        break;
+                    case 10: // Volatile Smoke
+                        r = static_cast<uint8_t>(45 + 30 * noise);
+                        g = static_cast<uint8_t>(40 + 25 * noise);
+                        b = static_cast<uint8_t>(55 + 35 * noise);
+                        rough = 250; metal = 0;
+                        break;
+                    case 11: { // Crystal Aquifer Water (Clear Shimmering Cyan/Aquamarine)
+                        float wave1 = std::sin(fx * 40.0f + fy * 25.0f);
+                        float wave2 = std::cos(fx * 25.0f - fy * 40.0f);
+                        float caustic = (wave1 * wave2) * 0.5f + 0.5f;
+                        r = static_cast<uint8_t>(20 + 35 * caustic);
+                        g = static_cast<uint8_t>(140 + 65 * caustic);
+                        b = static_cast<uint8_t>(215 + 35 * caustic);
+                        rough = 18; metal = 65; // Highly polished fluid-like surface
+                        er = static_cast<uint8_t>(15 + 25 * caustic);
+                        eg = static_cast<uint8_t>(75 + 50 * caustic);
+                        eb = static_cast<uint8_t>(120 + 60 * caustic);
+                        break;
+                    }
+                    case 12: { // Bioluminescent Flora & Moss (Vibrant Emerald / Cyan Spores)
+                        float vein = std::pow(std::abs(std::sin(fx * 28.0f) * std::cos(fy * 28.0f)), 0.6f);
+                        r = static_cast<uint8_t>(25 + 35 * noise);
+                        g = static_cast<uint8_t>(160 + 80 * vein);
+                        b = static_cast<uint8_t>(55 + 65 * vein);
+                        rough = 175; metal = 15;
+                        if (vein > 0.45f) {
+                            er = static_cast<uint8_t>(20 + 30 * vein);
+                            eg = static_cast<uint8_t>(190 + 60 * vein);
+                            eb = static_cast<uint8_t>(80 + 80 * vein);
+                        }
+                        break;
+                    }
+                    case 13: { // Prismatic Crystal (Sharply Faceted Reflective Diamond/Violet Shimmer)
+                        float facet = std::abs(std::sin(fx * 16.0f) * std::sin(fy * 16.0f));
+                        float facet_edge = std::pow(facet, 2.5f);
+                        r = static_cast<uint8_t>(120 + 110 * facet_edge);
+                        g = static_cast<uint8_t>(185 + 65 * facet_edge);
+                        b = static_cast<uint8_t>(245 + 10 * facet_edge);
+                        rough = 24; metal = 135; // Faceted crystal mineral
+                        er = static_cast<uint8_t>(90 + 130 * facet_edge);
+                        eg = static_cast<uint8_t>(170 + 75 * facet_edge);
+                        eb = static_cast<uint8_t>(240 + 15 * facet_edge);
+                        break;
+                    }
+                    case 14: { // Crystalline Obsidian Spikes (Sharp Jagged Needles with Crimson Emissive Warnings)
+                        float spike_pat = std::pow(std::abs(std::sin(fx * 24.0f) * std::sin(fy * 24.0f)), 3.0f);
+                        r = static_cast<uint8_t>(20 + 180 * spike_pat);
+                        g = static_cast<uint8_t>(18 + 15 * spike_pat);
+                        b = static_cast<uint8_t>(22 + 25 * spike_pat);
+                        rough = 50; metal = 60; // Sleek obsidian needles
+                        if (spike_pat > 0.35f) {
+                            er = static_cast<uint8_t>(220 + 35 * spike_pat); // Blood-crimson gleaming warning tips
+                            eg = static_cast<uint8_t>(20 + 20 * spike_pat);
+                            eb = static_cast<uint8_t>(30 + 30 * spike_pat);
+                        }
+                        break;
+                    }
                     default:
                         r = 70; g = 70; b = 70;
                         break;

@@ -34,6 +34,10 @@ ViewModel::~ViewModel() {
     if (m_scattergun_vbo) glDeleteBuffers(1, &m_scattergun_vbo);
     if (m_railgun_vao) glDeleteVertexArrays(1, &m_railgun_vao);
     if (m_railgun_vbo) glDeleteBuffers(1, &m_railgun_vbo);
+    if (m_detonator_vao) glDeleteVertexArrays(1, &m_detonator_vao);
+    if (m_detonator_vbo) glDeleteBuffers(1, &m_detonator_vbo);
+    if (m_plunger_vao) glDeleteVertexArrays(1, &m_plunger_vao);
+    if (m_plunger_vbo) glDeleteBuffers(1, &m_plunger_vbo);
 }
 
 void ViewModel::on_tool_switched() {
@@ -319,6 +323,10 @@ void ViewModel::init_geometry() {
     if (m_scattergun_vbo) { glDeleteBuffers(1, &m_scattergun_vbo); m_scattergun_vbo = 0; }
     if (m_railgun_vao) { glDeleteVertexArrays(1, &m_railgun_vao); m_railgun_vao = 0; }
     if (m_railgun_vbo) { glDeleteBuffers(1, &m_railgun_vbo); m_railgun_vbo = 0; }
+    if (m_detonator_vao) { glDeleteVertexArrays(1, &m_detonator_vao); m_detonator_vao = 0; }
+    if (m_detonator_vbo) { glDeleteBuffers(1, &m_detonator_vbo); m_detonator_vbo = 0; }
+    if (m_plunger_vao) { glDeleteVertexArrays(1, &m_plunger_vao); m_plunger_vao = 0; }
+    if (m_plunger_vbo) { glDeleteBuffers(1, &m_plunger_vbo); m_plunger_vbo = 0; }
 
     CharacterAttributes char_attr = get_character_attributes(m_character_class);
     glm::vec4 col_suit_arm = char_attr.suitSleeveColor;
@@ -930,6 +938,105 @@ void ViewModel::init_geometry() {
     glEnableVertexAttribArray(3);
     glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
     glBindVertexArray(0);
+
+    // =============================================================
+    // 5. TACTICAL REMOTE DETONATOR (DEMOLITION SATCHEL CHARGES)
+    // (Handheld ruggedized industrial radio clacker & plunger)
+    // =============================================================
+    std::vector<ViewmodelVertex> det_verts;
+    det_verts.reserve(2048);
+
+    glm::vec4 col_det_casing(0.18f, 0.20f, 0.23f, 1.0f);
+    glm::vec4 col_det_grip(0.08f, 0.08f, 0.10f, 1.0f);
+    glm::vec4 col_det_screen(0.05f, 0.18f, 0.22f, 1.0f);
+    glm::vec4 col_det_led_armed(1.0f, 0.15f, 0.08f, 1.0f);
+    glm::vec4 col_plunger(0.95f, 0.20f, 0.15f, 1.0f);
+
+    // A. Main Ruggedized Handset Body
+    add_box(det_verts, {-0.042f, -0.095f, -0.024f}, {0.042f, 0.055f, 0.024f}, col_det_casing, mat_armor);
+
+    // Ergonomic side bumpers / rubber grips
+    add_box(det_verts, {-0.046f, -0.090f, -0.020f}, {-0.038f, 0.045f, 0.020f}, col_det_grip, mat_rubber);
+    add_box(det_verts, { 0.038f, -0.090f, -0.020f}, { 0.046f, 0.045f, 0.020f}, col_det_grip, mat_rubber);
+
+    // Side grip ribbed notches
+    for (int g = 0; g < 4; ++g) {
+        float gy = -0.070f + static_cast<float>(g) * 0.032f;
+        add_box(det_verts, {-0.048f, gy - 0.005f, -0.015f}, {-0.044f, gy + 0.005f, 0.015f}, col_chassis_dark, mat_rubber);
+        add_box(det_verts, { 0.044f, gy - 0.005f, -0.015f}, { 0.048f, gy + 0.005f, 0.015f}, col_chassis_dark, mat_rubber);
+    }
+
+    // Hazard yellow/black diagonal side safety stripes
+    add_box(det_verts, {-0.043f, 0.035f, -0.025f}, {-0.035f, 0.048f, 0.025f}, col_hazard_yellow, mat_metal);
+    add_box(det_verts, { 0.035f, 0.035f, -0.025f}, { 0.043f, 0.048f, 0.025f}, col_hazard_yellow, mat_metal);
+
+    // B. Top Antenna Mast
+    add_cylinder(det_verts, {0.028f, 0.055f, -0.005f}, 0.006f, 0.015f, 8, col_brass, mat_metal, 1);
+    add_cylinder(det_verts, {0.028f, 0.070f, -0.005f}, 0.0035f, 0.085f, 8, col_steel_bright, mat_metal, 1);
+    add_cylinder(det_verts, {0.028f, 0.155f, -0.005f}, 0.0055f, 0.010f, 8, col_brass, mat_metal, 1);
+
+    // C. Safety Protective Guard Bars (protecting the plunger)
+    add_box(det_verts, {-0.028f, 0.055f, -0.020f}, {-0.022f, 0.088f, 0.020f}, col_steel_bright, mat_metal);
+    add_box(det_verts, { 0.010f, 0.055f, -0.020f}, { 0.016f, 0.088f, 0.020f}, col_steel_bright, mat_metal);
+    add_box(det_verts, {-0.028f, 0.084f, 0.014f}, { 0.016f, 0.088f, 0.020f}, col_steel_bright, mat_metal);
+
+    // D. Front Telemetry Display & Armed Status Beacon
+    add_box(det_verts, {-0.034f, -0.015f, -0.026f}, {0.034f, 0.045f, -0.024f}, col_chassis_dark, mat_armor);
+    add_box(det_verts, {-0.030f, -0.010f, -0.028f}, {0.030f, 0.040f, -0.025f}, col_det_screen, mat_screen_bg);
+    add_box(det_verts, {-0.026f,  0.022f, -0.029f}, {0.026f, 0.025f, -0.027f}, glm::vec4(0.15f, 0.85f, 0.95f, 1.0f), mat_led_emissive);
+    add_box(det_verts, {-0.026f,  0.005f, -0.029f}, {0.026f, 0.008f, -0.027f}, glm::vec4(0.15f, 0.85f, 0.95f, 1.0f), mat_led_emissive);
+
+    // Armed Beacon LED (Pulsating warning light)
+    add_box(det_verts, {-0.012f, 0.025f, -0.031f}, {0.012f, 0.037f, -0.027f}, col_det_led_armed, mat_led_emissive);
+
+    // Rotary frequency selector dial
+    add_cylinder(det_verts, {0.0f, -0.055f, -0.025f}, 0.012f, 0.010f, 10, col_brass, mat_metal, 2);
+
+    // E. Suited Arm and Glove Holding Detonator
+    add_cylinder(det_verts, {0.10f, -0.22f, 0.12f}, 0.035f, 0.18f, 10, col_suit_arm, mat_cloth, 1);
+    add_cylinder(det_verts, {0.08f, -0.15f, 0.08f}, 0.038f, 0.04f, 10, col_suit_accent, mat_armor, 1);
+    add_capsule(det_verts, {0.040f, -0.040f, 0.02f}, {0.042f, -0.035f, -0.02f}, 0.014f, 0.012f, 6, col_suit_glove, mat_rubber);
+    add_capsule(det_verts, {0.040f, -0.070f, 0.02f}, {0.042f, -0.065f, -0.02f}, 0.014f, 0.012f, 6, col_suit_glove, mat_rubber);
+    add_capsule(det_verts, {-0.035f, 0.010f, 0.03f}, {-0.010f, 0.050f, 0.01f}, 0.015f, 0.012f, 6, col_suit_glove, mat_rubber);
+
+    m_detonator_count = det_verts.size();
+    glGenVertexArrays(1, &m_detonator_vao);
+    glGenBuffers(1, &m_detonator_vbo);
+    glBindVertexArray(m_detonator_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_detonator_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_detonator_count * sizeof(ViewmodelVertex), det_verts.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
+
+    // F. Detonator Plunger Button
+    std::vector<ViewmodelVertex> plunger_verts;
+    plunger_verts.reserve(256);
+    add_cylinder(plunger_verts, {-0.006f, 0.055f, 0.0f}, 0.012f, 0.024f, 10, col_plunger, mat_armor, 1);
+    add_cylinder(plunger_verts, {-0.006f, 0.077f, 0.0f}, 0.0135f, 0.005f, 10, col_brass, mat_metal, 1);
+    add_box(plunger_verts, {-0.014f, 0.081f, -0.008f}, {0.002f, 0.083f, 0.008f}, glm::vec4(1.0f, 0.85f, 0.20f, 1.0f), mat_led_emissive);
+
+    m_plunger_count = plunger_verts.size();
+    glGenVertexArrays(1, &m_plunger_vao);
+    glGenBuffers(1, &m_plunger_vbo);
+    glBindVertexArray(m_plunger_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_plunger_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_plunger_count * sizeof(ViewmodelVertex), plunger_verts.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
 }
 
 void ViewModel::render(
@@ -939,11 +1046,17 @@ void ViewModel::render(
     bool is_in_range,
     ToolSlot active_tool,
     const glm::vec3& drill_target_pos,
-    bool is_firing
+    bool is_firing,
+    bool is_crouching,
+    bool is_reloading,
+    float reload_progress,
+    bool has_placed_charge
 ) {
     if (m_chassis_vao == 0 || m_carbine_vao == 0) return;
 
     m_total_time += dt;
+    m_is_reloading = is_reloading;
+    m_reload_progress = reload_progress;
 
     if (active_tool != m_last_tool) {
         on_tool_switched();
@@ -978,14 +1091,16 @@ void ViewModel::render(
     glm::mat4 proj = glm::perspective(glm::radians(68.0f), aspect, 0.05f, 10.0f);
     glm::mat4 view = glm::mat4(1.0f);
 
-    // 2. Idle Lissajous breathing sway
-    float lissajous_x = std::sin(m_total_time * 1.8f) * 0.005f;
-    float lissajous_y = std::cos(m_total_time * 3.6f) * 0.004f;
+    // 2. Idle Lissajous breathing sway & crouch stance shift
+    float crouch_offset_y = is_crouching ? -0.08f : 0.0f;
+    float crouch_offset_z = is_crouching ? -0.05f : 0.0f;
+    float sway_scale = is_crouching ? 0.5f : 1.0f; // 50% reduced sway amplitude when crouched
+    float lissajous_x = std::sin(m_total_time * 1.8f) * 0.005f * sway_scale;
+    float lissajous_y = std::cos(m_total_time * 3.6f) * 0.004f * sway_scale;
 
     glDisable(GL_CULL_FACE);
 
     // Dedicated depth pass with glDepthRange(0.0f, 0.15f) so viewmodel never clips cavern walls
-    glClear(GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthRange(0.0f, 0.15f);
@@ -1011,19 +1126,95 @@ void ViewModel::render(
         float recoil_kick = (m_muzzle_flash_timer > 0.0f) ? (0.045f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
         float kick_pitch = (m_muzzle_flash_timer > 0.0f) ? (3.8f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
 
+        // Multi-Stage Procedural Reload Animation
+        float reload_offset_x = 0.0f;
+        float reload_offset_y = 0.0f;
+        float reload_offset_z = 0.0f;
+        float reload_yaw_deg = 0.0f;
+        float reload_pitch_deg = 0.0f;
+        float reload_roll_deg = 0.0f;
+        float reload_emissive_boost = 0.0f;
+
+        if (is_reloading) {
+            float p = std::clamp(reload_progress, 0.0f, 1.0f);
+            if (p < 0.35f) {
+                // Phase 1: Magazine unlatch / Breach open / Drop & cant inward
+                float t = p / 0.35f; // 0 -> 1
+                float ease = t * t * (3.0f - 2.0f * t); // smoothstep
+                reload_offset_x = -0.04f * ease;
+                reload_offset_y = -0.12f * ease;
+                reload_offset_z =  0.06f * ease;
+                reload_roll_deg = -22.0f * ease;
+                reload_pitch_deg = 14.0f * ease;
+                reload_yaw_deg = 8.0f * ease;
+
+                // Archetype flavor
+                if (m_character_class == CharacterClass::Demolitionist) {
+                    // Break-action shotgun drops muzzle down
+                    reload_pitch_deg = -18.0f * ease;
+                    reload_roll_deg = -15.0f * ease;
+                }
+            } else if (p < 0.75f) {
+                // Phase 2: Insert new magazine / load shells / slam home
+                float t = (p - 0.35f) / 0.40f; // 0 -> 1
+                // Hold lowered pose with slight upward movement
+                reload_offset_x = -0.04f * (1.0f - t * 0.3f);
+                reload_offset_y = -0.12f + t * 0.04f;
+                reload_offset_z =  0.06f - t * 0.02f;
+                reload_roll_deg = -22.0f * (1.0f - t * 0.4f);
+                reload_pitch_deg = 14.0f * (1.0f - t * 0.3f);
+                reload_yaw_deg = 8.0f * (1.0f - t * 0.3f);
+
+                if (m_character_class == CharacterClass::Demolitionist) {
+                    reload_pitch_deg = -18.0f * (1.0f - t * 0.3f);
+                    reload_roll_deg = -15.0f * (1.0f - t * 0.4f);
+                }
+
+                // Magazine slam impulse at t in [0.50, 0.75]
+                if (t >= 0.50f && t <= 0.75f) {
+                    float slam_t = (t - 0.50f) / 0.25f; // 0 -> 1
+                    float impulse = std::sin(slam_t * 3.14159f);
+                    reload_offset_y += impulse * 0.035f;
+                    reload_offset_z -= impulse * 0.040f;
+                    reload_pitch_deg -= impulse * 6.0f;
+                    reload_emissive_boost = impulse * 0.60f; // Glowing capacitor lock flash!
+                }
+            } else {
+                // Phase 3: Charging handle rack / breach lock & return to rest
+                float t = (p - 0.75f) / 0.25f; // 0 -> 1
+                // Rack click jerk at start of phase 3
+                if (t < 0.35f) {
+                    float rack_t = t / 0.35f;
+                    float rack_kick = std::sin(rack_t * 3.14159f);
+                    reload_offset_z += rack_kick * 0.025f;
+                    reload_roll_deg += rack_kick * 5.0f;
+                    reload_emissive_boost = rack_kick * 0.30f;
+                }
+                // Smooth ease-out to 0
+                float ease = 1.0f - (1.0f - t) * (1.0f - t);
+                float return_factor = 1.0f - ease;
+                reload_offset_x = -0.028f * return_factor;
+                reload_offset_y = -0.08f * return_factor;
+                reload_offset_z =  0.04f * return_factor;
+                reload_roll_deg = -13.0f * return_factor;
+                reload_pitch_deg = (m_character_class == CharacterClass::Demolitionist ? -12.0f : 10.0f) * return_factor;
+                reload_yaw_deg = 5.0f * return_factor;
+            }
+        }
+
         glm::vec3 gun_pos(
-            0.15f + lissajous_x,
-            -0.14f + lissajous_y + switch_dip_y,
-            -0.34f + recoil_kick + switch_push_z
+            0.15f + lissajous_x + reload_offset_x,
+            -0.14f + lissajous_y + switch_dip_y + crouch_offset_y + reload_offset_y,
+            -0.34f + recoil_kick + switch_push_z + crouch_offset_z + reload_offset_z
         );
 
         glm::mat4 gun_model = glm::translate(glm::mat4(1.0f), gun_pos);
-        gun_model = glm::rotate(gun_model, glm::radians(-14.0f), glm::vec3(0.0f, 1.0f, 0.0f));           // Inward yaw
-        gun_model = glm::rotate(gun_model, glm::radians(2.0f - kick_pitch), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
-        gun_model = glm::rotate(gun_model, glm::radians(3.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Cant + switch roll
+        gun_model = glm::rotate(gun_model, glm::radians(-14.0f + reload_yaw_deg), glm::vec3(0.0f, 1.0f, 0.0f));           // Inward yaw
+        gun_model = glm::rotate(gun_model, glm::radians(2.0f - kick_pitch + reload_pitch_deg), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
+        gun_model = glm::rotate(gun_model, glm::radians(3.0f + switch_roll_deg + reload_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Cant + switch roll + reload roll
 
         m_shader.set_mat4("uModel", gun_model);
-        float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : 0.35f;
+        float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : (0.35f + reload_emissive_boost);
         m_shader.set_float("uEmissive", emissive);
 
         if (m_character_class == CharacterClass::Demolitionist) {
@@ -1036,6 +1227,38 @@ void ViewModel::render(
             glBindVertexArray(m_carbine_vao);
             glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_carbine_count));
         }
+        glBindVertexArray(0);
+    } else if (active_tool == ToolSlot::DemolitionCharge) {
+        // =============================================================
+        // DEMOLITION VIEWMODEL: TACTICAL REMOTE DETONATOR
+        // (Handheld clacker with armed safety beacon and tactile plunger)
+        // =============================================================
+        float plunger_offset = is_firing ? -0.016f : 0.0f;
+
+        glm::vec3 det_pos(
+            0.14f + lissajous_x,
+            -0.13f + lissajous_y + switch_dip_y + crouch_offset_y,
+            -0.32f + switch_push_z + crouch_offset_z
+        );
+
+        glm::mat4 det_model = glm::translate(glm::mat4(1.0f), det_pos);
+        det_model = glm::rotate(det_model, glm::radians(-12.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
+        det_model = glm::rotate(det_model, glm::radians(10.0f), glm::vec3(1.0f, 0.0f, 0.0f));  // Upward pitch for LCD readability
+        det_model = glm::rotate(det_model, glm::radians(2.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f));
+
+        m_shader.set_mat4("uModel", det_model);
+        float pulse = 0.5f + 0.5f * std::sin(m_total_time * 15.0f);
+        float emissive = has_placed_charge ? (0.7f + 0.8f * pulse) : 0.35f;
+        m_shader.set_float("uEmissive", emissive);
+
+        glBindVertexArray(m_detonator_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_detonator_count));
+
+        glm::mat4 btn_model = glm::translate(det_model, glm::vec3(0.0f, plunger_offset, 0.0f));
+        m_shader.set_mat4("uModel", btn_model);
+        glBindVertexArray(m_plunger_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_plunger_count));
+
         glBindVertexArray(0);
     } else {
         // =============================================================
@@ -1076,8 +1299,8 @@ void ViewModel::render(
 
         glm::vec3 base_pos(
             0.18f + lissajous_x + jitter_x,
-            -0.16f + lissajous_y + switch_dip_y + jitter_y,
-            -0.42f + recoil_z + switch_push_z
+            -0.16f + lissajous_y + switch_dip_y + jitter_y + crouch_offset_y,
+            -0.42f + recoil_z + switch_push_z + crouch_offset_z
         );
 
         glm::mat4 root_model = glm::translate(glm::mat4(1.0f), base_pos);

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include "../ai/swarm_manager.hpp"
+#include "stealth_system.hpp"
 
 namespace Voidfall {
 
@@ -57,7 +59,27 @@ public:
 
     using WaveCallback = std::function<void(AlertLevel level, float noise_pct)>;
 
-    NoiseMeter() = default;
+    NoiseMeter(float max_noise = 100.0f, float decay_rate = 2.5f)
+        : m_noise(0.0f), m_max_noise(max_noise), m_base_decay_rate(decay_rate) {}
+
+    /// Seconds of silence before the accelerated cooldown kicks in
+    void set_cooldown_grace(float secs)        { m_cooldown_grace = secs; }
+    /// Decay rate (units/sec) applied during post-combat cooldown
+    void set_cooldown_decay_rate(float rate)   { m_cooldown_decay_rate = rate; }
+
+    /// Configures the forced post-event cooldown (after swarm / large noise).
+    void set_post_event_decay_rate(float rate)   { m_post_event_decay_rate = rate; }
+    void set_post_event_duration(float secs)     { m_post_event_duration = secs; }
+    /// Minimum single-emission intensity that auto-triggers a post-event cooldown.
+    void set_large_event_threshold(float t)      { m_large_event_threshold = t; }
+
+    /// Returns true when the meter is actively cooling down after combat
+    bool is_cooling_down() const { return m_time_since_last_noise >= m_cooldown_grace && m_noise > 0.0f; }
+    float time_since_last_noise() const { return m_time_since_last_noise; }
+
+    /// Returns true during the forced rapid-drain window (post-swarm / post-blast)
+    bool is_post_event_cooldown_active() const { return m_post_event_cooldown_remaining > 0.0f; }
+    float post_event_cooldown_remaining() const { return m_post_event_cooldown_remaining; }
 
     void update(float dt) {
         // Update lifetime of active acoustic sound events
@@ -70,38 +92,111 @@ public:
             m_recent_sounds.end()
         );
 
+        // Accumulate silence time for post-combat cooldown
+        m_time_since_last_noise += dt;
+
         // Check threshold crossings before decay
         AlertLevel current = get_alert_level();
         if (current != m_last_alert && current > m_last_alert) {
             if (current == AlertLevel::Swarming) {
-                // Full swarm: trigger wave then reset to 60% to prevent instant re-trigger
-                if (m_on_wave) m_on_wave(AlertLevel::Swarming, noise_percent());
-                m_noise = m_max_noise * 0.6f;
-                m_swarm_count++;
+                // Full swarm: only trigger if not in cooldown period
+                if (m_swarm_cooldown <= 0.0f) {
+                    if (m_on_wave) m_on_wave(AlertLevel::Swarming, noise_percent());
+                    m_noise = m_max_noise * 0.6f;
+                    SwarmManager::instance().SetAgitation(1.0f);
+                    m_swarm_count++;
+                    m_swarm_cooldown = 20.0f; // 20s refractory window before another swarm can trigger
+                    // After a full swarm the player desperately needs breathing room.
+                    // Force aggressive decay for m_post_event_duration seconds so the
+                    // meter can drain even if they're still shooting stragglers.
+                    m_post_event_cooldown_remaining = m_post_event_duration;
+                } else {
+                    m_noise = std::min(m_noise, m_max_noise * 0.80f);
+                }
             } else {
                 if (m_on_wave) m_on_wave(current, noise_percent());
+                SwarmManager::instance().AddAgitation((noise_percent() - 40.0f) / 60.0f);
             }
         }
 
-        // Natural decay: noise dissipates when quiet / stationary / crouching
-        float decay_rate = m_is_crouching ? m_crouch_decay_rate : m_base_decay_rate;
+        // Select decay rate:
+        //  – Post-event override (swarm / big blast): hardest floor → m_post_event_decay_rate
+        //  – Crouching:          fastest stealth recovery           → m_crouch_decay_rate
+        //  – Post-combat quiet:  accelerated cooldown               → m_cooldown_decay_rate
+        //  – Normal standing:    baseline                           → m_base_decay_rate
+        float decay_rate = m_base_decay_rate;
+        if (m_is_crouching) {
+            decay_rate = m_crouch_decay_rate;
+        } else if (m_time_since_last_noise >= m_cooldown_grace) {
+            // Player has been silent for long enough — ramp up decay so the
+            // meter actually falls to zero between engagements.
+            decay_rate = m_cooldown_decay_rate;
+        }
+        // Post-event override is a hard floor: guarantees recovery after a swarm
+        // or massive noise spike regardless of what the player is doing.
+        if (m_post_event_cooldown_remaining > 0.0f) {
+            decay_rate = std::max(decay_rate, m_post_event_decay_rate);
+            m_post_event_cooldown_remaining = std::max(0.0f, m_post_event_cooldown_remaining - dt);
+        }
         m_noise = std::max(0.0f, m_noise - decay_rate * dt);
 
         m_last_alert = get_alert_level();
 
+        // Standing-still / silence recuperation: if the player stands still and the meter drains back down,
+        // clear threat peak enrage so the threat does not linger indefinitely when calm.
+        if (SwarmManager::instance().IsEnraged()) {
+            if (noise_percent() <= 40.0f || (m_time_since_last_noise >= 1.5f && noise_percent() < 60.0f)) {
+                SwarmManager::instance().EndEnrage();
+            }
+        }
+        if (m_noise <= 0.001f) {
+            if (SwarmManager::instance().IsEnraged()) {
+                SwarmManager::instance().EndEnrage();
+            }
+            if (m_time_since_last_noise >= 2.0f && SwarmManager::instance().GetState() == AgitationState::COOLDOWN) {
+                SwarmManager::instance().reset();
+            }
+        }
+
         // Cooldown tracking for swarm re-triggers
         if (m_swarm_cooldown > 0.0f) {
-            m_swarm_cooldown -= dt;
+            m_swarm_cooldown = std::max(0.0f, m_swarm_cooldown - dt);
         }
+    }
+
+    /// Forces immediate rapid-drain post-combat cooldown (e.g. after fighting off a wave/swarm)
+    void trigger_post_combat_cooldown(float duration = 12.0f) {
+        m_post_event_cooldown_remaining = std::max(m_post_event_cooldown_remaining, duration);
+        m_time_since_last_noise = std::max(m_time_since_last_noise, m_cooldown_grace);
+        m_noise = std::min(m_noise, m_max_noise * 0.50f);
     }
 
     /// Emit a 3D acoustic disturbance into the cavern
     void emit_sound(SoundEventType type, const glm::vec3& pos, float intensity, float audible_radius, float lifetime = 0.45f) {
+        // In stealth mode (crouching), delver sound emission is heavily dampened (-65% intensity, -55% radius)
+        float stealth_intensity_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_INTENSITY_MUL : 1.0f;
+        float stealth_radius_mul    = m_is_crouching ? StealthSystem::STEALTH_SOUND_RADIUS_MUL : 1.0f;
+
+        float effective_intensity = intensity * stealth_intensity_mul;
+        float effective_radius    = audible_radius * stealth_radius_mul;
+
         // Accumulate onto the global silence meter
-        m_noise = std::min(m_max_noise, m_noise + intensity * m_noise_multiplier);
+        float dampening = (m_swarm_cooldown > 0.0f) ? 0.65f : 1.0f;
+        m_noise = std::min(m_max_noise, m_noise + effective_intensity * m_noise_multiplier * dampening);
+
+        // Any noise resets the post-combat cooldown grace timer
+        m_time_since_last_noise = 0.0f;
+
+        // A single massive concussive noise event (demolition, seismic tremor, sonar blast)
+        // earns the player an immediate post-event cooldown window so the meter
+        // drains aggressively even if they're still firing through the aftermath.
+        if (type != SoundEventType::Gunshot && effective_intensity >= m_large_event_threshold) {
+            float window = m_post_event_duration * 0.67f; // 2/3 duration for single event
+            m_post_event_cooldown_remaining = std::max(m_post_event_cooldown_remaining, window);
+        }
 
         // Track spatial sound event for creature acoustic AI
-        m_recent_sounds.push_back({type, pos, intensity, audible_radius, 0.0f, lifetime});
+        m_recent_sounds.push_back({type, pos, effective_intensity, effective_radius, 0.0f, lifetime});
     }
 
     /// Access all recent active sound events
@@ -171,6 +266,11 @@ public:
         emit_sound(SoundEventType::Gunshot, muzzle_pos, intensity, radius, 0.75f);
     }
 
+    /// Weapon reload mechanical clack (quiet, short-range)
+    void add_reload_sound(const glm::vec3& pos) {
+        emit_sound(SoundEventType::BulkheadClang, pos, 4.0f, 9.0f, 0.4f);
+    }
+
     /// Bullet / plasma impact on solid voxel wall (creates acoustic distraction point!)
     void add_bullet_impact_sound(const glm::vec3& hit_pos, float stress = 2.0f) {
         float intensity = 4.0f * stress;
@@ -208,43 +308,72 @@ public:
     }
 
     // ─── Backward-Compatible Legacy Methods ────────────────────────────
+    // Each legacy emitter resets m_time_since_last_noise so cooldown is
+    // deferred until the player genuinely goes quiet.
 
     void add_drill_vibration(float dt, float intensity = 14.0f) {
         m_noise = std::min(m_max_noise, m_noise + intensity * dt * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     void add_drill_noise(float amount = 5.0f) {
         m_noise = std::min(m_max_noise, m_noise + amount * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     void add_bulk_mine_noise(float amount = 12.0f) {
         m_noise = std::min(m_max_noise, m_noise + amount * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     void add_demolition_noise(float amount = 28.0f) {
         m_noise = std::min(m_max_noise, m_noise + amount * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     void add_sonar_noise(float amount = 6.0f) {
         m_noise = std::min(m_max_noise, m_noise + amount * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     void add_explosive_noise(float amount = 35.0f) {
         m_noise = std::min(m_max_noise, m_noise + amount * m_noise_multiplier);
+        m_time_since_last_noise = 0.0f;
     }
 
     /// Get current noise level [0..max_noise]
     float noise() const { return m_noise; }
     float max_noise() const { return m_max_noise; }
     float noise_percent() const { return (m_max_noise > 0.0f) ? (m_noise / m_max_noise * 100.0f) : 0.0f; }
+    float noise_normalized() const { return (m_max_noise > 0.0f) ? std::clamp(m_noise / m_max_noise, 0.0f, 1.0f) : 0.0f; }
+
+    float GetCurrentNoise() const { return m_noise; }
+    void AddNoise(float amount) {
+        if (amount > 0.0f) inject_noise(amount);
+    }
+
+    void inject_noise(float amt) {
+        m_noise = std::clamp(m_noise + amt, 0.0f, m_max_noise);
+        if (amt > 0.0f) m_time_since_last_noise = 0.0f;
+    }
+    void set_noise(float n) {
+        m_noise = std::clamp(n, 0.0f, m_max_noise);
+    }
 
     AlertLevel get_alert_level() const {
         float pct = noise_percent();
-        if (pct >= 99.5f) return AlertLevel::Swarming;
+        if (pct >= 99.5f) {
+            // While swarm cooldown is active, cap at Agitated so HUD doesn't show Swarming
+            return (m_swarm_cooldown > 0.0f) ? AlertLevel::Agitated : AlertLevel::Swarming;
+        }
         if (pct >= 70.0f)  return AlertLevel::Agitated;
         if (pct >= 40.0f)  return AlertLevel::Alerted;
         return AlertLevel::Silent;
     }
+    AlertLevel alert_level() const { return get_alert_level(); }
+
+    float swarm_cooldown() const { return m_swarm_cooldown; }
+    void set_swarm_cooldown(float cd) { m_swarm_cooldown = cd; }
 
     /// HUD helper: returns a string description of current alert
     const char* alert_string() const {
@@ -280,15 +409,30 @@ public:
         m_last_alert = AlertLevel::Silent;
         m_swarm_count = 0;
         m_swarm_cooldown = 0.0f;
+        m_time_since_last_noise = 0.0f;
+        m_post_event_cooldown_remaining = 0.0f;
         m_recent_sounds.clear();
     }
 
 private:
     float m_noise{0.0f};
     float m_max_noise{100.0f};
-    float m_base_decay_rate{2.5f};      // Dissipation when standing still
-    float m_crouch_decay_rate{5.0f};    // Twice as fast dissipation when crouching (stealth)
-    float m_noise_multiplier{1.0f};     // Difficulty scaling
+    float m_base_decay_rate{2.5f};       // Dissipation when standing/moving quietly
+    float m_crouch_decay_rate{5.0f};     // Accelerated dissipation when crouching (stealth, 2x base)
+    /// After m_cooldown_grace seconds of no noise the meter drains at this rate,
+    /// letting the player recuperate between gunfight engagements.
+    float m_cooldown_decay_rate{12.0f};  // ~8.3 s to drain 100 → 0 post-combat
+    float m_cooldown_grace{3.0f};        // Seconds of silence before cooldown engages
+    float m_time_since_last_noise{0.0f}; // Accumulates while no sound is emitted
+
+    /// Forced rapid-drain override — activated after a swarm event or single
+    /// massive noise spike. Acts as a decay rate floor regardless of player noise.
+    float m_post_event_decay_rate{20.0f};          // ~5 s to drain 100 → 0 post-swarm
+    float m_post_event_duration{15.0f};            // How long the forced window lasts
+    float m_post_event_cooldown_remaining{0.0f};   // Countdown timer
+    float m_large_event_threshold{20.0f};          // Intensity floor to auto-trigger
+
+    float m_noise_multiplier{1.0f};      // Difficulty scaling
     bool m_is_crouching{false};
 
     AlertLevel m_last_alert{AlertLevel::Silent};

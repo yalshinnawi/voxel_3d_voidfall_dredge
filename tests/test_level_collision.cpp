@@ -427,7 +427,15 @@ void test_isolated_base_shapes_stress() {
         {RoomShapeType::VoidSingularityRift,      "VoidSingularityRift"},
         {RoomShapeType::FungoidBioGrotto,         "FungoidBioGrotto"},
         {RoomShapeType::LaserDefenseFoundry,      "LaserDefenseFoundry"},
-        {RoomShapeType::CrumblingArchCanyon,      "CrumblingArchCanyon"}
+        {RoomShapeType::CrumblingArchCanyon,      "CrumblingArchCanyon"},
+        {RoomShapeType::SubterraneanAquiferOasis,     "SubterraneanAquiferOasis"},
+        {RoomShapeType::ColossalAbyssalChasm,         "ColossalAbyssalChasm"},
+        {RoomShapeType::MoltenMagmaFoundry,           "MoltenMagmaFoundry"},
+        {RoomShapeType::ToxicMiasmaSwamp,             "ToxicMiasmaSwamp"},
+        {RoomShapeType::PrismaticCrystalCathedral,    "PrismaticCrystalCathedral"},
+        {RoomShapeType::AncientTitanNecropolis,       "AncientTitanNecropolis"},
+        {RoomShapeType::BioluminescentGlowwormGrotto, "BioluminescentGlowwormGrotto"},
+        {RoomShapeType::PrecursorCoolantReservoir,    "PrecursorCoolantReservoir"}
     };
 
     for (const auto& [shape_type, shape_name] : all_shapes) {
@@ -1089,10 +1097,10 @@ void test_environmental_room_dangers_and_mortality() {
     log_pass("Lava hazard: viscous drag, heat accumulation, and lethal incineration verified");
 
     // 2. Spike Trench Puncture Danger & Trapped Fatality
-    // Fill a 4x4 pit with spikes (flags_and_damage = 0x0F)
+    // Fill a 4x4 pit with obsidian spikes (MAT_OBSIDIAN_SPIKES)
     for (int x = 12; x <= 16; ++x) {
         for (int z = 12; z <= 16; ++z) {
-            world.set_voxel(x, 2, z, Voxel{MAT_VOLCANIC_BASALT, 0x0F}, false);
+            world.set_voxel(x, 2, z, Voxel{MAT_OBSIDIAN_SPIKES, 0}, false);
         }
     }
 
@@ -1168,6 +1176,157 @@ void test_environmental_room_dangers_and_mortality() {
     log_pass("Void chasm singularity: lethal void consumption verified");
 }
 
+// ─────────────────────────────────────────────────────────────
+// 11. SPAWN SAFETY, HAZARD VISIBILITY & FULL LEVEL WALK/FLIGHT
+// ─────────────────────────────────────────────────────────────
+void test_spawn_safety_and_full_level_walk_flight() {
+    std::cout << "\n=== [MODULE 11] Spawn Safety, Hazard Placement & Full Level Traversal ===" << std::endl;
+
+    for (int sector = 1; sector <= 3; ++sector) {
+        World world(1000 + sector * 77);
+        world.generate_world(sector, 1000 + sector * 77);
+        const LevelGenerator* gen = world.level_generator();
+        TEST_CHECK(gen != nullptr, "Level generator must be initialized");
+
+        // 1. Verify Spawn Safety & Immediate Mobility
+        glm::vec3 spawn_pos = gen->spawn_position();
+        PlayerController player(spawn_pos);
+        player.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+        player.clamp_to_surface(world);
+
+        // Ground check on spawn
+        TEST_CHECK(player.isGrounded(), "Delver must be solidly grounded upon spawn");
+        TEST_CHECK(!player.is_in_spikes(), "Delver MUST NOT spawn on spikes");
+        TEST_CHECK(!player.is_in_lava(), "Delver MUST NOT spawn in lava");
+        TEST_CHECK(player.health() == player.max_health(), "Delver must have 100% full health at spawn");
+
+        // Step 30 physics frames standing on spawn pad (0.5s idle)
+        for (int f = 0; f < 30; ++f) {
+            player.update_physics(1.0f / 60.0f, world);
+        }
+        TEST_CHECK(player.health() == player.max_health(), "Idle delver at spawn pad must take 0 damage");
+        TEST_CHECK(!player.is_in_spikes(), "Idle delver at spawn pad must not be flagged in spikes");
+
+        // 2. Cardinal Walking Test: Uninhibited Movement in All 4 Directions
+        const glm::vec3 dirs[4] = {
+            glm::vec3(1.0f, 0.0f, 0.0f),   // East (+X)
+            glm::vec3(-1.0f, 0.0f, 0.0f),  // West (-X)
+            glm::vec3(0.0f, 0.0f, 1.0f),   // South (+Z)
+            glm::vec3(0.0f, 0.0f, -1.0f)   // North (-Z)
+        };
+
+        for (int d = 0; d < 4; ++d) {
+            player.set_position(spawn_pos);
+            player.clamp_to_surface(world);
+            glm::vec3 start_p = player.position();
+
+            for (int f = 0; f < 25; ++f) {
+                player.velocity_mut() = dirs[d] * 5.5f;
+                player.update_physics(1.0f / 60.0f, world);
+            }
+            float dist_moved = glm::distance(glm::vec2(player.position().x, player.position().z),
+                                            glm::vec2(start_p.x, start_p.z));
+            TEST_CHECK(dist_moved >= 1.2f, "Delver walking in spawn room must move freely without false spike drag");
+            TEST_CHECK(player.health() == player.max_health(), "Delver walking in spawn room must take 0 damage");
+            TEST_CHECK(!player.is_in_spikes(), "Delver walking in spawn room must not trigger spike flag");
+        }
+
+        // 3. Verify Entire Spawn Staging Cavern (0, 0) Has ZERO Hazards
+        const RoomPlacement* spawn_room = gen->get_room_at_grid(0, 0);
+        TEST_CHECK(spawn_room != nullptr, "Spawn staging cavern must exist at grid (0,0)");
+        for (int rx = spawn_room->center.x - spawn_room->half_width; rx <= spawn_room->center.x + spawn_room->half_width; ++rx) {
+            for (int rz = spawn_room->center.z - spawn_room->half_depth; rz <= spawn_room->center.z + spawn_room->half_depth; ++rz) {
+                for (int ry = spawn_room->floor_y; ry <= spawn_room->ceiling_y; ++ry) {
+                    Voxel v = world.get_voxel(rx, ry, rz);
+                    TEST_CHECK(v.material_id != MAT_OBSIDIAN_SPIKES, "Spawn room must never contain obsidian spikes");
+                    TEST_CHECK(v.material_id != MAT_THERMITE_SLAG && v.material_id != MAT_MOLTEN_MAGMA, "Spawn room must never contain lava");
+                    TEST_CHECK(v.material_id != MAT_GAS && v.material_id != MAT_TOXIC_GAS, "Spawn room must never contain toxic gas");
+                }
+            }
+        }
+
+        // 4. Verify Doorway Thresholds and Mandatory Corridors are Hazard-Free
+        for (const auto& room : gen->rooms()) {
+            // Check cardinal doorway thresholds
+            const int door_coords[4][2] = {
+                {room.center.x + room.half_width, room.center.z},
+                {room.center.x - room.half_width, room.center.z},
+                {room.center.x, room.center.z + room.half_depth},
+                {room.center.x, room.center.z - room.half_depth}
+            };
+            for (int i = 0; i < 4; ++i) {
+                int dx = door_coords[i][0];
+                int dz = door_coords[i][1];
+                if (gen->is_in_bounds(dx, room.floor_y + 1, dz)) {
+                    Voxel step_v = world.get_voxel(dx, room.floor_y + 1, dz);
+                    TEST_CHECK(step_v.material_id != MAT_OBSIDIAN_SPIKES, "Doorway step must not be obsidian spikes");
+                    TEST_CHECK(step_v.material_id != MAT_THERMITE_SLAG && step_v.material_id != MAT_MOLTEN_MAGMA, "Doorway step must not be lava");
+                }
+            }
+        }
+
+        // 5. Test Full Level Flight & Safe Mid-Air Roaming Across All Rooms
+        for (const auto& room : gen->rooms()) {
+            glm::vec3 fly_pos(room.center.x + 0.5f, static_cast<float>(room.floor_y + 3) + 0.5f, room.center.z + 0.5f);
+            if (world.is_solid(glm::ivec3(fly_pos))) {
+                // If a decorative pillar/monument occupies exact center, find open air adjacent
+                for (int ox = -3; ox <= 3; ++ox) {
+                    for (int oz = -3; oz <= 3; ++oz) {
+                        glm::ivec3 check_air(room.center.x + ox, room.floor_y + 3, room.center.z + oz);
+                        if (!world.is_solid(check_air) && !world.is_solid(check_air + glm::ivec3(0, 1, 0))) {
+                            fly_pos = glm::vec3(check_air) + glm::vec3(0.5f);
+                            break;
+                        }
+                    }
+                }
+            }
+            player.set_position(fly_pos);
+            player.set_velocity(glm::vec3(0.0f));
+
+            for (int f = 0; f < 10; ++f) {
+                player.update_physics(1.0f / 60.0f, world);
+            }
+            TEST_CHECK(!player.is_penetrating_solid(world), "Flight inside cavern must not clip into ceiling or walls");
+            TEST_CHECK(!player.is_in_spikes(), "Flight high above floor must not trigger spike trap");
+            TEST_CHECK(!player.is_in_lava(), "Flight high above floor must not trigger lava damage");
+        }
+
+        // 6. Hazard Room Safe Bridge Verification
+        for (const auto& room : gen->rooms()) {
+            if (room.type == RoomShapeType::SpikeTrenchArena) {
+                // Bridge spans at floor_y + 2
+                glm::vec3 b_start(room.center.x - room.half_width + 2, static_cast<float>(room.floor_y + 3) + 0.95f, room.center.z);
+                PlayerController bridge_walker(b_start);
+                bridge_walker.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+                bridge_walker.clamp_to_surface(world);
+
+                // Walk along bridge across the room
+                for (int f = 0; f < 30; ++f) {
+                    bridge_walker.velocity_mut() = glm::vec3(4.0f, 0.0f, 0.0f);
+                    bridge_walker.update_physics(1.0f / 60.0f, world);
+                }
+                TEST_CHECK(bridge_walker.health() == bridge_walker.max_health(), "Delver traversing spike trench bridge must take 0 damage");
+                TEST_CHECK(!bridge_walker.is_in_spikes(), "Delver on safe bridge must not trigger spikes");
+            } else if (room.type == RoomShapeType::ColossalAbyssalChasm) {
+                // Suspension bridge spans at floor_y + 8
+                glm::vec3 b_start(room.center.x - room.half_width + 2, static_cast<float>(room.floor_y + 9) + 0.95f, room.center.z);
+                PlayerController chasm_walker(b_start);
+                chasm_walker.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+                chasm_walker.clamp_to_surface(world);
+
+                for (int f = 0; f < 30; ++f) {
+                    chasm_walker.velocity_mut() = glm::vec3(4.0f, 0.0f, 0.0f);
+                    chasm_walker.update_physics(1.0f / 60.0f, world);
+                }
+                TEST_CHECK(chasm_walker.health() == chasm_walker.max_health(), "Delver traversing colossal chasm suspension bridge must take 0 damage");
+                TEST_CHECK(!chasm_walker.is_in_spikes(), "Delver on suspension bridge must not trigger spikes");
+            }
+        }
+    }
+
+    log_pass("Spawn safety, uninhibited cardinal mobility, hazard placement, and full level flight verified across Sectors 1-3");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- LEVEL DESIGN & COLLISION TEST SUITE" << std::endl;
@@ -1183,6 +1342,7 @@ int main() {
     test_all_rooms_tour_and_visibility();
     test_flight_carving_and_mesh_integrity();
     test_environmental_room_dangers_and_mortality();
+    test_spawn_safety_and_full_level_walk_flight();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_passed_tests << " LEVEL DESIGN & COLLISION TESTS PASSED (0 CLIPPING ERRORS, 0 OCCLUSION GLITCHES)!" << std::endl;

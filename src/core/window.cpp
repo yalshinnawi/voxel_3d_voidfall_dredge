@@ -106,6 +106,7 @@ Window::Window(const WindowConfig& config)
 
     glfwSetFramebufferSizeCallback(m_window, framebuffer_size_callback);
     glfwSetCursorPosCallback(m_window, mouse_callback);
+    glfwSetScrollCallback(m_window, scroll_callback);
     glfwSetKeyCallback(m_window, key_callback);
     glfwSetMouseButtonCallback(m_window, mouse_button_callback);
 
@@ -226,6 +227,12 @@ glm::dvec2 Window::get_cursor_delta() {
     return delta;
 }
 
+double Window::get_scroll_delta_y() {
+    double delta = m_scroll_delta_y;
+    m_scroll_delta_y = 0.0;
+    return delta;
+}
+
 void Window::framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
     if (self) {
@@ -250,6 +257,14 @@ void Window::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
         self->m_mouse_delta_y += (self->m_last_mouse_y - ypos); // Invert Y for natural look
         self->m_last_mouse_x = xpos;
         self->m_last_mouse_y = ypos;
+    }
+}
+
+void Window::scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    (void)xoffset;
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (self) {
+        self->m_scroll_delta_y += yoffset;
     }
 }
 

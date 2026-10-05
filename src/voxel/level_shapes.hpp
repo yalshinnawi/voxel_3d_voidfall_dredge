@@ -27,7 +27,17 @@ enum class RoomShapeType {
     VoidSingularityRift,      // Bottomless cosmic void chasm with floating obsidian platforms & zero-g monolith (Level 3)
     FungoidBioGrotto,         // Subterranean bioluminescent mushroom grotto with bouncy spore platforms & gas pods (Level 1+)
     LaserDefenseFoundry,      // Precursor industrial facility with overhead catwalks, smelting flumes & security grids (Level 2+)
-    CrumblingArchCanyon       // Deep canyon spanned by fragile natural stone arches & grapple stalactites (Level 2+)
+    CrumblingArchCanyon,      // Deep canyon spanned by fragile natural stone arches & grapple stalactites (Level 2+)
+
+    // ── NEW EXPANDED DIVERSE ROOM ARCHETYPES ──
+    SubterraneanAquiferOasis,     // Verdant underground oasis with crystal pools, cascading waterfall & glowing flora (Level 1+)
+    ColossalAbyssalChasm,         // Mega vertical drop chasm with high tension bridges, punji pit & death drop (Level 2+)
+    MoltenMagmaFoundry,           // Vast volcanic smelting basin with bubbling thermite channels & steam flumes (Level 2+)
+    ToxicMiasmaSwamp,             // Low-lying bog filled with sinuous toxic gas pockets, visible spore clouds & fungal arches (Level 2+)
+    PrismaticCrystalCathedral,    // Towering vaulted mega-hall of colossal hexagonal crystal monoliths & crystal bridges (Level 1+)
+    AncientTitanNecropolis,       // Deep fossil excavation site spanned by giant prehistoric skeletal ribcage arches (Level 2+)
+    BioluminescentGlowwormGrotto, // Starry-sky cavern with hundreds of bioluminescent points & reflecting pool (Level 1+)
+    PrecursorCoolantReservoir     // Precursor industrial vault with ruptured subterranean coolant pipelines & strobes (Level 2+)
 };
 
 enum class CorridorType {
@@ -47,7 +57,8 @@ struct RoomPlacement {
     int floor_y{4};
     int ceiling_y{20};
     int floor_level{0};      // 0 = Lower Floor, 1 = Upper Floor, 2 = Multi-Floor (both floors)
-    bool is_massive{false};  // true for massive chambers (>= 24x24)
+    bool is_massive{false};  // true for massive chambers (>= 20x20)
+    bool is_mega{false};     // true for very large roaming mega-caverns (>= 26x26)
     bool connected_north{false}; // +Z
     bool connected_south{false}; // -Z
     bool connected_east{false};  // +X
@@ -84,7 +95,11 @@ enum class LuminaryType {
     CorridorBulkheadLight,   // Warm low-voltage navigation light
     VoidSingularityPulse,    // Deep pulsing cosmic ultraviolet
     FungoidSporeGlow,        // Eerie organic phosphorescent green/teal
-    LaserSecurityStrobe      // Intense automated red/amber security strobe
+    LaserSecurityStrobe,     // Intense automated red/amber security strobe
+    AquiferOasisGlow,        // Serene turquoise bioluminescent glow
+    PrismaticCrystalRadiance,// Brilliant refractive prismatic glow
+    ToxicMiasmaGreen,        // Murky sickly-green spore luminescence
+    TitanFossilAura          // Deep ancient amber fossil luminescence
 };
 
 struct CavernLuminary {
@@ -123,7 +138,7 @@ public:
     static constexpr int WORLD_DEPTH = GRID_CELL_SIZE * GRID_DEPTH; // 72 voxels
     static constexpr int WORLD_HEIGHT = 32;                         // 32 voxels (1 chunk: 0)
 
-    LevelGenerator(int sector_index, uint32_t seed);
+    LevelGenerator(int sector_index, uint32_t seed, int vertical_chunks = 1);
 
     void generate_layout();
     Voxel sample_voxel(int x, int y, int z) const;
@@ -133,7 +148,7 @@ public:
     int grid_depth() const { return m_grid_d; }
     int world_width() const { return m_grid_w * GRID_CELL_SIZE; }
     int world_depth() const { return m_grid_d * GRID_CELL_SIZE; }
-    int world_height() const { return WORLD_HEIGHT; }
+    int world_height() const { return m_world_h; }
 
     const std::vector<RoomPlacement>& rooms() const { return m_rooms; }
     const std::vector<CorridorPlacement>& corridors() const { return m_corridors; }
@@ -166,7 +181,7 @@ private:
     void sample_radioactive_sanctuary(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_extraction_bay(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
 
-    // New expanded room archetypes
+    // Expanded room archetypes
     void sample_magma_caldera(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_spike_trench(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_void_singularity(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
@@ -174,12 +189,23 @@ private:
     void sample_laser_foundry(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_crumbling_canyon(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
 
+    // New 8 deep/oasis/hazard archetypes
+    void sample_aquifer_oasis(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_colossal_abyssal_chasm(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_molten_magma_foundry(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_toxic_miasma_swamp(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_prismatic_crystal_cathedral(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_ancient_titan_necropolis(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_bioluminescent_glowworm_grotto(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_precursor_coolant_reservoir(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+
     void generate_luminaries();
 
     int m_sector_index{1};
     uint32_t m_seed{1337};
     int m_grid_w{3};
     int m_grid_d{3};
+    int m_world_h{WORLD_HEIGHT};
     std::vector<RoomPlacement> m_rooms;
     std::vector<CorridorPlacement> m_corridors;
     std::vector<CavernLuminary> m_luminaries;

@@ -1,4 +1,5 @@
 #include "controller.hpp"
+#include "../systems/stealth_system.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -9,6 +10,18 @@ PlayerController::PlayerController(const glm::vec3& start_pos)
     : m_position(start_pos)
 {
     update_camera_vectors();
+}
+
+void PlayerController::ProcessStanceChange(bool crouched) {
+    if (m_is_crouching != crouched) {
+        m_is_crouching = crouched;
+        // Toggling or holding crouch must produce 0.0 acoustic impulse
+        StealthSystem::instance().AddNoise(0.0f);
+    }
+}
+
+RaycastHit PlayerController::QueryRaycastTarget(const World& world, float max_dist) const {
+    return get_look_target(world, max_dist);
 }
 
 void PlayerController::update_camera_vectors() {
@@ -22,14 +35,13 @@ void PlayerController::update_camera_vectors() {
 }
 
 glm::mat4 PlayerController::get_view_matrix() const {
-    glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
+    glm::vec3 eye = eye_position();
     return glm::lookAt(eye, eye + m_front, m_up);
 }
 
 RaycastHit PlayerController::get_look_target(const World& world, float max_dist) const {
-    glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
-    glm::vec3 ray_origin = eye + m_front * 0.6f;
-    return world.raycast(ray_origin, m_front, max_dist);
+    glm::vec3 eye = eye_position();
+    return world.raycast(eye, m_front, max_dist);
 }
 
 void PlayerController::handle_input(const Window& window, float dt) {
@@ -42,11 +54,21 @@ void PlayerController::handle_input(const Window& window, float dt) {
     m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
     update_camera_vectors();
 
-    // Tool hotbar selection: 1 (Mining Drill), 2 (Combat Weapon), 3 (Industrial Bulkhead), 4 (Demolition Charge)
+    // Tool selection: 1 (Mining Drill), 2 (Combat Weapon), 3/4 (Demolition Charge)
+    // Bulkhead is placed directly with Right Click while on Mining Drill (bulk tool slot removed)
     if (window.is_key_down(GLFW_KEY_1)) m_active_tool = ToolSlot::MiningDrill;
     if (window.is_key_down(GLFW_KEY_2)) m_active_tool = ToolSlot::CombatWeapon;
-    if (window.is_key_down(GLFW_KEY_3)) m_active_tool = ToolSlot::IndustrialBulkhead;
-    if (window.is_key_down(GLFW_KEY_4)) m_active_tool = ToolSlot::DemolitionCharge;
+    if (window.is_key_down(GLFW_KEY_3) || window.is_key_down(GLFW_KEY_4)) m_active_tool = ToolSlot::DemolitionCharge;
+
+    // Mouse scroll wheel tool cycling: scroll down -> next weapon, scroll up -> prev weapon
+    double scroll_y = const_cast<Window&>(window).get_scroll_delta_y();
+    if (scroll_y != 0.0) {
+        if (scroll_y < -0.1) {
+            cycle_tool_forward();
+        } else if (scroll_y > 0.1) {
+            cycle_tool_backward();
+        }
+    }
 
     // Quick weapon draw / toggle: X key swaps between Mining Drill and Combat Weapon
     static bool x_down_last = false;
@@ -80,12 +102,17 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (window.is_key_down(GLFW_KEY_A)) { wish_dir -= flat_right; m_current_buttons |= BTN_LEFT; }
     if (window.is_key_down(GLFW_KEY_D)) { wish_dir += flat_right; m_current_buttons |= BTN_RIGHT; }
     if (window.is_key_down(GLFW_KEY_LEFT_SHIFT)) { m_current_buttons |= BTN_SPRINT; }
+    bool crouch_held = window.is_key_down(GLFW_KEY_LEFT_CONTROL) || window.is_key_down(GLFW_KEY_C);
+    ProcessStanceChange(crouch_held);
 
     if (glm::length(wish_dir) > 0.001f) {
         wish_dir = glm::normalize(wish_dir);
     }
 
     float move_speed = ((m_current_buttons & BTN_SPRINT) ? 12.0f : 7.0f) * m_char_attr.moveSpeed * m_carry_weight_multiplier;
+    if (m_is_crouching) {
+        move_speed *= 0.55f;
+    }
     if (m_on_ground) {
         m_velocity.x = wish_dir.x * move_speed;
         m_velocity.z = wish_dir.z * move_speed;
@@ -112,7 +139,7 @@ void PlayerController::handle_input(const Window& window, float dt) {
             m_velocity.y = glm::clamp(m_velocity.y, -4.0f, 9.0f);
             float overburden_drain = (m_carry_weight_multiplier < 0.99f) ? (1.0f + (1.0f - m_carry_weight_multiplier) * 1.5f) : 1.0f;
             m_exo.power -= 25.0f * dt * overburden_drain;
-            float heat_buildup = 20.0f * std::max(0.25f, 1.0f - m_upgrades.drillDurabilityTier * 0.15f);
+            float heat_buildup = drill_heat_buildup_rate();
             m_exo.heat += heat_buildup * dt;
             m_current_buttons |= BTN_THRUSTER;
         }
@@ -120,13 +147,11 @@ void PlayerController::handle_input(const Window& window, float dt) {
 
     // Passive heat dissipation & power regeneration with Kinetic Dynamo perk
     if (!(m_current_buttons & BTN_THRUSTER)) {
-        m_exo.heat = std::max(0.0f, m_exo.heat - 18.0f * dt);
+        m_exo.heat = std::max(0.0f, m_exo.heat - drill_heat_dissipation_rate() * dt);
 
         // Kinetic Dynamo: Movement and falling recharge fuel faster
-        float dynamo_mult = 1.0f + m_upgrades.kineticDynamoTier * 0.15f;
-        if ((m_current_buttons & BTN_SPRINT) || (!m_on_ground && m_velocity.y < -1.0f)) {
-            dynamo_mult += m_upgrades.kineticDynamoTier * 0.15f;
-        }
+        bool sprint_or_fall = (m_current_buttons & BTN_SPRINT) || (!m_on_ground && m_velocity.y < -1.0f);
+        float dynamo_mult = dynamo_multiplier(sprint_or_fall);
 
         float regen_rate = 15.0f * m_thruster_regen_multiplier * dynamo_mult;
         m_exo.power = std::min(m_exo.max_power, m_exo.power + regen_rate * dt);
@@ -223,6 +248,13 @@ void PlayerController::handle_input(const Window& window, float dt) {
 void PlayerController::update_physics(float dt, World& world) {
     m_current_world = &world;
 
+    // Smoothly interpolate first-person camera eye offset between standing and crouching
+    float targetEyeHeight = m_is_crouching ? EYE_HEIGHT_CROUCH : EYE_HEIGHT_STAND;
+    m_eyeHeight = glm::mix(m_eyeHeight, targetEyeHeight, 1.0f - std::exp(-18.0f * dt));
+    if (std::abs(m_eyeHeight - targetEyeHeight) < 0.03f) {
+        m_eyeHeight = targetEyeHeight;
+    }
+
     // 0. Update Combat Firearm cooldowns & passive capacitor recharge
     if (m_fire_cooldown > 0.0f) {
         m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
@@ -303,7 +335,8 @@ void PlayerController::update_physics(float dt, World& world) {
     Voxel underfoot = world.get_voxel(ground_x, ground_y, ground_z);
     Voxel lower_body = world.get_voxel(ground_x, body_y, ground_z);
 
-    if (underfoot.material_id == MAT_THERMITE_SLAG || lower_body.material_id == MAT_THERMITE_SLAG) {
+    if (underfoot.material_id == MAT_THERMITE_SLAG || lower_body.material_id == MAT_THERMITE_SLAG ||
+        underfoot.material_id == MAT_MOLTEN_MAGMA || lower_body.material_id == MAT_MOLTEN_MAGMA) {
         m_is_in_lava = true;
         // Viscous fluid drag - severely hampers horizontal movement
         m_velocity.x *= std::max(0.0f, 1.0f - 8.5f * dt);
@@ -313,12 +346,12 @@ void PlayerController::update_physics(float dt, World& world) {
         }
 
         float lava_dmg = 28.0f * dt;
-        take_damage(lava_dmg, false);
+        take_damage(lava_dmg, DamageSource::ThermalLava);
         m_exo.heat = std::min(100.0f, m_exo.heat + 50.0f * dt);
         if (m_exo.heat >= 100.0f) {
             m_exo.overheated = true;
         }
-        add_trauma(0.18f * dt);
+        add_trauma(0.08f * dt);
         static float s_lava_warn = 0.0f;
         s_lava_warn += dt;
         if (s_lava_warn >= 0.8f) {
@@ -333,7 +366,24 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
-    if (underfoot.flags_and_damage == 0x0F || lower_body.flags_and_damage == 0x0F) {
+    if (underfoot.material_id == MAT_CRYSTAL_AQUIFER || lower_body.material_id == MAT_CRYSTAL_AQUIFER) {
+        // Water immersion: rapid exo cooling and buoyant fluid drag
+        m_velocity.x *= std::max(0.0f, 1.0f - 2.5f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 2.5f * dt);
+        if (m_velocity.y < -4.5f) {
+            m_velocity.y = -4.5f; // Water buoyancy terminal velocity
+        }
+        m_exo.heat = std::max(0.0f, m_exo.heat - 75.0f * dt);
+        m_exo.overheated = false;
+    }
+
+    if (underfoot.material_id == MAT_TOXIC_GAS || lower_body.material_id == MAT_TOXIC_GAS) {
+        take_damage(22.0f * dt, DamageSource::ToxicGas);
+        add_trauma(0.06f * dt);
+    }
+
+    bool is_spikes_underfoot = (underfoot.material_id == MAT_OBSIDIAN_SPIKES || lower_body.material_id == MAT_OBSIDIAN_SPIKES);
+    if (is_spikes_underfoot) {
         m_is_in_spikes = true;
         // Movement slowed to crawl while traversing puncture hazards
         m_velocity.x *= std::max(0.0f, 1.0f - 7.0f * dt);
@@ -341,7 +391,7 @@ void PlayerController::update_physics(float dt, World& world) {
 
         if (m_spike_damage_timer <= 0.0f) {
             m_spike_damage_timer = 0.65f;
-            take_damage(25.0f, false);
+            take_damage(25.0f, DamageSource::Spikes);
             add_trauma(0.45f);
             m_velocity.y = std::max(m_velocity.y, 2.2f); // Sharp hop recoil, not trampoline escape
             if (m_on_warning) {
@@ -355,7 +405,7 @@ void PlayerController::update_physics(float dt, World& world) {
     }
 
     if (m_position.y <= 1.8f) {
-        take_damage(35.0f, false);
+        take_damage(35.0f, DamageSource::VoidSingularity);
         add_trauma(0.60f);
         if (m_health > 0.0f) {
             m_position.y = 6.5f;
@@ -385,41 +435,58 @@ void PlayerController::update_physics(float dt, World& world) {
         m_tactical_cooldown = std::max(0.0f, m_tactical_cooldown - dt);
     }
 
-    // Slot 3 LMB: Deploy Shaped Charge on targeted surface
+    // Slot 4 LMB: Deploy Shaped Satchel Charge on targeted surface
     if (m_current_buttons & BTN_SKILL_DEMO) {
         if (m_place_cooldown <= 0.0f) {
-            m_place_cooldown = 0.25f;
-            glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
-            glm::vec3 ray_origin = eye + m_front * 0.6f;
-            RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
-            if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
-                m_placed_charge_pos = hit.block_pos;
-                m_placed_charge_normal = hit.normal;
-                m_has_placed_charge = true;
-                if (m_on_warning) {
-                    m_on_warning("SHAPED CHARGE DEPLOYED. PRESS [RMB] TO DETONATE TUNNEL.");
-                }
-            }
-        }
-    }
-
-    // Slot 3 RMB: Detonate Placed Shaped Charge (blasts 3x1x1 tunnel)
-    if (m_current_buttons & BTN_DETONATE_CHARGE) {
-        if (m_place_cooldown <= 0.0f) {
-            m_place_cooldown = 0.35f;
+            m_place_cooldown = 0.30f;
             if (m_has_placed_charge) {
-                if (m_on_explosive_blast) {
-                    m_on_explosive_blast(m_placed_charge_pos, m_placed_charge_normal, true);
+                if (m_on_warning) {
+                    m_on_warning("SATCHEL CHARGE ALREADY PLANTED. PRESS [RMB] TO DETONATE.");
                 }
-                m_has_placed_charge = false;
             } else {
                 glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
                 glm::vec3 ray_origin = eye + m_front * 0.6f;
                 RaycastHit hit = world.raycast(ray_origin, m_front, 7.5f);
                 if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
-                    if (m_on_explosive_blast) {
-                        m_on_explosive_blast(hit.block_pos, hit.normal, true);
+                    if (m_can_deploy_charge_predicate && !m_can_deploy_charge_predicate()) {
+                        if (m_on_warning) {
+                            m_on_warning("OUT OF DEMOLITION SATCHEL CHARGES");
+                        }
+                    } else {
+                        m_placed_charge_pos = hit.block_pos;
+                        m_placed_charge_normal = hit.normal;
+                        m_has_placed_charge = true;
+                        if (m_on_charge_placed) {
+                            m_on_charge_placed(hit.block_pos, hit.normal);
+                        }
+                        if (m_on_warning) {
+                            m_on_warning("SATCHEL CHARGE PLANTED. PRESS [RMB] TO DETONATE.");
+                        }
                     }
+                } else if (!hit.hit) {
+                    if (m_on_warning) {
+                        m_on_warning("OUT OF RANGE TO PLANT SATCHEL CHARGE");
+                    }
+                }
+            }
+        }
+    }
+
+    // Slot 4 RMB: Detonate Placed Satchel Charge via remote detonator
+    if (m_current_buttons & BTN_DETONATE_CHARGE) {
+        if (m_place_cooldown <= 0.0f) {
+            m_place_cooldown = 0.35f;
+            if (m_has_placed_charge) {
+                if (m_on_explosive_blast) {
+                    m_on_explosive_blast(m_placed_charge_pos, m_placed_charge_normal, false);
+                }
+                m_has_placed_charge = false;
+                if (m_on_warning) {
+                    m_on_warning("SATCHEL CHARGE DETONATED! CREATURES ALERTED!");
+                }
+            } else {
+                if (m_on_warning) {
+                    m_on_warning("NO ACTIVE CHARGE PLANTED. PRESS [LMB] TO PLANT SATCHEL CHARGE.");
                 }
             }
         }
@@ -500,6 +567,9 @@ void PlayerController::clamp_to_surface(const World& world) {
             if (!world.is_solid(check_pos + glm::ivec3(0, 1, 0)) &&
                 !world.is_solid(check_pos + glm::ivec3(0, 2, 0))) {
                 m_position.y = static_cast<float>(y + 1) + 0.95f;
+                m_velocity.y = 0.0f;
+                m_on_ground = true;
+                m_isGrounded = true;
                 return;
             }
         }
@@ -511,18 +581,40 @@ void PlayerController::clamp_to_surface(const World& world) {
             if (!world.is_solid(check_pos + glm::ivec3(0, 1, 0)) &&
                 !world.is_solid(check_pos + glm::ivec3(0, 2, 0))) {
                 m_position.y = static_cast<float>(y + 1) + 0.95f;
+                m_velocity.y = 0.0f;
+                m_on_ground = true;
+                m_isGrounded = true;
                 return;
             }
         }
     }
     float surface = world.get_highest_solid_surface(static_cast<int>(m_position.x), static_cast<int>(m_position.z));
     m_position.y = surface + 0.95f;
+    m_velocity.y = 0.0f;
+    m_on_ground = true;
+    m_isGrounded = true;
 }
 
 void PlayerController::UpdatePhysics(float dt) {
+    float targetEyeHeight = m_is_crouching ? EYE_HEIGHT_CROUCH : EYE_HEIGHT_STAND;
+    m_eyeHeight = glm::mix(m_eyeHeight, targetEyeHeight, 1.0f - std::exp(-18.0f * dt));
+    if (std::abs(m_eyeHeight - targetEyeHeight) < 0.03f) {
+        m_eyeHeight = targetEyeHeight;
+    }
     if (m_current_world) {
         update_physics(dt, *m_current_world);
     }
+}
+
+void PlayerController::Update(float dt) {
+    UpdatePhysics(dt);
+    StealthSystem::instance().Update(dt, m_is_crouching);
+}
+
+void PlayerController::Update(float dt, World& world) {
+    m_current_world = &world;
+    UpdatePhysics(dt, world);
+    StealthSystem::instance().Update(dt, m_is_crouching);
 }
 
 void PlayerController::ResolveAxisCollision(int axis, const glm::vec3& half_extents) {
@@ -564,11 +656,15 @@ void PlayerController::apply_fall_impact(float impact_speed) {
     if (impact_speed > 2.5f && m_on_land) {
         m_on_land(m_position, impact_speed);
     }
+    if (impact_speed > 6.0f) {
+        // Medium landing thud camera trauma even without health damage
+        add_trauma(std::clamp((impact_speed - 5.0f) * 0.035f, 0.10f, 0.40f));
+    }
     if (impact_speed > 13.0f) {
         float vex = impact_speed - 13.0f;
         float raw_dmg = vex * (3.2f + 0.12f * vex);
-        float applied = take_damage(raw_dmg, true);
-        add_trauma(std::min(impact_speed * 0.035f, 0.6f));
+        float applied = take_damage(raw_dmg, DamageSource::FallImpact);
+        add_trauma(std::min(impact_speed * 0.04f, 0.85f));
         if (m_on_warning) {
             if (m_health <= 0.0f) {
                 m_on_warning("FATAL IMPACT: KINETIC COMPRESSION BLUNT FORCE TRAUMA (-" + std::to_string(static_cast<int>(applied)) + " HP)");
@@ -890,7 +986,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
 void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt) {
     m_on_ground = false;
     m_isGrounded = false;
-    glm::vec3 half_extents(0.3f, 0.9f, 0.3f);
+    glm::vec3 half_extents = this->half_extents();
 
     float max_speed = std::max({std::abs(m_velocity.x), std::abs(m_velocity.y), std::abs(m_velocity.z)});
     int steps = std::max(1, static_cast<int>(std::ceil(max_speed * dt / 0.12f)));
@@ -964,9 +1060,8 @@ void PlayerController::MineBlock(float dt, World& world) {
     bool is_mining = (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill);
 
     if (is_mining) {
-        glm::vec3 eye = m_position + glm::vec3(0.0f, 0.7f, 0.0f);
-        glm::vec3 ray_origin = eye + m_front * 0.6f;
-        RaycastHit hit = world.raycast(ray_origin, m_front, 6.5f);
+        glm::vec3 eye = eye_position();
+        RaycastHit hit = world.raycast(eye, m_front, 6.5f);
 
         if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
             if (hit.block_pos != m_target_block) {
@@ -985,8 +1080,8 @@ void PlayerController::MineBlock(float dt, World& world) {
             }
 
             // Track cumulative drill progress per block factoring baseMineSpeed and drillSpeedTier
-            float effective_mine_speed = m_char_attr.baseMineSpeed * (1.0f + m_upgrades.drillSpeedTier * 0.12f) * std::max(0.2f, m_drill_speed_multiplier);
-            m_drillDamageAccumulator += effective_mine_speed * dt;
+            float effective_speed = effective_mine_speed();
+            m_drillDamageAccumulator += effective_speed * dt;
             m_target_block_damage = m_drillDamageAccumulator;
             m_mine_timer = m_drillDamageAccumulator;
             m_target_time_to_break = m_block_hardness;
@@ -1071,21 +1166,57 @@ void PlayerController::apply_attributes_and_upgrades(CharacterClass cls, const U
     apply_attributes_and_upgrades(get_character_attributes(cls), upg);
 }
 
-float PlayerController::take_damage(float dmg, bool is_falling_debris) {
-    if (is_falling_debris) {
-        float reduction = m_char_attr.fallingDamageReduction + (m_upgrades.reinforcedPlatingTier * 0.10f);
-        reduction = std::clamp(reduction, 0.0f, 0.85f);
+float PlayerController::take_damage(float dmg, DamageSource source) {
+    if (source == DamageSource::FallingDebris) {
+        float reduction = debris_damage_reduction();
         dmg *= (1.0f - reduction);
     }
+    if (dmg <= 0.0f) return 0.0f;
     m_health = std::max(0.0f, m_health - dmg);
     m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
-    add_trauma(dmg * 0.02f);
+    m_last_damage_source = source;
+
+    // Apply trauma screen shake based on specific damage scenario:
+    // - Radiation causes invisible cellular breakdown -> ZERO screen shaking! (Telegraphed by Geiger counter & groaning)
+    // - Toxic gas causes respiratory distress -> subtle cough spasm (0.02f), NOT violent screen shaking!
+    // - Thermal lava causes burn distress -> mild heat tremor
+    // - Enemy attack -> visceral physical trauma
+    // - Kinetic / Falling Debris / Fall Impact / Spikes -> punchy camera trauma
+    if (source == DamageSource::Radiation) {
+        // Zero screen shaking for radiation
+    } else if (source == DamageSource::ToxicGas) {
+        add_trauma(0.02f);
+    } else if (source == DamageSource::ThermalLava) {
+        float trauma_to_add = std::clamp(0.10f + dmg * 0.015f, 0.10f, 0.35f);
+        add_trauma(trauma_to_add);
+    } else if (source == DamageSource::EnemyAttack) {
+        float trauma_to_add = std::clamp(0.30f + dmg * 0.025f, 0.30f, 0.95f);
+        add_trauma(trauma_to_add);
+    } else {
+        float trauma_to_add = std::clamp(0.25f + dmg * 0.025f, 0.25f, 0.95f);
+        add_trauma(trauma_to_add);
+    }
+
+    if (m_on_damage_source) {
+        m_on_damage_source(dmg, source);
+    }
+    if (m_on_damage) {
+        bool is_impact = (source == DamageSource::FallingDebris || source == DamageSource::FallImpact);
+        m_on_damage(dmg, is_impact);
+    }
     return dmg;
+}
+
+float PlayerController::take_damage(float dmg, bool is_falling_debris) {
+    return take_damage(dmg, is_falling_debris ? DamageSource::FallingDebris : DamageSource::Kinetic);
 }
 
 void PlayerController::reload_weapon() {
     if (m_reload_timer > 0.0f || m_weapon_ammo >= m_weapon_stats.max_ammo) return;
     m_reload_timer = m_weapon_stats.reload_time;
+    if (m_on_weapon_reload) {
+        m_on_weapon_reload(m_char_attr.classType, m_weapon_stats.reload_time);
+    }
 }
 
 bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts, float dt) {
@@ -1103,15 +1234,28 @@ bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts,
     m_fire_cooldown = m_weapon_stats.fire_rate;
     m_recharge_delay = 1.5f;
 
-    // Projectile spawn position: eye level offset forward & slightly right
-    glm::vec3 base_origin = m_position + glm::vec3(0.0f, 0.45f, 0.0f) + m_front * 0.45f + m_right * 0.12f;
+    // Unified Camera Center Raycast & Viewmodel Convergence Matrix:
+    glm::vec3 eye = eye_position();
+    glm::vec3 base_origin = eye + m_front * 0.35f + m_right * 0.10f - m_up * 0.06f;
+
+    // 1. Raycast forward from eye along camera front to find 3D world impact point
+    glm::vec3 p_target = eye + m_front * 50.0f;
+    if (m_current_world) {
+        RaycastHit hit = m_current_world->raycast(eye, m_front, 50.0f);
+        if (hit.hit) {
+            p_target = eye + m_front * hit.distance;
+        }
+    }
+
+    // 2. Aim projectile trajectory from muzzle to P_target
+    glm::vec3 shot_dir = glm::normalize(p_target - base_origin);
 
     for (int p = 0; p < m_weapon_stats.pellets; ++p) {
-        glm::vec3 fire_dir = m_front;
+        glm::vec3 fire_dir = shot_dir;
         if (m_weapon_stats.spread > 0.0f) {
             float rx = ((rand() % 1000) / 500.0f - 1.0f) * m_weapon_stats.spread;
             float ry = ((rand() % 1000) / 500.0f - 1.0f) * m_weapon_stats.spread;
-            fire_dir = glm::normalize(m_front + m_right * rx + m_up * ry);
+            fire_dir = glm::normalize(shot_dir + m_right * rx + m_up * ry);
         }
 
         PlayerPlasmaBolt bolt;
@@ -1140,6 +1284,26 @@ bool PlayerController::try_fire_weapon(glm::vec3& out_origin, glm::vec3& out_dir
         return true;
     }
     return false;
+}
+
+void PlayerController::cycle_tool_forward() {
+    if (m_active_tool == ToolSlot::MiningDrill) {
+        m_active_tool = ToolSlot::CombatWeapon;
+    } else if (m_active_tool == ToolSlot::CombatWeapon) {
+        m_active_tool = ToolSlot::DemolitionCharge;
+    } else {
+        m_active_tool = ToolSlot::MiningDrill;
+    }
+}
+
+void PlayerController::cycle_tool_backward() {
+    if (m_active_tool == ToolSlot::MiningDrill) {
+        m_active_tool = ToolSlot::DemolitionCharge;
+    } else if (m_active_tool == ToolSlot::DemolitionCharge) {
+        m_active_tool = ToolSlot::CombatWeapon;
+    } else {
+        m_active_tool = ToolSlot::MiningDrill;
+    }
 }
 
 } // namespace Voidfall

@@ -17,6 +17,7 @@ namespace Voidfall {
 class DynamicDebris;
 struct VoidStalker;
 struct SeismicBurrower;
+struct EnemyCarcass;
 
 struct PointLight {
     glm::vec3 position{0.0f};
@@ -50,6 +51,9 @@ struct BreakParticle {
     float size{0.25f};
     float life{0.8f};
     float max_life{0.8f};
+    float gravity{16.0f};    // Downward gravity acceleration (negative = buoyant float)
+    float drag{1.5f};        // Velocity damping
+    float size_growth{0.0f}; // Expansion over lifetime (for vapor/smoke)
 };
 
 class Renderer {
@@ -67,6 +71,7 @@ public:
     void render_debris(const DynamicDebris& debris);
     void render_stalkers(const std::vector<VoidStalker>& stalkers);
     void render_stalkers(const std::vector<VoidStalker>& stalkers, const std::vector<VoidSpikeProjectile>& projectiles);
+    void render_carcasses(const std::vector<EnemyCarcass>& carcasses);
     void render_burrowers(const std::vector<SeismicBurrower>& burrowers);
     void render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts);
     void render_delver(const glm::vec3& pos, float yaw, CharacterClass cls, float anim_time = 0.0f);
@@ -80,7 +85,16 @@ public:
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
     void spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id);
+    void spawn_burrow_particles(const glm::vec3& burrow_pos, const glm::vec3& burrow_dir, uint8_t mat_id = 1, int count = 8);
+    void spawn_toxic_gas_cloud(const glm::vec3& block_pos, int count = 3);
+    void spawn_radiation_glimmer(const glm::vec3& block_pos, int count = 2);
+    void spawn_lava_embers(const glm::vec3& block_pos, int count = 2);
+    void spawn_water_mist(const glm::vec3& block_pos, int count = 2);
+    size_t active_particle_count() const { return m_particles.size(); }
+    const std::vector<BreakParticle>& particles() const { return m_particles; }
+
     void render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id = 1);
+    void render_placed_charge(const glm::ivec3& block_pos, const glm::ivec3& normal, float time);
     void update_particles(float dt);
     void render_particles();
 

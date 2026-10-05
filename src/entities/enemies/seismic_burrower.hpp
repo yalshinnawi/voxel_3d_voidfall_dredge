@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include <string>
+#include "void_stalker.hpp"
 #include "../../systems/noise_meter.hpp"
 
 namespace Voidfall {
@@ -57,8 +58,10 @@ struct SeismicBurrower {
     // Audio & Roar indicators
     float roar_timer{0.0f};          // Timer between deep subterranean tectonic roars
     float grind_timer{0.0f};         // Timer between cutter teeth grinding pulses
+    float chatter_timer{0.0f};       // Timer between subterranean chitinous mandible/cutter chatter clicks
     bool just_roared{false};         // Emitted deep subterranean roar this frame
     bool just_ground{false};         // Emitted rock tooth grinding this frame
+    bool just_chattered{false};      // Emitted chattering clicks this frame
 
     // Acoustic sound tracking
     glm::vec3 sound_target{0.0f};
@@ -80,6 +83,32 @@ struct SeismicBurrower {
 
     bool is_dead() const { return state == BurrowerState::Dead; }
 
+    /// Forward direction vector based on velocity heading or pitch/yaw orientation
+    glm::vec3 forward() const {
+        if (glm::length(velocity) > 0.05f) {
+            return glm::normalize(velocity);
+        }
+        return glm::vec3(std::sin(yaw) * std::cos(pitch), -std::sin(pitch), std::cos(yaw) * std::cos(pitch));
+    }
+
+    /// Visual awareness classification for overhead indicators
+    bool is_investigating_state() const {
+        return !is_dead() && (state == BurrowerState::Burrowing);
+    }
+
+    bool is_engaged_state() const {
+        return !is_dead() && (state == BurrowerState::Breaching ||
+                              state == BurrowerState::Charging ||
+                              state == BurrowerState::Enraged);
+    }
+
+    /// Returns true if the burrower is completely unalerted (dormant or unaware of sound/player)
+    bool is_unalerted() const {
+        return !is_dead() &&
+               (state == BurrowerState::Dormant ||
+                (!is_engaged_state() && !has_sound_target && !is_pursuing_attacker));
+    }
+
     /// Returns emissive slag/eye color based on state
     glm::vec4 get_core_color() const {
         switch (state) {
@@ -93,7 +122,13 @@ struct SeismicBurrower {
     }
 };
 
-/// Excavation block delta emitted when the burrower eats terrain
+inline EnemyAwarenessMarkerType get_awareness_marker_type(const SeismicBurrower& b) {
+    if (b.is_engaged_state()) return EnemyAwarenessMarkerType::RedTriangle;
+    if (b.is_investigating_state()) return EnemyAwarenessMarkerType::YellowExclamation;
+    return EnemyAwarenessMarkerType::None;
+}
+
+/// Excavated block delta emitted when the burrower eats terrain
 struct ExcavatedVoxel {
     glm::ivec3 pos;
     uint8_t original_mat;
@@ -119,16 +154,21 @@ public:
         bool any_cavein_triggered{false};
         bool any_roar{false};
         bool any_grind{false};
+        bool any_chatter{false};
         float max_rumble{0.0f};
         std::vector<ExcavatedVoxel> excavated_voxels;
         std::vector<glm::ivec3> cavein_origins;
     };
 
     /// Update burrower AI, tunneling physics, voxel destruction, and combat
-    FrameResult update(float dt, const glm::vec3& player_pos, World& world, const std::vector<SoundEvent>& sound_events = {});
+    FrameResult update(float dt, const glm::vec3& player_pos, World& world,
+                       const std::vector<SoundEvent>& sound_events = {},
+                       bool player_is_crouching = false);
 
-    /// Apply damage to nearest burrower (with optional explosive multiplier)
-    bool damage_nearest(const glm::vec3& origin, float radius, float damage, bool is_explosive = false);
+    /// Apply damage to nearest burrower (with optional explosive multiplier and sneak attack crit)
+    bool damage_nearest(const glm::vec3& origin, float radius, float damage,
+                        bool is_explosive = false, bool allow_crit = false,
+                        bool* out_is_crit = nullptr, float* out_damage_dealt = nullptr);
 
     /// Apply stun to burrowers near an origin (e.g. bulkhead collision or concussion blast)
     void apply_stun(const glm::vec3& origin, float radius, float duration = 2.5f);

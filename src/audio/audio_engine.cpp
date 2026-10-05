@@ -81,14 +81,17 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::StalkerHiss:           return "stalker_hiss.wav";
         case SoundCue::BurrowerRoar:          return "burrower_roar.wav";
         case SoundCue::BurrowerGrind:         return "burrower_grind.wav";
+        case SoundCue::MonsterDigging:        return "monster_digging.wav";
 
-        case SoundCue::AmbientCavern:         return "ambient_cavern.wav";
-        case SoundCue::AmbientSector1:        return "ambient_sector1.wav";
-        case SoundCue::AmbientSector2:        return "ambient_sector2.wav";
-        case SoundCue::AmbientSector3:        return "ambient_sector3.wav";
+        case SoundCue::AmbientCavern:         return "ambient_orbit_hub.mp3";
+        case SoundCue::AmbientSector1:        return "ambient_sector1_music.mp3";
+        case SoundCue::AmbientSector2:        return "ambient_sector2_music.mp3";
+        case SoundCue::AmbientSector3:        return "ambient_sector3_music.mp3";
         case SoundCue::SectorArrival1:        return "sector_arrival_1.wav";
         case SoundCue::SectorArrival2:        return "sector_arrival_2.wav";
         case SoundCue::SectorArrival3:        return "sector_arrival_3.wav";
+        case SoundCue::SectorArrival4:        return "sector_arrival_4.wav";
+        case SoundCue::SectorArrival5:        return "sector_arrival_5.wav";
         case SoundCue::CavernDrip:            return "cavern_drip.wav";
         case SoundCue::CavernGroan:           return "cavern_groan.wav";
         case SoundCue::CrystalChime:          return "crystal_chime.wav";
@@ -103,6 +106,9 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::PlasmaHit:             return "plasma_hit.wav";
         case SoundCue::ScattergunFire:        return "scattergun_fire.wav";
         case SoundCue::RailgunFire:           return "railgun_fire.wav";
+        case SoundCue::PlasmaCarbineReload:   return "plasma_carbine_reload.wav";
+        case SoundCue::ScattergunReload:      return "scattergun_reload.wav";
+        case SoundCue::RailgunReload:         return "railgun_reload.wav";
 
         case SoundCue::Footstep:              return "footstep.wav";
         case SoundCue::Jump:                  return "jump.wav";
@@ -127,10 +133,24 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::HydraulicExhaust:      return "hydraulic_exhaust.wav";
         case SoundCue::PebbleSkitter:         return "pebble_skitter.wav";
         case SoundCue::SpikeRattle:           return "spike_rattle.wav";
+        case SoundCue::PlayerGroan:           return "player_groan.wav";
+        case SoundCue::PlayerAsphyxiation:    return "player_asphyxiation.wav";
+        case SoundCue::ToxicGasHiss:          return "toxic_gas_hiss.wav";
+        case SoundCue::PlayerDeath:           return "player_death.wav";
+        case SoundCue::SuitPuncture:          return "suit_puncture.wav";
+        case SoundCue::PlayerBreathing:       return "player_breathing.wav";
+        case SoundCue::BoneCrack:             return "bone_crack.wav";
+        case SoundCue::EnemyFleshHit:         return "enemy_flesh_hit.wav";
+        case SoundCue::DebrisArmorImpact:     return "debris_armor_impact.wav";
+        case SoundCue::CritHit:               return "crit_hit.wav";
 
         default: return nullptr;
     }
 }
+
+#define DR_MP3_IMPLEMENTATION
+#define DR_MP3_NO_SIMD
+#include "dr_mp3.h"
 
 // Zero-allocation-in-audio-thread WAV loader supporting 16-bit, 24-bit, and 32-bit float PCM
 static bool load_wav_file(const std::string& path, AudioEngine::SoundSample& out_sample) {
@@ -257,6 +277,51 @@ static bool load_wav_file(const std::string& path, AudioEngine::SoundSample& out
     return true;
 }
 
+// MP3 audio loader converting any MP3 stream into float stereo PCM
+static bool load_mp3_file(const std::string& path, AudioEngine::SoundSample& out_sample) {
+    drmp3_config config{};
+    drmp3_uint64 total_pcm_frames = 0;
+    float* pcm_data = drmp3_open_file_and_read_pcm_frames_f32(path.c_str(), &config, &total_pcm_frames, nullptr);
+    if (!pcm_data || total_pcm_frames == 0 || config.channels == 0 || config.sampleRate == 0) {
+        if (pcm_data) drmp3_free(pcm_data, nullptr);
+        return false;
+    }
+
+    out_sample.data.clear();
+    out_sample.data.resize(static_cast<size_t>(total_pcm_frames) * 2);
+    out_sample.frame_count = static_cast<size_t>(total_pcm_frames);
+    out_sample.duration_seconds = static_cast<float>(total_pcm_frames) / static_cast<float>(config.sampleRate);
+
+    if (config.channels == 1) {
+        for (size_t f = 0; f < out_sample.frame_count; ++f) {
+            float val = pcm_data[f];
+            out_sample.data[f * 2] = val;
+            out_sample.data[f * 2 + 1] = val;
+        }
+    } else {
+        for (size_t f = 0; f < out_sample.frame_count; ++f) {
+            out_sample.data[f * 2] = pcm_data[f * config.channels];
+            out_sample.data[f * 2 + 1] = pcm_data[f * config.channels + 1];
+        }
+    }
+
+    drmp3_free(pcm_data, nullptr);
+    out_sample.loaded = true;
+    return true;
+}
+
+// Unified audio loader: loads .mp3 or .wav
+static bool load_audio_file(const std::string& path, AudioEngine::SoundSample& out_sample) {
+    std::filesystem::path p(path);
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+
+    if (ext == ".mp3") {
+        return load_mp3_file(path, out_sample);
+    }
+    return load_wav_file(path, out_sample);
+}
+
 float get_cue_default_duration(SoundCue cue) {
     switch (cue) {
         case SoundCue::UIBlip:                return 0.08f;
@@ -273,18 +338,21 @@ float get_cue_default_duration(SoundCue cue) {
         case SoundCue::StalkerLunge:          return 0.40f;
         case SoundCue::StalkerHit:            return 0.18f;
         case SoundCue::StalkerDie:            return 0.55f;
-        case SoundCue::StalkerEchoScreech:    return 0.85f;
-        case SoundCue::StalkerChitter:        return 0.28f;
+        case SoundCue::StalkerEchoScreech:    return 2.2f;
+        case SoundCue::StalkerChitter:        return 0.38f;
         case SoundCue::StalkerHiss:           return 0.45f;
         case SoundCue::BurrowerRoar:          return 0.95f;
         case SoundCue::BurrowerGrind:         return 0.70f;
+        case SoundCue::MonsterDigging:        return 0.45f;
         case SoundCue::AmbientCavern:         return 10.0f;
         case SoundCue::AmbientSector1:        return 10.0f;
         case SoundCue::AmbientSector2:        return 10.0f;
         case SoundCue::AmbientSector3:        return 10.0f;
-        case SoundCue::SectorArrival1:        return 3.0f;
-        case SoundCue::SectorArrival2:        return 3.0f;
-        case SoundCue::SectorArrival3:        return 3.5f;
+        case SoundCue::SectorArrival1:        return 4.5f;
+        case SoundCue::SectorArrival2:        return 4.5f;
+        case SoundCue::SectorArrival3:        return 4.5f;
+        case SoundCue::SectorArrival4:        return 4.5f;
+        case SoundCue::SectorArrival5:        return 4.5f;
         case SoundCue::CavernDrip:            return 0.45f;
         case SoundCue::CavernGroan:           return 0.70f;
         case SoundCue::CrystalChime:          return 1.2f;
@@ -305,6 +373,9 @@ float get_cue_default_duration(SoundCue cue) {
         case SoundCue::PlasmaHit:             return 0.12f;
         case SoundCue::ScattergunFire:        return 0.28f;
         case SoundCue::RailgunFire:           return 0.22f;
+        case SoundCue::PlasmaCarbineReload:   return 1.25f;
+        case SoundCue::ScattergunReload:      return 1.60f;
+        case SoundCue::RailgunReload:         return 1.10f;
         case SoundCue::DamageWarning:         return 0.40f;
         case SoundCue::LavaBubble:            return 0.70f;
         case SoundCue::ThermalHiss:           return 0.95f;
@@ -317,6 +388,16 @@ float get_cue_default_duration(SoundCue cue) {
         case SoundCue::HydraulicExhaust:      return 0.75f;
         case SoundCue::PebbleSkitter:         return 0.65f;
         case SoundCue::SpikeRattle:           return 0.50f;
+        case SoundCue::PlayerGroan:           return 0.85f;
+        case SoundCue::PlayerAsphyxiation:    return 1.10f;
+        case SoundCue::ToxicGasHiss:          return 1.00f;
+        case SoundCue::PlayerDeath:           return 2.50f;
+        case SoundCue::SuitPuncture:          return 0.50f;
+        case SoundCue::PlayerBreathing:       return 0.80f;
+        case SoundCue::BoneCrack:             return 0.45f;
+        case SoundCue::EnemyFleshHit:         return 0.38f;
+        case SoundCue::DebrisArmorImpact:     return 0.45f;
+        case SoundCue::CritHit:               return 0.42f;
         default:                              return 0.20f;
     }
 }
@@ -422,9 +503,22 @@ bool AudioEngine::load_sound_samples(const std::string& directory_path) {
         const char* fname = get_sound_cue_filename(cue);
         if (!fname) continue;
 
-        std::filesystem::path full_path = std::filesystem::path(valid_dir) / fname;
-        if (std::filesystem::exists(full_path)) {
-            if (load_wav_file(full_path.string(), m_samples[i])) {
+        std::filesystem::path base_path = std::filesystem::path(valid_dir) / fname;
+        std::filesystem::path mp3_path = base_path;
+        mp3_path.replace_extension(".mp3");
+        std::filesystem::path wav_path = base_path;
+        wav_path.replace_extension(".wav");
+
+        if (std::filesystem::exists(mp3_path)) {
+            if (load_audio_file(mp3_path.string(), m_samples[i])) {
+                loaded_count++;
+            }
+        } else if (std::filesystem::exists(wav_path)) {
+            if (load_audio_file(wav_path.string(), m_samples[i])) {
+                loaded_count++;
+            }
+        } else if (std::filesystem::exists(base_path)) {
+            if (load_audio_file(base_path.string(), m_samples[i])) {
                 loaded_count++;
             }
         }
@@ -455,7 +549,7 @@ void AudioEngine::trigger_ducking(float target_attenuation, float hold_seconds, 
 }
 
 void AudioEngine::shutdown() {
-    stop_all();
+    stop_all(true);
     shutdown_platform_audio();
 }
 
@@ -543,8 +637,8 @@ void AudioEngine::update_spatial_pan(AudioVoice& voice) {
 
     // Inverse distance attenuation with reference distance and cavern roll-off
     // Monster echoing screeches and subterranean roars carry further down cavern tunnels (up to 58m)
-    float ref_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind) ? 4.0f : 2.5f;
-    float max_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind) ? 58.0f : 45.0f;
+    float ref_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging) ? 4.0f : 2.5f;
+    float max_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging) ? 58.0f : 45.0f;
     float att = 1.0f;
     if (dist > ref_dist) {
         att = ref_dist / (ref_dist + (dist - ref_dist) * 1.15f);
@@ -599,7 +693,9 @@ void AudioEngine::play_sound_2d(SoundCue cue, float volume, float pitch, bool lo
     v.is_3d = false;
     v.pan_left = 0.707f;
     v.pan_right = 0.707f;
-    v.current_gain = 0.0f; // Smooth fade-in to eliminate pops
+    v.current_gain = 0.0f;
+    v.fading_out = false;
+    v.fade_out_remaining = 0.0f;
     v.seed = 98765 + static_cast<uint32_t>(best_slot * 1337);
 
     for (int k = 0; k < 8; ++k) {
@@ -614,18 +710,30 @@ void AudioEngine::play_sound_2d(SoundCue cue, float volume, float pitch, bool lo
 
     // Set duration based on loaded sample or fallback cue synthesis
     size_t cue_idx = static_cast<size_t>(cue);
-    float default_dur = get_cue_default_duration(cue);
+    bool is_ambient_music = (cue == SoundCue::AmbientCavern || cue == SoundCue::AmbientSector1 ||
+                             cue == SoundCue::AmbientSector2 || cue == SoundCue::AmbientSector3);
     if (cue_idx < m_samples.size() && m_samples[cue_idx].loaded) {
-        v.duration = std::min(m_samples[cue_idx].duration_seconds, default_dur) / std::max(0.1f, v.pitch);
+        float sample_dur = m_samples[cue_idx].duration_seconds;
+        if (is_ambient_music) {
+            v.duration = sample_dur / std::max(0.1f, v.pitch);
+        } else {
+            float default_dur = get_cue_default_duration(cue);
+            v.duration = std::min(sample_dur, default_dur) / std::max(0.1f, v.pitch);
+        }
     } else {
+        float default_dur = get_cue_default_duration(cue);
         v.duration = default_dur / std::max(0.1f, v.pitch);
     }
 
-    // Dynamic negative space: Threat cues duck background ambience for visceral contrast
+    // Dynamic negative space: Threat cues and arrival stingers duck background ambience for visceral contrast
     if (cue == SoundCue::StalkerEchoScreech || cue == SoundCue::StalkerLunge ||
         cue == SoundCue::BurrowerRoar || cue == SoundCue::SeismicTremor ||
-        cue == SoundCue::ExplosiveBlast) {
-        trigger_ducking(0.28f, 0.75f, 1.35f);
+        cue == SoundCue::ExplosiveBlast || cue == SoundCue::SectorArrival1 ||
+        cue == SoundCue::SectorArrival2 || cue == SoundCue::SectorArrival3 ||
+        cue == SoundCue::SectorArrival4 || cue == SoundCue::SectorArrival5) {
+        if (m_ducking_attenuation > 0.60f) {
+            trigger_ducking(0.20f, 0.95f, 1.25f);
+        }
     }
 }
 
@@ -658,6 +766,8 @@ void AudioEngine::play_sound_3d(SoundCue cue, const glm::vec3& world_pos, float 
     v.is_3d = true;
     v.world_pos = world_pos;
     v.current_gain = 0.0f;
+    v.fading_out = false;
+    v.fade_out_remaining = 0.0f;
     v.seed = 54321 + static_cast<uint32_t>(best_slot * 333);
 
     for (int k = 0; k < 8; ++k) {
@@ -671,49 +781,144 @@ void AudioEngine::play_sound_3d(SoundCue cue, const glm::vec3& world_pos, float 
     v.sample_cursor = 0.0f;
 
     size_t cue_idx = static_cast<size_t>(cue);
-    float default_dur = get_cue_default_duration(cue);
+    bool is_ambient_music = (cue == SoundCue::AmbientCavern || cue == SoundCue::AmbientSector1 ||
+                             cue == SoundCue::AmbientSector2 || cue == SoundCue::AmbientSector3);
     if (cue_idx < m_samples.size() && m_samples[cue_idx].loaded) {
-        v.duration = std::min(m_samples[cue_idx].duration_seconds, default_dur) / std::max(0.1f, v.pitch);
+        float sample_dur = m_samples[cue_idx].duration_seconds;
+        if (is_ambient_music) {
+            v.duration = sample_dur / std::max(0.1f, v.pitch);
+        } else {
+            float default_dur = get_cue_default_duration(cue);
+            v.duration = std::min(sample_dur, default_dur) / std::max(0.1f, v.pitch);
+        }
     } else {
+        float default_dur = get_cue_default_duration(cue);
         v.duration = default_dur / std::max(0.1f, v.pitch);
     }
 
     if (cue == SoundCue::StalkerEchoScreech || cue == SoundCue::StalkerLunge ||
         cue == SoundCue::BurrowerRoar || cue == SoundCue::SeismicTremor ||
-        cue == SoundCue::ExplosiveBlast) {
-        trigger_ducking(0.28f, 0.75f, 1.35f);
+        cue == SoundCue::ExplosiveBlast || cue == SoundCue::SectorArrival1 ||
+        cue == SoundCue::SectorArrival2 || cue == SoundCue::SectorArrival3 ||
+        cue == SoundCue::SectorArrival4 || cue == SoundCue::SectorArrival5) {
+        if (m_ducking_attenuation > 0.60f) {
+            trigger_ducking(0.20f, 0.95f, 1.25f);
+        }
     }
 
     update_spatial_pan(v);
 }
 
-void AudioEngine::stop_sound(SoundCue cue) {
+void AudioEngine::stop_sound(SoundCue cue, bool instant) {
     std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
     for (auto& v : m_voices) {
         if (v.active && v.cue == cue) {
-            v.active = false;
+            if (instant) {
+                v.active = false;
+            } else {
+                v.fading_out = true;
+                v.fade_out_remaining = 0.025f;
+                v.fade_out_total = 0.025f;
+            }
         }
     }
 }
 
-void AudioEngine::stop_all() {
+void AudioEngine::stop_all(bool instant) {
     std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
     for (auto& v : m_voices) {
-        v.active = false;
+        if (instant) {
+            v.active = false;
+        } else if (v.active) {
+            v.fading_out = true;
+            v.fade_out_remaining = 0.025f;
+            v.fade_out_total = 0.025f;
+        }
     }
-    for (int ch = 0; ch < 2; ++ch) {
-        m_dc_block_x1[ch] = 0.0f;
-        m_dc_block_y1[ch] = 0.0f;
-        m_lp_state[ch] = 0.0f;
-        m_prev_sample[ch] = 0.0f;
+    if (instant) {
+        for (int ch = 0; ch < 2; ++ch) {
+            m_dc_block_x1[ch] = 0.0f;
+            m_dc_block_y1[ch] = 0.0f;
+            m_lp_state[ch] = 0.0f;
+            m_prev_sample[ch] = 0.0f;
+        }
+        m_limiter_envelope = 0.0f;
     }
-    m_limiter_envelope = 0.0f;
     m_hazard_phase = 0;
     m_hazard_timer = 0.0f;
     m_micro_ambience_timer = 0.0f;
     m_drill_active = false;
     m_ducking_attenuation = 1.0f;
     m_ducking_timer = 0.0f;
+    m_void_hazard_cooldown = 0.0f;
+    m_lava_hazard_cooldown = 0.0f;
+    m_spike_hazard_cooldown = 0.0f;
+    m_gas_hazard_cooldown = 0.0f;
+    m_seismic_rumble_cooldown = 0.0f;
+    m_recent_micro_cues.clear();
+}
+
+void AudioEngine::play_arrival_stinger(int sector) {
+    std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+
+    // Dynamic arrival pool based on sector tier
+    int audio_tier = std::min(std::max(0, sector - 1) / 3, 2); // 0 = Sec 1-3, 1 = Sec 4-6, 2 = Sec 7+
+
+    std::vector<SoundCue> candidates;
+    if (audio_tier == 0) {
+        // Sector 1-3: Crystalline perimeter shrieks, distant cavern screams & hunting echoes
+        candidates = { SoundCue::SectorArrival1, SoundCue::SectorArrival4, SoundCue::SectorArrival5 };
+    } else if (audio_tier == 1) {
+        // Sector 4-6: Volatile fault roars, tectonic shrieks, hunting screams & swarm wails
+        candidates = { SoundCue::SectorArrival2, SoundCue::SectorArrival4, SoundCue::SectorArrival1, SoundCue::SectorArrival5 };
+    } else {
+        // Sector 7+: Deep abyssal void shrieks, demonic horrors, infrasound screams
+        candidates = { SoundCue::SectorArrival3, SoundCue::SectorArrival5, SoundCue::SectorArrival2 };
+    }
+
+    // Filter out recently played stingers to eliminate repetitiveness
+    std::vector<SoundCue> fresh;
+    for (SoundCue c : candidates) {
+        bool used = false;
+        for (SoundCue recent : m_recent_arrival_stingers) {
+            if (c == recent) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) fresh.push_back(c);
+    }
+    if (fresh.empty()) fresh = candidates;
+
+    // Pick random stinger from fresh candidates
+    size_t pick = static_cast<size_t>(fast_rand(m_ambience_seed) * fresh.size()) % fresh.size();
+    SoundCue chosen = fresh[pick];
+
+    m_recent_arrival_stingers.push_back(chosen);
+    if (m_recent_arrival_stingers.size() > 2) {
+        m_recent_arrival_stingers.erase(m_recent_arrival_stingers.begin());
+    }
+
+    // Organic biological variation: subtle pitch shift (+/- 6%) and volume modulation
+    float pitch_var = 0.94f + fast_rand(m_ambience_seed) * 0.12f;
+    float volume = 0.82f + fast_rand(m_ambience_seed) * 0.08f;
+
+    play_sound_2d(chosen, volume, pitch_var);
+    trigger_ducking(0.20f, 1.25f, 1.15f);
+}
+
+void AudioEngine::play_weapon_reload(int archetype) {
+    SoundCue cue = SoundCue::PlasmaCarbineReload;
+    if (archetype == 0) { // Demolitionist: MagmaScattergun
+        cue = SoundCue::ScattergunReload;
+    } else if (archetype == 1) { // Vanguard: PlasmaCarbine
+        cue = SoundCue::PlasmaCarbineReload;
+    } else if (archetype == 2) { // Scout: NeedlerRailgun
+        cue = SoundCue::RailgunReload;
+    }
+
+    float pitch = 0.98f + fast_rand(m_ambience_seed) * 0.04f;
+    play_sound_2d(cue, 0.85f, pitch);
 }
 
 void AudioEngine::set_current_sector(int sector) {
@@ -735,100 +940,82 @@ void AudioEngine::trigger_cavern_micro_event(int sector, float volume) {
 void AudioEngine::trigger_cavern_micro_event(int sector, int room_shape, float volume) {
     if (m_ambient_volume <= 0.001f || m_mute_all) return;
 
-    SoundCue cue = SoundCue::CavernDrip;
+    std::array<SoundCue, 3> options{SoundCue::CavernDrip, SoundCue::CrystalChime, SoundCue::CavernGroan};
     float roll = fast_rand(m_ambience_seed);
 
     if (room_shape >= 0) {
         // Room-specific environmental tailored sound palette matching each archetype
         switch (room_shape) {
             case 9: // MagmaCalderaLake (volcanic molten slag lake, bubbling lava geysers)
-                if (roll < 0.45f) cue = SoundCue::LavaBubble;
-                else if (roll < 0.80f) cue = SoundCue::ThermalHiss;
-                else cue = SoundCue::GeothermalVent;
+                options = {SoundCue::LavaBubble, SoundCue::ThermalHiss, SoundCue::GeothermalVent};
                 break;
             case 5: // FaultLineCrevasse (tectonic rift, sulfurous fissure)
-                if (roll < 0.40f) cue = SoundCue::ThermalHiss;
-                else if (roll < 0.70f) cue = SoundCue::LavaBubble;
-                else cue = SoundCue::CavernGroan;
+                options = {SoundCue::ThermalHiss, SoundCue::LavaBubble, SoundCue::CavernGroan};
                 break;
             case 7: // RadioactiveCoreSanctuary (irradiated toxic moat & altar)
-                if (roll < 0.45f) cue = SoundCue::RadioactiveHum;
-                else if (roll < 0.75f) cue = SoundCue::GeigerClick;
-                else cue = SoundCue::CrystalChime;
+                options = {SoundCue::RadioactiveHum, SoundCue::GeigerClick, SoundCue::CrystalChime};
                 break;
             case 11: // VoidSingularityRift (zero-g chasm, bottomless void)
-                if (roll < 0.45f) cue = SoundCue::GravityDistortion;
-                else if (roll < 0.75f) cue = SoundCue::VoidDistortion;
-                else cue = SoundCue::VoidWind;
+                options = {SoundCue::GravityDistortion, SoundCue::VoidDistortion, SoundCue::VoidWind};
                 break;
             case 6: // AbyssalVerticalChasm (24m vertical drop shaft)
-                if (roll < 0.45f) cue = SoundCue::VoidWind;
-                else if (roll < 0.75f) cue = SoundCue::CavernGroan;
-                else cue = SoundCue::VoidDistortion;
+                options = {SoundCue::VoidWind, SoundCue::CavernGroan, SoundCue::VoidDistortion};
                 break;
             case 12: // FungoidBioGrotto (bioluminescent alien mushroom grotto)
-                if (roll < 0.45f) cue = SoundCue::SporePlop;
-                else if (roll < 0.75f) cue = SoundCue::OrganicCreak;
-                else cue = SoundCue::CavernDrip;
+                options = {SoundCue::SporePlop, SoundCue::OrganicCreak, SoundCue::CavernDrip};
                 break;
             case 13: // LaserDefenseFoundry (automated smelting vats & crane gantries)
-                if (roll < 0.40f) cue = SoundCue::IndustrialHum;
-                else if (roll < 0.75f) cue = SoundCue::HydraulicExhaust;
-                else cue = SoundCue::PebbleSkitter;
+                options = {SoundCue::IndustrialHum, SoundCue::HydraulicExhaust, SoundCue::PebbleSkitter};
                 break;
             case 4: // IndustrialVaultBunker (reinforced blast gates & mezzanine catwalks)
-                if (roll < 0.45f) cue = SoundCue::IndustrialHum;
-                else if (roll < 0.75f) cue = SoundCue::HydraulicExhaust;
-                else cue = SoundCue::CavernGroan;
+                options = {SoundCue::IndustrialHum, SoundCue::HydraulicExhaust, SoundCue::CavernGroan};
                 break;
             case 14: // CrumblingArchCanyon (fragile natural stone arches, falling debris)
-                if (roll < 0.45f) cue = SoundCue::PebbleSkitter;
-                else if (roll < 0.75f) cue = SoundCue::VoidWind;
-                else cue = SoundCue::CavernGroan;
+                options = {SoundCue::PebbleSkitter, SoundCue::VoidWind, SoundCue::CavernGroan};
                 break;
             case 10: // SpikeTrenchArena (crystalline punji spike beds & high catwalks)
-                if (roll < 0.45f) cue = SoundCue::SpikeRattle;
-                else if (roll < 0.75f) cue = SoundCue::PebbleSkitter;
-                else cue = SoundCue::VoidWind;
+                options = {SoundCue::SpikeRattle, SoundCue::PebbleSkitter, SoundCue::VoidWind};
                 break;
             case 2: // CrystallineGeode (emissive Voidite crystals & stepping stones)
-                if (roll < 0.60f) cue = SoundCue::CrystalChime;
-                else if (roll < 0.85f) cue = SoundCue::CavernDrip;
-                else cue = SoundCue::VoidDistortion;
+                options = {SoundCue::CrystalChime, SoundCue::CavernDrip, SoundCue::VoidDistortion};
                 break;
             case 1: // MiningPillarHall (massive extraction columns & vaulted ceiling)
-                if (roll < 0.40f) cue = SoundCue::CavernGroan;
-                else if (roll < 0.75f) cue = SoundCue::CrystalChime;
-                else cue = SoundCue::PebbleSkitter;
+                options = {SoundCue::CavernGroan, SoundCue::CrystalChime, SoundCue::PebbleSkitter};
                 break;
             case 3: // TerracedQuarry (stepped quarry pit, loose rubble)
-                if (roll < 0.45f) cue = SoundCue::PebbleSkitter;
-                else if (roll < 0.75f) cue = SoundCue::CavernGroan;
-                else cue = SoundCue::CavernDrip;
+                options = {SoundCue::PebbleSkitter, SoundCue::CavernGroan, SoundCue::CavernDrip};
                 break;
             case 0: // SpawnStagingCavern
             case 8: // ExtractionLandingBay
             default:
-                if (roll < 0.40f) cue = SoundCue::CavernDrip;
-                else if (roll < 0.75f) cue = SoundCue::IndustrialHum;
-                else cue = SoundCue::CavernGroan;
+                options = {SoundCue::CavernDrip, SoundCue::IndustrialHum, SoundCue::CavernGroan};
                 break;
         }
     } else {
         // Fallback to sector distribution if in corridor / transition tunnels
         if (sector == 2) {
-            if (roll < 0.48f) cue = SoundCue::GeothermalVent;
-            else if (roll < 0.82f) cue = SoundCue::CavernGroan;
-            else cue = SoundCue::CavernDrip;
+            options = {SoundCue::GeothermalVent, SoundCue::CavernGroan, SoundCue::CavernDrip};
         } else if (sector >= 3) {
-            if (roll < 0.48f) cue = SoundCue::VoidDistortion;
-            else if (roll < 0.82f) cue = SoundCue::CavernGroan;
-            else cue = SoundCue::CavernDrip;
+            options = {SoundCue::VoidDistortion, SoundCue::CavernGroan, SoundCue::CavernDrip};
         } else {
-            if (roll < 0.45f) cue = SoundCue::CavernDrip;
-            else if (roll < 0.82f) cue = SoundCue::CrystalChime;
-            else cue = SoundCue::CavernGroan;
+            options = {SoundCue::CavernDrip, SoundCue::CrystalChime, SoundCue::CavernGroan};
         }
+    }
+
+    int pick_idx = (roll < 0.45f) ? 0 : ((roll < 0.80f) ? 1 : 2);
+
+    // Anti-repetition algorithm: never play the exact same sound cue consecutively
+    if (!m_recent_micro_cues.empty() && options[pick_idx] == m_recent_micro_cues.back()) {
+        pick_idx = (pick_idx + 1) % 3;
+        if (m_recent_micro_cues.size() >= 2 && options[pick_idx] == m_recent_micro_cues[m_recent_micro_cues.size() - 2]) {
+            pick_idx = (pick_idx + 1) % 3;
+        }
+    }
+
+    SoundCue cue = options[pick_idx];
+    m_recent_micro_cues.push_back(cue);
+    if (m_recent_micro_cues.size() > 4) {
+        m_recent_micro_cues.erase(m_recent_micro_cues.begin());
     }
 
     // Spatialized around listener (4m to 12m radius)
@@ -849,7 +1036,14 @@ void AudioEngine::trigger_cavern_micro_event(int sector, int room_shape, float v
     play_sound_3d(cue, event_pos, event_vol, 0.92f + fast_rand(m_ambience_seed) * 0.16f);
 }
 
-void AudioEngine::update_hazard_proximity_audio(float dt, float lava_dist, float rad_level, float spike_dist, float void_dist) {
+void AudioEngine::update_hazard_proximity_audio(float dt, float lava_dist, float rad_level, float spike_dist, float void_dist, float gas_dist) {
+    // Advance cooldown timers unconditionally so they stay responsive across mutes
+    m_void_hazard_cooldown = std::max(0.0f, m_void_hazard_cooldown - dt);
+    m_lava_hazard_cooldown = std::max(0.0f, m_lava_hazard_cooldown - dt);
+    m_spike_hazard_cooldown = std::max(0.0f, m_spike_hazard_cooldown - dt);
+    m_gas_hazard_cooldown = std::max(0.0f, m_gas_hazard_cooldown - dt);
+    m_seismic_rumble_cooldown = std::max(0.0f, m_seismic_rumble_cooldown - dt);
+
     if (m_ambient_volume <= 0.001f || m_mute_all) return;
 
     m_lava_proximity = std::max(0.0f, 1.0f - (lava_dist / 10.0f));
@@ -857,43 +1051,129 @@ void AudioEngine::update_hazard_proximity_audio(float dt, float lava_dist, float
     m_void_proximity = std::max(0.0f, 1.0f - (void_dist / 8.0f));
 
     m_hazard_audio_timer += dt;
-    if (m_hazard_audio_timer < 0.45f) return;
+    if (m_hazard_audio_timer < 2.5f) return;
     m_hazard_audio_timer = 0.0f;
 
-    // 1. Molten Lava proximity (< 10m): thermal bubbling pops & hiss
-    if (lava_dist < 10.0f) {
+    // 1. Molten Lava proximity (< 10m): thermal bubbling pops & hiss with cooldown spacing
+    if (lava_dist < 10.0f && m_lava_hazard_cooldown <= 0.0f) {
         float lava_factor = 1.0f - (lava_dist / 10.0f);
-        if (fast_rand(m_ambience_seed) < (0.25f + lava_factor * 0.45f)) {
+        if (fast_rand(m_ambience_seed) < (0.20f + lava_factor * 0.40f)) {
             SoundCue c = (fast_rand(m_ambience_seed) < 0.60f) ? SoundCue::LavaBubble : SoundCue::ThermalHiss;
-            float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
-            glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * lava_dist, -1.0f, std::sin(pan_angle) * lava_dist);
-            play_sound_3d(c, pos, 0.40f * lava_factor, 0.90f + fast_rand(m_ambience_seed) * 0.20f);
+            bool already_playing = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+                for (const auto& v : m_voices) {
+                    if (v.active && (v.cue == SoundCue::LavaBubble || v.cue == SoundCue::ThermalHiss)) {
+                        already_playing = true;
+                        break;
+                    }
+                }
+            }
+            if (!already_playing) {
+                float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
+                glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * lava_dist, -1.0f, std::sin(pan_angle) * lava_dist);
+                play_sound_3d(c, pos, 0.40f * lava_factor, 0.90f + fast_rand(m_ambience_seed) * 0.20f);
+                m_lava_hazard_cooldown = 8.0f + fast_rand(m_ambience_seed) * 4.0f;
+            }
         }
     }
 
-    // 2. Spike Trench proximity (< 7m): eerie hollow rattle
-    if (spike_dist < 7.0f) {
+    // 2. Spike Trench proximity (< 7m): eerie hollow rattle with cooldown spacing
+    if (spike_dist < 7.0f && m_spike_hazard_cooldown <= 0.0f) {
         float spike_factor = 1.0f - (spike_dist / 7.0f);
-        if (fast_rand(m_ambience_seed) < (0.20f + spike_factor * 0.40f)) {
-            float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
-            glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * spike_dist, -1.2f, std::sin(pan_angle) * spike_dist);
-            play_sound_3d(SoundCue::SpikeRattle, pos, 0.32f * spike_factor);
+        if (fast_rand(m_ambience_seed) < (0.18f + spike_factor * 0.35f)) {
+            bool already_playing = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+                for (const auto& v : m_voices) {
+                    if (v.active && v.cue == SoundCue::SpikeRattle) {
+                        already_playing = true;
+                        break;
+                    }
+                }
+            }
+            if (!already_playing) {
+                float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
+                glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * spike_dist, -1.2f, std::sin(pan_angle) * spike_dist);
+                play_sound_3d(SoundCue::SpikeRattle, pos, 0.32f * spike_factor, 0.94f + fast_rand(m_ambience_seed) * 0.12f);
+                m_spike_hazard_cooldown = 8.0f + fast_rand(m_ambience_seed) * 4.0f;
+            }
         }
     }
 
-    // 3. Void Abyss proximity (< 8m): gravity warp & hollow wind
-    if (void_dist < 8.0f) {
+    // 3. Void Abyss proximity (< 8m): gravity warp & hollow wind (spaced by strict 10-15s refractory window)
+    if (void_dist < 8.0f && m_void_hazard_cooldown <= 0.0f) {
         float void_factor = 1.0f - (void_dist / 8.0f);
-        if (fast_rand(m_ambience_seed) < (0.22f + void_factor * 0.45f)) {
+        if (fast_rand(m_ambience_seed) < (0.20f + void_factor * 0.35f)) {
             SoundCue c = (fast_rand(m_ambience_seed) < 0.55f) ? SoundCue::GravityDistortion : SoundCue::VoidWind;
-            float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
-            glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * void_dist, -2.5f, std::sin(pan_angle) * void_dist);
-            play_sound_3d(c, pos, 0.35f * void_factor);
+            bool already_playing = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+                for (const auto& v : m_voices) {
+                    if (v.active && (v.cue == SoundCue::VoidWind || v.cue == SoundCue::GravityDistortion)) {
+                        already_playing = true;
+                        break;
+                    }
+                }
+            }
+            if (!already_playing) {
+                float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
+                glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * void_dist, -2.5f, std::sin(pan_angle) * void_dist);
+                play_sound_3d(c, pos, 0.35f * void_factor, 0.92f + fast_rand(m_ambience_seed) * 0.16f);
+                m_void_hazard_cooldown = 10.0f + fast_rand(m_ambience_seed) * 5.0f; // 10 to 15s before wind wash can replay
+            }
         }
     }
 
-    // 4. Radiation proximity: update radiation level for Geiger clicks
+    // 4. Toxic Gas proximity (< 6m): escaping chemical gas hiss & venting with cooldown spacing
+    if (gas_dist < 6.0f && m_gas_hazard_cooldown <= 0.0f) {
+        float gas_factor = 1.0f - (gas_dist / 6.0f);
+        if (fast_rand(m_ambience_seed) < (0.22f + gas_factor * 0.38f)) {
+            bool already_playing = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+                for (const auto& v : m_voices) {
+                    if (v.active && v.cue == SoundCue::ToxicGasHiss) {
+                        already_playing = true;
+                        break;
+                    }
+                }
+            }
+            if (!already_playing) {
+                float pan_angle = fast_rand(m_ambience_seed) * TWO_PI;
+                glm::vec3 pos = m_listener.position + glm::vec3(std::cos(pan_angle) * gas_dist, -0.2f, std::sin(pan_angle) * gas_dist);
+                play_sound_3d(SoundCue::ToxicGasHiss, pos, 0.45f * gas_factor, 0.95f + fast_rand(m_ambience_seed) * 0.15f);
+                m_gas_hazard_cooldown = 8.0f + fast_rand(m_ambience_seed) * 4.0f;
+            }
+        }
+    }
+
+    // 5. Radiation proximity: update radiation level for Geiger clicks
     set_radiation_proximity(rad_level);
+}
+
+void AudioEngine::trigger_player_groan(float volume) {
+    play_sound_2d(SoundCue::PlayerGroan, volume, 0.95f + fast_rand(m_ambience_seed) * 0.10f);
+}
+
+void AudioEngine::trigger_player_asphyxiation(float volume) {
+    play_sound_2d(SoundCue::PlayerAsphyxiation, volume, 0.97f + fast_rand(m_ambience_seed) * 0.08f);
+}
+
+void AudioEngine::trigger_toxic_gas_hiss(float volume) {
+    play_sound_2d(SoundCue::ToxicGasHiss, volume);
+}
+
+void AudioEngine::trigger_bone_crack(float volume) {
+    play_sound_2d(SoundCue::BoneCrack, volume, 0.95f + fast_rand(m_ambience_seed) * 0.10f);
+}
+
+void AudioEngine::trigger_enemy_flesh_hit(float volume) {
+    play_sound_2d(SoundCue::EnemyFleshHit, volume, 0.97f + fast_rand(m_ambience_seed) * 0.08f);
+}
+
+void AudioEngine::trigger_debris_impact(float volume) {
+    play_sound_2d(SoundCue::DebrisArmorImpact, volume, 0.95f + fast_rand(m_ambience_seed) * 0.10f);
 }
 
 void AudioEngine::update_biometrics(float health_pct, float threat_proximity) {
@@ -918,6 +1198,8 @@ void AudioEngine::set_drill_active(bool active, float progress, const glm::vec3&
             } else {
                 v.world_pos = pos;
                 v.pitch = 0.90f + m_drill_progress * 0.35f;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
                 update_spatial_pan(v);
             }
             break;
@@ -939,6 +1221,8 @@ void AudioEngine::set_drill_active(bool active, float progress, const glm::vec3&
                 v.world_pos = pos;
                 v.current_gain = 0.0f;
                 v.sample_cursor = 0.0f;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
                 update_spatial_pan(v);
                 break;
             }
@@ -965,8 +1249,9 @@ void AudioEngine::set_seismic_rumble(float intensity) {
                 break;
             }
         }
-        if (!playing) {
+        if (!playing && m_seismic_rumble_cooldown <= 0.0f) {
             play_sound_2d(SoundCue::SeismicTremor, 0.85f * intensity, 0.85f);
+            m_seismic_rumble_cooldown = 12.0f;
         }
     }
 }
@@ -1291,25 +1576,25 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
         }
 
         case SoundCue::StalkerChitter: {
-            // Subtle, terrifying chitinous mandible clicking in the dark (0.28s duration)
+            // Terrifying chitinous mandible clicking and chattering (0.38s duration)
             // Multi-burst discrete clicks with bone-dry hollow acoustic resonance
-            float click_times[3] = {0.03f, 0.10f, 0.18f};
+            float click_times[5] = {0.02f, 0.08f, 0.15f, 0.22f, 0.30f};
             float click_tone = 0.0f;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 5; ++i) {
                 float dt_click = t - click_times[i];
                 if (dt_click >= 0.0f && dt_click < 0.045f) {
-                    float click_pitch = (3200.0f + static_cast<float>(i * 350)) * voice.pitch;
+                    float click_pitch = (3100.0f + static_cast<float>((i % 3) * 380)) * voice.pitch;
                     voice.phase[i] += click_pitch * dt;
                     float c_sine = fast_sin(TWO_PI * voice.phase[i]);
                     float c_env = std::exp(-dt_click * 120.0f);
-                    click_tone += c_sine * c_env * 0.70f;
+                    click_tone += c_sine * c_env * 0.75f;
                 }
             }
             // Filtered mandible scrape noise (bandpass around 3400 Hz)
             float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
             float bp = process_resonator(raw_noise, 3400.0f, 4.5f, static_cast<float>(SAMPLE_RATE),
                                          voice.filter_state[0], voice.filter_state[1]);
-            sample = (click_tone * 0.75f + bp * 0.25f * std::exp(-t * 3.5f)) * 0.45f;
+            sample = (click_tone * 0.75f + bp * 0.25f * std::exp(-t * 3.5f)) * 0.65f;
             break;
         }
 
@@ -1372,6 +1657,33 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             float attack = std::min(1.0f, t / 0.008f);
             float env = attack * std::exp(-t * 2.8f);
             sample = (tooth_grind * 0.38f + tooth_harmonic * 0.20f + voice.filter_state[0] * 0.32f) * env;
+            break;
+        }
+
+        case SoundCue::MonsterDigging: {
+            // High-torque claws and borer teeth drilling/digging into rock walls
+            // 1. Dual FM rotary grinding friction (135 Hz + 210 Hz with fast 38 Hz biting wobble)
+            voice.phase[1] += 38.0f * dt;
+            float wobble = std::sin(TWO_PI * voice.phase[1]) * 45.0f;
+            float freq1 = (135.0f + wobble) * voice.pitch;
+            voice.phase[0] += freq1 * dt;
+            float bite1 = std::sin(TWO_PI * voice.phase[0]);
+
+            float freq2 = (220.0f + wobble * 0.7f) * voice.pitch;
+            voice.phase[2] += freq2 * dt;
+            float bite2 = std::sin(TWO_PI * voice.phase[2]) * 0.40f;
+
+            // 2. High-frequency stone fracture & crunchy excavation noise (bandpassed at 1400 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 1400.0f, 3.8f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+
+            // 3. Rasping tooth pulses (12 Hz cyclical scraping rate)
+            float scrape_pulse = 0.75f + 0.25f * fast_sin(TWO_PI * (t * 12.0f));
+
+            float attack = std::min(1.0f, t / 0.012f);
+            float env = attack * std::exp(-t * 2.2f);
+            sample = (bite1 * 0.35f + bite2 * 0.25f + bp * 0.40f) * scrape_pulse * env * 0.85f;
             break;
         }
 
@@ -1532,6 +1844,35 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
             float dread_tail = voice.filter_state[0] * std::exp(-t * 0.9f) * 0.35f;
             sample = (sub_drop * 0.55f + void_strike * 0.30f + dread_tail) * 0.80f;
+            break;
+        }
+
+        case SoundCue::SectorArrival4: {
+            // Sector Arrival 4: Cavern Hunter Screech with delay slapback (3.8s duration)
+            float carrier = 880.0f * voice.pitch + 240.0f * fast_sin(TWO_PI * 18.0f * t);
+            voice.phase[0] += carrier * dt;
+            float screech = fast_sin(TWO_PI * voice.phase[0]) * 0.60f + fast_sin(TWO_PI * voice.phase[0] * 2.0f) * 0.40f;
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(2200.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float echo = (t > 0.14f) ? fast_sin(TWO_PI * 660.0f * voice.pitch * (t - 0.14f)) * std::exp(-(t - 0.14f) * 1.8f) * 0.35f : 0.0f;
+            float env = std::min(1.0f, t / 0.05f) * std::exp(-t * 1.1f);
+            sample = (screech * 0.55f + voice.filter_state[0] * 0.25f + echo) * env * 0.75f;
+            break;
+        }
+
+        case SoundCue::SectorArrival5: {
+            // Sector Arrival 5: Swarm Infrasound Alien Howl & Choral Dissonance (4.2s duration)
+            voice.phase[0] += (440.0f * voice.pitch) * dt;
+            voice.phase[1] += (466.16f * voice.pitch) * dt; // Minor second dissonance
+            float tone1 = fast_sin(TWO_PI * voice.phase[0]);
+            float tone2 = fast_sin(TWO_PI * voice.phase[1]) * 0.85f;
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(1600.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float sub_pulse = fast_sin(TWO_PI * 34.0f * t) * std::exp(-t * 0.8f) * 0.45f;
+            float env = std::min(1.0f, t / 0.06f) * std::exp(-t * 0.95f);
+            sample = ((tone1 + tone2) * 0.35f + voice.filter_state[0] * 0.20f + sub_pulse) * env * 0.80f;
             break;
         }
 
@@ -2025,6 +2366,339 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             break;
         }
 
+        case SoundCue::PlasmaCarbineReload: {
+            // Vanguard Plasma Carbine reload sequence (1.25s duration)
+            // Stage 1 (0.0 - 0.28s): Depleted cell ejection latch click + cooling steam release
+            float eject_click = 0.0f;
+            if (t < 0.12f) {
+                voice.phase[0] += 880.0f * voice.pitch * dt;
+                eject_click = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 40.0f) * 0.45f;
+            }
+            float hiss_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float hiss_lp = calc_lp_alpha(2200.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += hiss_lp * (hiss_noise - voice.filter_state[0]);
+            float hiss = (t < 0.32f) ? voice.filter_state[0] * std::exp(-t * 9.0f) * 0.28f : 0.0f;
+
+            // Stage 2 (0.45 - 0.72s): Fresh plasma battery insertion slide & solid locking slam
+            float insert_thud = 0.0f;
+            if (t >= 0.48f && t < 0.70f) {
+                float ti = t - 0.48f;
+                voice.phase[1] += (240.0f - ti * 380.0f) * voice.pitch * dt;
+                float body = fast_sin(TWO_PI * voice.phase[1]);
+                float click = (fast_rand(voice.seed) * 2.0f - 1.0f) * 0.4f;
+                insert_thud = (body * 0.65f + click * 0.35f) * std::exp(-ti * 24.0f) * 0.75f;
+            }
+
+            // Stage 3 (0.75 - 1.15s): Energizing ionization chirp & capacitor charging hum
+            float charge = 0.0f;
+            if (t >= 0.75f && t < 1.18f) {
+                float tc = t - 0.75f;
+                float charge_freq = (280.0f + tc * 520.0f) * voice.pitch;
+                voice.phase[2] += charge_freq * dt;
+                float hum = fast_sin(TWO_PI * voice.phase[2]) * fast_sin(PI * std::clamp(tc / 0.40f, 0.0f, 1.0f));
+                // High ionization harmonic chirp
+                voice.phase[3] += (charge_freq * 2.5f) * dt;
+                float chirp = fast_sin(TWO_PI * voice.phase[3]) * 0.35f;
+                charge = (hum * 0.60f + chirp * 0.40f) * 0.55f;
+            }
+
+            sample = eject_click + hiss + insert_thud + charge;
+            break;
+        }
+
+        case SoundCue::ScattergunReload: {
+            // Demolitionist Magma Scattergun heavy drum reload (1.60s duration)
+            // Stage 1 (0.0 - 0.35s): Heavy drum latch release: spring clack + hollow steel resonance
+            float latch_clack = 0.0f;
+            if (t < 0.22f) {
+                voice.phase[0] += 580.0f * voice.pitch * dt;
+                latch_clack = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 22.0f) * 0.55f;
+            }
+
+            // Stage 2 (0.35 - 0.75s): Rotary cylinder ratchet clicks (3 rapid mechanical teeth clicks)
+            float ratchet = 0.0f;
+            for (int k = 0; k < 3; ++k) {
+                float click_time = 0.38f + k * 0.11f;
+                if (t >= click_time && t < click_time + 0.06f) {
+                    float tr = t - click_time;
+                    voice.phase[1] += (920.0f + k * 140.0f) * voice.pitch * dt;
+                    ratchet += fast_sin(TWO_PI * voice.phase[1]) * std::exp(-tr * 65.0f) * 0.42f;
+                }
+            }
+
+            // Stage 3 (0.75 - 1.15s): Massive heavy drum slam into receiver + titanium clamp snap
+            float drum_slam = 0.0f;
+            if (t >= 0.78f && t < 1.12f) {
+                float ts = t - 0.78f;
+                voice.phase[2] += (115.0f - ts * 120.0f) * voice.pitch * dt; // deep heavy thud
+                voice.phase[3] += 1250.0f * voice.pitch * dt;                 // clamp snap
+                float punch = fast_sin(TWO_PI * voice.phase[2]) * 0.75f;
+                float snap = fast_sin(TWO_PI * voice.phase[3]) * 0.35f;
+                drum_slam = (punch + snap) * std::exp(-ts * 16.0f) * 0.85f;
+            }
+
+            // Stage 4 (1.18 - 1.50s): Fore-end pump rack forward
+            float pump = 0.0f;
+            if (t >= 1.20f && t < 1.48f) {
+                float tp = t - 1.20f;
+                voice.phase[4] += (740.0f - tp * 300.0f) * voice.pitch * dt;
+                pump = fast_sin(TWO_PI * voice.phase[4]) * std::exp(-tp * 28.0f) * 0.50f;
+            }
+
+            sample = latch_clack + ratchet + drum_slam + pump;
+            break;
+        }
+
+        case SoundCue::RailgunReload: {
+            // Scout Needler Railgun linear rack reload (1.10s duration)
+            // Stage 1 (0.0 - 0.25s): Pneumatic needle rack eject: gas puff + slide click
+            float eject = 0.0f;
+            if (t < 0.20f) {
+                voice.phase[0] += 1150.0f * voice.pitch * dt;
+                float click = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 35.0f);
+                float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+                float alpha = calc_lp_alpha(1600.0f, static_cast<float>(SAMPLE_RATE));
+                voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+                eject = (click * 0.55f + voice.filter_state[0] * 0.45f) * std::exp(-t * 18.0f) * 0.60f;
+            }
+
+            // Stage 2 (0.38 - 0.68s): Linear needle battery insert: magnetic rail snap
+            float insert = 0.0f;
+            if (t >= 0.40f && t < 0.66f) {
+                float ti = t - 0.40f;
+                voice.phase[1] += (1400.0f - ti * 1800.0f) * voice.pitch * dt;
+                float body = fast_sin(TWO_PI * voice.phase[1]);
+                insert = body * std::exp(-ti * 25.0f) * 0.70f;
+            }
+
+            // Stage 3 (0.68 - 1.05s): Superconducting charging coil whine & slide lock
+            float charge = 0.0f;
+            if (t >= 0.68f && t < 1.05f) {
+                float tc = t - 0.68f;
+                float freq = (380.0f + tc * 1400.0f) * voice.pitch;
+                voice.phase[2] += freq * dt;
+                float whine = fast_sin(TWO_PI * voice.phase[2]) * fast_sin(PI * std::clamp(tc / 0.35f, 0.0f, 1.0f));
+                // Bolt lock click at end
+                float lock = 0.0f;
+                if (tc >= 0.25f) {
+                    float tl = tc - 0.25f;
+                    voice.phase[3] += 1850.0f * voice.pitch * dt;
+                    lock = fast_sin(TWO_PI * voice.phase[3]) * std::exp(-tl * 45.0f) * 0.6f;
+                }
+                charge = whine * 0.40f + lock * 0.55f;
+            }
+
+            sample = eject + insert + charge;
+            break;
+        }
+
+        case SoundCue::PlayerGroan: {
+            // Delver vocal pain groan & strain under radiation sickness / systemic toxicity (0.85s duration)
+            // Vocal cord fundamental with pitch sag (125Hz -> 96Hz) + vocal tract throat formants
+            float f0 = std::max(90.0f, 125.0f - t * 35.0f) * voice.pitch;
+            voice.phase[0] += f0 * dt;
+            voice.phase[1] += 460.0f * dt;  // Throat resonance (F1)
+            voice.phase[2] += 1150.0f * dt; // Oral cavity resonance (F2)
+
+            float vocal_pulse = fast_sin(TWO_PI * voice.phase[0]);
+            float formant1 = fast_sin(TWO_PI * voice.phase[1]) * 0.40f;
+            float formant2 = fast_sin(TWO_PI * voice.phase[2]) * 0.25f;
+
+            // Breathy rasp & vocal fold strain noise
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(850.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+
+            float vocal_body = vocal_pulse * 0.55f + formant1 + formant2 + voice.filter_state[0] * 0.30f;
+            // Smooth attack (40ms) then gradual agony fade
+            float env = (t < 0.04f) ? (t / 0.04f) : std::exp(-(t - 0.04f) * 3.4f);
+            sample = vocal_body * env * 0.75f;
+            break;
+        }
+
+        case SoundCue::PlayerAsphyxiation: {
+            // Delver violent coughing, gasping & choking spasms from toxic gas inhalation (1.10s duration)
+            // 3-phase convulsing cough spasms (at 0.02s, 0.34s, 0.64s) followed by a desperate wheezing intake gasp
+            float cough_sound = 0.0f;
+            float spasm_times[3] = {0.02f, 0.34f, 0.64f};
+
+            for (int i = 0; i < 3; ++i) {
+                float dt_spasm = t - spasm_times[i];
+                if (dt_spasm >= 0.0f && dt_spasm < 0.22f) {
+                    // Diaphragmatic kinetic cough thump (85Hz)
+                    voice.phase[i] += 85.0f * voice.pitch * dt;
+                    float thump = fast_sin(TWO_PI * voice.phase[i]) * std::exp(-dt_spasm * 22.0f);
+
+                    // Harsh turbulent aspirate air expulsion (bandpass filtered 1600Hz)
+                    float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+                    float bp = process_resonator(raw_noise, 1650.0f * voice.pitch, 3.2f, static_cast<float>(SAMPLE_RATE),
+                                                 voice.filter_state[0], voice.filter_state[1]);
+                    cough_sound += (thump * 0.45f + bp * 0.65f) * std::exp(-dt_spasm * 16.0f);
+                }
+            }
+
+            // Desperate inspiratory wheezing gasp (stridor) in final third (t = 0.72s .. 1.05s)
+            float wheeze = 0.0f;
+            if (t > 0.72f) {
+                float tw = t - 0.72f;
+                float wheeze_freq = (850.0f + tw * 1100.0f) * voice.pitch;
+                voice.phase[3] += wheeze_freq * dt;
+                float whistle = fast_sin(TWO_PI * voice.phase[3]) * 0.35f;
+
+                float air_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+                float bp_wheeze = process_resonator(air_noise, wheeze_freq * 1.2f, 2.5f, static_cast<float>(SAMPLE_RATE),
+                                                    voice.filter_state[2], voice.filter_state[3]);
+                float wheeze_env = fast_sin(std::clamp(tw / 0.35f, 0.0f, 1.0f) * PI);
+                wheeze = (whistle + bp_wheeze * 0.65f) * wheeze_env * 0.55f;
+            }
+
+            sample = (cough_sound + wheeze) * 0.85f;
+            break;
+        }
+
+        case SoundCue::ToxicGasHiss: {
+            // Pressurized escaping toxic chemical gas & caustic vent hiss (1.00s duration)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 1850.0f * voice.pitch, 3.4f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            // Pressure modulation flutter (14Hz)
+            float flutter = 0.82f + 0.18f * fast_sin(TWO_PI * 14.0f * t);
+            float env = std::min(1.0f, t / 0.06f) * std::exp(-t * 2.8f);
+            sample = bp * flutter * env * 0.68f;
+            break;
+        }
+
+        case SoundCue::SuitPuncture: {
+            // Atmospheric decompression puncture hiss (0.50s duration)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 3200.0f * voice.pitch, 2.8f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float env = std::exp(-t * 7.5f);
+            sample = bp * env * 0.70f;
+            break;
+        }
+
+        case SoundCue::PlayerBreathing: {
+            // Heavy respiration in closed delver visor (0.80s duration)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 720.0f * voice.pitch, 2.0f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float env = fast_sin(std::clamp(t / 0.80f, 0.0f, 1.0f) * PI);
+            sample = bp * env * 0.50f;
+            break;
+        }
+
+        case SoundCue::PlayerDeath: {
+            // Critical suit flatline and telemetry loss (2.50s duration)
+            voice.phase[0] += 880.0f * dt; // 880Hz flatline monitor tone
+            float tone = fast_sin(TWO_PI * voice.phase[0]) * 0.40f;
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(400.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float env = std::exp(-t * 1.2f);
+            sample = (tone + voice.filter_state[0] * 0.35f) * env * 0.65f;
+            break;
+        }
+
+        case SoundCue::BoneCrack: {
+            // Sickening bone fracture snap + low-end crush (0.45s duration)
+            // Stage 1: Sharp snapping transient (brittle bone fracture at 3200Hz down to 1800Hz)
+            float snap_freq = (3200.0f - t * 4500.0f) * voice.pitch;
+            if (snap_freq < 1400.0f) snap_freq = 1400.0f;
+            voice.phase[0] += snap_freq * dt;
+            float snap = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 65.0f);
+
+            // Stage 2: Dull heavy body impact / kinetic crunch (110Hz resonant body compression)
+            voice.phase[1] += 110.0f * voice.pitch * dt;
+            float body_thud = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 18.0f);
+
+            // Stage 3: Splintering crunch texture (bone fragment noise at 1450Hz with 55Hz amplitude chatter)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 1450.0f * voice.pitch, 3.0f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float crunch_env = (t < 0.22f) ? std::exp(-t * 14.0f) * (0.8f + 0.2f * fast_sin(TWO_PI * 55.0f * t)) : 0.0f;
+
+            // Stage 4: Secondary micro-fracture split at 0.045s
+            float split = 0.0f;
+            if (t >= 0.045f && t < 0.12f) {
+                float ts = t - 0.045f;
+                voice.phase[2] += 2400.0f * voice.pitch * dt;
+                split = fast_sin(TWO_PI * voice.phase[2]) * std::exp(-ts * 50.0f) * 0.6f;
+            }
+
+            sample = (snap * 0.70f + body_thud * 0.65f + bp * crunch_env * 0.55f + split * 0.40f) * 0.95f;
+            break;
+        }
+
+        case SoundCue::EnemyFleshHit: {
+            // Visceral flesh tearing / claw laceration on player (0.38s duration)
+            // Stage 1: High-velocity razor claw slice whoosh (slicing down 2400Hz -> 850Hz)
+            float slice_freq = (2400.0f - t * 4000.0f) * voice.pitch;
+            if (slice_freq < 750.0f) slice_freq = 750.0f;
+            voice.phase[0] += slice_freq * dt;
+            float slice = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 28.0f);
+
+            // Stage 2: Wet organic laceration squelch (subterranean damp flesh thump)
+            voice.phase[1] += 80.0f * voice.pitch * dt;
+            float thud = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 22.0f);
+
+            // Stage 3: Organic tearing texture (resonator filtered 720Hz with fast irregular chop)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 720.0f * voice.pitch, 2.2f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float tear_env = (t < 0.25f) ? std::exp(-t * 12.0f) * (0.75f + 0.25f * fast_sin(TWO_PI * 35.0f * t)) : 0.0f;
+
+            sample = (slice * 0.60f + thud * 0.50f + bp * tear_env * 0.70f) * 0.92f;
+            break;
+        }
+
+        case SoundCue::DebrisArmorImpact: {
+            // Crashing stone rubble & armor deflecting heavy falling debris (0.45s duration)
+            // Heavy rock shatter transient
+            voice.phase[0] += 160.0f * voice.pitch * dt;
+            float rock_thud = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 20.0f);
+
+            // Resonant titanium armor ring deflection
+            voice.phase[1] += 480.0f * voice.pitch * dt;
+            float armor_ring = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 15.0f);
+
+            // Shattering mineral stone fragment noise
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(1100.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float debris_noise = voice.filter_state[0] * std::exp(-t * 10.0f);
+
+            sample = (rock_thud * 0.60f + armor_ring * 0.45f + debris_noise * 0.65f) * 0.90f;
+            break;
+        }
+
+        case SoundCue::CritHit: {
+            // High-impact sneak attack / critical strike sound cue (0.42s duration)
+            // Stage 1: Searing high-frequency impact crack & punch (rapid pitch drop 2800Hz -> 900Hz)
+            float snap_freq = (2800.0f - t * 5000.0f) * voice.pitch;
+            if (snap_freq < 900.0f) snap_freq = 900.0f;
+            voice.phase[0] += snap_freq * dt;
+            float snap = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 35.0f);
+
+            // Stage 2: Deep sub-bass kinetic body punch (90Hz drop)
+            voice.phase[1] += 90.0f * voice.pitch * dt;
+            float punch = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 16.0f);
+
+            // Stage 3: Resonant harmonic crystal/chitin ring chime (1480Hz & 2220Hz harmonic overtone)
+            voice.phase[2] += 1480.0f * voice.pitch * dt;
+            voice.phase[3] += 2220.0f * voice.pitch * dt;
+            float chime = (0.65f * fast_sin(TWO_PI * voice.phase[2]) + 0.35f * fast_sin(TWO_PI * voice.phase[3])) * std::exp(-t * 7.5f);
+
+            // Stage 4: Crunchy vital fracture noise burst
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 1850.0f * voice.pitch, 3.5f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float crunch_env = (t < 0.15f) ? std::exp(-t * 22.0f) : 0.0f;
+
+            sample = (snap * 0.55f + punch * 0.65f + chime * 0.50f + bp * crunch_env * 0.60f) * 0.95f;
+            break;
+        }
+
         default:
             sample = 0.0f;
             break;
@@ -2084,7 +2758,7 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
     // Dynamic Cavern Micro-Events (Procedural Room-Specific Ambience & Tectonic Groans)
     if (m_ambient_volume > 0.001f && m_ambient_intensity > 0.05f) {
         m_micro_ambience_timer += static_cast<float>(num_frames) * dt;
-        float amb_interval = (m_hazard_phase >= 2) ? 6.5f : 9.5f;
+        float amb_interval = (m_hazard_phase >= 2) ? 14.0f : 20.0f;
         if (m_micro_ambience_timer >= amb_interval) {
             m_micro_ambience_timer = 0.0f;
             trigger_cavern_micro_event(m_current_sector, m_current_room_type, 0.38f * m_ambient_intensity);
@@ -2124,8 +2798,11 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                 continue;
             }
 
-            // Duck ambient / drill noise when threat stings occur
-            if (get_sound_category(voice.cue) == SoundCategory::Ambience || voice.cue == SoundCue::DrillLoop) {
+            // Duck ambient / drill noise when threat stings occur (stingers themselves never duck)
+            bool is_stinger = (voice.cue == SoundCue::SectorArrival1 || voice.cue == SoundCue::SectorArrival2 ||
+                               voice.cue == SoundCue::SectorArrival3 || voice.cue == SoundCue::SectorArrival4 ||
+                               voice.cue == SoundCue::SectorArrival5);
+            if (!is_stinger && (get_sound_category(voice.cue) == SoundCategory::Ambience || voice.cue == SoundCue::DrillLoop)) {
                 category_mult *= m_ducking_attenuation;
             }
 
@@ -2137,7 +2814,61 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                 float sample_l = 0.0f;
                 float sample_r = 0.0f;
 
+                // Smooth quick-release fade out when stopping or voice-stealing
+                float stop_fade = 1.0f;
+                if (voice.fading_out) {
+                    voice.fade_out_remaining -= dt;
+                    if (voice.fade_out_remaining <= 0.0f) {
+                        voice.active = false;
+                        stop_fade = 0.0f;
+                    } else {
+                        stop_fade = (voice.fade_out_remaining / voice.fade_out_total);
+                    }
+                }
+
                 if (sample_ptr && sample_ptr->frame_count > 0) {
+                    voice.time += dt;
+
+                    // Master Attack & Release Envelope: smooth anti-click swells and musical fade-outs
+                    float envelope = 1.0f;
+
+                    // 1. Smooth attack ramp (prevents pop/click)
+                    float attack_time = (voice.cue == SoundCue::UIBlip || voice.cue == SoundCue::GeigerClick || voice.cue == SoundCue::VoxelHit) ? 0.003f : 0.025f;
+                    if (voice.time < attack_time) {
+                        envelope *= 0.5f * (1.0f - std::cos(PI * (voice.time / attack_time)));
+                    }
+
+                    // 2. Timeline decay tail (smooth musical release before duration expires)
+                    if (!voice.loop) {
+                        float tail_dur = 0.05f;
+                        if (voice.cue == SoundCue::SectorArrival1 || voice.cue == SoundCue::SectorArrival2 ||
+                            voice.cue == SoundCue::SectorArrival3 || voice.cue == SoundCue::SectorArrival4 ||
+                            voice.cue == SoundCue::SectorArrival5) {
+                            tail_dur = std::min(1.40f, 0.35f * voice.duration);
+                        } else if (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar ||
+                                   voice.cue == SoundCue::CavernGroan || voice.cue == SoundCue::SeismicTremor ||
+                                   voice.cue == SoundCue::VoidWind) {
+                            tail_dur = std::min(0.70f, 0.30f * voice.duration);
+                        } else {
+                            tail_dur = std::max(0.020f, std::min(0.15f * voice.duration, 0.15f));
+                        }
+
+                        if (voice.time > voice.duration - tail_dur) {
+                            float tail_ratio = std::clamp((voice.duration - voice.time) / tail_dur, 0.0f, 1.0f);
+                            envelope *= 0.5f * (1.0f - std::cos(PI * tail_ratio));
+                        }
+                    }
+
+                    // 3. Loaded sample buffer-edge safety fade-out
+                    if (!voice.loop && sample_ptr->frame_count > 0) {
+                        float remaining_frames = static_cast<float>(sample_ptr->frame_count) - voice.sample_cursor;
+                        constexpr float BUFFER_FADE_FRAMES = 2205.0f; // 50ms buffer edge
+                        if (remaining_frames < BUFFER_FADE_FRAMES) {
+                            float edge_ratio = std::clamp(remaining_frames / BUFFER_FADE_FRAMES, 0.0f, 1.0f);
+                            envelope *= 0.5f * (1.0f - std::cos(PI * edge_ratio));
+                        }
+                    }
+
                     float pos = voice.sample_cursor;
                     size_t idx0 = static_cast<size_t>(pos);
                     size_t idx1 = idx0 + 1;
@@ -2151,17 +2882,8 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                         sample_r = sample_ptr->data[idx0 * 2 + 1] * (1.0f - frac) + sample_ptr->data[idx1 * 2 + 1] * frac;
                     }
 
-                    voice.time += dt;
-                    float envelope = 1.0f;
-                    constexpr float ATTACK_TIME = 0.003f;
-                    if (voice.time < ATTACK_TIME) {
-                        envelope = 0.5f * (1.0f - std::cos(PI * (voice.time / ATTACK_TIME)));
-                    } else if (!voice.loop && voice.time > voice.duration - 0.008f) {
-                        float tail = std::max(0.0f, (voice.duration - voice.time) / 0.008f);
-                        envelope = 0.5f * (1.0f - std::cos(PI * tail));
-                    }
-                    sample_l *= voice.volume * envelope;
-                    sample_r *= voice.volume * envelope;
+                    sample_l *= voice.volume * envelope * stop_fade;
+                    sample_r *= voice.volume * envelope * stop_fade;
 
                     voice.sample_cursor += voice.pitch;
                     if (voice.sample_cursor >= static_cast<float>(sample_ptr->frame_count) || (!voice.loop && voice.time >= voice.duration)) {
@@ -2172,7 +2894,7 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                         }
                     }
                 } else {
-                    float s = synth_sample(voice, dt);
+                    float s = synth_sample(voice, dt) * stop_fade;
                     sample_l = s;
                     sample_r = s;
                 }

@@ -60,11 +60,37 @@ public:
         float speed = 8.0f
     );
 
+    /// Minimum engagement parameters
+    static constexpr float MIN_STRIKE_DISTANCE    = 1.75f; // Distance maintained at end of lunge
+    static constexpr float MELEE_STRIKE_REACH     = 2.20f; // Range where melee damage registers
+    static constexpr float ENEMY_PLAYER_REPULSION  = 14.0f; // Soft repulsion force to prevent phasing
+
     /// Calculates local model anchor/pivot offset based on surface angle
     /// so the mesh legs stay flush with voxel faces without clipping.
     static glm::vec3 compute_surface_snapping_offset(
         StalkerSurfaceState state,
         const glm::vec3& normal
+    );
+
+    /// Hard capsule-capsule penetration resolution against the player
+    static bool resolve_player_penetration(
+        glm::vec3& enemy_pos,
+        const glm::vec3& player_pos,
+        float enemy_radius = 0.5f,
+        float player_radius = 0.35f
+    );
+
+    /// Compute lunge target offset maintaining stand-off distance
+    static glm::vec3 calculate_lunge_target(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& player_pos,
+        float stand_off = MIN_STRIKE_DISTANCE
+    );
+
+    /// Cancel forward momentum along attack approach vector
+    static void cancel_forward_momentum(
+        glm::vec3& velocity,
+        const glm::vec3& attack_dir
     );
 };
 

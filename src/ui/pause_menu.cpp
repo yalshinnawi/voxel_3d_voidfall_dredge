@@ -513,24 +513,25 @@ PauseMenuAction PauseMenu::render(
             glm::vec4 color;
         };
         Binding bindings[] = {
-            {"[WASD]",     "Locomotion & Strafing",     Typography::COLOR_PRIMARY},
-            {"[SPACE]",    "Jump / Jetpack Thruster",   Typography::COLOR_PRIMARY},
-            {"[L-CTRL]",   "Crouch (Dampen Acoustics)", Typography::COLOR_GREEN},
-            {"[LMB]",      "Mining Drill / Attack",     Typography::COLOR_AMBER},
-            {"[RMB]",      "Deploy Bulkhead Shelter",   Typography::COLOR_PRIMARY},
-            {"[F]",        "Grappling Hook Tether",     Typography::COLOR_CYAN},
-            {"[Q]",        "Seismic Sonar Pulse",       Typography::COLOR_CYAN},
-            {"[C]",        "Class Tactical Ability",    Typography::COLOR_AMBER},
-            {"[B]",        "Deploy Evacuation Beacon",  Typography::COLOR_GREEN},
-            {"[H / F1]",   "Toggle Contractor Guide",   Typography::COLOR_PRIMARY}
+            {"[WASD]",         "Locomotion & Strafing",       Typography::COLOR_PRIMARY},
+            {"[SPACE]",        "Jump / Jetpack Thruster",     Typography::COLOR_PRIMARY},
+            {"[L-CTRL]",       "Crouch (Dampen Acoustics)",   Typography::COLOR_GREEN},
+            {"[1-3 / MWHEEL]", "Equip Drill / Weapon / Demo", Typography::COLOR_CYAN},
+            {"[LMB]",          "Mining Drill / Attack",       Typography::COLOR_AMBER},
+            {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
+            {"[F]",            "Grappling Hook Tether",       Typography::COLOR_CYAN},
+            {"[Q]",            "Seismic Sonar Pulse",         Typography::COLOR_CYAN},
+            {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},
+            {"[B]",            "Deploy Evacuation Beacon",    Typography::COLOR_GREEN},
+            {"[H / F1]",       "Toggle Contractor Guide",     Typography::COLOR_PRIMARY}
         };
 
-        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 10.0f, 18.0f * ui_scale, 24.0f * ui_scale);
-        float key_col_w = std::clamp(80.0f * ui_scale, 65.0f, 95.0f);
+        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 11.0f, 16.0f * ui_scale, 22.0f * ui_scale);
+        float key_col_w = std::clamp(92.0f * ui_scale, 75.0f, 105.0f);
         for (const auto& b : bindings) {
-            draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.95f * ui_scale, Typography::COLOR_CYAN);
+            draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.92f * ui_scale, Typography::COLOR_CYAN);
             float act_max_w = col_w - key_col_w - 6.0f * ui_scale;
-            draw_text_fitted(b.action, col1_x + key_col_w + 6.0f * ui_scale, c1_y, act_max_w, 0.95f * ui_scale, b.color);
+            draw_text_fitted(b.action, col1_x + key_col_w + 6.0f * ui_scale, c1_y, act_max_w, 0.92f * ui_scale, b.color);
             c1_y += b_step;
         }
 

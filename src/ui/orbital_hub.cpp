@@ -141,7 +141,7 @@ void OrbitalHubUI::draw_text_fitted(const std::string& text, float x, float y, f
 
 void OrbitalHubUI::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale) {
     if (text.empty()) return;
-    float pad = 4.0f;
+    float pad = 12.0f;
     float scale = FontRenderer::fit_scale(text, std::max(20.0f, box_w - pad * 2.0f), base_scale, min_scale);
     draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color);
 }
@@ -295,7 +295,7 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
     };
 
     float btn_y = title_y + 82.0f * ui_scale;
-    float btn_w = std::clamp(380.0f * ui_scale, 280.0f, 440.0f);
+    float btn_w = std::clamp(420.0f * ui_scale, 320.0f, 480.0f);
     float btn_h = std::clamp(46.0f * ui_scale, 36.0f, 52.0f);
     float btn_gap = std::clamp(10.0f * ui_scale, 6.0f, 14.0f);
 
@@ -330,16 +330,16 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
 
         draw_panel_with_border(current_btn_x, y, btn_w, btn_h, bg_col, border_col, is_hovered ? 2.0f : 1.0f);
 
-        float text_scale = 1.6f * ui_scale;
+        float text_scale = 1.35f * ui_scale;
         glm::vec4 text_col = !item.enabled ? Typography::COLOR_MUTED :
                              is_hovered    ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) :
                                              Typography::COLOR_PRIMARY;
-        draw_text_centered(item.label, current_btn_x, y, btn_w, btn_h, text_scale, text_col);
+        draw_text_centered_fitted(item.label, current_btn_x, y, btn_w, btn_h, text_scale, text_col);
 
         if (is_hovered) {
             float tip_scale = 1.15f * ui_scale;
             float tip_y = y + (btn_h - FontRenderer::get_rendered_height(tip_scale)) * 0.5f;
-            draw_text(item.tip, current_btn_x + btn_w + 20.0f * ui_scale, tip_y, tip_scale, Typography::COLOR_CYAN);
+            draw_text_fitted(item.tip, current_btn_x + btn_w + 20.0f * ui_scale, tip_y, w - (current_btn_x + btn_w + 30.0f * ui_scale), tip_scale, Typography::COLOR_CYAN);
         }
     }
 
@@ -579,14 +579,14 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
         if (!is_unlocked) {
             draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
                                    glm::vec4(0.3f, 0.1f, 0.12f, 0.85f), glm::vec4(1.0f, 0.35f, 0.35f, 0.8f));
-            draw_text_centered("[ LOCKED // REQUIRES LEVEL " + std::to_string(req_lvl) + " ]",
-                               badge_x, badge_y, badge_w, badge_h, 0.98f * ui_scale,
-                               glm::vec4(1.0f, 0.5f, 0.5f, 1.0f));
+            draw_text_centered_fitted("[ LOCKED // REQUIRES LEVEL " + std::to_string(req_lvl) + " ]",
+                                      badge_x, badge_y, badge_w, badge_h, 0.98f * ui_scale,
+                                      glm::vec4(1.0f, 0.5f, 0.5f, 1.0f));
         } else if (is_selected) {
             draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
                                    glm::vec4(0.0f, 0.85f, 1.0f, 0.20f), Typography::COLOR_CYAN, 1.0f);
-            draw_text_centered("[ ACTIVE SECTOR ]", badge_x, badge_y, badge_w, badge_h,
-                               1.05f * ui_scale, Typography::COLOR_CYAN);
+            draw_text_centered_fitted("[ ACTIVE SECTOR ]", badge_x, badge_y, badge_w, badge_h,
+                                      1.05f * ui_scale, Typography::COLOR_CYAN);
         }
     }
 
@@ -606,8 +606,8 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
                            back_hov ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG,
                            back_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.0f, 0.85f, 1.0f, 0.35f),
                            back_hov ? 2.0f : 1.0f);
-    draw_text_centered("< BACK", back_x, bar_y, back_w, back_h, 1.25f * ui_scale,
-                       back_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+    draw_text_centered_fitted("< BACK", back_x, bar_y, back_w, back_h, 1.25f * ui_scale,
+                              back_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
     // Page indicator (centred on bar)
     {
@@ -637,7 +637,7 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
         draw_panel_with_border(prev_x, bar_y, nav_btn_w, bar_h, pb, bd, prev_hov ? 2.0f : 1.0f);
         glm::vec4 tc = !prev_en ? glm::vec4(0.4f, 0.4f, 0.4f, 0.4f) :
                         prev_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY;
-        draw_text_centered("< PREV", prev_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
+        draw_text_centered_fitted("< PREV", prev_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
     }
 
     // NEXT > page arrow
@@ -657,7 +657,7 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
         draw_panel_with_border(next_x, bar_y, nav_btn_w, bar_h, nb, bd, next_hov ? 2.0f : 1.0f);
         glm::vec4 tc = !next_en ? glm::vec4(0.4f, 0.4f, 0.4f, 0.4f) :
                         next_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY;
-        draw_text_centered("NEXT >", next_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
+        draw_text_centered_fitted("NEXT >", next_x, bar_y, nav_btn_w, bar_h, 1.15f * ui_scale, tc);
     }
 
     // LAUNCH button
@@ -683,10 +683,10 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
     std::string launch_text = cur_unlocked
         ? "[ LAUNCH SECTOR " + std::to_string(selected_level) + " ]"
         : "[ LOCKED // LEVEL " + std::to_string(cur_req_lvl) + " REQUIRED ]";
-    float text_scale = cur_unlocked ? 1.55f * ui_scale : 1.25f * ui_scale;
-    draw_text_centered(launch_text, launch_x, bar_y, launch_w, launch_h, text_scale,
-                       !cur_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) :
-                       launch_hov    ? glm::vec4(1.0f) : Typography::COLOR_GREEN);
+    float text_scale = cur_unlocked ? 1.45f * ui_scale : 1.20f * ui_scale;
+    draw_text_centered_fitted(launch_text, launch_x, bar_y, launch_w, launch_h, text_scale,
+                              !cur_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) :
+                              launch_hov    ? glm::vec4(1.0f) : Typography::COLOR_GREEN);
 }
 
 
@@ -808,8 +808,8 @@ void OrbitalHubUI::render_delver_roster(UserProfile& profile, float mouse_x, flo
         std::string btn_txt = !is_unlocked ? "[ LOCKED // REQUIRES LEVEL " + std::to_string(req_lvl) + " ]" :
                               is_selected  ? "[ ACTIVE DELVER SELECTED ]" :
                               is_hovered   ? "[ CLICK TO SELECT DELVER ]" : "[ SELECT DELVER ]";
-        draw_text_centered(btn_txt, btn_x, btn_y, btn_w, btn_h, 1.05f * ui_scale,
-                           !is_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        draw_text_centered_fitted(btn_txt, btn_x, btn_y, btn_w, btn_h, 1.05f * ui_scale,
+                                  !is_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     }
 }
 
@@ -818,9 +818,9 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     float h = static_cast<float>(m_height);
     float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
-    float terminal_w = std::clamp(w * 0.94f, 640.0f, 1420.0f);
+    float terminal_w = std::clamp(w * 0.94f, 680.0f, 1460.0f);
     float start_x = (w - terminal_w) * 0.5f;
-    float start_y = 76.0f * ui_scale;
+    float start_y = 66.0f * ui_scale;
 
     // Pulse feedback overlay
     if (m_purchase_pulse_timer > 0.0f) {
@@ -831,34 +831,37 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     }
 
     // Top Balance & Respec Strip
-    float top_h = 46.0f * ui_scale;
+    float top_h = 44.0f * ui_scale;
     draw_panel_with_border(start_x, start_y, terminal_w, top_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.2f, 0.45f, 0.65f, 0.6f));
 
-    // Respec Button: Sleek, high-contrast, well-padded tactical button
-    float respec_w = std::clamp(175.0f * ui_scale, 140.0f, 210.0f);
-    float respec_h = 32.0f * ui_scale;
-    float respec_x = start_x + terminal_w - respec_w - 12.0f * ui_scale;
+    // Respec Button: Sleek, high-contrast, well-padded tactical button (100% full recovery)
+    float respec_w = std::clamp(210.0f * ui_scale, 160.0f, 250.0f);
+    float respec_h = 30.0f * ui_scale;
+    float respec_x = start_x + terminal_w - respec_w - 10.0f * ui_scale;
     float respec_y = start_y + (top_h - respec_h) * 0.5f;
     bool respec_hov = (mouse_x >= respec_x && mouse_x <= respec_x + respec_w &&
                        mouse_y >= respec_y && mouse_y <= respec_y + respec_h);
 
     if (respec_hov && mouse_clicked) {
-        int refunded = 0;
-        profile.upgrades.respec(refunded);
-        profile.total_coins += refunded;
+        int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
+        profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
+        profile.total_coins += ref_coins;
+        profile.total_voidite += ref_voidite;
+        profile.total_titanium += ref_titanium;
         m_profile_dirty = true;
         m_purchase_pulse_timer = 1.0f;
-        m_terminal_msg = "RESPEC COMPLETE: REFUNDED " + std::to_string(refunded) + " COINS (85% RECOVERY)";
-        m_terminal_msg_col = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
+        m_terminal_msg = "RESPEC COMPLETE: REFUNDED 100% (" + std::to_string(ref_coins) + " COINS, " +
+                         std::to_string(ref_voidite) + " VOIDITE, " + std::to_string(ref_titanium) + " TITANIUM). READY TO RE-ALLOCATE!";
+        m_terminal_msg_col = glm::vec4(0.2f, 0.95f, 0.4f, 1.0f);
     }
 
-    glm::vec4 respec_bg = respec_hov ? glm::vec4(0.52f, 0.16f, 0.18f, 0.98f) : glm::vec4(0.18f, 0.08f, 0.10f, 0.92f);
+    glm::vec4 respec_bg = respec_hov ? glm::vec4(0.55f, 0.18f, 0.20f, 0.98f) : glm::vec4(0.20f, 0.08f, 0.10f, 0.92f);
     glm::vec4 respec_border = respec_hov ? Typography::COLOR_CRIMSON : glm::vec4(0.85f, 0.35f, 0.35f, 0.75f);
     draw_panel_with_border(respec_x, respec_y, respec_w, respec_h, respec_bg, respec_border);
-    draw_text_centered("[RESET UPGRADES]", respec_x, respec_y, respec_w, respec_h, 0.88f * ui_scale,
-                       respec_hov ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.85f, 0.85f, 0.95f));
+    draw_text_centered_fitted("[RESPEC (100% REFUND)]", respec_x, respec_y, respec_w, respec_h, 0.88f * ui_scale,
+                              respec_hov ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.85f, 0.85f, 0.95f));
 
-    // Full-Width Delver Balance Line (Given pristine breathing room without dev crowding)
+    // Full-Width Delver Balance Line
     float avail_bal_w = respec_x - start_x - 18.0f * ui_scale;
     int player_lvl = profile.get_player_level();
     float bal_scale = 1.15f * ui_scale;
@@ -872,25 +875,18 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     if (FontRenderer::get_rendered_width(bal_str, bal_scale) > avail_bal_w) {
         bal_scale = std::max(0.85f * ui_scale, 0.72f);
     }
-    if (FontRenderer::get_rendered_width(bal_str, bal_scale) > avail_bal_w) {
-        bal_str = "LVL " + std::to_string(player_lvl) + " | EXP " + std::to_string(profile.total_exp) +
-                  " | " + std::to_string(profile.total_coins) + "C | " +
-                  std::to_string(profile.total_voidite) + "V | " +
-                  std::to_string(profile.total_titanium) + "T";
-    }
     draw_text(bal_str, start_x + 14.0f * ui_scale, start_y + (top_h - FontRenderer::get_rendered_height(bal_scale)) * 0.5f, bal_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
 
-    // Terminal Status Feedback Line & Test Mode Action Badges
-    float subrow_y = start_y + top_h + 5.0f * ui_scale;
+    // Sub-row: Terminal Status Feedback Line & Test Mode Action Badges
+    float subrow_y = start_y + top_h + 4.0f * ui_scale;
     if (!m_terminal_msg.empty()) {
-        draw_text(">> " + m_terminal_msg, start_x + 14.0f * ui_scale, subrow_y, 1.02f * ui_scale, m_terminal_msg_col);
+        draw_text(">> " + m_terminal_msg, start_x + 14.0f * ui_scale, subrow_y, 0.98f * ui_scale, m_terminal_msg_col);
     }
 
-    // Test Mode Badges cleanly positioned in the sub-row to keep the balance bar pristine
     if (m_test_mode) {
-        float grant_w = std::clamp(130.0f * ui_scale, 100.0f, 150.0f);
-        float grant_h = 20.0f * ui_scale;
-        float grant_x = start_x + terminal_w - grant_w - 12.0f * ui_scale;
+        float grant_w = std::clamp(125.0f * ui_scale, 95.0f, 145.0f);
+        float grant_h = 18.0f * ui_scale;
+        float grant_x = start_x + terminal_w - grant_w - 10.0f * ui_scale;
         float grant_y = subrow_y;
         bool grant_hov = (mouse_x >= grant_x && mouse_x <= grant_x + grant_w &&
                           mouse_y >= grant_y && mouse_y <= grant_y + grant_h);
@@ -905,9 +901,9 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
 
         glm::vec4 grant_bg = grant_hov ? glm::vec4(0.15f, 0.45f, 0.25f, 1.0f) : glm::vec4(0.08f, 0.22f, 0.14f, 0.85f);
         draw_panel_with_border(grant_x, grant_y, grant_w, grant_h, grant_bg, glm::vec4(0.3f, 0.85f, 0.45f, 0.7f));
-        draw_text_centered("[+1000 EXP (F5)]", grant_x, grant_y, grant_w, grant_h, 0.80f * ui_scale, glm::vec4(0.6f, 1.0f, 0.7f, 1.0f));
+        draw_text_centered("[+1000 EXP (F5)]", grant_x, grant_y, grant_w, grant_h, 0.76f * ui_scale, glm::vec4(0.6f, 1.0f, 0.7f, 1.0f));
 
-        float cycle_w = std::clamp(135.0f * ui_scale, 105.0f, 155.0f);
+        float cycle_w = std::clamp(130.0f * ui_scale, 100.0f, 150.0f);
         float cycle_h = grant_h;
         float cycle_x = grant_x - cycle_w - 8.0f * ui_scale;
         float cycle_y = subrow_y;
@@ -919,140 +915,369 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
             bool p1 = profile.upgrades.purchase(UpgradeType::DrillSpeed, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
             bool p2 = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
             (void)p1; (void)p2;
-            int refunded = 0;
-            profile.upgrades.respec(refunded);
-            profile.total_coins += refunded;
+            int ref_c = 0, ref_v = 0, ref_t = 0;
+            profile.upgrades.respec(ref_c, ref_v, ref_t);
+            profile.total_coins += ref_c;
+            profile.total_voidite += ref_v;
+            profile.total_titanium += ref_t;
             m_profile_dirty = true;
             m_purchase_pulse_timer = 1.0f;
-            m_terminal_msg = "TEST CYCLE: PURCHASED & RESPECCED (REFUNDED " + std::to_string(refunded) + " COINS)";
+            m_terminal_msg = "TEST CYCLE: PURCHASED & RESPECCED (REFUNDED 100%: " + std::to_string(ref_c) + "C, " +
+                             std::to_string(ref_v) + "V, " + std::to_string(ref_t) + "T)";
             m_terminal_msg_col = glm::vec4(0.3f, 0.85f, 1.0f, 1.0f);
         }
 
         glm::vec4 cycle_bg = cycle_hov ? glm::vec4(0.2f, 0.32f, 0.48f, 1.0f) : glm::vec4(0.10f, 0.18f, 0.28f, 0.85f);
         draw_panel_with_border(cycle_x, cycle_y, cycle_w, cycle_h, cycle_bg, glm::vec4(0.35f, 0.65f, 0.9f, 0.7f));
-        draw_text_centered("[TEST RESPEC (F6)]", cycle_x, cycle_y, cycle_w, cycle_h, 0.80f * ui_scale, glm::vec4(0.8f, 0.9f, 1.0f, 1.0f));
+        draw_text_centered("[TEST RESPEC (F6)]", cycle_x, cycle_y, cycle_w, cycle_h, 0.76f * ui_scale, glm::vec4(0.8f, 0.9f, 1.0f, 1.0f));
     }
 
-    // 6 Upgrade Nodes (2 Columns of 3 Nodes)
-    float grid_y = start_y + top_h + 30.0f * ui_scale;
-    float avail_grid_h = h - grid_y - 18.0f * ui_scale;
-    float row_gap = std::clamp(10.0f * ui_scale, 6.0f, 14.0f);
-    float row_h = std::clamp((avail_grid_h - 2.0f * row_gap) / 3.0f, 105.0f, 180.0f);
-    float col_gap = std::clamp(18.0f * ui_scale, 10.0f, 22.0f);
-    float col_w = (terminal_w - col_gap) * 0.5f;
+    // ── Main Content Area: Skill Tree (Left) & Horizon-Style Inspector (Right) ──
+    float foot_h = 32.0f * ui_scale;
+    float foot_y = h - foot_h - 10.0f * ui_scale;
+    float main_y = start_y + top_h + 24.0f * ui_scale;
+    float main_h = foot_y - main_y - 8.0f * ui_scale;
 
-    UpgradeType types[6] = {
-        UpgradeType::DrillSpeed,
-        UpgradeType::DrillDurability,
-        UpgradeType::ThrusterTank,
-        UpgradeType::KineticDynamo,
-        UpgradeType::SonarFrequency,
-        UpgradeType::ReinforcedPlating
+    float tree_w = std::round(terminal_w * 0.58f);
+    float insp_x = start_x + tree_w + 14.0f * ui_scale;
+    float insp_w = terminal_w - tree_w - 14.0f * ui_scale;
+
+    // 6 Upgrade Types mapped to 3 Disciplines
+    UpgradeType branch_nodes[3][2] = {
+        { UpgradeType::DrillSpeed, UpgradeType::DrillDurability },       // EXCAVATION (Drill Matrix)
+        { UpgradeType::ThrusterTank, UpgradeType::KineticDynamo },       // TRAVERSAL (Exo-Suit)
+        { UpgradeType::ReinforcedPlating, UpgradeType::SonarFrequency }  // DEFENSE & SURVEYING
     };
 
-    for (int idx = 0; idx < 6; ++idx) {
-        UpgradeType type = types[idx];
-        int col = idx / 3;
-        int row = idx % 3;
+    std::string branch_titles[3] = {
+        "EXCAVATION",
+        "TRAVERSAL",
+        "SURVEYING"
+    };
 
-        float ux = start_x + col * (col_w + col_gap);
-        float uy = grid_y + row * (row_h + row_gap);
+    std::string branch_subtitles[3] = {
+        "DRILL MATRIX",
+        "EXO-SUIT",
+        "DEFENSE & SCAN"
+    };
 
-        auto info = UpgradeTree::get_info(type);
-        int cur_tier = profile.upgrades.get_tier(type);
-        int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
-        bool is_maxed = (cur_tier >= UpgradeTree::MAX_TIER);
-        bool level_locked = (!is_maxed && player_lvl < req_lvl);
+    glm::vec4 branch_colors[3] = {
+        glm::vec4(1.0f, 0.65f, 0.15f, 1.0f),  // Amber
+        glm::vec4(0.2f, 0.85f, 1.0f, 1.0f),   // Cyan
+        glm::vec4(0.3f, 0.95f, 0.55f, 1.0f)   // Emerald
+    };
 
-        int coin_cost = UpgradeTree::get_coin_cost(cur_tier);
-        int void_cost = UpgradeTree::get_voidite_cost(cur_tier);
-        int tit_cost = UpgradeTree::get_titanium_cost(cur_tier);
-        bool can_buy = profile.upgrades.can_purchase(type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
+    float col_gap = 10.0f * ui_scale;
+    float col_w = (tree_w - 2.0f * col_gap) / 3.0f;
+    float b_header_h = 28.0f * ui_scale;
+    float node_h = std::clamp((main_h - b_header_h - 40.0f * ui_scale) / 2.0f, 110.0f, 210.0f);
+    float arrow_gap = 26.0f * ui_scale;
 
-        draw_rect(ux, uy, col_w, row_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
-        draw_rect(ux, uy, 4.0f, row_h, is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
-                                       level_locked ? glm::vec4(0.6f, 0.25f, 0.25f, 0.8f) :
-                                       glm::vec4(0.2f, 0.85f, 1.0f, 0.9f));
-        draw_rect(ux, uy, col_w, 1.0f, glm::vec4(0.18f, 0.3f, 0.4f, 0.5f));
+    m_selected_upgrade_idx = std::clamp(m_selected_upgrade_idx, 0, 5);
 
-        // Purchase Button (Well-padded proportions)
-        float btn_w = std::clamp(170.0f * ui_scale, 140.0f, 200.0f);
-        float btn_h = std::clamp(52.0f * ui_scale, 44.0f, 58.0f);
-        float bx = ux + col_w - btn_w - 12.0f * ui_scale;
-        float by = uy + (row_h - btn_h) * 0.5f;
+    // Render 3 Discipline Columns
+    for (int b = 0; b < 3; ++b) {
+        float cx = start_x + b * (col_w + col_gap);
+        float cy = main_y;
 
-        float text_max_w = bx - ux - 18.0f * ui_scale;
+        // Discipline Header
+        draw_panel_with_border(cx, cy, col_w, b_header_h, glm::vec4(0.05f, 0.08f, 0.12f, 0.9f), branch_colors[b] * glm::vec4(1.0f, 1.0f, 1.0f, 0.6f));
+        draw_rect(cx, cy, 3.0f, b_header_h, branch_colors[b]);
+        draw_text(branch_titles[b] + " // " + branch_subtitles[b], cx + 8.0f * ui_scale, cy + 6.0f * ui_scale, 0.88f * ui_scale, branch_colors[b]);
 
-        // Title and Category
-        draw_text(info.category + " // " + info.name, ux + 12.0f * ui_scale, uy + 8.0f * ui_scale, 1.05f * ui_scale, glm::vec4(0.2f, 0.9f, 1.0f, 1.0f));
+        // Render 2 Nodes in this branch (Root Node then Advanced Node)
+        for (int r = 0; r < 2; ++r) {
+            UpgradeType type = branch_nodes[b][r];
+            int type_idx = static_cast<int>(type);
+            float ny = cy + b_header_h + 8.0f * ui_scale + r * (node_h + arrow_gap);
 
-        // Description wrapped to text area
-        auto desc_lines = FontRenderer::wrap_text(info.description, text_max_w, 0.92f * ui_scale);
-        float desc_y = uy + 26.0f * ui_scale;
-        if (!desc_lines.empty()) {
-            draw_text(desc_lines[0], ux + 12.0f * ui_scale, desc_y, 0.92f * ui_scale, glm::vec4(0.7f, 0.75f, 0.8f, 0.85f));
-        }
+            // Prerequisite Connector Flow (between Node 0 and Node 1)
+            if (r == 1) {
+                float conn_y = ny - arrow_gap;
+                float conn_cx = cx + col_w * 0.5f;
+                draw_rect(conn_cx - 1.0f, conn_y + 2.0f, 2.0f, arrow_gap - 6.0f, branch_colors[b] * glm::vec4(1.0f, 1.0f, 1.0f, 0.5f));
+                // Tactical flow arrow ▼
+                draw_text_centered("v", conn_cx - 10.0f, conn_y + 6.0f * ui_scale, 20.0f, 14.0f, 0.72f * ui_scale, branch_colors[b]);
+                draw_text_centered("REQUIRES T1", cx, conn_y + 4.0f * ui_scale, col_w, 14.0f, 0.65f * ui_scale, glm::vec4(0.7f, 0.75f, 0.8f, 0.7f));
+            }
 
-        // Progress Pips [ ■ ■ ■ □ □ ]
-        float pip_start_x = ux + 12.0f * ui_scale;
-        float pip_y = uy + 45.0f * ui_scale;
-        float pip_size = 12.0f * ui_scale;
-        float pip_gap = 4.0f * ui_scale;
+            int cur_tier = profile.upgrades.get_tier(type);
+            int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
+            bool is_maxed = (cur_tier >= UpgradeTree::MAX_TIER);
+            bool can_buy = profile.upgrades.can_purchase(type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
+            bool is_selected = (m_selected_upgrade_idx == type_idx);
 
-        for (int p = 0; p < UpgradeTree::MAX_TIER; ++p) {
-            float px = pip_start_x + p * (pip_size + pip_gap);
-            bool filled = (p < cur_tier);
-            glm::vec4 pip_col = filled ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) : glm::vec4(0.15f, 0.20f, 0.25f, 0.7f);
-            draw_rect(px, pip_y, pip_size, pip_size, pip_col);
-            draw_rect(px, pip_y, pip_size, 1.0f, glm::vec4(0.3f, 0.5f, 0.6f, 0.8f));
-        }
+            bool node_hov = (mouse_x >= cx && mouse_x <= cx + col_w && mouse_y >= ny && mouse_y <= ny + node_h);
+            if (node_hov && mouse_clicked) {
+                m_selected_upgrade_idx = type_idx;
+            }
 
-        std::string tier_text = "TIER " + std::to_string(cur_tier) + "/" + std::to_string(UpgradeTree::MAX_TIER);
-        if (!is_maxed) {
-            tier_text += " [REQ LVL " + std::to_string(req_lvl) + "]";
-        }
-        glm::vec4 tier_col = is_maxed ? glm::vec4(0.2f, 0.95f, 0.4f, 1.0f) :
-                             level_locked ? glm::vec4(1.0f, 0.55f, 0.4f, 0.9f) :
-                             glm::vec4(0.85f, 0.9f, 0.95f, 0.9f);
-        draw_text(tier_text, pip_start_x + UpgradeTree::MAX_TIER * (pip_size + pip_gap) + 8.0f * ui_scale, pip_y + 1.0f, 1.00f * ui_scale, tier_col);
+            // Node Panel Background & Selection Border
+            glm::vec4 n_bg = is_selected ? glm::vec4(0.08f, 0.12f, 0.18f, 0.98f) :
+                             node_hov ? glm::vec4(0.06f, 0.09f, 0.14f, 0.95f) :
+                                        glm::vec4(0.04f, 0.06f, 0.09f, 0.92f);
+            glm::vec4 n_border = is_selected ? branch_colors[b] :
+                                 node_hov ? glm::vec4(0.35f, 0.6f, 0.8f, 0.8f) :
+                                            glm::vec4(0.16f, 0.24f, 0.32f, 0.6f);
 
-        // Stat Delta Preview
-        std::string delta_preview = profile.upgrades.get_stat_preview(type);
-        draw_text("Effect: " + delta_preview, ux + 12.0f * ui_scale, uy + row_h - 22.0f * ui_scale, 1.08f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+            draw_panel_with_border(cx, ny, col_w, node_h, n_bg, n_border, is_selected ? 2.0f : 1.0f);
+            if (is_selected) {
+                // Corner selection accents
+                draw_rect(cx, ny, 6.0f, 2.0f, branch_colors[b]);
+                draw_rect(cx, ny, 2.0f, 6.0f, branch_colors[b]);
+                draw_rect(cx + col_w - 6.0f, ny, 6.0f, 2.0f, branch_colors[b]);
+                draw_rect(cx + col_w - 2.0f, ny, 2.0f, 6.0f, branch_colors[b]);
+            }
 
-        bool btn_hov = (mouse_x >= bx && mouse_x <= bx + btn_w && mouse_y >= by && mouse_y <= by + btn_h);
+            auto info = UpgradeTree::get_info(type);
 
-        if (btn_hov && mouse_clicked && can_buy && !is_maxed) {
-            profile.upgrades.purchase(type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
-            m_profile_dirty = true;
-            m_purchase_pulse_timer = 1.0f;
-            m_terminal_msg = "UPGRADE ACQUIRED: " + info.name + " [TIER " + std::to_string(cur_tier + 1) + "]";
-            m_terminal_msg_col = glm::vec4(0.2f, 0.95f, 0.4f, 1.0f);
-        }
+            // Node Title
+            draw_text_fitted(info.name, cx + 10.0f * ui_scale, ny + 8.0f * ui_scale, col_w - 20.0f * ui_scale, 0.92f * ui_scale,
+                             is_selected ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.85f, 0.90f, 0.95f, 0.9f));
 
-        glm::vec4 b_bg = is_maxed ? glm::vec4(0.1f, 0.14f, 0.18f, 0.5f) :
-                         level_locked ? glm::vec4(0.22f, 0.10f, 0.12f, 0.7f) :
-                         can_buy  ? (btn_hov ? glm::vec4(0.2f, 0.65f, 0.95f, 1.0f) : glm::vec4(0.12f, 0.4f, 0.7f, 0.9f)) :
-                                    glm::vec4(0.15f, 0.18f, 0.22f, 0.6f);
-        glm::vec4 b_border = (can_buy && !is_maxed) ? (btn_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.4f, 0.85f, 1.0f, 0.8f)) :
-                             glm::vec4(0.2f, 0.35f, 0.45f, 0.5f);
-        draw_panel_with_border(bx, by, btn_w, btn_h, b_bg, b_border);
+            // Rank Subtitle
+            std::string sub_title = (cur_tier > 0 && cur_tier <= static_cast<int>(info.tier_subtitles.size())) ?
+                                     info.tier_subtitles[cur_tier - 1] : (r == 0 ? "Foundation Node" : "Specialization Node");
+            draw_text_fitted(sub_title, cx + 10.0f * ui_scale, ny + 24.0f * ui_scale, col_w - 20.0f * ui_scale, 0.78f * ui_scale, branch_colors[b] * 0.9f);
 
-        if (is_maxed) {
-            draw_text_centered("MAX TIER", bx, by, btn_w, btn_h, 1.05f * ui_scale, glm::vec4(0.5f, 0.55f, 0.6f, 0.8f));
-        } else if (level_locked) {
-            std::string lock_str = "[REQ LEVEL " + std::to_string(req_lvl) + "]";
-            draw_text_centered(lock_str, bx, by, btn_w, btn_h, 0.95f * ui_scale, glm::vec4(1.0f, 0.45f, 0.45f, 0.9f));
-        } else {
-            std::string cost_str = std::to_string(coin_cost) + " COINS";
-            std::string mat_str = std::to_string(void_cost) + "V  " + std::to_string(tit_cost) + "T";
-            float half_h = btn_h * 0.5f;
-            draw_text_centered("UPGRADE: " + cost_str, bx, by + 3.0f * ui_scale, btn_w, half_h, 0.90f * ui_scale,
-                              can_buy ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.6f, 0.6f, 0.6f, 0.8f));
-            draw_text_centered(mat_str, bx, by + half_h - 1.0f * ui_scale, btn_w, half_h, 0.88f * ui_scale,
-                              can_buy ? Typography::COLOR_CYAN : glm::vec4(0.45f, 0.45f, 0.45f, 0.7f));
+            // Progress Pips [ ■ ■ ■ □ □ ]
+            float pip_start_x = cx + 10.0f * ui_scale;
+            float pip_y = ny + 42.0f * ui_scale;
+            float pip_size = 11.0f * ui_scale;
+            float pip_gap = 4.0f * ui_scale;
+
+            for (int p = 0; p < UpgradeTree::MAX_TIER; ++p) {
+                float px = pip_start_x + p * (pip_size + pip_gap);
+                bool filled = (p < cur_tier);
+                glm::vec4 pip_col = filled ? (is_maxed ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f) : glm::vec4(0.2f, 0.95f, 0.4f, 1.0f)) :
+                                    (p == cur_tier && can_buy) ? glm::vec4(0.2f, 0.75f, 0.95f, 0.9f) :
+                                                                 glm::vec4(0.12f, 0.16f, 0.22f, 0.8f);
+                draw_rect(px, pip_y, pip_size, pip_size, pip_col);
+                draw_rect(px, pip_y, pip_size, 1.0f, glm::vec4(0.3f, 0.5f, 0.6f, 0.7f));
+            }
+
+            std::string tier_str = "TIER " + std::to_string(cur_tier) + "/" + std::to_string(UpgradeTree::MAX_TIER);
+            draw_text(tier_str, pip_start_x + UpgradeTree::MAX_TIER * (pip_size + pip_gap) + 6.0f * ui_scale, pip_y + 1.0f, 0.85f * ui_scale,
+                      is_maxed ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f) : glm::vec4(0.8f, 0.85f, 0.9f, 0.85f));
+
+            // Current Stat Line
+            std::string cur_stat = profile.upgrades.get_current_stat_string(type);
+            draw_text_fitted("Bonus: " + cur_stat, cx + 10.0f * ui_scale, ny + 62.0f * ui_scale, col_w - 20.0f * ui_scale, 0.82f * ui_scale, glm::vec4(0.9f, 0.9f, 0.9f, 0.9f));
+
+            // Quick Next Cost or Status Tag
+            std::string cost_tag;
+            glm::vec4 tag_col;
+            if (is_maxed) {
+                cost_tag = "[MASTERED]";
+                tag_col = glm::vec4(0.2f, 0.95f, 0.4f, 1.0f);
+            } else if (player_lvl < req_lvl) {
+                cost_tag = "REQ LVL " + std::to_string(req_lvl);
+                tag_col = glm::vec4(1.0f, 0.55f, 0.4f, 0.95f);
+            } else {
+                auto prereq = UpgradeTree::get_prerequisite(type);
+                if (prereq.has_prerequisite && profile.upgrades.get_tier(prereq.required_type) < prereq.required_tier) {
+                    cost_tag = "LOCKED (REQ T1)";
+                    tag_col = glm::vec4(1.0f, 0.5f, 0.4f, 0.9f);
+                } else {
+                    int c_cost = UpgradeTree::get_coin_cost(cur_tier);
+                    int v_cost = UpgradeTree::get_voidite_cost(cur_tier);
+                    int t_cost = UpgradeTree::get_titanium_cost(cur_tier);
+                    cost_tag = std::to_string(c_cost) + "C | " + std::to_string(v_cost) + "V | " + std::to_string(t_cost) + "T";
+                    tag_col = can_buy ? Typography::COLOR_CYAN : glm::vec4(0.85f, 0.7f, 0.4f, 0.9f);
+                }
+            }
+
+            float tag_y = ny + node_h - 22.0f * ui_scale;
+            draw_rect(cx + 8.0f * ui_scale, tag_y - 2.0f, col_w - 16.0f * ui_scale, 18.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.07f, 0.8f));
+            draw_text_centered_fitted(cost_tag, cx + 8.0f * ui_scale, tag_y - 2.0f, col_w - 16.0f * ui_scale, 18.0f * ui_scale, 0.80f * ui_scale, tag_col);
         }
     }
+
+    // ── Horizon Zero Dawn Style Skill Detail & Cost Inspector (Right Panel) ──
+    UpgradeType sel_type = static_cast<UpgradeType>(m_selected_upgrade_idx);
+    auto sel_info = UpgradeTree::get_info(sel_type);
+    int sel_tier = profile.upgrades.get_tier(sel_type);
+    int sel_req_lvl = UpgradeTree::get_required_level_for_tier(sel_tier);
+    bool sel_is_maxed = (sel_tier >= UpgradeTree::MAX_TIER);
+    bool sel_can_buy = profile.upgrades.can_purchase(sel_type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
+    UpgradePrerequisite sel_prereq = UpgradeTree::get_prerequisite(sel_type);
+    bool prereq_met = !sel_prereq.has_prerequisite || (profile.upgrades.get_tier(sel_prereq.required_type) >= sel_prereq.required_tier);
+
+    // Inspector Panel
+    draw_panel_with_border(insp_x, main_y, insp_w, main_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.96f), glm::vec4(0.22f, 0.45f, 0.65f, 0.8f), 1.5f);
+    draw_rect(insp_x, main_y, insp_w, 3.0f, Typography::COLOR_CYAN_GLOW);
+
+    float ix = insp_x + 16.0f * ui_scale;
+    float iy = main_y + 12.0f * ui_scale;
+    float iw = insp_w - 32.0f * ui_scale;
+
+    // Header Tag & Title
+    draw_text("// " + sel_info.discipline + " DISCIPLINE", ix, iy, 0.80f * ui_scale, Typography::COLOR_CYAN);
+    iy += 16.0f * ui_scale;
+    draw_text_fitted(sel_info.name, ix, iy, iw, 1.25f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    iy += 26.0f * ui_scale;
+
+    // Current & Next Rank Subtitles
+    std::string cur_title = (sel_tier > 0 && sel_tier <= static_cast<int>(sel_info.tier_subtitles.size())) ?
+                            sel_info.tier_subtitles[sel_tier - 1] : "Unranked";
+    std::string next_title = (!sel_is_maxed && sel_tier < static_cast<int>(sel_info.tier_subtitles.size())) ?
+                             sel_info.tier_subtitles[sel_tier] : "Maximum Rank Achieved";
+    draw_text_fitted("Current: Tier " + std::to_string(sel_tier) + " [" + cur_title + "]", ix, iy, iw, 0.88f * ui_scale, glm::vec4(0.85f, 0.88f, 0.92f, 0.9f));
+    iy += 18.0f * ui_scale;
+    if (!sel_is_maxed) {
+        draw_text_fitted("Next: Tier " + std::to_string(sel_tier + 1) + " [" + next_title + "]", ix, iy, iw, 0.88f * ui_scale, glm::vec4(0.3f, 0.95f, 0.55f, 0.95f));
+        iy += 18.0f * ui_scale;
+    }
+
+    // Description text wrapped
+    auto desc_lines = FontRenderer::wrap_text(sel_info.description, iw, 0.88f * ui_scale);
+    for (const auto& line : desc_lines) {
+        draw_text(line, ix, iy, 0.88f * ui_scale, glm::vec4(0.7f, 0.75f, 0.82f, 0.85f));
+        iy += 16.0f * ui_scale;
+    }
+    iy += 6.0f * ui_scale;
+
+    // Milestone Perk Banner (if any)
+    if (!sel_info.milestone_perk.empty()) {
+        float mb_h = 24.0f * ui_scale;
+        draw_panel_with_border(ix, iy, iw, mb_h, glm::vec4(0.12f, 0.20f, 0.16f, 0.9f), glm::vec4(0.2f, 0.85f, 0.45f, 0.7f));
+        draw_text_fitted("★ " + sel_info.milestone_perk, ix + 8.0f * ui_scale, iy + 5.0f * ui_scale, iw - 16.0f * ui_scale, 0.78f * ui_scale, glm::vec4(0.6f, 1.0f, 0.7f, 1.0f));
+        iy += mb_h + 8.0f * ui_scale;
+    }
+
+    // ── Dedicated Clear Upgrade Cost Box for Next Level ──
+    float cost_box_h = 92.0f * ui_scale;
+    draw_panel_with_border(ix, iy, iw, cost_box_h, glm::vec4(0.02f, 0.04f, 0.07f, 0.92f), glm::vec4(0.25f, 0.4f, 0.55f, 0.7f));
+    draw_text("NEXT LEVEL UPGRADE REQUIREMENTS", ix + 10.0f * ui_scale, iy + 6.0f * ui_scale, 0.82f * ui_scale, Typography::COLOR_CYAN_GLOW);
+
+    if (sel_is_maxed) {
+        draw_text_centered("ALL 5 TIERS MASTERED - MAXIMUM SPECIALIZATION", ix, iy + 30.0f * ui_scale, iw, 30.0f * ui_scale, 0.95f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+    } else {
+        int coin_c = UpgradeTree::get_coin_cost(sel_tier);
+        int void_c = UpgradeTree::get_voidite_cost(sel_tier);
+        int tit_c = UpgradeTree::get_titanium_cost(sel_tier);
+
+        bool lvl_ok = (player_lvl >= sel_req_lvl);
+        bool coins_ok = (profile.total_coins >= coin_c);
+        bool void_ok = (profile.total_voidite >= void_c);
+        bool tit_ok = (profile.total_titanium >= tit_c);
+
+        // Row 1: Level & Prerequisite requirements
+        std::string lvl_txt = "PLAYER LEVEL " + std::to_string(sel_req_lvl) + (lvl_ok ? " [OK]" : " [LOCKED]");
+        glm::vec4 lvl_col = lvl_ok ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(1.0f, 0.45f, 0.45f, 1.0f);
+        draw_text(lvl_txt, ix + 10.0f * ui_scale, iy + 26.0f * ui_scale, 0.82f * ui_scale, lvl_col);
+
+        if (sel_prereq.has_prerequisite) {
+            std::string pre_txt = "PREREQ: " + sel_prereq.required_name + (prereq_met ? " [MET]" : " [LOCKED]");
+            glm::vec4 pre_col = prereq_met ? glm::vec4(0.3f, 0.95f, 0.4f, 1.0f) : glm::vec4(1.0f, 0.5f, 0.4f, 1.0f);
+            draw_text_fitted(pre_txt, ix + iw * 0.50f, iy + 26.0f * ui_scale, iw * 0.50f - 8.0f * ui_scale, 0.82f * ui_scale, pre_col);
+        }
+
+        // Row 2: Exact Currency Costs (Coins, Voidite, Titanium)
+        float c_y = iy + 48.0f * ui_scale;
+        std::string c_str = std::to_string(coin_c) + " COINS (" + std::to_string(profile.total_coins) + ")";
+        glm::vec4 c_col = coins_ok ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f) : glm::vec4(1.0f, 0.4f, 0.4f, 1.0f);
+        draw_text(c_str, ix + 10.0f * ui_scale, c_y, 0.85f * ui_scale, c_col);
+
+        std::string v_str = std::to_string(void_c) + " VOIDITE (" + std::to_string(profile.total_voidite) + ")";
+        glm::vec4 v_col = void_ok ? glm::vec4(0.7f, 0.35f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.4f, 0.4f, 1.0f);
+        draw_text(v_str, ix + 10.0f * ui_scale, c_y + 18.0f * ui_scale, 0.85f * ui_scale, v_col);
+
+        std::string t_str = std::to_string(tit_c) + " TITANIUM (" + std::to_string(profile.total_titanium) + ")";
+        glm::vec4 t_col = tit_ok ? glm::vec4(0.2f, 0.85f, 1.0f, 1.0f) : glm::vec4(1.0f, 0.4f, 0.4f, 1.0f);
+        draw_text(t_str, ix + iw * 0.50f, c_y + 18.0f * ui_scale, 0.85f * ui_scale, t_col);
+    }
+    iy += cost_box_h + 8.0f * ui_scale;
+
+    // ── Full 5-Level Progression Roadmap Table ──
+    float road_h = 100.0f * ui_scale;
+    draw_panel_with_border(ix, iy, iw, road_h, glm::vec4(0.03f, 0.05f, 0.08f, 0.88f), glm::vec4(0.18f, 0.28f, 0.38f, 0.5f));
+    draw_text("5-TIER PROGRESSION ROADMAP", ix + 8.0f * ui_scale, iy + 5.0f * ui_scale, 0.78f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.8f));
+
+    for (int t = 1; t <= 5; ++t) {
+        auto t_info = UpgradeTree::get_tier_cost_info(t);
+        float ry = iy + 18.0f * ui_scale + (t - 1) * 15.0f * ui_scale;
+        bool is_current = (t == sel_tier);
+        bool is_next = (t == sel_tier + 1);
+
+        glm::vec4 r_col = is_current ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f) :
+                          is_next ? glm::vec4(0.3f, 0.95f, 0.55f, 1.0f) :
+                          (t < sel_tier) ? glm::vec4(0.5f, 0.6f, 0.7f, 0.7f) :
+                                           glm::vec4(0.7f, 0.75f, 0.8f, 0.85f);
+
+        std::string r_prefix = is_current ? "> TIER " : "  TIER ";
+        std::string row_str = r_prefix + std::to_string(t) + " (Req Lv " + std::to_string(t_info.required_level) + "): " +
+                              std::to_string(t_info.coin_cost) + "C | " +
+                              std::to_string(t_info.voidite_cost) + "V | " +
+                              std::to_string(t_info.titanium_cost) + "T";
+        draw_text_fitted(row_str, ix + 8.0f * ui_scale, ry, iw - 16.0f * ui_scale, 0.75f * ui_scale, r_col);
+    }
+    iy += road_h + 10.0f * ui_scale;
+
+    // ── Big Tactile Upgrade Button ──
+    float btn_w = iw;
+    float btn_h = std::clamp(48.0f * ui_scale, 38.0f, 54.0f);
+    float bx = ix;
+    float by = iy;
+
+    bool btn_hov = (mouse_x >= bx && mouse_x <= bx + btn_w && mouse_y >= by && mouse_y <= by + btn_h);
+
+    if (btn_hov && mouse_clicked && sel_can_buy && !sel_is_maxed) {
+        profile.upgrades.purchase(sel_type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
+        m_profile_dirty = true;
+        m_purchase_pulse_timer = 1.0f;
+        m_terminal_msg = "UPGRADE ACQUIRED: " + sel_info.name + " [TIER " + std::to_string(sel_tier + 1) + "]";
+        m_terminal_msg_col = glm::vec4(0.2f, 0.95f, 0.4f, 1.0f);
+    }
+
+    glm::vec4 b_bg = sel_is_maxed ? glm::vec4(0.10f, 0.14f, 0.18f, 0.6f) :
+                     !prereq_met ? glm::vec4(0.25f, 0.12f, 0.10f, 0.8f) :
+                     (player_lvl < sel_req_lvl) ? glm::vec4(0.25f, 0.10f, 0.12f, 0.8f) :
+                     sel_can_buy ? (btn_hov ? glm::vec4(0.2f, 0.75f, 0.95f, 1.0f) : glm::vec4(0.12f, 0.45f, 0.75f, 0.95f)) :
+                                   glm::vec4(0.15f, 0.18f, 0.22f, 0.65f);
+
+    glm::vec4 b_border = (sel_can_buy && !sel_is_maxed) ? (btn_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.4f, 0.85f, 1.0f, 0.8f)) :
+                         glm::vec4(0.22f, 0.35f, 0.45f, 0.6f);
+
+    draw_panel_with_border(bx, by, btn_w, btn_h, b_bg, b_border, (sel_can_buy && !sel_is_maxed) ? 2.0f : 1.0f);
+
+    if (sel_is_maxed) {
+        draw_text_centered_fitted("[MAX RANK MASTERED]", bx, by, btn_w, btn_h, 1.00f * ui_scale, glm::vec4(0.5f, 0.6f, 0.7f, 0.85f));
+    } else if (!prereq_met) {
+        draw_text_centered_fitted("[LOCKED: REQUIRES " + sel_prereq.required_name + "]", bx, by, btn_w, btn_h, 0.88f * ui_scale, glm::vec4(1.0f, 0.55f, 0.45f, 0.95f));
+    } else if (player_lvl < sel_req_lvl) {
+        draw_text_centered_fitted("[REQUIRES DELVER LEVEL " + std::to_string(sel_req_lvl) + "]", bx, by, btn_w, btn_h, 0.92f * ui_scale, glm::vec4(1.0f, 0.45f, 0.45f, 0.95f));
+    } else if (sel_can_buy) {
+        int coin_c = UpgradeTree::get_coin_cost(sel_tier);
+        draw_text_centered_fitted("ACQUIRE UPGRADE [" + std::to_string(coin_c) + " COINS]", bx, by, btn_w, btn_h, 0.95f * ui_scale,
+                                  btn_hov ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.95f, 0.98f, 1.0f, 1.0f));
+    } else {
+        std::string reason_str = profile.upgrades.get_lock_reason_string(sel_type, player_lvl, profile.total_coins, profile.total_voidite, profile.total_titanium);
+        draw_text_centered_fitted("[" + reason_str + "]", bx, by, btn_w, btn_h, 0.85f * ui_scale, glm::vec4(0.9f, 0.7f, 0.4f, 0.9f));
+    }
+
+    // ── Bottom Delver Progression Footer (Horizon Zero Dawn Style) ──
+    draw_panel_with_border(start_x, foot_y, terminal_w, foot_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.95f), glm::vec4(0.2f, 0.35f, 0.5f, 0.6f));
+
+    // Current Level Badge
+    draw_text("DELVER LEVEL: " + std::to_string(player_lvl), start_x + 12.0f * ui_scale, foot_y + 8.0f * ui_scale, 0.92f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+
+    // Wide Experience Progress Bar
+    float exp_bar_x = start_x + 180.0f * ui_scale;
+    float exp_bar_w = terminal_w - 200.0f * ui_scale;
+    float exp_bar_h = 16.0f * ui_scale;
+    float exp_bar_y = foot_y + (foot_h - exp_bar_h) * 0.5f;
+
+    int cur_exp = profile.total_exp;
+    int next_exp = profile.get_next_level_exp_req();
+    float exp_progress = (next_exp > 0) ? std::clamp(static_cast<float>(cur_exp) / static_cast<float>(next_exp), 0.0f, 1.0f) : 1.0f;
+
+    draw_rect(exp_bar_x, exp_bar_y, exp_bar_w, exp_bar_h, glm::vec4(0.08f, 0.12f, 0.16f, 0.9f));
+    draw_rect(exp_bar_x, exp_bar_y, exp_bar_w * exp_progress, exp_bar_h, glm::vec4(0.2f, 0.75f, 0.95f, 0.85f));
+    draw_panel_with_border(exp_bar_x, exp_bar_y, exp_bar_w, exp_bar_h, glm::vec4(0.0f), glm::vec4(0.3f, 0.5f, 0.7f, 0.7f));
+
+    std::string exp_label = "EXP: " + std::to_string(cur_exp) + " / " + std::to_string(next_exp) + " (" + std::to_string(static_cast<int>(exp_progress * 100.0f)) + "%)";
+    draw_text_centered_fitted(exp_label, exp_bar_x, exp_bar_y, exp_bar_w, exp_bar_h, 0.75f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 0.95f));
 }
 
 bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, float mouse_x, float mouse_y, bool mouse_clicked) {
@@ -1588,7 +1813,7 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
     }
     glm::vec4 b2_col = b2_hov ? glm::vec4(0.2f, 0.45f, 0.75f, 1.0f) : glm::vec4(0.12f, 0.3f, 0.55f, 0.95f);
     draw_panel_with_border(b2_x, bot_y, bot_btn_w, bot_btn_h, b2_col, b2_hov ? glm::vec4(0.6f, 0.85f, 1.0f, 1.0f) : glm::vec4(0.3f, 0.5f, 0.7f, 0.7f), b2_hov ? 2.0f : 1.0f);
-    draw_text_centered("[RETURN TO ORBITAL HUB]", b2_x, bot_y, bot_btn_w, bot_btn_h, 1.30f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    draw_text_centered_fitted("[RETURN TO ORBITAL HUB]", b2_x, bot_y, bot_btn_w, bot_btn_h, 1.30f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);

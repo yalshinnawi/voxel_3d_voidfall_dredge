@@ -13,6 +13,8 @@
 #include "../systems/noise_meter.hpp"
 #include "../entities/enemies/void_stalker.hpp"
 #include "../entities/enemies/seismic_burrower.hpp"
+#include "../entities/carcass_manager.hpp"
+#include "../ai/spawn_manager.hpp"
 #include "../ui/hud.hpp"
 #include "../ui/orbital_hub.hpp"
 #include "../ui/pause_menu.hpp"
@@ -20,6 +22,7 @@
 #include "../net/net_client.hpp"
 #include "../entities/dynamic_debris.hpp"
 #include "../audio/audio_engine.hpp"
+#include "../systems/audio_system.hpp"
 #include "save_system.hpp"
 #include <vector>
 #include <memory>
@@ -68,6 +71,8 @@ public:
     Application& operator=(const Application&) = delete;
 
     void run();
+    void TransitionState(GameState newState);
+    GameState current_state() const { return m_state; }
     const std::string& active_save_file() const { return m_active_save_file; }
     bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.capture_level_shapes; }
     AudioEngine* audio() { return m_audio.get(); }
@@ -86,6 +91,7 @@ private:
     void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
     void on_tactical_ability(CharacterClass cls, const glm::vec3& pos, const glm::vec3& dir);
     void setup_hazard_system();
+    void spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float radius, int min_blocks, int max_blocks);
     void sync_profile_with_player();
     void sync_audio_settings();
 
@@ -118,7 +124,10 @@ private:
     NoiseMeter m_noise_meter;
     VoidStalkerManager m_stalkers;
     SeismicBurrowerManager m_burrowers;
+    SpawnManager m_spawn_mgr;
     std::vector<PlayerPlasmaBolt> m_plasma_bolts;
+    float m_stalker_spotted_audio_cooldown{0.0f};
+    float m_stalker_investigate_audio_cooldown{0.0f};
 
     // Game state machine & progression
     GameState m_state{GameState::MainMenu};
@@ -127,6 +136,7 @@ private:
     PlayerInventory m_inventory;
     SkillMatrix m_skills;
     SurveyingSystem m_surveying;
+    int m_holdout_stage{0};
 
     uint32_t m_current_tick{0};
     float m_screen_shake{0.0f};
@@ -140,6 +150,7 @@ private:
 
     // Tremor visual & sustained shaking tracker
     float m_tremor_spall_timer{0.0f};
+    float m_aftershock_wave_timer{0.0f};
 
     // Level 3 collapse timer
     float m_level3_timer{180.0f};

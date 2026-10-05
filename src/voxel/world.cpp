@@ -67,16 +67,22 @@ void World::generate_world(int sector_index, uint32_t seed) {
         std::lock_guard<std::mutex> lock(m_world_mutex);
         m_chunks.clear();
         m_radioactive_sources.clear();
+        m_toxic_gas_sources.clear();
+        m_lava_sources.clear();
+        m_aquifer_sources.clear();
 
         int chunk_count_x = (m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        int chunk_count_y = (m_level_gen->world_height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         int chunk_count_z = (m_level_gen->world_depth() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         for (int cz = 0; cz < chunk_count_z; ++cz) {
-            for (int cx = 0; cx < chunk_count_x; ++cx) {
-                ChunkPos pos{cx, 0, cz};
-                auto chunk = std::make_shared<Chunk>(pos);
-                generate_chunk_terrain(*chunk);
-                m_chunks[pos] = std::move(chunk);
-                to_mesh.push_back(pos);
+            for (int cy = 0; cy < chunk_count_y; ++cy) {
+                for (int cx = 0; cx < chunk_count_x; ++cx) {
+                    ChunkPos pos{cx, cy, cz};
+                    auto chunk = std::make_shared<Chunk>(pos);
+                    generate_chunk_terrain(*chunk);
+                    m_chunks[pos] = std::move(chunk);
+                    to_mesh.push_back(pos);
+                }
             }
         }
     }
@@ -104,16 +110,22 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
         m_level_gen = std::move(gen);
         m_chunks.clear();
         m_radioactive_sources.clear();
+        m_toxic_gas_sources.clear();
+        m_lava_sources.clear();
+        m_aquifer_sources.clear();
 
         int chunk_count_x = m_level_gen ? ((m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 3;
+        int chunk_count_y = m_level_gen ? ((m_level_gen->world_height() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 1;
         int chunk_count_z = m_level_gen ? ((m_level_gen->world_depth() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 3;
         for (int cz = 0; cz < chunk_count_z; ++cz) {
-            for (int cx = 0; cx < chunk_count_x; ++cx) {
-                ChunkPos pos{cx, 0, cz};
-                auto chunk = std::make_shared<Chunk>(pos);
-                generate_chunk_terrain(*chunk);
-                m_chunks[pos] = std::move(chunk);
-                to_mesh.push_back(pos);
+            for (int cy = 0; cy < chunk_count_y; ++cy) {
+                for (int cx = 0; cx < chunk_count_x; ++cx) {
+                    ChunkPos pos{cx, cy, cz};
+                    auto chunk = std::make_shared<Chunk>(pos);
+                    generate_chunk_terrain(*chunk);
+                    m_chunks[pos] = std::move(chunk);
+                    to_mesh.push_back(pos);
+                }
             }
         }
     }
@@ -308,6 +320,12 @@ void World::generate_chunk_terrain(Chunk& chunk) {
 
                 if (v.material_id == MAT_RADIOACTIVE_ORE || v.material_id == MAT_RADIOACTIVE) {
                     m_radioactive_sources.push_back(glm::ivec3(wx, wy, wz));
+                } else if (v.material_id == MAT_TOXIC_GAS || v.material_id == MAT_GAS) {
+                    m_toxic_gas_sources.push_back(glm::ivec3(wx, wy, wz));
+                } else if (v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_LAVA) {
+                    m_lava_sources.push_back(glm::ivec3(wx, wy, wz));
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                    m_aquifer_sources.push_back(glm::ivec3(wx, wy, wz));
                 }
             }
         }

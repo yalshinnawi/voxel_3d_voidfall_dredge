@@ -215,8 +215,82 @@ int main() {
         std::cout << " -> Attacking burrower retaliation pursuit & prolonged escape verified." << std::endl;
     }
 
+    // Test 8: Subterranean Wall Drilling & Chattering Noises
+    {
+        std::cout << "[Test 8] Testing Burrower Wall Drilling & Chattering Noises..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(30.0f, 20.0f, 30.0f);
+        manager.spawn_burrower(spawn_pos);
+        auto& b = manager.burrowers_mut()[0];
+        b.state = BurrowerState::Burrowing;
+        b.grind_timer = 0.05f; // Ready to emit drilling/grinding noise
+        b.chatter_timer = 0.05f; // Ready to emit chattering noise
+
+        glm::vec3 player_pos(30.0f, 20.0f, 35.0f);
+        auto res = manager.update(0.1f, player_pos, world);
+
+        CHECK(res.any_grind, "Burrower tunneling through walls must emit drilling/digging noises (any_grind)");
+        CHECK(b.just_ground, "Burrower must set just_ground flag when drilling into walls");
+        CHECK(res.any_chatter, "Burrower must emit chattering noises while traveling through stone");
+        CHECK(b.just_chattered, "Burrower must set just_chattered flag");
+
+        std::cout << " -> Subterranean wall drilling & chattering noises verified." << std::endl;
+    }
+
+    // Test 9: Localized Burrowing Occlusion & Wall Line-Of-Sight Isolation
+    {
+        std::cout << "[Test 9] Testing Localized Burrowing Occlusion & Wall Line-Of-Sight..." << std::endl;
+
+        // Construct two chambers separated by a solid rock barrier wall at x = 20
+        World chamber_world;
+        chamber_world.generate_world(1, 9999);
+        // Clear Room A (x: 10..18, y: 18..22, z: 10..20)
+        for (int x = 10; x <= 18; ++x) {
+            for (int y = 18; y <= 22; ++y) {
+                for (int z = 10; z <= 20; ++z) {
+                    chamber_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+        // Build solid dividing wall at x = 19..21
+        for (int x = 19; x <= 21; ++x) {
+            for (int y = 18; y <= 22; ++y) {
+                for (int z = 10; z <= 20; ++z) {
+                    chamber_world.set_voxel(x, y, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+                }
+            }
+        }
+        // Clear Room B (x: 22..30, y: 18..22, z: 10..20)
+        for (int x = 22; x <= 30; ++x) {
+            for (int y = 18; y <= 22; ++y) {
+                for (int z = 10; z <= 20; ++z) {
+                    chamber_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+
+        glm::vec3 player_eye(14.0f, 20.0f, 15.0f);
+        glm::vec3 behind_wall_burrow(26.0f, 20.0f, 15.0f);
+        glm::vec3 same_room_burrow(16.0f, 20.0f, 15.0f);
+
+        // Raycast across dividing wall
+        glm::vec3 diff_wall = behind_wall_burrow - player_eye;
+        float d_wall = glm::length(diff_wall);
+        RaycastHit hit_wall = chamber_world.raycast(player_eye, diff_wall / d_wall, d_wall - 0.25f);
+        CHECK(hit_wall.hit, "Intervening wall must block line-of-sight to behind-wall burrowing");
+        CHECK(hit_wall.block_pos.x >= 19 && hit_wall.block_pos.x <= 21, "Raycast must hit the dividing basalt wall");
+
+        // Raycast within same room (direct line-of-sight)
+        glm::vec3 diff_room = same_room_burrow - player_eye;
+        float d_room = glm::length(diff_room);
+        RaycastHit hit_room = chamber_world.raycast(player_eye, diff_room / d_room, d_room - 0.25f);
+        CHECK(!hit_room.hit, "Direct line-of-sight within same room must NOT be blocked by wall");
+
+        std::cout << " -> Localized burrowing wall occlusion & line-of-sight verified." << std::endl;
+    }
+
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (7/7)" << std::endl;
+    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (9/9)" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }

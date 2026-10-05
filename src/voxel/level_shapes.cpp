@@ -6,8 +6,8 @@
 
 namespace Voidfall {
 
-LevelGenerator::LevelGenerator(int sector_index, uint32_t seed)
-    : m_sector_index(sector_index), m_seed(seed)
+LevelGenerator::LevelGenerator(int sector_index, uint32_t seed, int vertical_chunks)
+    : m_sector_index(sector_index), m_seed(seed), m_world_h(vertical_chunks > 1 ? vertical_chunks * 32 : WORLD_HEIGHT)
 {
     // Sector-based level scaling:
     // Sector 1: 3x3 grid (9 rooms, 72x72 voxels)
@@ -86,7 +86,7 @@ glm::vec3 LevelGenerator::extraction_position() const {
 bool LevelGenerator::is_in_bounds(int x, int y, int z) const {
     return (x >= 2 && x <= world_width() - 3 &&
             z >= 2 && z <= world_depth() - 3 &&
-            y >= 1 && y <= 27);
+            y >= 1 && y <= m_world_h - 5);
 }
 
 void LevelGenerator::create_single_room_test_layout(RoomShapeType type) {
@@ -221,64 +221,76 @@ void LevelGenerator::generate_layout() {
     std::vector<RoomShapeType> guaranteed_types;
 
     if (m_sector_index <= 1) {
-        // Sector 1: Natural caverns, geodes, quarries, and fungoid bio-grottos
+        // Sector 1: Natural caverns, geodes, quarries, grottos, crystal cathedrals & aquifer oases
         archetype_weights = {
-            {RoomShapeType::MiningPillarHall, 25, 2},
-            {RoomShapeType::TerracedQuarry,   25, 2},
-            {RoomShapeType::CrystallineGeode, 25, 2},
-            {RoomShapeType::FungoidBioGrotto, 25, 2}
+            {RoomShapeType::MiningPillarHall,             18, 2},
+            {RoomShapeType::TerracedQuarry,               16, 2},
+            {RoomShapeType::CrystallineGeode,             16, 2},
+            {RoomShapeType::FungoidBioGrotto,             16, 2},
+            {RoomShapeType::SubterraneanAquiferOasis,     16, 2},
+            {RoomShapeType::BioluminescentGlowwormGrotto, 15, 2},
+            {RoomShapeType::PrismaticCrystalCathedral,    14, 2}
         };
         // Guarantee at least 1 resource cavern and 1 crystalline/fungal cavern
         guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::MiningPillarHall : RoomShapeType::TerracedQuarry);
-        guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::CrystallineGeode : RoomShapeType::FungoidBioGrotto);
+        guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::CrystallineGeode : RoomShapeType::SubterraneanAquiferOasis);
     } else if (m_sector_index == 2) {
-        // Sector 2: Industrial bunkers, magma lakes, spike arenas, fault crevasses, canyons
+        // Sector 2: Industrial bunkers, magma foundries, toxic swamps, titan necropolises, coolant reservoirs, chasms
         archetype_weights = {
-            {RoomShapeType::IndustrialVaultBunker, 15, 2},
-            {RoomShapeType::FaultLineCrevasse,     14, 2},
-            {RoomShapeType::MagmaCalderaLake,      14, 2},
-            {RoomShapeType::SpikeTrenchArena,      14, 2},
-            {RoomShapeType::CrumblingArchCanyon,   13, 2},
-            {RoomShapeType::LaserDefenseFoundry,   12, 2},
-            {RoomShapeType::FungoidBioGrotto,      10, 2},
-            {RoomShapeType::MiningPillarHall,       8, 2},
-            {RoomShapeType::TerracedQuarry,         8, 2},
-            {RoomShapeType::CrystallineGeode,       8, 2}
+            {RoomShapeType::IndustrialVaultBunker,        12, 2},
+            {RoomShapeType::MoltenMagmaFoundry,           12, 2},
+            {RoomShapeType::ToxicMiasmaSwamp,             12, 2},
+            {RoomShapeType::ColossalAbyssalChasm,         12, 2},
+            {RoomShapeType::FaultLineCrevasse,            11, 2},
+            {RoomShapeType::MagmaCalderaLake,             11, 2},
+            {RoomShapeType::AncientTitanNecropolis,       11, 2},
+            {RoomShapeType::PrecursorCoolantReservoir,    11, 2},
+            {RoomShapeType::SubterraneanAquiferOasis,     10, 2},
+            {RoomShapeType::PrismaticCrystalCathedral,    10, 2},
+            {RoomShapeType::BioluminescentGlowwormGrotto, 10, 2},
+            {RoomShapeType::SpikeTrenchArena,             10, 2},
+            {RoomShapeType::CrumblingArchCanyon,          10, 2},
+            {RoomShapeType::LaserDefenseFoundry,          10, 2},
+            {RoomShapeType::FungoidBioGrotto,              8, 2}
         };
-        // Guarantee at least 1 vault and at least 1 hazard arena
-        guaranteed_types.push_back(RoomShapeType::IndustrialVaultBunker);
+        // Guarantee at least 1 vault/coolant and at least 1 hazard arena
+        guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::IndustrialVaultBunker : RoomShapeType::PrecursorCoolantReservoir);
         RoomShapeType hazards[] = {
+            RoomShapeType::MoltenMagmaFoundry,
+            RoomShapeType::ToxicMiasmaSwamp,
             RoomShapeType::MagmaCalderaLake,
-            RoomShapeType::SpikeTrenchArena,
-            RoomShapeType::FungoidBioGrotto
+            RoomShapeType::ColossalAbyssalChasm
         };
-        guaranteed_types.push_back(hazards[rng() % 3]);
+        guaranteed_types.push_back(hazards[rng() % 4]);
     } else {
-        // Sector 3+: Abyssal chasms, radioactive sanctuaries, void rifts, advanced hazards
+        // Sector 3+: Abyssal chasms, radioactive sanctuaries, void rifts, ancient titan necropolises, advanced hazards
         archetype_weights = {
-            {RoomShapeType::AbyssalVerticalChasm,     16, 3},
-            {RoomShapeType::RadioactiveCoreSanctuary, 16, 3},
-            {RoomShapeType::VoidSingularityRift,      16, 3},
-            {RoomShapeType::MagmaCalderaLake,         12, 2},
-            {RoomShapeType::SpikeTrenchArena,         12, 2},
-            {RoomShapeType::LaserDefenseFoundry,      12, 2},
-            {RoomShapeType::IndustrialVaultBunker,    10, 2},
-            {RoomShapeType::FaultLineCrevasse,        10, 2},
-            {RoomShapeType::CrumblingArchCanyon,      10, 2},
-            {RoomShapeType::FungoidBioGrotto,          8, 2},
-            {RoomShapeType::MiningPillarHall,          6, 2},
-            {RoomShapeType::TerracedQuarry,            6, 2},
-            {RoomShapeType::CrystallineGeode,          6, 2}
+            {RoomShapeType::AbyssalVerticalChasm,         14, 3},
+            {RoomShapeType::ColossalAbyssalChasm,         15, 3},
+            {RoomShapeType::RadioactiveCoreSanctuary,     14, 3},
+            {RoomShapeType::VoidSingularityRift,          14, 3},
+            {RoomShapeType::AncientTitanNecropolis,       13, 2},
+            {RoomShapeType::ToxicMiasmaSwamp,             13, 2},
+            {RoomShapeType::MoltenMagmaFoundry,           13, 2},
+            {RoomShapeType::PrecursorCoolantReservoir,    12, 2},
+            {RoomShapeType::PrismaticCrystalCathedral,    12, 2},
+            {RoomShapeType::MagmaCalderaLake,             10, 2},
+            {RoomShapeType::SpikeTrenchArena,             10, 2},
+            {RoomShapeType::LaserDefenseFoundry,          10, 2},
+            {RoomShapeType::IndustrialVaultBunker,         8, 2},
+            {RoomShapeType::FaultLineCrevasse,             8, 2},
+            {RoomShapeType::SubterraneanAquiferOasis,      8, 2}
         };
         // Guarantee Sector 3 core archetypes + hazard
-        guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::AbyssalVerticalChasm : RoomShapeType::RadioactiveCoreSanctuary);
+        guaranteed_types.push_back((rng() % 2 == 0) ? RoomShapeType::ColossalAbyssalChasm : RoomShapeType::RadioactiveCoreSanctuary);
         guaranteed_types.push_back(RoomShapeType::VoidSingularityRift);
         RoomShapeType s3_hazards[] = {
-            RoomShapeType::MagmaCalderaLake,
-            RoomShapeType::SpikeTrenchArena,
+            RoomShapeType::MoltenMagmaFoundry,
+            RoomShapeType::ToxicMiasmaSwamp,
+            RoomShapeType::AncientTitanNecropolis,
             RoomShapeType::LaserDefenseFoundry
         };
-        guaranteed_types.push_back(s3_hazards[rng() % 3]);
+        guaranteed_types.push_back(s3_hazards[rng() % 4]);
     }
 
     std::vector<RoomShapeType> available_pool;
@@ -353,8 +365,20 @@ void LevelGenerator::generate_layout() {
                 if (is_massive_slot[gx][gz] ||
                     room.type == RoomShapeType::AbyssalVerticalChasm ||
                     room.type == RoomShapeType::VoidSingularityRift ||
-                    room.type == RoomShapeType::RadioactiveCoreSanctuary) {
+                    room.type == RoomShapeType::RadioactiveCoreSanctuary ||
+                    room.type == RoomShapeType::ColossalAbyssalChasm ||
+                    room.type == RoomShapeType::PrismaticCrystalCathedral ||
+                    room.type == RoomShapeType::AncientTitanNecropolis ||
+                    room.type == RoomShapeType::SubterraneanAquiferOasis) {
                     room.is_massive = true;
+                    // Mega-cavern status for key center chambers or colossal chasms
+                    if (is_massive_slot[gx][gz] && (room.type == RoomShapeType::ColossalAbyssalChasm ||
+                                                   room.type == RoomShapeType::PrismaticCrystalCathedral ||
+                                                   room.type == RoomShapeType::AncientTitanNecropolis ||
+                                                   room.type == RoomShapeType::SubterraneanAquiferOasis ||
+                                                   m_sector_index >= 2)) {
+                        room.is_mega = true;
+                    }
                     room.floor_level = 2;
                     room.floor_y = 4;
                     room.ceiling_y = 25;
@@ -436,7 +460,11 @@ void LevelGenerator::generate_layout() {
             RoomPlacement room = grid_rooms[idx];
 
             // Room Dimensions & Non-Square Variation:
-            if (room.is_massive) {
+            if (room.is_mega) {
+                // Mega-cavern expansive dimensions (up to 27x27 roaming expanse)
+                room.half_width = 12 + static_cast<int>(rng() % 2); // 12 to 13
+                room.half_depth = 12 + static_cast<int>(rng() % 2); // 12 to 13
+            } else if (room.is_massive) {
                 room.half_width = 10;
                 room.half_depth = 10;
             } else {
@@ -974,6 +1002,183 @@ void LevelGenerator::generate_luminaries() {
                 break;
             }
 
+            case RoomShapeType::SubterraneanAquiferOasis: {
+                CavernLuminary pool_glow;
+                pool_glow.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 1.2f), room.center.z);
+                pool_glow.base_color = glm::vec3(0.08f, 0.92f, 0.96f);
+                pool_glow.base_radius = 24.0f;
+                pool_glow.base_intensity = 3.0f;
+                pool_glow.type = LuminaryType::AquiferOasisGlow;
+                pool_glow.pulse_speed = 1.3f;
+                pool_glow.pulse_depth = 0.15f;
+                pool_glow.name = "Aquifer Oasis Pool Luminary";
+                m_luminaries.push_back(pool_glow);
+
+                CavernLuminary waterfall_mist;
+                waterfall_mist.position = glm::vec3(room.center.x - room.half_width + 2.0f, static_cast<float>(room.floor_y + 4.0f), room.center.z);
+                waterfall_mist.base_color = glm::vec3(0.18f, 0.98f, 0.55f);
+                waterfall_mist.base_radius = 16.0f;
+                waterfall_mist.base_intensity = 2.2f;
+                waterfall_mist.type = LuminaryType::AquiferOasisGlow;
+                waterfall_mist.name = "Waterfall Mist Flora Glow";
+                m_luminaries.push_back(waterfall_mist);
+                break;
+            }
+
+            case RoomShapeType::ColossalAbyssalChasm: {
+                CavernLuminary bridge_light;
+                bridge_light.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 9.5f), room.center.z);
+                bridge_light.base_color = glm::vec3(0.95f, 0.85f, 0.40f);
+                bridge_light.base_radius = 22.0f;
+                bridge_light.base_intensity = 2.8f;
+                bridge_light.type = LuminaryType::CorridorBulkheadLight;
+                bridge_light.name = "Suspension Bridge Lantern";
+                m_luminaries.push_back(bridge_light);
+
+                CavernLuminary pit_beacon;
+                pit_beacon.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 2.0f), room.center.z);
+                pit_beacon.base_color = glm::vec3(0.95f, 0.20f, 0.12f);
+                pit_beacon.base_radius = 28.0f;
+                pit_beacon.base_intensity = 3.4f;
+                pit_beacon.type = LuminaryType::IndustrialVaultBeacon;
+                pit_beacon.pulse_speed = 2.4f;
+                pit_beacon.pulse_depth = 0.28f;
+                pit_beacon.name = "Abyssal Chasm Spike Warning";
+                m_luminaries.push_back(pit_beacon);
+                break;
+            }
+
+            case RoomShapeType::MoltenMagmaFoundry: {
+                CavernLuminary hearth;
+                hearth.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 1.2f), room.center.z);
+                hearth.base_color = glm::vec3(1.0f, 0.38f, 0.05f);
+                hearth.base_radius = 28.0f;
+                hearth.base_intensity = 3.8f;
+                hearth.type = LuminaryType::ThermalMagmaVent;
+                hearth.pulse_speed = 3.0f;
+                hearth.pulse_depth = 0.25f;
+                hearth.name = "Magma Foundry Smelter";
+                m_luminaries.push_back(hearth);
+
+                CavernLuminary flume;
+                flume.position = glm::vec3(room.center.x + 4.0f, static_cast<float>(room.floor_y + 4.0f), room.center.z - 4.0f);
+                flume.base_color = glm::vec3(1.0f, 0.65f, 0.12f);
+                flume.base_radius = 16.0f;
+                flume.base_intensity = 2.4f;
+                flume.type = LuminaryType::ThermalMagmaVent;
+                flume.name = "Foundry Slag Flume";
+                m_luminaries.push_back(flume);
+                break;
+            }
+
+            case RoomShapeType::ToxicMiasmaSwamp: {
+                CavernLuminary miasma;
+                miasma.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 2.0f), room.center.z);
+                miasma.base_color = glm::vec3(0.22f, 0.95f, 0.18f);
+                miasma.base_radius = 24.0f;
+                miasma.base_intensity = 3.0f;
+                miasma.type = LuminaryType::ToxicMiasmaGreen;
+                miasma.pulse_speed = 1.8f;
+                miasma.pulse_depth = 0.30f;
+                miasma.flicker_rate = 7.0f;
+                miasma.name = "Toxic Miasma Core Vent";
+                m_luminaries.push_back(miasma);
+
+                CavernLuminary spore;
+                spore.position = glm::vec3(room.center.x - 3.5f, static_cast<float>(room.floor_y + 4.0f), room.center.z + 3.5f);
+                spore.base_color = glm::vec3(0.40f, 0.85f, 0.15f);
+                spore.base_radius = 16.0f;
+                spore.base_intensity = 2.0f;
+                spore.type = LuminaryType::ToxicMiasmaGreen;
+                spore.name = "Swamp Spore Vent";
+                m_luminaries.push_back(spore);
+                break;
+            }
+
+            case RoomShapeType::PrismaticCrystalCathedral: {
+                CavernLuminary monolith;
+                monolith.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 6.0f), room.center.z);
+                monolith.base_color = glm::vec3(0.88f, 0.35f, 0.98f);
+                monolith.base_radius = 32.0f;
+                monolith.base_intensity = 4.2f;
+                monolith.type = LuminaryType::PrismaticCrystalRadiance;
+                monolith.pulse_speed = 1.6f;
+                monolith.pulse_depth = 0.22f;
+                monolith.name = "Prismatic Cathedral Core";
+                m_luminaries.push_back(monolith);
+
+                CavernLuminary spire;
+                spire.position = glm::vec3(room.center.x + 4.0f, static_cast<float>(room.floor_y + 9.0f), room.center.z + 4.0f);
+                spire.base_color = glm::vec3(0.20f, 0.85f, 0.98f);
+                spire.base_radius = 20.0f;
+                spire.base_intensity = 2.8f;
+                spire.type = LuminaryType::PrismaticCrystalRadiance;
+                spire.name = "Cathedral Spire Prism";
+                m_luminaries.push_back(spire);
+                break;
+            }
+
+            case RoomShapeType::AncientTitanNecropolis: {
+                CavernLuminary titan_rib;
+                titan_rib.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 6.0f), room.center.z);
+                titan_rib.base_color = glm::vec3(0.92f, 0.65f, 0.18f);
+                titan_rib.base_radius = 26.0f;
+                titan_rib.base_intensity = 3.2f;
+                titan_rib.type = LuminaryType::TitanFossilAura;
+                titan_rib.pulse_speed = 1.0f;
+                titan_rib.pulse_depth = 0.18f;
+                titan_rib.name = "Titan Necropolis Fossil Glow";
+                m_luminaries.push_back(titan_rib);
+                break;
+            }
+
+            case RoomShapeType::BioluminescentGlowwormGrotto: {
+                CavernLuminary starry_canopy;
+                starry_canopy.position = glm::vec3(room.center.x, static_cast<float>(room.ceiling_y - 2.0f), room.center.z);
+                starry_canopy.base_color = glm::vec3(0.15f, 0.92f, 0.82f);
+                starry_canopy.base_radius = 26.0f;
+                starry_canopy.base_intensity = 3.4f;
+                starry_canopy.type = LuminaryType::BioluminescentLedge;
+                starry_canopy.pulse_speed = 2.0f;
+                starry_canopy.pulse_depth = 0.25f;
+                starry_canopy.name = "Glowworm Canopy Stars";
+                m_luminaries.push_back(starry_canopy);
+
+                CavernLuminary mirror_pool;
+                mirror_pool.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 1.0f), room.center.z);
+                mirror_pool.base_color = glm::vec3(0.10f, 0.75f, 0.95f);
+                mirror_pool.base_radius = 20.0f;
+                mirror_pool.base_intensity = 2.2f;
+                mirror_pool.type = LuminaryType::AquiferOasisGlow;
+                mirror_pool.name = "Grotto Mirror Pool";
+                m_luminaries.push_back(mirror_pool);
+                break;
+            }
+
+            case RoomShapeType::PrecursorCoolantReservoir: {
+                CavernLuminary coolant;
+                coolant.position = glm::vec3(room.center.x, static_cast<float>(room.floor_y + 2.0f), room.center.z);
+                coolant.base_color = glm::vec3(0.08f, 0.70f, 0.98f);
+                coolant.base_radius = 24.0f;
+                coolant.base_intensity = 3.2f;
+                coolant.type = LuminaryType::IndustrialVaultBeacon;
+                coolant.pulse_speed = 3.8f;
+                coolant.pulse_depth = 0.22f;
+                coolant.name = "Precursor Coolant Reservoir";
+                m_luminaries.push_back(coolant);
+
+                CavernLuminary strobe;
+                strobe.position = glm::vec3(room.center.x - 4.0f, static_cast<float>(room.floor_y + 4.5f), room.center.z + 4.0f);
+                strobe.base_color = glm::vec3(0.98f, 0.65f, 0.10f);
+                strobe.base_radius = 16.0f;
+                strobe.base_intensity = 2.6f;
+                strobe.type = LuminaryType::LaserSecurityStrobe;
+                strobe.flicker_rate = 14.0f;
+                strobe.name = "Reservoir Leak Warning";
+                m_luminaries.push_back(strobe);
+                break;
+            }
+
             case RoomShapeType::SpawnStagingCavern:
             default: {
                 CavernLuminary spawn_beacon;
@@ -1014,7 +1219,7 @@ Voxel LevelGenerator::sample_voxel(int x, int y, int z) const {
     }
 
     // 2. Ceiling mantle layer (top of world is solid rock mantle)
-    if (y >= 26) {
+    if (y >= m_world_h - 6) {
         uint8_t ceiling_mat = (m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE;
         return Voxel{ceiling_mat, VOXEL_FLAG_ANCHORED};
     }
@@ -1227,6 +1432,30 @@ Voxel LevelGenerator::sample_voxel(int x, int y, int z) const {
                 case RoomShapeType::CrumblingArchCanyon:
                     sample_crumbling_canyon(room, x, y, z, voxel);
                     break;
+                case RoomShapeType::SubterraneanAquiferOasis:
+                    sample_aquifer_oasis(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::ColossalAbyssalChasm:
+                    sample_colossal_abyssal_chasm(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::MoltenMagmaFoundry:
+                    sample_molten_magma_foundry(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::ToxicMiasmaSwamp:
+                    sample_toxic_miasma_swamp(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::PrismaticCrystalCathedral:
+                    sample_prismatic_crystal_cathedral(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::AncientTitanNecropolis:
+                    sample_ancient_titan_necropolis(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::BioluminescentGlowwormGrotto:
+                    sample_bioluminescent_glowworm_grotto(room, x, y, z, voxel);
+                    break;
+                case RoomShapeType::PrecursorCoolantReservoir:
+                    sample_precursor_coolant_reservoir(room, x, y, z, voxel);
+                    break;
             }
             return voxel;
         }
@@ -1422,7 +1651,7 @@ void LevelGenerator::sample_pillar_hall(const RoomPlacement& room, int x, int y,
     }
 
     // Elevated parkour arch bridge (relative to room.floor_y)
-    int bridge_y = room.floor_y + 7 + static_cast<int>((room_hash >> 2) % 2);
+    int bridge_y = room.floor_y + 4 + static_cast<int>((room_hash >> 2) % 2);
     bool bridge_align_x = ((room_hash >> 3) % 2 == 1);
     bool is_bridge = false;
     if (bridge_align_x) {
@@ -1431,7 +1660,7 @@ void LevelGenerator::sample_pillar_hall(const RoomPlacement& room, int x, int y,
         is_bridge = (y == bridge_y && std::abs(dx) <= 1 && std::abs(dz) <= (room.half_depth - 3));
     }
 
-    if (is_bridge && bridge_y < room.ceiling_y - 2) {
+    if (is_bridge && bridge_y <= room.ceiling_y - 6) {
         if (dx == 0 && dz == 0) {
             out = Voxel{MAT_VOIDITE_CRYSTAL, VOXEL_FLAG_EMISSIVE}; // Central bridge prize
         } else {
@@ -1911,9 +2140,26 @@ void LevelGenerator::sample_spike_trench(const RoomPlacement& room, int x, int y
         return;
     }
 
+    if (is_doorway_floor(room, dx, dz, y)) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
     if (is_doorway_air(room, dx, dz, y)) {
         out = Voxel{MAT_AIR, 0};
         return;
+    }
+
+    // Safe perimeter walkway / doorway entrance ledges around room walls
+    if (abs_x >= room.half_width - 2 || abs_z >= room.half_depth - 2) {
+        if (y == room.floor_y) {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+            return;
+        }
+        if (y >= room.floor_y + 1 && y <= room.floor_y + 3) {
+            out = Voxel{MAT_AIR, 0};
+            return;
+        }
     }
 
     // Pit floor at room.floor_y
@@ -1925,10 +2171,13 @@ void LevelGenerator::sample_spike_trench(const RoomPlacement& room, int x, int y
     uint32_t trench_hash = hash_coord(room.center.x, room.center.z, 0, 521);
     int spike_parity = static_cast<int>(trench_hash % 2);
 
-    // Sharp crystalline basalt spikes protruding from the floor at floor_y + 1
-    bool is_spike = (y == room.floor_y + 1) && ((abs_x + abs_z) % 2 == spike_parity) && (abs_x >= 2 || abs_z >= 2);
+    // Spikes strictly confined to interior recessed pit away from perimeter walkways and bridges
+    bool is_spike = (y == room.floor_y + 1) &&
+                    (abs_x >= 2 && abs_x <= room.half_width - 3) &&
+                    (abs_z >= 2 && abs_z <= room.half_depth - 3) &&
+                    ((abs_x + abs_z) % 2 == spike_parity);
     if (is_spike) {
-        out = Voxel{MAT_VOLCANIC_BASALT, 0x0F}; // Flagged spike block
+        out = Voxel{MAT_OBSIDIAN_SPIKES, VOXEL_FLAG_EMISSIVE}; // Lethal glowing crimson obsidian spikes
         return;
     }
 
@@ -2210,6 +2459,467 @@ void LevelGenerator::sample_crumbling_canyon(const RoomPlacement& room, int x, i
 
     if (y >= room.ceiling_y - 2) {
         out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+// ─────────────────────────────────────────────────────────────
+// NEW EXPANDED ROOM ARCHETYPES (OASIS, CHASMS, FOUNDRIES, GROTTOS)
+// ─────────────────────────────────────────────────────────────
+
+void LevelGenerator::sample_aquifer_oasis(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 201) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_FRACTURED_GRANITE, out);
+        return;
+    }
+
+    // Floor and water pools
+    if (y == room.floor_y) {
+        // Central crystal aquifer pool
+        if (r_horiz <= static_cast<float>(room.half_width) - 3.2f) {
+            // Stepping stones and islands
+            if ((std::abs(dx) <= 1 && std::abs(dz) <= 1) || (std::abs(dx % 3) == 0 && std::abs(dz % 3) == 0)) {
+                out = Voxel{MAT_VOLCANIC_BASALT, 0};
+            } else {
+                out = Voxel{MAT_CRYSTAL_AQUIFER, 0}; // Liquid crystal water pool
+            }
+        } else {
+            // Verdant oasis shoreline banks: lush bioluminescent moss & soil
+            uint32_t florah = hash_coord(x, y, z, 303);
+            if ((florah % 10) < 6) {
+                out = Voxel{MAT_BIOLUMINESCENT_FLORA, VOXEL_FLAG_EMISSIVE};
+            } else {
+                out = Voxel{MAT_VOLCANIC_BASALT, 0};
+            }
+        }
+        return;
+    }
+
+    // Cascading subterranean waterfall pouring along the West wall
+    if (dx <= -room.half_width + 2 && std::abs(dz) <= 2 && y > room.floor_y && y <= room.ceiling_y - 3) {
+        out = Voxel{MAT_CRYSTAL_AQUIFER, 0}; // Cascading vertical water stream
+        return;
+    }
+
+    // Prismatic crystals jutting out around the oasis banks
+    if (y == room.floor_y + 1 && r_horiz >= static_cast<float>(room.half_width) - 3.0f && r_horiz <= static_cast<float>(room.half_width) - 1.5f) {
+        if ((hash_coord(x, y, z, 404) % 10) == 0) {
+            out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+    }
+
+    // High domed ceiling with moisture stalactites
+    if (y >= room.ceiling_y - 2) {
+        if (y == room.ceiling_y - 2 && (std::abs(dx % 4) == 0 && std::abs(dz % 4) == 0)) {
+            out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+        out = Voxel{MAT_FRACTURED_GRANITE, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_colossal_abyssal_chasm(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 202) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_VOLCANIC_BASALT, out);
+        return;
+    }
+
+    if (is_doorway_floor(room, dx, dz, y)) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    if (is_doorway_air(room, dx, dz, y)) {
+        out = Voxel{MAT_AIR, 0};
+        return;
+    }
+
+    // Chasm floor at y == room.floor_y:
+    // Deadly spiked abyss pit bed!
+    if (y == room.floor_y) {
+        // Safe perimeter walkway / doorway entrance ledges around room walls
+        if (std::abs(dx) >= room.half_width - 3 || std::abs(dz) >= room.half_depth - 3) {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+            return;
+        }
+        // In the center is a lethal punji spike trench
+        if (r_horiz <= static_cast<float>(room.half_width) - 3.0f) {
+            out = Voxel{MAT_OBSIDIAN_SPIKES, VOXEL_FLAG_EMISSIVE}; // Deadly punji spike trench
+        } else {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        }
+        return;
+    }
+
+    // High-tension suspension bridge spanning across the chasm at y = room.floor_y + 8
+    // Spans East-West (along X axis) with 3m wide clear central walkway and perimeter railings at dz = +/- 2
+    bool on_bridge = (std::abs(dz) <= 2 && y == room.floor_y + 8);
+    bool on_railing = (std::abs(dz) == 2 && y == room.floor_y + 9);
+    if (on_bridge) {
+        out = Voxel{MAT_TITANIUM, 0};
+        return;
+    }
+    if (on_railing) {
+        out = Voxel{MAT_INDUSTRIAL_BULKHEAD, 0};
+        return;
+    }
+
+    // Doorway entrance ledges at room.floor_y on the perimeter so corridors connect safely
+    bool is_doorway_walkway = (std::abs(dx) >= room.half_width - 2 || std::abs(dz) >= room.half_depth - 2) && (y == room.floor_y);
+    if (is_doorway_walkway) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    // Hanging grapple stalactites from ceiling
+    if (y >= room.ceiling_y - 4 && (std::abs(dx % 5) == 0 && std::abs(dz % 5) == 0)) {
+        out = Voxel{MAT_VOLCANIC_BASALT, VOXEL_FLAG_ANCHORED};
+        return;
+    }
+
+    if (y >= room.ceiling_y - 1) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_molten_magma_foundry(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 203) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_VOLCANIC_BASALT, out);
+        return;
+    }
+
+    // Magma lake & smelting flumes at floor level
+    if (y == room.floor_y) {
+        // Criss-crossing magma channels
+        bool is_magma_channel = (std::abs(dx) <= 2 || std::abs(dz) <= 2) && r_horiz <= static_cast<float>(room.half_width) - 2.5f;
+        if (is_magma_channel) {
+            out = Voxel{MAT_MOLTEN_MAGMA, VOXEL_FLAG_EMISSIVE};
+        } else {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        }
+        return;
+    }
+
+    // Elevated titanium industrial catwalk at y == room.floor_y + 3
+    bool catwalk_perimeter = (r_horiz >= 4.0f && r_horiz <= 6.0f) && (y == room.floor_y + 3);
+    bool catwalk_cross = (std::abs(dx) <= 1 || std::abs(dz) <= 1) && (y == room.floor_y + 3);
+    if (catwalk_perimeter || catwalk_cross) {
+        out = Voxel{MAT_TITANIUM, 0};
+        return;
+    }
+
+    // Smelting columns & exhaust chimneys
+    if ((std::abs(dx) == 4 && std::abs(dz) == 4) && y < room.ceiling_y - 2) {
+        out = Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_ANCHORED};
+        return;
+    }
+
+    if (y >= room.ceiling_y - 2) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_toxic_miasma_swamp(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 204) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_VOLCANIC_BASALT, out);
+        return;
+    }
+
+    // Low swamp floor: damp moss & sludge
+    if (y == room.floor_y) {
+        if ((hash_coord(x, y, z, 505) % 10) < 5) {
+            out = Voxel{MAT_BIOLUMINESCENT_FLORA, VOXEL_FLAG_EMISSIVE};
+        } else {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        }
+        return;
+    }
+
+    // Pockets of heavy toxic gas lingering in the lower 2 meters (y = floor_y + 1 and floor_y + 2)
+    // Sinuous pockets visible across the room!
+    if ((y == room.floor_y + 1 || y == room.floor_y + 2) && r_horiz <= static_cast<float>(room.half_width) - 3.0f) {
+        // Natural meandering gas pockets
+        float gas_wave = std::sin(static_cast<float>(dx) * 0.5f) * std::cos(static_cast<float>(dz) * 0.5f);
+        if (gas_wave > -0.2f && (std::abs(dx) > 1 || std::abs(dz) > 1)) {
+            out = Voxel{MAT_TOXIC_GAS, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+    }
+
+    // Elevated winding root bridge at y = room.floor_y + 3 allowing delvers to navigate over gas
+    float root_path = std::sin(static_cast<float>(dx) * 0.4f) * 2.2f;
+    bool on_root = (std::abs(static_cast<float>(dz) - root_path) <= 1.2f) && (y == room.floor_y + 3);
+    if (on_root) {
+        out = Voxel{MAT_FRACTURED_GRANITE, 0};
+        return;
+    }
+
+    // Overhanging fungal spore arches from ceiling
+    if (y >= room.ceiling_y - 3 && (std::abs(dx % 4) == 0 || std::abs(dz % 4) == 0)) {
+        if ((hash_coord(x, y, z, 606) % 10) < 4) {
+            out = Voxel{MAT_VOLATILE_SMOKE, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+    }
+
+    if (y >= room.ceiling_y - 2) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_prismatic_crystal_cathedral(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 205) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_FRACTURED_GRANITE, out);
+        return;
+    }
+
+    // Floor at y == room.floor_y:
+    if (y == room.floor_y) {
+        // Polished crystal dais at center
+        if (r_horiz <= 3.5f) {
+            out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+        } else {
+            out = Voxel{MAT_FRACTURED_GRANITE, 0};
+        }
+        return;
+    }
+
+    // Stepped central dais stairs (y = floor_y + 1 and floor_y + 2)
+    if (y == room.floor_y + 1 && r_horiz <= 2.5f) {
+        out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+        return;
+    }
+    if (y == room.floor_y + 2 && r_horiz <= 1.2f) {
+        out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+        return;
+    }
+
+    // 4 Colossal Hexagonal Prismatic Crystal Columns extending floor to ceiling
+    int col_offset_x = std::max(2, room.half_width / 2);
+    int col_offset_z = std::max(2, room.half_depth / 2);
+    bool is_col1 = (std::abs(dx - col_offset_x) <= 1 && std::abs(dz - col_offset_z) <= 1);
+    bool is_col2 = (std::abs(dx + col_offset_x) <= 1 && std::abs(dz - col_offset_z) <= 1);
+    bool is_col3 = (std::abs(dx - col_offset_x) <= 1 && std::abs(dz + col_offset_z) <= 1);
+    bool is_col4 = (std::abs(dx + col_offset_x) <= 1 && std::abs(dz + col_offset_z) <= 1);
+
+    if (is_col1 || is_col2 || is_col3 || is_col4) {
+        if (y <= room.ceiling_y - 2) {
+            out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+    }
+
+    // Elevated crystal bridges linking the pillars at y = room.floor_y + 7
+    bool bridge_x = (y == room.floor_y + 7 && (std::abs(dz - col_offset_z) <= 1 || std::abs(dz + col_offset_z) <= 1) && std::abs(dx) <= col_offset_x);
+    bool bridge_z = (y == room.floor_y + 7 && (std::abs(dx - col_offset_x) <= 1 || std::abs(dx + col_offset_x) <= 1) && std::abs(dz) <= col_offset_z);
+    if (bridge_x || bridge_z) {
+        out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+        return;
+    }
+
+    // Vaulted cathedral ceiling with ribbed arches
+    if (y >= room.ceiling_y - 2) {
+        if ((std::abs(dx) % 3 == 0) || (std::abs(dz) % 3 == 0)) {
+            out = Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+        } else {
+            out = Voxel{MAT_FRACTURED_GRANITE, 0};
+        }
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_ancient_titan_necropolis(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 206) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_VOLCANIC_BASALT, out);
+        return;
+    }
+
+    // Sunken excavation pit floor at y = room.floor_y
+    if (y == room.floor_y) {
+        if (std::abs(dx) <= 2 && std::abs(dz) <= room.half_depth - 3) {
+            out = Voxel{MAT_TITANIUM, 0}; // Excavated mineral seam
+        } else {
+            out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        }
+        return;
+    }
+
+    // Giant Skeletal Ribcage Arches spanning across Z axis: 5 massive bone arches
+    bool on_rib_ring = (std::abs(dz) % 3 == 0) && (std::abs(dz) <= room.half_depth - 2);
+    if (on_rib_ring && y > room.floor_y && y <= room.ceiling_y - 3) {
+        float max_arch_h = static_cast<float>(room.ceiling_y - room.floor_y - 4);
+        float arch_span = static_cast<float>(std::max(3, room.half_width - 2));
+        float norm_x = std::abs(static_cast<float>(dx)) / arch_span;
+        if (norm_x <= 1.0f) {
+            float expected_y = static_cast<float>(room.floor_y + 1) + max_arch_h * std::sqrt(std::max(0.0f, 1.0f - norm_x * norm_x));
+            if (std::abs(static_cast<float>(y) - expected_y) <= 1.0f) {
+                out = Voxel{MAT_TITANIUM, VOXEL_FLAG_ANCHORED}; // Titan bone matrix
+                return;
+            }
+        }
+    }
+
+    // Ancient excavation scaffolding along east/west walls at y = room.floor_y + 4
+    if ((std::abs(dx) == room.half_width - 2) && (y == room.floor_y + 4)) {
+        out = Voxel{MAT_INDUSTRIAL_BULKHEAD, 0};
+        return;
+    }
+
+    if (y >= room.ceiling_y - 2) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_bioluminescent_glowworm_grotto(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 207) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_FRACTURED_GRANITE, out);
+        return;
+    }
+
+    // Subterranean reflecting pool at floor level
+    if (y == room.floor_y) {
+        if (r_horiz <= static_cast<float>(room.half_width) - 3.0f) {
+            // Serene reflecting water pool
+            out = Voxel{MAT_CRYSTAL_AQUIFER, 0};
+        } else {
+            // Winding mossy shoreline
+            uint32_t florah = hash_coord(x, y, z, 707);
+            if ((florah % 10) < 5) {
+                out = Voxel{MAT_BIOLUMINESCENT_FLORA, VOXEL_FLAG_EMISSIVE};
+            } else {
+                out = Voxel{MAT_VOLCANIC_BASALT, 0};
+            }
+        }
+        return;
+    }
+
+    // Starry night glowworm canopy ceiling
+    if (y == room.ceiling_y - 2) {
+        uint32_t star_hash = hash_coord(x, y, z, 888);
+        if ((star_hash % 10) < 4) {
+            // Densely clustered bioluminescent glow points
+            out = Voxel{MAT_BIOLUMINESCENT_FLORA, VOXEL_FLAG_EMISSIVE};
+            return;
+        } else if ((star_hash % 20) == 7) {
+            out = Voxel{MAT_VOIDITE_CRYSTAL, VOXEL_FLAG_EMISSIVE};
+            return;
+        }
+    }
+
+    if (y >= room.ceiling_y - 1) {
+        out = Voxel{MAT_FRACTURED_GRANITE, 0};
+        return;
+    }
+
+    out = Voxel{MAT_AIR, 0};
+}
+
+void LevelGenerator::sample_precursor_coolant_reservoir(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+    int dx = x - room.center.x;
+    int dz = z - room.center.z;
+    float r_horiz = std::sqrt(static_cast<float>(dx * dx + dz * dz));
+    float angle = std::atan2(static_cast<float>(dz), static_cast<float>(dx));
+
+    float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 208) - 0.5f) * 0.35f);
+    if (r_horiz > r_wall) {
+        check_doorway_or_solid(room, dx, dz, y, MAT_INDUSTRIAL_BULKHEAD, out);
+        return;
+    }
+
+    // Floor and twin coolant reservoirs
+    if (y == room.floor_y) {
+        float d_pool1 = std::sqrt(static_cast<float>((dx - 4) * (dx - 4) + dz * dz));
+        float d_pool2 = std::sqrt(static_cast<float>((dx + 4) * (dx + 4) + dz * dz));
+        if (d_pool1 <= 2.8f || d_pool2 <= 2.8f) {
+            out = Voxel{MAT_CRYSTAL_AQUIFER, 0}; // Purified liquid coolant
+        } else {
+            out = Voxel{MAT_TITANIUM, 0}; // Reinforced steel plating
+        }
+        return;
+    }
+
+    // Overhead high-pressure coolant pipelines running along Z axis over reservoir pools at dx = +/- 4, y = room.floor_y + 5
+    if ((std::abs(dx - 4) <= 1 || std::abs(dx + 4) <= 1) && y == room.floor_y + 5) {
+        out = Voxel{MAT_TITANIUM, VOXEL_FLAG_ANCHORED};
+        return;
+    }
+
+    // Ruptured pipeline leak spray pouring into eastern coolant pool
+    if (dx == 4 && dz == 0 && y > room.floor_y && y < room.floor_y + 5) {
+        out = Voxel{MAT_CRYSTAL_AQUIFER, 0}; // Liquid coolant spray stream
+        return;
+    }
+
+    // Control consoles and reinforced blast catwalks
+    if (std::abs(dz) >= room.half_depth - 2 && (y == room.floor_y + 1 || y == room.floor_y + 2)) {
+        out = Voxel{MAT_REINFORCED_VAULT_DOOR, 0};
+        return;
+    }
+
+    if (y >= room.ceiling_y - 2) {
+        out = Voxel{MAT_INDUSTRIAL_BULKHEAD, 0};
         return;
     }
 

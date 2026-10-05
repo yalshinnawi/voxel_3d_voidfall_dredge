@@ -77,8 +77,15 @@ set(ENGINE_CORE_SOURCES
     src/entities/enemies/void_stalker.cpp
     src/entities/enemies/seismic_burrower.cpp
     src/audio/audio_engine.cpp
+    src/systems/audio_system.cpp
     src/ai/aberrant_ai.cpp
+    src/ai/spawn_manager.cpp
+    src/ai/swarm_manager.cpp
+    src/systems/stealth_system.cpp
+    src/entities/carcass_manager.cpp
     src/graphics/animation_controller.cpp
+    src/graphics/shader.cpp
+    src/ui/hud.cpp
 )
 
 add_library(voidfall_engine_core STATIC ${ENGINE_CORE_SOURCES})
@@ -112,11 +119,9 @@ set(APP_SOURCES
     src/main.cpp
     src/core/application.cpp
     src/core/screenshot.cpp
-    src/graphics/shader.cpp
     src/graphics/texture_array.cpp
     src/graphics/renderer.cpp
     src/graphics/viewmodel.cpp
-    src/ui/hud.cpp
     src/ui/orbital_hub.cpp
     src/ui/pause_menu.cpp
     src/net/net_host.cpp
@@ -162,6 +167,15 @@ target_link_libraries(test_enemy_burrower PRIVATE voidfall_engine_core)
 add_executable(test_audio tests/test_audio.cpp)
 target_link_libraries(test_audio PRIVATE voidfall_engine_core)
 
+add_executable(test_audio_system tests/test_audio_system.cpp)
+target_link_libraries(test_audio_system PRIVATE voidfall_engine_core)
+
+add_executable(test_combat_omni_ai tests/test_combat_omni_ai.cpp)
+target_link_libraries(test_combat_omni_ai PRIVATE voidfall_engine_core)
+
+add_executable(test_gameplay_mechanics tests/test_gameplay_mechanics.cpp)
+target_link_libraries(test_gameplay_mechanics PRIVATE voidfall_engine_core)
+
 # ── CTest Integration (Enables `ctest --parallel` and test discovery) ──
 enable_testing()
 add_test(NAME UnitTests COMMAND test_unit_all)
@@ -171,3 +185,6 @@ add_test(NAME LevelCollisionTests COMMAND test_level_collision)
 add_test(NAME EnemyStalkerTests COMMAND test_enemy_stalker)
 add_test(NAME EnemyBurrowerTests COMMAND test_enemy_burrower)
 add_test(NAME AudioTests COMMAND test_audio)
+add_test(NAME AudioSystemTests COMMAND test_audio_system)
+add_test(NAME CombatOmniAITests COMMAND test_combat_omni_ai)
+add_test(NAME GameplayMechanicsTests COMMAND test_gameplay_mechanics)

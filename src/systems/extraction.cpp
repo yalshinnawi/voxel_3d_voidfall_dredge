@@ -7,13 +7,15 @@ namespace Voidfall {
 ExtractionSystem::ExtractionSystem() {
 }
 
-void ExtractionSystem::deploy_beacon(const glm::vec3& beacon_pos) {
+void ExtractionSystem::deploy_beacon(const glm::vec3& beacon_pos, float holdout_time) {
     if (m_phase == ExtractionPhase::Dormant) {
         m_phase = ExtractionPhase::BeaconDeployed;
         m_beacon_pos = beacon_pos;
-        m_countdown = 40.0f;
+        m_initial_countdown = holdout_time;
+        m_countdown = holdout_time;
         std::cout << "[Extraction] Beacon deployed at (" << beacon_pos.x << ", "
-                  << beacon_pos.y << ", " << beacon_pos.z << ")! 40-Second evacuation defense initiated!" << std::endl;
+                  << beacon_pos.y << ", " << beacon_pos.z << ")! "
+                  << static_cast<int>(holdout_time) << "-Second evacuation defense initiated!" << std::endl;
     }
 }
 
@@ -42,7 +44,7 @@ void ExtractionSystem::update(float dt, const glm::vec3& player_pos) {
 
 void ExtractionSystem::force_evacuation_pod() {
     if (m_phase == ExtractionPhase::Dormant) {
-        deploy_beacon(m_beacon_pos);
+        deploy_beacon(m_beacon_pos, m_initial_countdown);
     }
     m_phase = ExtractionPhase::PodLanded;
     m_countdown = 0.0f;

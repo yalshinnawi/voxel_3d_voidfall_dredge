@@ -20,14 +20,14 @@ As delvers delve deeper into Voidfall, sectors expand horizontally, increasing n
 
 ---
 
-## 3. Chamber Archetypes (15 Distinct Rooms)
+## 3. Chamber Archetypes (23 Distinct Rooms)
 
-Voidfall Dredge features 15 meticulously handcrafted room archetypes categorized by tactical role, verticality, environmental hazards, and parkour challenges:
+Voidfall Dredge features 23 meticulously handcrafted room archetypes categorized by tactical role, verticality, environmental hazards, and parkour challenges:
 
 | Shape Archetype | Sector Gating | Dimensions | Tactical Profile & Hazard Features | Parkour & Traversal Mechanics |
 |---|---|---|---|---|
 | **Spawn Staging Cavern** | All Sectors (Grid 0,0) | $20\times 12\times 20$ | Arrival staging pad ($y=4$), titanium reinforcement, overhead drop-pod beacon shaft ($y=24$). Safe staging zone. | Stepped mineral training crags and climbing crates. |
-| **Mining Pillar Hall** | Sector 1+ | $24\times 12\times 24$ | 4 massive $3\times 3$ structural support columns with embedded vertical veins of `MAT_VOIDITE_CRYSTAL` and `MAT_TITANIUM`. | High arched stone balance bridge connecting north and south columns at $y=11$. |
+| **Mining Pillar Hall** | Sector 1+ | $24\times 12\times 24$ | 4 massive structural support columns with embedded vertical veins of `MAT_VOIDITE_CRYSTAL` and `MAT_TITANIUM`. | Arched stone balance bridge connecting columns at $y=room.floor\_y+4$. |
 | **Crystalline Geode** | Sector 1+ | $20\times 16\times 20$ | Hollow ellipsoidal geode grotto. Concave shell lined with emissive violet `MAT_VOIDITE_CRYSTAL`. Central towering crystal spire. | Perimeter stepping-stone ring suspended along the concave walls at $y=8$. |
 | **Terraced Quarry** | Sector 1+ | $22\times 14\times 22$ | 4-tiered stepped amphitheater excavation pit ($y=4, 6, 8$) with embedded titanium scrap seams. | Stepped terraces and diagonal ramps allowing fast sprint-climbing. |
 | **Industrial Vault Bunker** | Sector 2+ | $20\times 10\times 20$ | Pre-collapse research bunker with titanium wall panels. Sealed by reinforced vault blast door frames (`MAT_REINFORCED_VAULT_DOOR`). | Elevated perimeter catwalk mezzanine ($y=9$) accessible via corner ladder columns. |
@@ -35,12 +35,20 @@ Voidfall Dredge features 15 meticulously handcrafted room archetypes categorized
 | **Abyssal Vertical Chasm** | Sector 3 Exclusive | $22\times 24\times 22$ | 24-meter deep abyss with unstable hanging ceiling stalactites. Lethal drop hazard. | Spiral rock ledges ascending at $y=9, 14, 19$, requiring thruster hover and grapple tension climbing. |
 | **Radioactive Core Sanctuary** | Sector 3 Exclusive | $20\times 14\times 20$ | Dangerous chamber encircled by a moat of `MAT_RADIOACTIVE_ORE` (+24 Rad/s). Central dais with pure Voidite monolith. | Island hopping stepping stones over the irradiated mineral moat. |
 | **Extraction Landing Bay** | All Sectors (Grid W-1, D-1) | $22\times 16\times 22$ | Evacuation landing zone. Reinforced beacon cradle, high launch chimney ($y=25$), defensive blast barricades for 40s holdouts. | Barricade vaulting and multi-level cover for squad defense. |
-| **Magma Caldera Lake** | Sector 2+ | $22\times 14\times 22$ | Searing volcanic chamber with molten thermite slag lake (`MAT_THERMITE_SLAG`, -24 HP/s burn). Central lava geyser chimney. | Basalt stepping stones and diagonal natural stone arch spanning the molten lake at $y=7$. |
+| **Magma Caldera Lake** | Sector 2+ | $22\times 14\times 22$ | Searing volcanic chamber with molten thermite slag lake (`MAT_THERMITE_SLAG`, -28 HP/s burn). Central lava geyser chimney. | Basalt stepping stones and diagonal natural stone arch spanning the molten lake at $y=7$. |
 | **Spike Trench Arena** | Sector 2+ | $22\times 14\times 22$ | Sunken arena pit lined with crystalline punji spikes (flag `0x0F`, -25 HP puncture damage + upward impulse). Central reward dais. | High balance beam catwalk bridges spanning at $y=6$ with intentional parkour jump gaps. |
 | **Void Singularity Rift** | Sector 3 Exclusive | $24\times 22\times 24$ | Bedrock crust completely collapsed into bottomless cosmic abyss. Central gravitational singularity monolith ($y=7..13$). | Floating zero-gravity obsidian stepping platforms suspended in open void ($y=6, 8, 11, 14$). |
 | **Fungoid Bio-Grotto** | Sector 1+ | $22\times 16\times 22$ | Bioluminescent cavern filled with towering subterranean mushrooms and toxic spore pockets (`MAT_GAS`). | Giant phosphorescent tiered mushroom caps ($y=8, 12, 16$) serving as bouncy parkour stepping platforms. |
 | **Laser Defense Foundry** | Sector 2+ | $22\times 16\times 22$ | Precursor industrial smelting facility with molten slag drainage flumes and security beacon pylons. | Elevated perimeter gantry catwalks ($y=8$) and overhead crane beam ($y=16$) for grapple traversal. |
 | **Crumbling Arch Canyon** | Sector 2+ | $24\times 16\times 24$ | 14-meter deep gorge flanked by high basalt rim cliffs ($y=6$) with hanging ceiling stalactites. | Three natural stone arches spanning the chasm at $y=7, 8, 11$ and ceiling grapple swing anchors. |
+| **Subterranean Aquifer Oasis** | Sector 1+ | $26\times 22\times 26$ (Mega) | Verdant crystal oasis with shimmering water pools (`MAT_CRYSTAL_AQUIFER`), cascading vertical waterfall, bioluminescent flora banks, and moisture stalactites. Rapid exosuit cooling. | Basalt stepping stones, shoreline paths, and water cushion descents. |
+| **Colossal Abyssal Chasm** | Sector 2+ | $26\times 24\times 26$ (Mega) | Vast vertical drop pit with lethal punji spike trench at bottom. Spanned by a high-tension suspension bridge at $y=room.floor\_y+8$. | 3m-wide titanium suspension bridge with perimeter safety railings and hanging grapple stalactites. |
+| **Molten Magma Foundry** | Sector 2+ | $26\times 20\times 26$ (Mega) | Boiling criss-crossing magma flumes and smelting columns. Elevated titanium industrial catwalk crossing the chamber. | Perimeter and cross catwalks ($y=room.floor\_y+3$) allowing safe traversal above searing slag channels. |
+| **Toxic Miasma Swamp** | Sector 2+ | $26\times 18\times 26$ (Mega) | Low swamp basin with sinuous pockets of heavy toxic gas (`MAT_TOXIC_GAS`) visible from across the cavern, fungal spore arches, and bioluminescent moss. | Elevated winding granite root bridge ($y=room.floor\_y+3$) routing delvers safely above gas pockets. |
+| **Prismatic Crystal Cathedral** | Sector 1+ | $26\times 22\times 26$ (Mega) | Towering vaulted cathedral hall flanked by 4 colossal hexagonal crystal columns, stepped dais, and elevated crystal skybridges ($y=room.floor\_y+7$). | Stepped crystal altar stairs and elevated crystal bridges linking the giant monolith columns. |
+| **Ancient Titan Necropolis** | Sector 2+ | $26\times 20\times 26$ (Mega) | Deep fossil excavation site spanned by 5 massive prehistoric skeletal ribcage bone arches (`MAT_TITANIUM`) and wall scaffolding. | Excavated mineral seam trench, wall scaffolds ($y=room.floor\_y+4$), and bone arch grapple swinging. |
+| **Bioluminescent Glowworm Grotto** | Sector 1+ | $24\times 18\times 24$ | Starry night cavern ceiling dotted with hundreds of glowing bio-points (`MAT_BIOLUMINESCENT_FLORA`), Voidite clusters, and a pristine reflecting lake. | Winding mossy shoreline trails and soothing subterranean water immersion. |
+| **Precursor Coolant Reservoir** | Sector 2+ | $24\times 18\times 24$ | High-tech precursor vault featuring twin liquid coolant reservoirs, ruptured high-pressure overhead pipelines, and blast catwalks. | Central steel aisle, vault catwalks, and twin coolant immersion pools for instant thermal cooling. |
 
 ---
 

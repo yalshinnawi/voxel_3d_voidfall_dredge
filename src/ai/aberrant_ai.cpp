@@ -169,4 +169,45 @@ glm::vec3 AberrantAI::compute_surface_snapping_offset(
     return n * clearance;
 }
 
+bool AberrantAI::resolve_player_penetration(
+    glm::vec3& enemy_pos,
+    const glm::vec3& player_pos,
+    float enemy_radius,
+    float player_radius)
+{
+    glm::vec3 delta = enemy_pos - player_pos;
+    delta.y = 0.0f; // Horizontal separation plane
+    float dist = glm::length(delta);
+    float minRadius = enemy_radius + player_radius; // e.g., 0.5m + 0.35m = 0.85m
+    if (dist < minRadius) {
+        glm::vec3 pushDir = (dist > 0.001f) ? (delta / dist) : glm::vec3(0.0f, 0.0f, 1.0f);
+        float penetration = minRadius - dist;
+        enemy_pos += pushDir * penetration; // Push enemy back out into attackable view
+        return true;
+    }
+    return false;
+}
+
+glm::vec3 AberrantAI::calculate_lunge_target(
+    const glm::vec3& enemy_pos,
+    const glm::vec3& player_pos,
+    float stand_off)
+{
+    glm::vec3 to_player = player_pos - enemy_pos;
+    float dist = glm::length(to_player);
+    glm::vec3 dir = (dist > 0.001f) ? (to_player / dist) : glm::vec3(0.0f, 0.0f, 1.0f);
+    return player_pos - dir * stand_off;
+}
+
+void AberrantAI::cancel_forward_momentum(
+    glm::vec3& velocity,
+    const glm::vec3& attack_dir)
+{
+    glm::vec3 dir = (glm::length(attack_dir) > 0.001f) ? glm::normalize(attack_dir) : glm::vec3(0.0f);
+    float forward_proj = glm::dot(velocity, dir);
+    if (forward_proj > 0.0f) {
+        velocity -= dir * forward_proj;
+    }
+}
+
 } // namespace Voidfall

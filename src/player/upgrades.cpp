@@ -31,7 +31,7 @@ void UpgradeTree::set_tier(UpgradeType type, int tier) {
 
 int UpgradeTree::get_coin_cost(int current_tier) {
     if (current_tier >= MAX_TIER) return 0;
-    // Cost(tier) = BaseCoin * 1.6^tier (100 -> 160 -> 256 -> 410 -> 656 Coins)
+    // Exponential Coin Curve: 100 -> 160 -> 256 -> 410 -> 656 Coins
     static const int s_coin_costs[MAX_TIER] = {100, 160, 256, 410, 656};
     if (current_tier >= 0 && current_tier < MAX_TIER) {
         return s_coin_costs[current_tier];
@@ -42,27 +42,99 @@ int UpgradeTree::get_coin_cost(int current_tier) {
 
 int UpgradeTree::get_voidite_cost(int current_tier) {
     if (current_tier >= MAX_TIER) return 0;
-    return 4 * (current_tier + 1); // 4, 8, 12, 16, 20
+    return 4 * (current_tier + 1); // Tier 1: 4, Tier 2: 8, Tier 3: 12, Tier 4: 16, Tier 5: 20
 }
 
 int UpgradeTree::get_titanium_cost(int current_tier) {
     if (current_tier >= MAX_TIER) return 0;
-    return 3 * (current_tier + 1); // 3, 6, 9, 12, 15
+    return 3 * (current_tier + 1); // Tier 1: 3, Tier 2: 6, Tier 3: 9, Tier 4: 12, Tier 5: 15
+}
+
+TierCostInfo UpgradeTree::get_tier_cost_info(int target_tier) {
+    int tier_idx = std::clamp(target_tier - 1, 0, MAX_TIER - 1);
+    return TierCostInfo{
+        target_tier,
+        get_required_level_for_tier(tier_idx),
+        get_coin_cost(tier_idx),
+        get_voidite_cost(tier_idx),
+        get_titanium_cost(tier_idx)
+    };
+}
+
+UpgradePrerequisite UpgradeTree::get_prerequisite(UpgradeType type) {
+    switch (type) {
+        case UpgradeType::DrillSpeed:
+            return UpgradePrerequisite{false, UpgradeType::DrillSpeed, 0, "None", "Foundational excavation rotary bit."};
+        case UpgradeType::DrillDurability:
+            return UpgradePrerequisite{true, UpgradeType::DrillSpeed, 1, "Drill Velocity Tier 1", "Requires basic bit stabilization before thermal cooling channels can be routed."};
+        case UpgradeType::ThrusterTank:
+            return UpgradePrerequisite{false, UpgradeType::ThrusterTank, 0, "None", "Foundational jetpack fuel reservoir."};
+        case UpgradeType::KineticDynamo:
+            return UpgradePrerequisite{true, UpgradeType::ThrusterTank, 1, "Thruster Reservoir Tier 1", "Requires active jetpack tank manifold to interface kinetic recovery."};
+        case UpgradeType::ReinforcedPlating:
+            return UpgradePrerequisite{false, UpgradeType::ReinforcedPlating, 0, "None", "Foundational suit integrity plating."};
+        case UpgradeType::SonarFrequency:
+            return UpgradePrerequisite{false, UpgradeType::SonarFrequency, 0, "None", "Foundational seismic surveying transceiver."};
+        default:
+            return UpgradePrerequisite{false, UpgradeType::DrillSpeed, 0, "None", ""};
+    }
+}
+
+UpgradeLockReason UpgradeTree::get_lock_reason(UpgradeType type, int player_level, int coins, int voidite, int titanium) const {
+    int tier = get_tier(type);
+    if (tier >= MAX_TIER) return UpgradeLockReason::MaxTier;
+
+    int req_level = get_required_level_for_tier(tier);
+    if (player_level < req_level) return UpgradeLockReason::LevelLocked;
+
+    auto prereq = get_prerequisite(type);
+    if (prereq.has_prerequisite && get_tier(prereq.required_type) < prereq.required_tier) {
+        return UpgradeLockReason::PrerequisiteLocked;
+    }
+
+    int coin_needed = get_coin_cost(tier);
+    int void_needed = get_voidite_cost(tier);
+    int tit_needed = get_titanium_cost(tier);
+
+    if (coins < coin_needed) return UpgradeLockReason::InsufficientCoins;
+    if (voidite < void_needed) return UpgradeLockReason::InsufficientVoidite;
+    if (titanium < tit_needed) return UpgradeLockReason::InsufficientTitanium;
+
+    return UpgradeLockReason::Unlocked;
+}
+
+std::string UpgradeTree::get_lock_reason_string(UpgradeType type, int player_level, int coins, int voidite, int titanium) const {
+    int tier = get_tier(type);
+    UpgradeLockReason reason = get_lock_reason(type, player_level, coins, voidite, titanium);
+    switch (reason) {
+        case UpgradeLockReason::MaxTier:
+            return "MAX TIER MASTERED";
+        case UpgradeLockReason::LevelLocked:
+            return "REQUIRES DELVER LEVEL " + std::to_string(get_required_level_for_tier(tier));
+        case UpgradeLockReason::PrerequisiteLocked: {
+            auto prereq = get_prerequisite(type);
+            return "REQUIRES: " + prereq.required_name;
+        }
+        case UpgradeLockReason::InsufficientCoins: {
+            int need = get_coin_cost(tier) - coins;
+            return "LACKING COINS (Need " + std::to_string(need) + " more)";
+        }
+        case UpgradeLockReason::InsufficientVoidite: {
+            int need = get_voidite_cost(tier) - voidite;
+            return "LACKING VOIDITE (Need " + std::to_string(need) + " more)";
+        }
+        case UpgradeLockReason::InsufficientTitanium: {
+            int need = get_titanium_cost(tier) - titanium;
+            return "LACKING TITANIUM (Need " + std::to_string(need) + " more)";
+        }
+        case UpgradeLockReason::Unlocked:
+        default:
+            return "READY TO ACQUIRE";
+    }
 }
 
 bool UpgradeTree::can_purchase(UpgradeType type, int player_level, int current_coins, int current_voidite, int current_titanium) const {
-    int tier = get_tier(type);
-    if (tier >= MAX_TIER) return false;
-    
-    // Level gating: Tier 1 requires Level 1, Tier 2 requires Level 2, etc.
-    int req_level = get_required_level_for_tier(tier);
-    if (player_level < req_level) return false;
-
-    int coin_needed = get_coin_cost(tier);
-    int voidite_needed = get_voidite_cost(tier);
-    int titanium_needed = get_titanium_cost(tier);
-
-    return (current_coins >= coin_needed && current_voidite >= voidite_needed && current_titanium >= titanium_needed);
+    return get_lock_reason(type, player_level, current_coins, current_voidite, current_titanium) == UpgradeLockReason::Unlocked;
 }
 
 bool UpgradeTree::purchase(UpgradeType type, int player_level, int& inout_coins, int& inout_voidite, int& inout_titanium) {
@@ -92,9 +164,33 @@ int UpgradeTree::get_total_spent_coins() const {
     return total;
 }
 
-int UpgradeTree::respec(int& out_refunded_coins) {
-    int total_spent = get_total_spent_coins();
-    out_refunded_coins = static_cast<int>(std::round(total_spent * 0.85f)); // 85% refund
+int UpgradeTree::get_total_spent_voidite() const {
+    int total = 0;
+    for (int t = 0; t < static_cast<int>(UpgradeType::COUNT); ++t) {
+        int tier = get_tier(static_cast<UpgradeType>(t));
+        for (int i = 0; i < tier; ++i) {
+            total += get_voidite_cost(i);
+        }
+    }
+    return total;
+}
+
+int UpgradeTree::get_total_spent_titanium() const {
+    int total = 0;
+    for (int t = 0; t < static_cast<int>(UpgradeType::COUNT); ++t) {
+        int tier = get_tier(static_cast<UpgradeType>(t));
+        for (int i = 0; i < tier; ++i) {
+            total += get_titanium_cost(i);
+        }
+    }
+    return total;
+}
+
+void UpgradeTree::respec(int& out_refunded_coins, int& out_refunded_voidite, int& out_refunded_titanium) {
+    // 100% full recovery of all spent Coins, Voidite, and Titanium
+    out_refunded_coins = get_total_spent_coins();
+    out_refunded_voidite = get_total_spent_voidite();
+    out_refunded_titanium = get_total_spent_titanium();
 
     drillSpeedTier = 0;
     drillDurabilityTier = 0;
@@ -102,106 +198,157 @@ int UpgradeTree::respec(int& out_refunded_coins) {
     kineticDynamoTier = 0;
     sonarFrequencyTier = 0;
     reinforcedPlatingTier = 0;
+}
 
+int UpgradeTree::respec(int& out_refunded_coins) {
+    int dummy_v = 0;
+    int dummy_t = 0;
+    respec(out_refunded_coins, dummy_v, dummy_t);
     return out_refunded_coins;
 }
 
 UpgradeInfo UpgradeTree::get_info(UpgradeType type) {
     switch (type) {
         case UpgradeType::DrillSpeed:
-            return {
+            return UpgradeInfo{
                 type,
                 "Subterranean Drill Velocity",
                 "DRILL MATRIX",
+                "EXCAVATION",
                 "+12% mining excavation rate per tier.",
                 "%",
-                12.0f
+                12.0f,
+                true,
+                {"Carbide Rotary Bit", "Tungsten Flute Teeth", "Diamond Core Sintering", "High-RPM Vibro-Overclock", "Subterranean Voidbreaker"},
+                "Tier 5: Excavation rate reaches +60% maximum drill overdrive."
             };
         case UpgradeType::DrillDurability:
-            return {
+            return UpgradeInfo{
                 type,
                 "Spindle Heat Sinks & Spinup",
                 "DRILL MATRIX",
-                "-15% thermal buildup and accelerated torque spinup.",
+                "EXCAVATION",
+                "-15% thermal buildup and +20% passive heat cooling rate per tier.",
                 "%",
-                15.0f
+                15.0f,
+                false,
+                {"Conductive Thermal Fins", "Cryo-Coolant Conduit", "Ceramic Heat Shrouds", "Active Vapor Chamber", "Zero-Thermal Overdrive"},
+                "Requires Drill Velocity T1. Reduces heat buildup by up to 75%."
             };
         case UpgradeType::ThrusterTank:
-            return {
+            return UpgradeInfo{
                 type,
                 "Pressurized Jetpack Reservoir",
                 "EXO-SUIT & MOBILITY",
-                "+20% thruster fuel capacity and hover endurance.",
+                "TRAVERSAL",
+                "+20% thruster fuel capacity and hover endurance per tier.",
                 "%",
-                20.0f
+                20.0f,
+                true,
+                {"Auxiliary Fuel Bladder", "Carbon Filament Tank", "Dual-Chamber Injector", "Cryo-Propellant Density", "Orbital Vector Thrusters"},
+                "Doubles maximum thruster power at Tier 5 (+100% capacity)."
             };
         case UpgradeType::KineticDynamo:
-            return {
+            return UpgradeInfo{
                 type,
                 "Kinetic Dynamo Converter",
                 "EXO-SUIT & MOBILITY",
-                "Movement and falls regenerate fuel +15% faster.",
+                "TRAVERSAL",
+                "Sprinting and falling regenerates thruster fuel +15% faster per tier.",
                 "%",
-                15.0f
-            };
-        case UpgradeType::SonarFrequency:
-            return {
-                type,
-                "Wide-Spectrum Sonar Transceiver",
-                "SURVEYING & DEFENSE",
-                "+2.0m scan pulse radius, -1.0s cooldown (Rank 2 unlocks HUD Rock Labels).",
-                "m",
-                2.0f
+                15.0f,
+                false,
+                {"Inertial Piezo-Gels", "Impact Recovery Harness", "High-Density Capacitor", "Superconducting Dynamo", "Perpetual Kinetic Flywheel"},
+                "Requires Thruster Reservoir T1. Recharges fuel mid-sprint and during descents."
             };
         case UpgradeType::ReinforcedPlating:
-            return {
+            return UpgradeInfo{
                 type,
                 "Ablative Hazard Plating",
                 "SURVEYING & DEFENSE",
-                "+15 Max Suit Integrity HP and -10% cave-in impact damage.",
+                "DEFENSE",
+                "+15 Max Suit Integrity HP and -10% cave-in impact damage per tier.",
                 " HP",
-                15.0f
+                15.0f,
+                true,
+                {"Reinforced Composite Weave", "Ablative Ceramic Tiles", "Titanium Skeleton Ribs", "Reactive Impact Dampeners", "Vanguard Bastion Carapace"},
+                "+75 Suit Integrity and up to 50% cave-in damage mitigation."
+            };
+        case UpgradeType::SonarFrequency:
+            return UpgradeInfo{
+                type,
+                "Wide-Spectrum Sonar Transceiver",
+                "SURVEYING & DEFENSE",
+                "DEFENSE",
+                "+2.0m scan pulse radius and -1.0s cooldown per tier.",
+                "m",
+                2.0f,
+                true,
+                {"Wideband Acoustic Pinger", "Acoustic Spectroscopy", "Deep Resonance Sub-Pulse", "Harmonic Geo-Penetration", "Omni-Seismic Overdrive"},
+                "Tier 2 unlocks Acoustic Spectroscopy (HUD Rock Labels)! Expands pulse radius up to +10m."
             };
         default:
-            return {
+            return UpgradeInfo{
                 type,
                 "Unknown Calibration",
                 "GENERAL",
+                "GENERAL",
                 "No description available.",
                 "",
-                0.0f
+                0.0f,
+                true,
+                {},
+                ""
             };
     }
 }
 
-std::string UpgradeTree::get_stat_preview(UpgradeType type) const {
+std::string UpgradeTree::get_current_stat_string(UpgradeType type) const {
     int cur = get_tier(type);
     auto info = get_info(type);
-
     if (type == UpgradeType::SonarFrequency) {
-        if (cur >= MAX_TIER) {
-            return "MAXED (+10m, -5s cd, Labels)";
-        }
-        if (cur == 0) {
-            return "+0m (10s cd) -> +2m (9s cd)";
-        }
-        if (cur == 1) {
-            return "+2m -> +4m (Unlocks HUD Labels)";
-        }
-        return "+" + std::to_string(cur * 2) + "m (" + std::to_string(10 - cur) + "s cd) -> +" +
-               std::to_string((cur + 1) * 2) + "m (" + std::to_string(10 - (cur + 1)) + "s cd)";
+        if (cur == 0) return "+0m Radius (10.0s CD)";
+        std::string s = "+" + std::to_string(cur * 2) + "m Radius (" + std::to_string(10 - cur) + ".0s CD)";
+        if (cur >= 2) s += " [HUD Labels Active]";
+        return s;
     }
+    if (type == UpgradeType::DrillDurability) {
+        if (cur == 0) return "0% Heat Reduction, 0% Cooling";
+        return "-" + std::to_string(cur * 15) + "% Heat, +" + std::to_string(cur * 20) + "% Cool";
+    }
+    if (type == UpgradeType::ReinforcedPlating) {
+        if (cur == 0) return "+0 HP, 0% Debris Reduction";
+        return "+" + std::to_string(cur * 15) + " HP, -" + std::to_string(cur * 10) + "% Debris Dmg";
+    }
+    if (cur == 0) return "+0" + info.statUnit;
+    return "+" + std::to_string(static_cast<int>(cur * info.baseStatBonusPerTier)) + info.statUnit;
+}
 
+std::string UpgradeTree::get_next_stat_string(UpgradeType type) const {
+    int cur = get_tier(type);
+    if (cur >= MAX_TIER) return "MAX RANK MASTERED";
+    auto info = get_info(type);
+    int next_tier = cur + 1;
+    if (type == UpgradeType::SonarFrequency) {
+        std::string s = "+" + std::to_string(next_tier * 2) + "m Radius (" + std::to_string(10 - next_tier) + ".0s CD)";
+        if (next_tier == 2) s += " [Unlocks HUD Labels!]";
+        return s;
+    }
+    if (type == UpgradeType::DrillDurability) {
+        return "-" + std::to_string(next_tier * 15) + "% Heat, +" + std::to_string(next_tier * 20) + "% Cool";
+    }
+    if (type == UpgradeType::ReinforcedPlating) {
+        return "+" + std::to_string(next_tier * 15) + " HP, -" + std::to_string(next_tier * 10) + "% Debris Dmg";
+    }
+    return "+" + std::to_string(static_cast<int>(next_tier * info.baseStatBonusPerTier)) + info.statUnit;
+}
+
+std::string UpgradeTree::get_stat_preview(UpgradeType type) const {
+    int cur = get_tier(type);
     if (cur >= MAX_TIER) {
-        float total = cur * info.baseStatBonusPerTier;
-        return "MAXED (+" + std::to_string(static_cast<int>(total)) + info.statUnit + ")";
+        return "MAXED (" + get_current_stat_string(type) + ")";
     }
-
-    float cur_val = cur * info.baseStatBonusPerTier;
-    float next_val = (cur + 1) * info.baseStatBonusPerTier;
-
-    return "+" + std::to_string(static_cast<int>(cur_val)) + info.statUnit +
-           " -> +" + std::to_string(static_cast<int>(next_val)) + info.statUnit;
+    return get_current_stat_string(type) + " -> " + get_next_stat_string(type);
 }
 
 } // namespace Voidfall

@@ -53,6 +53,21 @@ TESTS = {
         "target": "test_audio",
         "exe": f"test_audio{EXE_EXT}",
         "name": "Audio Engine, 3D Spatial SFX & Ear Safety Mastering (9 modules)"
+    },
+    "audio_system": {
+        "target": "test_audio_system",
+        "exe": f"test_audio_system{EXE_EXT}",
+        "name": "Audio Subsystem, Ambience Crossfade, Voice Decay & Teardown (6 modules)"
+    },
+    "combat_omni_ai": {
+        "target": "test_combat_omni_ai",
+        "exe": f"test_combat_omni_ai{EXE_EXT}",
+        "name": "Combat Lunge Separation, Persistent Carcasses, Omni AI & Stance (6 modules)"
+    },
+    "gameplay_mechanics": {
+        "target": "test_gameplay_mechanics",
+        "exe": f"test_gameplay_mechanics{EXE_EXT}",
+        "name": "Gameplay Mechanics: Agitation Loop, Crouch Noise, Aiming Parallax & Monster Death Lifecycle (4 modules)"
     }
 }
 

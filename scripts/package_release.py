@@ -116,6 +116,21 @@ def main():
     print(f"[*] Copying assets (shaders, sounds, textures)...")
     shutil.copytree(ASSETS_DIR, PACKAGE_DIR / "assets", dirs_exist_ok=True)
 
+    # 4b. Bundle VC++ Redistributable Runtime DLLs for standalone execution
+    print(f"[*] Bundling C++ runtime DLLs (msvcp140, vcruntime140, vcruntime140_1)...")
+    system32 = Path("C:/Windows/System32")
+    for dll_name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"]:
+        dll_src = system32 / dll_name
+        if dll_src.exists():
+            shutil.copy2(dll_src, PACKAGE_DIR / dll_name)
+            print(f"    + Bundled {dll_name}")
+        else:
+            print(f"    [!] Warning: {dll_name} not found in System32")
+
+    # 4c. Ensure saves directory exists
+    saves_dir = PACKAGE_DIR / "saves"
+    saves_dir.mkdir(exist_ok=True)
+
     # 5. Write Guides and Launchers
     print(f"[*] Writing HOW_TO_PLAY.txt...")
     (PACKAGE_DIR / "HOW_TO_PLAY.txt").write_text(HOW_TO_PLAY_TEXT, encoding="utf-8")

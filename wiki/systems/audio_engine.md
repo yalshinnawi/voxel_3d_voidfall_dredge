@@ -60,7 +60,8 @@ To protect the player's hearing from sharp clicks, digital overs, and ear-pierci
 | | `VOXEL_BREAK_BULKHEAD` | Deep structural heavy metallic clank (120 Hz) | Dismantling deployed bulkheads |
 | | `VOXEL_BREAK_RADIOACTIVE` | Unstable sizzle with sub-harmonic distortion | Mining irradiated cores |
 | | `DRILL_LOOP` | Multi-sawtooth motor hum with progress-based pitch rise | Active excavation drill hold |
-| **Enemy Cues** | `STALKER_CHITTER` | Rapid FM-modulated chirp (550-950 Hz) | Void Stalker alert / spotted player |
+| **Enemy Cues** | `STALKER_CHITTER` | Multi-tap chitinous burst with mandible scrape clicks (3400 Hz) | Ambient prowl, stealth stalking, & burrowing chatter |
+| | `MONSTER_DIGGING` | High-torque dual FM rotary grinding friction (135/210 Hz) + 1400 Hz fracture noise | Wall excavation, drilling, & burrowing escape through rock |
 | | `STALKER_SNARL` | Aggressive sawtooth growl (160 Hz) with sub-bass distortion | Void Stalker lunge charge |
 | | `STALKER_ATTACK_IMPACT` | Dull claw impact slap with suit damage thud | Melee impact on player |
 | | `STALKER_DEATH` | Descending frequency dissipation whistle (600 -> 80 Hz) | Void Stalker elimination |
@@ -156,4 +157,28 @@ The engine partitions all procedural synthesis into independent sound channels:
 3. **Session Persistence**:
    - All audio levels and mute preferences are encapsulated in `GameSettings` (`src/core/settings.hpp`) within `UserProfile` (`src/core/save_system.hpp`).
    - Saved and loaded automatically from `saves/save_data.json` across game sessions.
+
+---
+
+## 7. Extended Instrumental Music Tracks & Non-Repetitive Playback
+
+To prevent auditory fatigue from short, repetitive loops, the ambient music loop architecture integrates extended 2-to-3.5-minute instrumental compositions with zero runtime memory allocations:
+
+### 7.1 Track Roster & Biome Mappings
+| Sound Cue | Biome / Game State | Track Title | Artist & License | Duration | File Format |
+|---|---|---|---|---|---|
+| `AmbientCavern` | Orbital Hub & Station | *Phantom from Space* | Kevin MacLeod (CC-BY 4.0) | 2m 36s (156.4s) | MP3 / 44.1kHz |
+| `AmbientSector1` | Sector 1: Perimeter Drift | *Blue Sizzle* | Kevin MacLeod (CC-BY 4.0) | 2m 26s (146.2s) | MP3 / 44.1kHz |
+| `AmbientSector2` | Sector 2: Volatile Fault | *Deep Haze* | Kevin MacLeod (CC-BY 4.0) | 2m 02s (122.1s) | MP3 / 44.1kHz |
+| `AmbientSector3` | Sector 3: Void Cradle | *Aftermath* | Kevin MacLeod (CC-BY 4.0) | 3m 30s (210.5s) | MP3 / 44.1kHz |
+
+### 7.2 Native MP3 Decoding Engine (`dr_mp3.h`)
+- Integrated via single-header `dr_mp3.h` (public domain / MIT-0 by David Reid).
+- Decodes MP3 audio streams directly into standard 32-bit float stereo PCM buffers during startup (`AudioEngine::load_sound_samples`).
+- Supports automatic fallback to `.wav` files and procedural synthesis if MP3 assets are omitted or missing.
+- Respects full loaded duration for ambient music cues without premature truncation.
+
+### 7.3 Automated Waveform Variance Verification
+- **Non-Repetitive Assertion**: Test 17 in `test_audio.exe` verifies that consecutive 4-second audio windows sampled from the same track yield a normalized mean-squared difference $> 0.05$ (actual measured: $> 0.89$), proving rich compositional variance rather than monotonous short looping.
+
 

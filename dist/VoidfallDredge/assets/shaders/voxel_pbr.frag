@@ -55,6 +55,10 @@ vec3 get_material_albedo(uint layer) {
         case 6u: return vec3(0.85, 0.35, 0.05); // Thermite Slag (Molten orange)
         case 7u: return vec3(0.15, 0.65, 0.25); // Radioactive Ore (Emerald toxic)
         case 8u: return vec3(0.06, 0.06, 0.08); // Dredge Bedrock
+        case 11u: return vec3(0.12, 0.60, 0.85); // Crystal Aquifer Water (Cyan azure)
+        case 12u: return vec3(0.20, 0.85, 0.35); // Bioluminescent Flora (Vibrant emerald)
+        case 13u: return vec3(0.82, 0.38, 0.95); // Prismatic Crystal (Radiant diamond violet)
+        case 14u: return vec3(0.22, 0.05, 0.08); // Crystalline Obsidian Spikes (Charcoal / Blood Crimson)
         default: return vec3(0.30, 0.30, 0.30);
     }
 }
@@ -65,6 +69,10 @@ vec2 get_material_rough_metal(uint layer) {
         case 4u: return vec2(0.35, 0.85); // Industrial bulkhead (metallic)
         case 5u: return vec2(0.25, 0.90); // Vault door (polished metal)
         case 6u: return vec2(0.70, 0.30); // Molten slag
+        case 11u: return vec2(0.08, 0.10); // Water (ultra-smooth fluid)
+        case 12u: return vec2(0.65, 0.05); // Flora (soft moss)
+        case 13u: return vec2(0.12, 0.35); // Prismatic crystal (faceted gem)
+        case 14u: return vec2(0.30, 0.45); // Obsidian spikes (glossy mineral needle)
         default: return vec2(0.85, 0.05); // Rock / granite / basalt
     }
 }
@@ -130,6 +138,18 @@ void main() {
         } else if (vTexLayer == 7u) { // Radioactive ore
             float pulse = 0.8 + 0.3 * sin(uTime * 2.0 + dot(vWorldPos, vec3(0.3, 1.1, 0.7)));
             emissive = vec3(0.1, 0.9, 0.3) * (vEmissive * 4.0 + 1.0) * pulse;
+        } else if (vTexLayer == 11u) { // Crystal aquifer water
+            float caustic = 0.85 + 0.25 * sin(uTime * 2.5 + dot(vWorldPos, vec3(1.2, 0.5, 0.9)));
+            emissive = vec3(0.10, 0.65, 0.92) * (vEmissive * 2.5 + 0.3) * caustic;
+        } else if (vTexLayer == 12u) { // Bioluminescent flora
+            float pulse = 0.8 + 0.3 * sin(uTime * 1.8 + dot(vWorldPos, vec3(0.6, 1.2, 0.8)));
+            emissive = vec3(0.15, 0.95, 0.38) * (vEmissive * 4.0 + 0.8) * pulse;
+        } else if (vTexLayer == 13u) { // Prismatic crystal
+            float sheen = 0.85 + 0.3 * sin(uTime * 2.8 + dot(vWorldPos, vec3(1.1, 1.1, 0.6)));
+            emissive = vec3(0.85, 0.40, 0.98) * (vEmissive * 4.5 + 1.0) * sheen;
+        } else if (vTexLayer == 14u) { // Crystalline obsidian spikes (Ominous crimson danger warning)
+            float pulse = 0.85 + 0.25 * sin(uTime * 4.0 + dot(vWorldPos, vec3(1.0, 2.0, 1.0)));
+            emissive = vec3(0.98, 0.12, 0.18) * (vEmissive * 3.5 + 0.8) * pulse;
         }
     }
 

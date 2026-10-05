@@ -46,6 +46,7 @@ public:
     bool is_mouse_button_down(int button) const;
     glm::dvec2 get_cursor_pos() const;
     glm::dvec2 get_cursor_delta();
+    double get_scroll_delta_y();
 
     using ResizeCallback = std::function<void(int, int)>;
     void set_resize_callback(ResizeCallback cb) { m_resize_cb = std::move(cb); }
@@ -56,6 +57,7 @@ public:
 private:
     static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
     static void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+    static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
     static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
     static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 
@@ -68,6 +70,7 @@ private:
     double m_last_mouse_y{0.0};
     double m_mouse_delta_x{0.0};
     double m_mouse_delta_y{0.0};
+    double m_scroll_delta_y{0.0};
     bool m_first_mouse{true};
 
     int m_windowed_x{100};

@@ -72,8 +72,19 @@ Rather than tremors occurring solely on passive timers, tectonic instability is 
 
 ## 🚨 2. Extraction Beacon Protocol
 
-- **Beacon Deployment (`Key B`)**: Activated by the player when inventory is full or hazard level reaches critical limits.
-- **Holdout Duration**: **40-second survival defense timer** (`initial_countdown() == 40.0f`).
+- **Beacon Deployment (`Key B`)**: Activated by the player when target Voidite quota is collected or subterranean vault is breached.
+- **Sector-Scaled Holdout Duration**:
+  - **Sector 1 (Perimeter Drift)**: **20-second survival defense timer** (`initial_countdown() == 20.0f`). Introductory wave pacing designed for starter gear: exactly 2 solitary stalkers spaced across the holdout, zero burrowers, and zero forced ceiling tremors.
+  - **Sector 2 (Volatile Fault)**: **30-second survival defense timer** (`initial_countdown() == 30.0f`). Moderate escalation: 4 stalkers, 1 burrower at 70% elapsed, mild final tremor with protected LZ.
+  - **Sector 3 (Abyssal Mantle)**: **40-second survival defense timer** (`initial_countdown() == 40.0f`). Endgame apex challenge: 7 stalkers, 1 burrower at 65% elapsed, severe tectonic tremor at 88%.
+- **Beacon Defense Perimeter & Damage Dampening**:
+  - The deployed beacon generates an active 12-meter kinetic defense perimeter (`is_player_in_perimeter()`).
+  - While holding out within the perimeter, Delvers receive substantial incoming damage resistance:
+    - **Sector 1**: $+40\%$ damage resistance (applies to claw mauls, spine projectiles, falling debris, and toxic radiation).
+    - **Sector 2**: $+25\%$ damage resistance.
+    - **Sector 3**: $+15\%$ damage resistance.
+- **Landing Zone Overhead Ceiling Shielding**:
+  - During holdouts, ceiling tremor rock detachment queries protect the extraction zone. In Sector 1, ceiling spalling is completely suppressed near the beacon; in Sectors 2+, a 6-block radius around the beacon is shielded from falling rocks.
 - **Emergency Siren**: High-intensity 360° red emergency strobe alerts hazards and provides dynamic perimeter illumination.
 - **Evacuation Pod Touchdown**: At $0.0\text{s}$, the drop pod touches down at the beacon coordinates.
 - **Resource Banking**: Stepping into the extraction pod concludes the expedition, banks collected Voidite, Titanium, and EXP in [`saves/save_data.json`](file:///d:/Projects/voxel_3d_voidfall_dredge/saves/save_data.json), and awards sector mastery badges.

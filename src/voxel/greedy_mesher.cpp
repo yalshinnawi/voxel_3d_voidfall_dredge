@@ -230,7 +230,11 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         uint32_t damage = root.voxel.damage();
                         uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
                                             (mat_id == MAT_THERMITE_SLAG) ? 255 :
-                                            (mat_id == MAT_RADIOACTIVE_ORE) ? 180 : 0;
+                                            (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
+                                            (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
+                                            (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
+                                            (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
+                                            (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
                         uint32_t aux = root.voxel.is_highlighted() ? 1 : 0;
 
                         // 4 Quad vertices:

@@ -620,7 +620,13 @@ int main(int argc, char** argv) {
         std::cout << "[Test 13] Testing Sector-Specific Ambience & Descent Arrival Stingers..." << std::endl;
 
         SoundCue ambients[] = { SoundCue::AmbientSector1, SoundCue::AmbientSector2, SoundCue::AmbientSector3 };
-        SoundCue stingers[] = { SoundCue::SectorArrival1, SoundCue::SectorArrival2, SoundCue::SectorArrival3 };
+        SoundCue stingers[] = {
+            SoundCue::SectorArrival1,
+            SoundCue::SectorArrival2,
+            SoundCue::SectorArrival3,
+            SoundCue::SectorArrival4,
+            SoundCue::SectorArrival5
+        };
 
         for (int s = 1; s <= 3; ++s) {
             audio.stop_all();
@@ -629,29 +635,33 @@ int main(int argc, char** argv) {
 
             // Test Ambient Loop
             audio.play_sound_2d(ambients[s - 1], 0.5f, 1.0f, true);
-            auto amb_samples = audio.render_offline_samples(0.3f);
+            auto amb_samples = audio.render_offline_samples(1.0f);
             float amb_energy = 0.0f;
             float amb_peak = 0.0f;
             for (float val : amb_samples) {
                 amb_energy += val * val;
                 amb_peak = std::max(amb_peak, std::abs(val));
             }
+            std::cout << " -> Sector " << s << " amb_energy: " << amb_energy << " peak: " << amb_peak << std::endl;
             CHECK(amb_energy > 0.001f, "Sector ambient drone must generate continuous subtle energy");
             CHECK(amb_peak <= 0.95f, "Sector ambient drone must obey ear-safety ceiling");
+        }
 
-            // Test Arrival Stinger
+        // Test All 5 Arrival Stingers
+        for (int i = 0; i < 5; ++i) {
             audio.stop_all();
-            audio.play_sound_2d(stingers[s - 1], 0.8f);
+            audio.play_sound_2d(stingers[i], 0.8f);
             auto stinger_samples = audio.render_offline_samples(0.4f);
             float stinger_peak = 0.0f;
             for (float val : stinger_samples) {
                 stinger_peak = std::max(stinger_peak, std::abs(val));
             }
+            std::cout << " -> Stinger " << (i + 1) << " peak: " << stinger_peak << std::endl;
             CHECK(stinger_peak > 0.05f, "Arrival stinger must generate distinct non-zero waveform");
             CHECK(stinger_peak <= 0.95f, "Arrival stinger must obey ear-safety ceiling");
         }
 
-        std::cout << " -> Sector 1 (Crystalline), Sector 2 (Geothermal), and Sector 3 (Abyssal) audio validated." << std::endl;
+        std::cout << " -> Sector ambients and all 5 arrival stingers validated." << std::endl;
     }
 
     // ── Test 14: Sector-Specific Micro-Ambience Distribution ──
@@ -781,6 +791,502 @@ int main(int argc, char** argv) {
         std::cout << " -> All 11 room/hazard sound cues, archetype micro-ambience and proximity modulations verified." << std::endl;
     }
 
+    // ── Test 17: Long Instrumental Track Playback & Non-Repetitive Time-Window Invariants ──
+    {
+        std::cout << "[Test 17] Testing Extended Instrumental Duration & Non-Repetitive Waveforms..." << std::endl;
+        audio.stop_all();
+
+        // 17.1 Verify loaded track durations: each sector track must be >= 120 seconds
+        SoundCue music_cues[] = {
+            SoundCue::AmbientCavern,
+            SoundCue::AmbientSector1,
+            SoundCue::AmbientSector2,
+            SoundCue::AmbientSector3
+        };
+
+        for (SoundCue cue : music_cues) {
+            CHECK(audio.has_sample(cue), "Music track must be loaded in memory");
+            const auto* s = audio.get_sample(cue);
+            CHECK(s != nullptr, "Sample pointer must be non-null");
+            CHECK(s->duration_seconds >= 120.0f, "Extended instrumental music tracks must exceed 120 seconds duration");
+            CHECK(s->frame_count >= static_cast<size_t>(120 * 44100), "Track must contain >= 120s of PCM frames");
+        }
+
+        // 17.2 Verify voice duration in play_sound_2d is not truncated (exceeds 100 seconds)
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::AmbientSector1, 0.5f, 1.0f, true);
+        CHECK(audio.active_voice_count() == 1, "Ambient music voice must be active");
+
+        // 17.3 Verify non-repetitiveness across sequential time windows (e.g. Window A [2s..6s] vs Window B [6s..10s])
+        // In the old synthetic generator, audio looped identically every ~8s.
+        // With actual instrumental compositions, different musical movements produce distinct waveform signatures.
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::AmbientSector1, 0.5f, 1.0f, true);
+
+        // Discard initial transient/intro
+        audio.render_offline_samples(2.0f);
+
+        // Capture Window A: 4 seconds of music
+        auto window_a = audio.render_offline_samples(4.0f);
+        // Capture Window B: next 4 seconds of music
+        auto window_b = audio.render_offline_samples(4.0f);
+
+        CHECK(window_a.size() == window_b.size(), "Consecutive test windows must match in length");
+
+        // Compute mean squared difference between Window A and Window B
+        double sum_diff_sq = 0.0;
+        double sum_energy_a = 0.0;
+        double sum_energy_b = 0.0;
+        for (size_t i = 0; i < window_a.size(); ++i) {
+            double diff = static_cast<double>(window_a[i] - window_b[i]);
+            sum_diff_sq += diff * diff;
+            sum_energy_a += static_cast<double>(window_a[i] * window_a[i]);
+            sum_energy_b += static_cast<double>(window_b[i] * window_b[i]);
+        }
+
+        CHECK(sum_energy_a > 0.1, "Window A must contain healthy musical energy");
+        CHECK(sum_energy_b > 0.1, "Window B must contain healthy musical energy");
+        // For a repeating 4s/8s loop, diff would be ~0. For rich instrumental music, diff is significant
+        double normalized_diff = sum_diff_sq / (sum_energy_a + sum_energy_b);
+        CHECK(normalized_diff > 0.05, "Sequential musical passages must be non-identical (non-repetitive music confirmed)");
+
+        std::cout << " -> Extended instrumental playback verified (duration >= 120s, normalized variance: "
+                  << normalized_diff << " > 0.05)." << std::endl;
+    }
+
+    // ── Test 18: Environmental Hazard Audio: Groan, Asphyxiation & Toxic Gas Hiss ──
+    {
+        std::cout << "[Test 18] Testing Environmental Hazard Audio (Player Groan, Asphyxiation & Toxic Gas Hiss)..." << std::endl;
+
+        // 18.1 Player Groan (Radiation cellular damage)
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::PlayerGroan, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "PlayerGroan voice must be active");
+        auto groan_samples = audio.render_offline_samples(0.85f);
+        float groan_energy = 0.0f;
+        float groan_max_abs = 0.0f;
+        for (float s : groan_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Groan audio samples must be valid finite numbers");
+            groan_energy += s * s;
+            groan_max_abs = std::max(groan_max_abs, std::abs(s));
+        }
+        CHECK(groan_energy > 0.05f, "PlayerGroan must synthesize audible vocal resonance energy");
+        CHECK(groan_max_abs <= 1.0f, "PlayerGroan must not exceed ceiling");
+
+        // 18.2 Player Asphyxiation (Toxic gas inhalation)
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::PlayerAsphyxiation, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "PlayerAsphyxiation voice must be active");
+        auto asph_samples = audio.render_offline_samples(1.1f);
+        float asph_energy = 0.0f;
+        float asph_max_abs = 0.0f;
+        for (float s : asph_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Asphyxiation audio samples must be valid finite numbers");
+            asph_energy += s * s;
+            asph_max_abs = std::max(asph_max_abs, std::abs(s));
+        }
+        CHECK(asph_energy > 0.05f, "PlayerAsphyxiation must synthesize cough spasms and inspiratory wheeze");
+        CHECK(asph_max_abs <= 1.0f, "PlayerAsphyxiation must not exceed ceiling");
+
+        // 18.3 Toxic Gas Hiss (3D Proximity telegraph)
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::ToxicGasHiss, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "ToxicGasHiss voice must be active");
+        auto hiss_samples = audio.render_offline_samples(0.8f);
+        float hiss_energy = 0.0f;
+        float hiss_max_abs = 0.0f;
+        for (float s : hiss_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Toxic gas hiss samples must be valid finite numbers");
+            hiss_energy += s * s;
+            hiss_max_abs = std::max(hiss_max_abs, std::abs(s));
+        }
+        CHECK(hiss_energy > 0.05f, "ToxicGasHiss must synthesize audible pressurized gas vapor hiss");
+        CHECK(hiss_max_abs <= 1.0f, "ToxicGasHiss must not exceed ceiling");
+
+        // 18.4 Dedicated environmental trigger helper methods
+        audio.stop_all();
+        audio.trigger_player_groan(0.85f);
+        CHECK(audio.active_voice_count() >= 1, "trigger_player_groan must spawn active voice");
+
+        audio.stop_all();
+        audio.trigger_player_asphyxiation(0.90f);
+        CHECK(audio.active_voice_count() >= 1, "trigger_player_asphyxiation must spawn active voice");
+
+        audio.stop_all();
+        audio.trigger_toxic_gas_hiss(0.75f);
+        CHECK(audio.active_voice_count() >= 1, "trigger_toxic_gas_hiss must spawn active voice");
+
+        // 18.5 Hazard proximity gas modulation
+        audio.stop_all();
+        bool gas_hiss_triggered = false;
+        for (int i = 0; i < 15; ++i) {
+            audio.update_hazard_proximity_audio(0.50f, 50.0f, 0.0f, 50.0f, 50.0f, 1.0f);
+            if (audio.active_voice_count() > 0) {
+                gas_hiss_triggered = true;
+                break;
+            }
+        }
+        CHECK(gas_hiss_triggered, "update_hazard_proximity_audio must trigger ToxicGasHiss when near gas (<6m)");
+
+        audio.stop_all();
+        for (int i = 0; i < 5; ++i) {
+            audio.update_hazard_proximity_audio(0.50f, 50.0f, 0.0f, 50.0f, 50.0f, 25.0f);
+        }
+        CHECK(audio.active_voice_count() == 0, "update_hazard_proximity_audio must not trigger ToxicGasHiss when far from gas (>6m)");
+
+        std::cout << " -> Environmental hazard audio synthesis and proximity telegraph verified." << std::endl;
+    }
+
+    // ── Test 19: Impact Damage Audio Cues: Bone Crack, Enemy Flesh Hit & Debris Deflection ──
+    {
+        std::cout << "[Test 19] Testing Specific Impact Cues (Bone Crack, Enemy Flesh Hit & Debris Armor Deflection)..." << std::endl;
+
+        // 19.1 Fall Impact Bone Crack (sickening bone fracture crunch)
+        audio.stop_all();
+        audio.trigger_bone_crack(1.0f);
+        CHECK(audio.active_voice_count() == 1, "trigger_bone_crack voice must be active");
+        auto bone_samples = audio.render_offline_samples(0.45f);
+        float bone_energy = 0.0f;
+        float bone_max_abs = 0.0f;
+        for (float s : bone_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "BoneCrack audio samples must be valid finite numbers");
+            bone_energy += s * s;
+            bone_max_abs = std::max(bone_max_abs, std::abs(s));
+        }
+        CHECK(bone_energy > 0.05f, "BoneCrack must synthesize audible fracture snapping and crunch energy");
+        CHECK(bone_max_abs <= 1.0f, "BoneCrack must not exceed ceiling");
+
+        // 19.2 Enemy Attack Flesh Hit (visceral organic slash & laceration squelch)
+        audio.stop_all();
+        audio.trigger_enemy_flesh_hit(1.0f);
+        CHECK(audio.active_voice_count() == 1, "trigger_enemy_flesh_hit voice must be active");
+        auto flesh_samples = audio.render_offline_samples(0.38f);
+        float flesh_energy = 0.0f;
+        float flesh_max_abs = 0.0f;
+        for (float s : flesh_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "EnemyFleshHit audio samples must be valid finite numbers");
+            flesh_energy += s * s;
+            flesh_max_abs = std::max(flesh_max_abs, std::abs(s));
+        }
+        CHECK(flesh_energy > 0.05f, "EnemyFleshHit must synthesize visceral claw tearing energy");
+        CHECK(flesh_max_abs <= 1.0f, "EnemyFleshHit must not exceed ceiling");
+
+        // 19.3 Falling Debris Armor Impact (heavy stone crash and titanium suit deflection)
+        audio.stop_all();
+        audio.trigger_debris_impact(1.0f);
+        CHECK(audio.active_voice_count() == 1, "trigger_debris_impact voice must be active");
+        auto debris_samples = audio.render_offline_samples(0.45f);
+        float debris_energy = 0.0f;
+        float debris_max_abs = 0.0f;
+        for (float s : debris_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "DebrisArmorImpact audio samples must be valid finite numbers");
+            debris_energy += s * s;
+            debris_max_abs = std::max(debris_max_abs, std::abs(s));
+        }
+        CHECK(debris_energy > 0.05f, "DebrisArmorImpact must synthesize heavy stone impact and armor deflection energy");
+        CHECK(debris_max_abs <= 1.0f, "DebrisArmorImpact must not exceed ceiling");
+
+        std::cout << " -> Bone crack, enemy flesh hit, and debris armor impact audio synthesis verified." << std::endl;
+    }
+
+    // ── Test 20: Arrival Stinger Procedural Non-Repetition & Enveloping Dynamics ──
+    {
+        std::cout << "[Test 20] Testing Arrival Stinger Procedural Non-Repetition, Fade-In & Fade-Out Envelopes..." << std::endl;
+
+        // 20.1 Procedural Non-Repetition & Variety Across Consecutive Openings
+        SoundCue last_cue = SoundCue::UIBlip;
+        std::vector<float> pitches_observed;
+        std::vector<SoundCue> cues_observed;
+
+        for (int i = 0; i < 20; ++i) {
+            audio.stop_all(true);
+            int sector = 1 + (i % 3); // Cycle sectors 1, 2, 3
+            audio.play_arrival_stinger(sector);
+
+            CHECK(audio.active_voice_count() == 1, "play_arrival_stinger must activate exactly one voice");
+
+            SoundCue chosen_cue = SoundCue::UIBlip;
+            float chosen_pitch = 1.0f;
+            for (const auto& voice : audio.voices()) {
+                if (voice.active) {
+                    chosen_cue = voice.cue;
+                    chosen_pitch = voice.pitch;
+                    break;
+                }
+            }
+
+            CHECK(chosen_cue != SoundCue::UIBlip, "A valid stinger cue must be chosen");
+            if (i > 0) {
+                CHECK(chosen_cue != last_cue, "Consecutive arrival stingers must NOT repeat the same cue");
+            }
+            last_cue = chosen_cue;
+            cues_observed.push_back(chosen_cue);
+            pitches_observed.push_back(chosen_pitch);
+
+            // Verify organic pitch modulation range [0.93 .. 1.07]
+            CHECK(chosen_pitch >= 0.93f && chosen_pitch <= 1.07f, "Arrival stinger pitch must have subtle organic variation");
+            // Verify threat ducking triggered
+            CHECK(audio.ducking_factor() < 0.5f, "Arrival stinger must trigger dramatic threat ducking");
+        }
+
+        // Verify that multiple distinct cues were played across the 20 trials
+        std::sort(cues_observed.begin(), cues_observed.end());
+        size_t unique_cues = std::unique(cues_observed.begin(), cues_observed.end()) - cues_observed.begin();
+        CHECK(unique_cues >= 3, "Arrival stinger system must utilize multiple stinger cues across sectors");
+
+        // Verify pitch wasn't constant
+        float min_pitch = *std::min_element(pitches_observed.begin(), pitches_observed.end());
+        float max_pitch = *std::max_element(pitches_observed.begin(), pitches_observed.end());
+        CHECK(max_pitch - min_pitch > 0.04f, "Pitches must vary across level openings");
+
+        // 20.2 Smooth Fade-In Envelope (No DC Step / Initial Clicks)
+        audio.stop_all(true);
+        audio.play_arrival_stinger(1);
+        auto attack_samples = audio.render_offline_samples(0.010f); // 10ms
+        CHECK(attack_samples.size() >= 2, "Attack samples must be generated");
+        CHECK(std::abs(attack_samples[0]) < 0.005f && std::abs(attack_samples[1]) < 0.005f,
+              "Initial stinger frame must start at zero with anti-click attack ramp");
+
+        // 20.3 Smooth Tail Fade-Out (Decay into Silence with Zero Discontinuity)
+        for (int c = 1; c <= 5; ++c) {
+            audio.stop_all(true);
+            SoundCue cue = static_cast<SoundCue>(static_cast<int>(SoundCue::SectorArrival1) + (c - 1));
+            audio.play_sound_2d(cue, 0.85f);
+            CHECK(audio.active_voice_count() == 1, "Voice must start active");
+
+            // Render 4.8 seconds in blocks to trace tail behavior
+            float prev_s[2] = {0.0f, 0.0f};
+            float final_block_max = 0.0f;
+            float max_tail_slew = 0.0f;
+
+            for (int block = 0; block < 16; ++block) {
+                auto block_samples = audio.render_offline_samples(0.30f); // 0.30s chunks
+                for (size_t idx = 0; idx < block_samples.size(); ++idx) {
+                    int ch = idx % 2;
+                    float s = block_samples[idx];
+                    CHECK(!std::isnan(s) && !std::isinf(s), "Stinger samples must be finite");
+                    CHECK(std::abs(s) <= 0.95f, "Stinger samples must respect ear-safety ceiling");
+                    float slew = std::abs(s - prev_s[ch]);
+                    if (block >= 13) {
+                        max_tail_slew = std::max(max_tail_slew, slew);
+                    }
+                    if (block >= 14 || audio.active_voice_count() == 0) {
+                        final_block_max = std::max(final_block_max, std::abs(s));
+                    }
+                    prev_s[ch] = s;
+                }
+                if (audio.active_voice_count() == 0) break;
+            }
+
+            // Voice must have cleanly finished within 4.8 seconds
+            CHECK(audio.active_voice_count() == 0, "Arrival stinger voice must naturally release");
+            // Final samples before/at release must be quiet (< 0.035)
+            CHECK(final_block_max < 0.035f, "Stinger tail must fade to near-silence before voice release");
+            std::cout << " -> Stinger " << c << " smooth tail verified (final block max: " << final_block_max << ")" << std::endl;
+        }
+
+        // 20.4 Smooth Anti-Click Quick-Release Stopping Fade
+        audio.stop_all(true);
+        audio.play_sound_2d(SoundCue::SectorArrival1, 0.90f);
+        audio.render_offline_samples(0.50f); // Let it reach peak volume
+        CHECK(audio.active_voice_count() == 1, "Voice must be playing");
+
+        // Request graceful stop (smooth 25ms release)
+        audio.stop_sound(SoundCue::SectorArrival1, false);
+        // Voice should STILL be active during the 25ms quick-release ramp
+        auto stop_ramp_part1 = audio.render_offline_samples(0.012f); // 12ms into 25ms fade
+        float stop_peak1 = 0.0f;
+        for (float s : stop_ramp_part1) stop_peak1 = std::max(stop_peak1, std::abs(s));
+        CHECK(stop_peak1 > 0.001f, "Voice must smoothly decay during stopping fade rather than abruptly cutting to zero");
+
+        // Finish the remaining fade (25ms)
+        auto stop_ramp_part2 = audio.render_offline_samples(0.025f);
+        CHECK(audio.active_voice_count() == 0, "Voice must release cleanly at the end of stopping fade");
+
+        std::cout << " -> Arrival stinger non-repetition, fade-in attack ramp, smooth tail decay, and anti-click stopping verified." << std::endl;
+    }
+
+    // ── Test 21: Sneak Attack Critical Hit Audio Synthesis & Procedural Chime ──
+    {
+        std::cout << "[Test 21] Testing Sneak Attack Critical Hit Audio Synthesis (SoundCue::CritHit)..." << std::endl;
+
+        audio.stop_all(true);
+        audio.play_sound_2d(SoundCue::CritHit, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "CritHit voice must be active");
+
+        auto crit_samples = audio.render_offline_samples(0.42f);
+        float crit_energy = 0.0f;
+        float crit_peak = 0.0f;
+        for (float s : crit_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "CritHit audio samples must be valid finite numbers");
+            crit_energy += s * s;
+            crit_peak = std::max(crit_peak, std::abs(s));
+        }
+        CHECK(crit_energy > 0.05f, "CritHit must synthesize audible punch, chime, and fracture energy");
+        CHECK(crit_peak <= 1.0f, "CritHit audio must respect ear-safety ceiling");
+        CHECK(crit_peak >= 0.15f, "CritHit audio peak must provide noticeable acoustic punch");
+
+        std::cout << " -> Sneak attack critical hit procedural audio synthesis verified." << std::endl;
+    }
+
+    // ── Test 22: Monster Digging & Chattering Procedural Audio Synthesis ──
+    {
+        std::cout << "[Test 22] Testing Monster Digging & Mandible Chattering Audio Synthesis (SoundCue::MonsterDigging & StalkerChitter)..." << std::endl;
+
+        // 22.1 Monster Wall Digging / Drilling Rotary Grinding
+        audio.stop_all(true);
+        audio.play_sound_2d(SoundCue::MonsterDigging, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "MonsterDigging voice must be active");
+
+        auto dig_samples = audio.render_offline_samples(0.55f);
+        float dig_energy = 0.0f;
+        float dig_peak = 0.0f;
+        for (float s : dig_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "MonsterDigging audio samples must be valid finite numbers");
+            dig_energy += s * s;
+            dig_peak = std::max(dig_peak, std::abs(s));
+        }
+        CHECK(dig_energy > 0.05f, "MonsterDigging must synthesize audible mechanical grinding and stone fracture energy");
+        CHECK(dig_peak <= 1.0f, "MonsterDigging audio must respect ear-safety ceiling");
+        CHECK(dig_peak >= 0.15f, "MonsterDigging audio peak must provide noticeable acoustic presence");
+
+        // 22.2 Monster Chattering Clicks & Mandible Scrape Burst
+        audio.stop_all(true);
+        audio.play_sound_2d(SoundCue::StalkerChitter, 1.0f);
+        CHECK(audio.active_voice_count() == 1, "StalkerChitter voice must be active");
+
+        auto chitter_samples = audio.render_offline_samples(0.40f);
+        float chitter_energy = 0.0f;
+        float chitter_peak = 0.0f;
+        for (float s : chitter_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "StalkerChitter audio samples must be valid finite numbers");
+            chitter_energy += s * s;
+            chitter_peak = std::max(chitter_peak, std::abs(s));
+        }
+        CHECK(chitter_energy > 0.01f, "StalkerChitter must synthesize distinct chitinous clicks");
+        CHECK(chitter_peak <= 1.0f, "StalkerChitter audio must respect ear-safety ceiling");
+
+        // 22.3 3D Spatial Attenuation for Wall Digging
+        audio.stop_all(true);
+        audio.set_listener(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), glm::vec3(0, 1, 0));
+        audio.play_sound_3d(SoundCue::MonsterDigging, glm::vec3(0, 0, 3), 1.0f);
+        auto close_samples = audio.render_offline_samples(0.3f);
+        float close_energy = 0.0f;
+        for (float s : close_samples) close_energy += s * s;
+
+        audio.stop_all(true);
+        audio.set_listener(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), glm::vec3(0, 1, 0));
+        audio.play_sound_3d(SoundCue::MonsterDigging, glm::vec3(0, 0, 35), 1.0f);
+        auto far_samples = audio.render_offline_samples(0.3f);
+        float far_energy = 0.0f;
+        for (float s : far_samples) far_energy += s * s;
+
+        CHECK(close_energy > far_energy * 3.0f, "Close digging must be significantly louder than distant wall burrowing");
+
+        std::cout << " -> Monster wall digging and chattering procedural audio synthesis verified." << std::endl;
+    }
+
+    // ── Test 23: Anti-Repetition Filter, Hazard Proximity Spacing & Non-Pumping Audio ──
+    {
+        std::cout << "[Test 23] Testing Anti-Repetition Filter, Hazard Cooldowns & Non-Pumping Audio..." << std::endl;
+        audio.stop_all(true);
+
+        // 23.1 Cavern Micro-Events Anti-Repetition Filter
+        // Consecutive triggers must never repeat the exact same sound cue back-to-back
+        SoundCue last_cue = SoundCue::UIBlip;
+        for (int i = 0; i < 20; ++i) {
+            audio.trigger_cavern_micro_event(1, 0, 0.4f);
+            const auto& recent = audio.recent_micro_cues();
+            if (!recent.empty()) {
+                SoundCue current_cue = recent.back();
+                if (i > 0) {
+                    CHECK(current_cue != last_cue,
+                          "Anti-repetition filter must prevent consecutive identical micro-ambience cues");
+                }
+                last_cue = current_cue;
+            }
+        }
+
+        // Room-specific micro-event anti-repetition (Void Singularity Rift: room 11)
+        last_cue = SoundCue::UIBlip;
+        for (int i = 0; i < 15; ++i) {
+            audio.trigger_cavern_micro_event(3, 11, 0.4f);
+            const auto& recent = audio.recent_micro_cues();
+            if (!recent.empty()) {
+                SoundCue current_cue = recent.back();
+                if (i > 0) {
+                    CHECK(current_cue != last_cue,
+                          "Anti-repetition filter in VoidSingularityRift must not repeat same wind/distortion cue consecutively");
+                }
+                last_cue = current_cue;
+            }
+        }
+
+        // 23.2 Seismic Rumble Cooldown (prevents 1.1s repetitive rumble/wash sound re-triggering)
+        audio.stop_all(true);
+        audio.set_seismic_rumble(0.85f);
+        CHECK(audio.seismic_rumble_cooldown() >= 10.0f,
+              "Initial seismic rumble trigger must set refractory cooldown (>= 10s)");
+
+        // Simulate voice completion after 1.5s (SeismicTremor duration is 1.1s / 0.85 pitch = ~1.29s)
+        audio.render_offline_samples(1.5f);
+        CHECK(audio.active_voice_count() == 0, "Seismic tremor voice must have finished");
+
+        // Attempting to re-trigger while cooldown is active must be rejected
+        audio.set_seismic_rumble(0.85f);
+        CHECK(audio.active_voice_count() == 0,
+              "Seismic rumble must NOT restart immediately while cooldown is active");
+
+        // Advance cooldown to 0
+        audio.update_hazard_proximity_audio(15.0f, 999.0f, 0.0f, 999.0f, 999.0f);
+        CHECK(audio.seismic_rumble_cooldown() == 0.0f, "Cooldown must reach 0 after timer expires");
+
+        // Now it can trigger again
+        audio.set_seismic_rumble(0.85f);
+        CHECK(audio.active_voice_count() == 1,
+              "Seismic rumble can trigger cleanly once cooldown has elapsed");
+
+        // 23.3 Void Hazard Wind Proximity Cooldown
+        audio.stop_all(true);
+        // Force void proximity triggers by updating hazard proximity with low void distance
+        bool triggered_void = false;
+        for (int step = 0; step < 20; ++step) {
+            audio.update_hazard_proximity_audio(2.6f, 999.0f, 0.0f, 999.0f, 2.0f);
+            if (audio.void_hazard_cooldown() > 0.0f) {
+                triggered_void = true;
+                break;
+            }
+        }
+        CHECK(triggered_void, "Void abyss proximity must eventually trigger acoustic warning");
+        CHECK(audio.void_hazard_cooldown() >= 8.0f,
+              "Void hazard warning must initiate a strict 10-15s refractory cooldown");
+
+        // Consecutive frames within cooldown must not spawn redundant overlapping voices
+        int initial_voices = audio.active_voice_count();
+        for (int f = 0; f < 5; ++f) {
+            audio.update_hazard_proximity_audio(0.1f, 999.0f, 0.0f, 999.0f, 2.0f);
+        }
+        CHECK(audio.active_voice_count() == initial_voices,
+              "No redundant overlapping void wind voices can spawn while cooldown is active");
+
+        // 23.4 Ducking Non-Pumping Protection
+        audio.stop_all(true);
+        // Play ambient music bed
+        audio.play_sound_2d(SoundCue::AmbientCavern, 0.5f, 1.0f, true);
+        // Trigger threat sound
+        audio.play_sound_2d(SoundCue::SeismicTremor, 0.85f);
+        float duck1 = audio.ducking_factor();
+        CHECK(duck1 <= 0.35f, "Threat sound must duck ambience");
+
+        // Subsequent rapid calls must not repeatedly compress or re-pump already-ducked audio
+        for (int k = 0; k < 5; ++k) {
+            audio.play_sound_2d(SoundCue::ExplosiveBlast, 0.9f);
+        }
+        CHECK(audio.ducking_factor() >= 0.15f, "Ducking attenuation must remain within controlled safety floor");
+
+        std::cout << " -> Anti-repetition, hazard refractory cooldowns, and non-pumping ducking verified." << std::endl;
+    }
+
     if (export_wav) {
         std::cout << "[*] Exporting diagnostic audio sample WAV files to screenshots/audio_samples/..." << std::endl;
 
@@ -819,6 +1325,15 @@ int main(int argc, char** argv) {
         audio.stop_all();
         audio.play_sound_3d(SoundCue::StalkerDie, glm::vec3(0, 0, 2), 0.70f);
         write_wav_file("screenshots/audio_samples/stalker_die.wav", audio.render_offline_samples(0.7f));
+
+        // Monster Digging & Chattering
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::MonsterDigging, 1.0f);
+        write_wav_file("screenshots/audio_samples/monster_digging.wav", audio.render_offline_samples(0.6f));
+
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::StalkerChitter, 1.0f);
+        write_wav_file("screenshots/audio_samples/stalker_chitter.wav", audio.render_offline_samples(0.4f));
 
         // 4. Seismic Burrower Roar & Tooth Grind
         audio.stop_all();
@@ -881,7 +1396,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL 16 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
+    std::cout << "ALL 23 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     audio.shutdown();

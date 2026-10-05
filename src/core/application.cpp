@@ -44,6 +44,25 @@ Application::Application(const AppConfig& config)
 Application::~Application() {
 }
 
+void Application::TransitionState(GameState newState) {
+    if (m_state == newState) {
+        return;
+    }
+
+    // Explicit Channel Teardown on State Transition:
+    // When switching to Main Menu, Orbital Hub, or Debrief, halt all gameplay voice channels
+    if (newState == GameState::MainMenu || newState == GameState::OrbitalHub || newState == GameState::Debrief) {
+        AudioSystem::StopAllGameplayVoices();
+    }
+
+    // Reset single-trigger death guard when entering active gameplay
+    if (newState == GameState::Gameplay && m_state != GameState::Paused) {
+        AudioSystem::instance().reset_death_sound();
+    }
+
+    m_state = newState;
+}
+
 void Application::init_systems() {
     // 1. Window
     WindowConfig win_cfg;
@@ -102,6 +121,21 @@ void Application::init_systems() {
         return m_inventory.has_bulkhead_material();
     });
 
+    m_player->set_can_deploy_charge_predicate([this]() {
+        return m_inventory.demolition_charges > 0;
+    });
+
+    m_player->set_on_charge_placed([this](const glm::ivec3& pos, const glm::ivec3& normal) {
+        if (m_inventory.demolition_charges > 0) {
+            m_inventory.demolition_charges--;
+        }
+        glm::vec3 world_pos = glm::vec3(pos) + glm::vec3(0.5f) + glm::vec3(normal) * 0.5f;
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::BulkheadDeploy, world_pos, 0.85f);
+        }
+        m_noise_meter.add_bulkhead_sound(world_pos, true);
+    });
+
     m_player->set_on_warning([this](const std::string& msg) {
         if (m_hud) m_hud->show_warning(msg);
     });
@@ -126,22 +160,103 @@ void Application::init_systems() {
         m_noise_meter.add_landing_sound(pos, impact_speed);
     });
 
+    m_player->set_on_weapon_reload([this](CharacterClass cls, float reload_time) {
+        if (m_audio) {
+            m_audio->play_weapon_reload(static_cast<int>(m_player->weapon_archetype()));
+        }
+        m_noise_meter.add_reload_sound(m_player->position());
+    });
+
+    m_player->set_on_damage_source([this](float dmg, PlayerController::DamageSource source) {
+        float flash_intensity = std::clamp(dmg * 0.025f + 0.45f, 0.45f, 0.95f);
+        if (source == PlayerController::DamageSource::Radiation) {
+            // ZERO screen shake trauma for radiation! Emerald ionizing static vignette
+            if (m_hud) {
+                m_hud->trigger_radiation_flash(flash_intensity);
+            }
+        } else if (source == PlayerController::DamageSource::ToxicGas) {
+            // Subtle cough shudder only (0.02f), no violent camera disorientation!
+            if (m_hud) {
+                m_hud->trigger_toxic_gas_flash(flash_intensity);
+            }
+        } else if (source == PlayerController::DamageSource::EnemyAttack) {
+            // ENEMY ATTACK: Trigger visceral on-screen blood splatters + flesh slash audio!
+            if (m_hud) {
+                m_hud->trigger_damage_flash(flash_intensity);
+                m_hud->trigger_enemy_blood_splatter(flash_intensity);
+            }
+            float trauma_add = std::clamp(dmg * 0.035f + 0.30f, 0.30f, 0.95f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio) {
+                m_audio->trigger_enemy_flesh_hit(1.0f);
+            }
+        } else if (source == PlayerController::DamageSource::FallImpact) {
+            // FALL DAMAGE: Bone cracking noise, camera trauma, but STRICTLY NO blood splatters!
+            if (m_hud) {
+                m_hud->trigger_damage_flash(flash_intensity);
+            }
+            float trauma_add = std::clamp(dmg * 0.035f + 0.35f, 0.35f, 0.95f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio) {
+                m_audio->trigger_bone_crack(1.0f);
+            }
+        } else if (source == PlayerController::DamageSource::FallingDebris) {
+            // FALLING DEBRIS (Seismic Activity): Stone crash/armor crunch, camera trauma, but STRICTLY NO blood splatters!
+            if (m_hud) {
+                m_hud->trigger_damage_flash(flash_intensity);
+            }
+            float trauma_add = std::clamp(dmg * 0.030f + 0.25f, 0.25f, 0.85f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio) {
+                m_audio->trigger_debris_impact(1.0f);
+            }
+        } else {
+            // Kinetic / Spikes / Thermal Lava / Void Singularity
+            if (m_hud) {
+                m_hud->trigger_damage_flash(flash_intensity);
+            }
+            float trauma_add = (source == PlayerController::DamageSource::ThermalLava)
+                                ? std::clamp(dmg * 0.015f + 0.10f, 0.10f, 0.35f)
+                                : std::clamp(dmg * 0.035f + 0.25f, 0.25f, 0.90f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio && (source == PlayerController::DamageSource::Kinetic || source == PlayerController::DamageSource::Spikes)) {
+                m_audio->play_sound_2d(SoundCue::SuitPuncture, 0.85f);
+            }
+        }
+    });
+
     // 5. Systems
     setup_hazard_system();
 
+    SwarmManager::instance().SetOnEnrageEnded([this]() {
+        m_noise_meter.trigger_post_combat_cooldown();
+        if (m_hud) {
+            m_hud->show_warning("// SWARM BREACH REPELLED - DELVER RECUPERATING //", 2.5f);
+        }
+    });
+
     m_noise_meter.set_on_wave([this](NoiseMeter::AlertLevel level, float pct) {
         if (!m_player || !m_world) return;
+        if (!m_spawn_mgr.can_spawn(m_stalkers.active_count(), m_player->position())) return;
+
         int count = 1;
         if (level == NoiseMeter::AlertLevel::Alerted) {
             count = 1 + (m_selected_level >= 2 ? 1 : 0);
-            if (m_hud) m_hud->show_warning("! SEISMIC NOISE: HOSTILE DETECTED !", 2.5f);
+            if (m_audio) {
+                m_audio->play_sound_3d(SoundCue::StalkerChitter, m_player->position() + glm::vec3(6.0f, 0.0f, 6.0f), 0.95f);
+            }
         } else if (level == NoiseMeter::AlertLevel::Agitated) {
             count = 2 + (m_selected_level >= 2 ? 1 : 0);
-            if (m_hud) m_hud->show_warning("! HEAVY NOISE: VOID STALKER PACK APPROACHING !", 3.0f);
+            if (m_audio) {
+                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 0.85f);
+            }
             m_player->add_trauma(0.2f);
         } else if (level == NoiseMeter::AlertLevel::Swarming) {
             count = 3 + (m_selected_level >= 2 ? 2 : 0);
-            if (m_hud) m_hud->show_warning("! CRITICAL NOISE: VOID SWARM INCOMING !", 3.5f);
+            SwarmManager::instance().set_active_wave_hostiles(count);
+            if (m_audio) {
+                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 1.0f);
+            }
             m_player->add_trauma(0.4f);
         }
         m_stalkers.spawn_wave(m_player->position(), count, *m_world);
@@ -151,7 +266,7 @@ void Application::init_systems() {
     m_extraction->set_on_complete([this]() {
         m_expedition_success = true;
         m_inventory.finalize_run(m_selected_level, true);
-        m_state = GameState::Debrief;
+        TransitionState(GameState::Debrief);
         m_window->set_cursor_locked(false);
         std::cout << "[Extraction] Delver extraction complete! Returning to debrief." << std::endl;
     });
@@ -176,6 +291,7 @@ void Application::init_systems() {
     }
     m_audio->init(enable_audio);
     m_audio->set_master_volume(m_settings.master_volume);
+    AudioSystem::instance().set_audio_engine(m_audio.get());
 
     // 8. Networking
     if (m_config.is_host) {
@@ -299,13 +415,27 @@ void Application::start_expedition(int level) {
     m_world->generate_world(level, m_world->seed());
     m_world->update(m_player->position(), 2);
 
-    m_player->set_position(glm::vec3(16.0f, 22.0f, 16.0f));
+    glm::vec3 spawn_pos = (m_world && m_world->level_generator()) ?
+        m_world->level_generator()->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
+    m_player->set_position(spawn_pos);
     m_player->clamp_to_surface(*m_world);
 
     // Reset systems
     m_noise_meter.reset();
     m_stalkers.reset();
     m_burrowers.reset();
+    m_spawn_mgr.reset(level, m_player->position());
+    CarcassManager::instance().clear();
+    m_spawn_mgr.set_on_dust_burst([this](const glm::vec3& pos, const glm::vec3& normal) {
+        if (m_renderer) {
+            m_renderer->spawn_break_particles(pos, glm::ivec3(glm::round(normal)), MAT_FRACTURED_GRANITE);
+        }
+    });
+    m_spawn_mgr.set_on_audio_cue([this](const glm::vec3& pos) {
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::StalkerChitter, pos, 1.0f);
+        }
+    });
     m_plasma_bolts.clear();
     setup_hazard_system();
     m_hazard->set_sector_parameters(level);
@@ -361,11 +491,12 @@ void Application::start_expedition(int level) {
     }
 
     m_extraction = std::make_unique<ExtractionSystem>();
+    m_holdout_stage = 0;
     m_extraction->set_on_complete([this]() {
         m_expedition_success = true;
         if (m_audio) m_audio->play_sound_2d(SoundCue::EvacTouchdown, 1.0f);
         m_inventory.finalize_run(m_selected_level, true); // Safe evac!
-        m_state = GameState::Debrief;
+        TransitionState(GameState::Debrief);
         m_window->set_cursor_locked(false);
     });
 
@@ -373,16 +504,14 @@ void Application::start_expedition(int level) {
         m_audio->stop_all();
         m_audio->set_current_sector(level);
 
-        // Map sector to audio cue bank: 3 audio themes cycle per 3 sectors
+        // Map sector to ambient drone theme
         int audio_tier = std::min((level - 1) / 3, 2); // 0 = Sector 1-3, 1 = 4-6, 2 = 7+
-        SoundCue arrival_stinger = (audio_tier == 0) ? SoundCue::SectorArrival1 :
-                                   (audio_tier == 1) ? SoundCue::SectorArrival2 :
-                                                       SoundCue::SectorArrival3;
         SoundCue ambient_drone   = (audio_tier == 0) ? SoundCue::AmbientSector1 :
                                    (audio_tier == 1) ? SoundCue::AmbientSector2 :
                                                        SoundCue::AmbientSector3;
 
-        m_audio->play_sound_2d(arrival_stinger, 0.85f);
+        // Play non-repetitive arrival stinger (curated variety pool, non-consecutive history, organic pitch, smooth fade-in/fade-out)
+        m_audio->play_arrival_stinger(level);
         m_audio->play_sound_2d(ambient_drone, 0.24f, 1.0f, true);
     }
 
@@ -396,12 +525,13 @@ void Application::start_expedition(int level) {
     m_death_timer = 0.0f;
     m_debrief_input_lock = 0.0f;
     m_tremor_spall_timer = 0.0f;
+    m_aftershock_wave_timer = 0.0f;
     if (m_hud) {
         m_hud->set_death_sequence(false);
     }
 
     m_window->set_cursor_locked(true);
-    m_state = GameState::Gameplay;
+    TransitionState(GameState::Gameplay);
 }
 
 void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags) {
@@ -431,6 +561,7 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
 
     // Spawn 12 dynamic billboard debris quads
     m_renderer->spawn_break_particles(glm::vec3(x, y, z), normal, mat);
+    m_spawn_mgr.on_block_broken(mat);
 
     // Update inventory, floating text, and award Demolitions XP
     glm::vec3 popup_pos(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.8f, static_cast<float>(z) + 0.5f);
@@ -493,6 +624,16 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_hud->add_floating_loot(popup_pos, "+1 RELIC HYPER-CORE (+250 PTS)", glm::vec4(1.0f, 0.82f, 0.2f, 1.0f));
         m_skills.add_demolitions_xp(50);
         m_trauma = std::min(m_trauma + 0.35f, 1.0f);
+    } else if (mat == MAT_PRISMATIC_CRYSTAL) {
+        m_inventory.add_voidite(2);
+        m_inventory.total_run_score += 35;
+        m_skills.add_demolitions_xp(25);
+        m_hud->add_floating_loot(popup_pos, "+2 PRISMATIC VOIDITE (+35 PTS)", glm::vec4(0.95f, 0.40f, 1.0f, 1.0f));
+    } else if (mat == MAT_BIOLUMINESCENT_FLORA) {
+        m_inventory.add_salvage(8);
+        m_inventory.total_run_score += 15;
+        m_skills.add_demolitions_xp(10);
+        m_hud->add_floating_loot(popup_pos, "+8 BIO-SAMPLE (+15 PTS)", glm::vec4(0.25f, 0.95f, 0.50f, 1.0f));
     } else {
         m_inventory.add_salvage(1);
         m_hud->add_floating_loot(popup_pos, "+1 SALVAGE (+10 PTS)", glm::vec4(0.7f, 0.75f, 0.8f, 1.0f));
@@ -502,7 +643,7 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
     // Accumulate mining fracture sound event based on material hardness & 3D location
     m_noise_meter.add_voxel_break_sound(glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), mat);
     if (m_hazard) {
-        m_hazard->on_rock_mined(mat);
+        m_hazard->on_rock_mined(glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), mat);
     }
 
     // Drill contact damage to any ambush stalker right in front of drill bit
@@ -660,12 +801,19 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
         m_audio->play_sound_3d(SoundCue::ExplosiveBlast, blast_origin, is_micro ? 0.95f : 1.25f);
     }
 
-    // Explosive concussive blast generates severe spatial noise and shatters nearby stalkers
+    // Explosive concussive blast generates severe spatial noise and shatters nearby stalkers & burrowers
     m_noise_meter.add_demolition_sound(blast_origin, is_micro);
     if (m_hazard) {
-        m_hazard->on_explosive_detonation(is_micro ? 16.0f : 32.0f);
+        m_hazard->on_explosive_detonation(blast_origin, is_micro ? 25.0f : 45.0f);
     }
     m_stalkers.damage_nearest(glm::vec3(origin), is_micro ? 4.0f : 8.0f, is_micro ? 35.0f : 70.0f);
+    m_burrowers.damage_nearest(blast_origin, is_micro ? 5.0f : 9.0f, is_micro ? 40.0f : 85.0f, true);
+
+    // Concussive shockwave triggers localized seismic tremor and attracts subterranean monsters
+    m_noise_meter.add_seismic_sound(blast_origin, is_micro ? 0.95f : 1.35f);
+    if (m_renderer) {
+        m_renderer->trigger_dust_kickup(is_micro ? 2.5f : 3.8f);
+    }
 
     if (is_micro) {
         // Surgical 1x1x3 (or 1x1x4 for Demolitionist) directional blast that removes a tunnel without destroying adjacent fragile ore
@@ -682,12 +830,9 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                 }
             }
         }
-        m_trauma = std::min(m_trauma + 0.2f, 1.0f);
+        m_trauma = std::min(m_trauma + 0.25f, 1.0f);
     } else {
         // Heavy Demolition Charge: 3x3x3 spherical blast radius (expanded +1 perimeter for Demolitionist)
-        if (m_inventory.demolition_charges <= 0) return;
-        m_inventory.demolition_charges--;
-
         int blast_rad = is_demolitionist ? 2 : 1;
         for (int dx = -blast_rad; dx <= blast_rad; ++dx) {
             for (int dy = -blast_rad; dy <= blast_rad; ++dy) {
@@ -702,7 +847,7 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                 }
             }
         }
-        m_trauma = std::min(m_trauma + 0.45f, 1.0f);
+        m_trauma = std::min(m_trauma + 0.50f, 1.0f);
     }
 }
 
@@ -710,8 +855,8 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
     if (!m_player || !m_world) return;
 
     if (cls == CharacterClass::Demolitionist) {
-        // Concussion shaped charge shockwave forward
-        if (m_hud) m_hud->show_warning("TACTICAL: CONCUSSION SHOCKWAVE BLAST!", 2.5f);
+        // Concussion shockwave disruptor pulse
+        if (m_hud) m_hud->show_warning("TACTICAL: CONCUSSION SHOCKWAVE DISRUPTOR!", 2.5f);
         m_player->add_trauma(0.35f);
         m_noise_meter.add_explosive_noise(25.0f);
 
@@ -788,108 +933,163 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
     }
 }
 
-void Application::setup_hazard_system() {
-    m_hazard = std::make_unique<HazardClock>();
+void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float radius, int min_blocks, int max_blocks) {
+    if (!m_world) return;
 
-    // 0.75 seconds before ceiling blocks detach:
-    m_hazard->set_on_tremor_warning([this]() {
-        if (m_hud) {
-            m_hud->show_warning("[!] INCOMING TECTONIC SPALL - EVADE [!]", 2.0f);
-        }
-        if (m_audio) {
-            m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.45f, 1.15f);
-        }
-        glm::vec3 p = m_player->position();
-        for (int i = 0; i < 6; ++i) {
-            float ox = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 3.5f;
-            float oz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 3.5f;
-            float oy = 5.0f + static_cast<float>(rand() % 5);
-            m_renderer->spawn_break_particles(p + glm::vec3(ox, oy, oz), glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
-        }
-        if (m_renderer) {
-            m_renderer->trigger_dust_kickup(2.0f);
-        }
-    });
+    // Detach ceiling blocks around the epicenter within the excavation zone
+    auto detach_blocks = StructuralCheck::query_seismic_detachment_blocks(
+        *m_world,
+        epicenter,
+        min_blocks, max_blocks,
+        std::min(radius * 0.75f, 15.0f),
+        2, 16
+    );
 
-    m_hazard->set_on_tremor([this](float intensity) {
-        m_player->add_trauma(intensity * 0.45f);
-        m_trauma = std::min(m_trauma + intensity * 0.45f, 1.0f);
-        if (m_audio) {
-            m_audio->set_seismic_rumble(intensity);
-        }
-        if (m_renderer) {
-            m_renderer->trigger_dust_kickup(3.5f);
-        }
-        if (m_hud) {
-            m_hud->show_warning("<< SEISMIC SENSOR: TECTONIC STRATUM SHIFT >>", 1.8f);
-        }
-
-        // Seismic Detachment Pass: locate 3-6 candidate blocks 2-14 units above player within 7-block radius
-        auto detach_blocks = StructuralCheck::query_seismic_detachment_blocks(
+    // Fallback: if ceiling is higher or wider within the affected zone, expand query
+    if (detach_blocks.empty()) {
+        detach_blocks = StructuralCheck::query_seismic_detachment_blocks(
             *m_world,
-            m_player->position(),
-            3, 6,   // 3 to 6 blocks
-            7.0f,   // 7-block radius
-            2, 14   // 2 to 14 units directly above
+            epicenter,
+            min_blocks, max_blocks,
+            std::min(radius * 0.95f, 18.0f),
+            2, 22
         );
+    }
 
-        // Fallback: if ceiling is higher or wider, expand query
-        if (detach_blocks.empty()) {
-            detach_blocks = StructuralCheck::query_seismic_detachment_blocks(
-                *m_world,
-                m_player->position(),
-                3, 6,
-                9.0f,
-                2, 18
+    // Extraction Landing Zone Shielding: Protect players defending the extraction beacon
+    if (m_extraction && (m_extraction->phase() == ExtractionPhase::BeaconDeployed || m_extraction->phase() == ExtractionPhase::PodLanded)) {
+        if (m_selected_level <= 1) {
+            // In Sector 1 (Perimeter Drift), the LZ is fully shielded from ceiling spalling during evacuation
+            detach_blocks.clear();
+        } else {
+            // In higher sectors, protect a 6-block horizontal radius around the extraction beacon
+            glm::vec3 bpos = m_extraction->beacon_position();
+            std::erase_if(detach_blocks, [&](const glm::ivec3& b) {
+                float dist_horiz = glm::distance(glm::vec2(b.x + 0.5f, b.z + 0.5f), glm::vec2(bpos.x, bpos.z));
+                return dist_horiz < 6.0f;
+            });
+        }
+    }
+
+    if (detach_blocks.empty()) return;
+
+    for (const auto& b : detach_blocks) {
+        Voxel v = m_world->get_voxel(b.x, b.y, b.z);
+        // Remove physical block from ceiling
+        m_world->set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, true);
+
+        // Spawn fracture dust/particles at ceiling detachment point in the affected zone
+        if (m_renderer) {
+            m_renderer->spawn_break_particles(
+                glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f),
+                glm::ivec3(0, -1, 0),
+                v.material_id
             );
         }
 
-        if (!detach_blocks.empty() && m_hud) {
-            m_hud->show_warning("SEISMIC TREMOR: CEILING COLLAPSE - BLOCKS DETACHING!", 2.5f);
+        if (m_host) {
+            int cx = (b.x >= 0) ? (b.x / CHUNK_SIZE) : ((b.x - CHUNK_SIZE + 1) / CHUNK_SIZE);
+            int cy = (b.y >= 0) ? (b.y / CHUNK_SIZE) : ((b.y - CHUNK_SIZE + 1) / CHUNK_SIZE);
+            int cz = (b.z >= 0) ? (b.z / CHUNK_SIZE) : ((b.z - CHUNK_SIZE + 1) / CHUNK_SIZE);
+            int lx = (b.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+            int ly = (b.y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+            int lz = (b.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+            uint16_t idx = static_cast<uint16_t>(Chunk::to_index(lx, ly, lz));
+            m_host->broadcast_block_delta(cx, cy, cz, idx, MAT_AIR, 0);
         }
 
-        for (const auto& b : detach_blocks) {
-            Voxel v = m_world->get_voxel(b.x, b.y, b.z);
-            // Remove physical block from ceiling
-            m_world->set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, true);
+        uint32_t did = m_next_debris_id++;
+        float rvx = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 1.1f;
+        float rvz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 1.1f;
+        // Heavy, high-gravity downward velocity with chaotic tumbling
+        float rvy = -2.5f - static_cast<float>(rand() % 100) / 40.0f;
+        glm::vec3 vel(rvx, rvy, rvz);
+        float rot_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
+        float rot_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
+        float rot_z = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
+        glm::vec3 rot(rot_x, rot_y, rot_z);
+        m_debris.emplace_back(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, rot, v.material_id, 1);
+        if (m_host) {
+            m_host->broadcast_debris_spawn(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, v.material_id, 1);
+        }
+    }
+}
 
-            // Spawn fracture dust/particles at ceiling detachment point
-            if (m_renderer) {
-                m_renderer->spawn_break_particles(
-                    glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f),
-                    glm::ivec3(0, -1, 0),
-                    v.material_id
-                );
+void Application::setup_hazard_system() {
+    m_hazard = std::make_unique<HazardClock>();
+
+    // Pre-tremor warning phase: localized spall particles and proximity warning
+    m_hazard->set_on_tremor_warning([this](const glm::vec3& epicenter, float radius) {
+        float dist = glm::distance(m_player->position(), epicenter);
+        float proximity = std::clamp(1.0f - (dist / radius), 0.0f, 1.0f);
+
+        if (m_hud) {
+            if (proximity > 0.15f) {
+                m_hud->show_warning("[!] INCOMING LOCALIZED SPALL - EVADE ZONE [!]", 2.0f);
+            } else {
+                m_hud->show_warning("[!] DISTANT FAULT RUPTURE DETECTED IN EXCAVATION ZONE [!]", 1.5f);
             }
-
-            if (m_host) {
-                int cx = (b.x >= 0) ? (b.x / CHUNK_SIZE) : ((b.x - CHUNK_SIZE + 1) / CHUNK_SIZE);
-                int cy = (b.y >= 0) ? (b.y / CHUNK_SIZE) : ((b.y - CHUNK_SIZE + 1) / CHUNK_SIZE);
-                int cz = (b.z >= 0) ? (b.z / CHUNK_SIZE) : ((b.z - CHUNK_SIZE + 1) / CHUNK_SIZE);
-                int lx = (b.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-                int ly = (b.y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-                int lz = (b.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-                uint16_t idx = static_cast<uint16_t>(Chunk::to_index(lx, ly, lz));
-                m_host->broadcast_block_delta(cx, cy, cz, idx, MAT_AIR, 0);
-            }
-
-            uint32_t did = m_next_debris_id++;
-            float rvx = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 0.75f;
-            float rvz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 0.75f;
-            glm::vec3 vel(rvx, -1.5f - static_cast<float>(rand() % 100) / 100.0f, rvz);
-            float rot_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 2.0f;
-            float rot_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 2.0f;
-            float rot_z = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 2.0f;
-            glm::vec3 rot(rot_x, rot_y, rot_z);
-            m_debris.emplace_back(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, rot, v.material_id, 1);
-            if (m_host) {
-                m_host->broadcast_debris_spawn(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, v.material_id, 1);
+        }
+        if (m_audio) {
+            if (proximity > 0.05f) {
+                m_audio->play_sound_2d(SoundCue::CavernGroan, 0.70f * std::max(0.3f, proximity), 0.95f);
+                m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.55f * std::max(0.2f, proximity), 1.15f);
+            } else {
+                m_audio->play_sound_3d(SoundCue::SeismicTremor, epicenter, 0.75f);
             }
         }
 
-        // Hazard Phase 3 & 4 (radiation >= 45% or Sector >= 2): chance to awaken Seismic Burrower!
-        if (m_hazard->radiation_level() >= 45.0f && m_burrowers.active_count() == 0) {
-            m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
+        // Particle effects are strictly localized to the zone undergoing tremor
+        if (m_renderer) {
+            for (int i = 0; i < 16; ++i) {
+                float ox = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 5.0f;
+                float oz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 5.0f;
+                float oy = 3.5f + static_cast<float>(rand() % 8);
+                m_renderer->spawn_break_particles(epicenter + glm::vec3(ox, oy, oz), glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
+            }
+            if (proximity > 0.15f) {
+                m_renderer->trigger_dust_kickup(2.5f * proximity);
+            }
+        }
+    });
+
+    m_hazard->set_on_tremor([this](float intensity, const glm::vec3& epicenter, float radius) {
+        float dist = glm::distance(m_player->position(), epicenter);
+        float proximity = std::clamp(1.0f - (dist / radius), 0.0f, 1.0f);
+
+        // Screen shaking ONLY affects player if they are inside or near the affected zone
+        if (proximity > 0.01f) {
+            float shake_amount = intensity * 0.70f * proximity;
+            m_player->add_trauma(shake_amount);
+            m_trauma = std::min(m_trauma + shake_amount, 1.0f);
+        }
+
+        if (m_audio) {
+            if (proximity > 0.05f) {
+                m_audio->play_sound_2d(SoundCue::ExplosiveBlast, 0.65f * proximity, 0.85f);
+                m_audio->set_seismic_rumble(intensity * proximity);
+            } else {
+                m_audio->play_sound_3d(SoundCue::SeismicTremor, epicenter, 0.85f);
+            }
+        }
+        if (proximity > 0.15f && m_renderer) {
+            m_renderer->trigger_dust_kickup(4.5f * proximity);
+        }
+        if (m_hud) {
+            if (proximity > 0.15f) {
+                m_hud->show_warning("<< SEISMIC SENSOR: CATASTROPHIC LOCAL CEILING COLLAPSE >>", 2.5f);
+            } else {
+                m_hud->show_warning("<< SEISMIC SENSOR: REMOTE CATASTROPHIC FAULT COLLAPSE >>", 2.0f);
+            }
+        }
+
+        // Primary Cave-in Wave: detach 18 to 36 physical ceiling blocks in the active zone
+        spawn_ceiling_cavein_wave(epicenter, radius, 18, 36);
+
+        // Hazard Phase 3 & 4 (radiation >= 45% in Sector >= 2): chance to awaken Seismic Burrower around epicenter!
+        // Sector 1 is introductory and does NOT spawn deep subterranean burrowers.
+        if (m_selected_level >= 2 && m_hazard->radiation_level() >= 45.0f && m_burrowers.active_count() == 0) {
+            m_burrowers.spawn_hazard_wave(epicenter, *m_world);
             if (m_hud) {
                 m_hud->show_warning("! SUBTERRANEAN SENSOR: SEISMIC BURROWER DETECTED !", 3.5f);
             }
@@ -902,17 +1102,17 @@ void Application::process_input(int key, int action) {
 
     if (key == GLFW_KEY_ESCAPE) {
         if (m_state == GameState::Gameplay) {
-            m_state = GameState::Paused;
+            TransitionState(GameState::Paused);
             m_window->set_cursor_locked(false);
         } else if (m_state == GameState::Paused) {
-            m_state = GameState::Gameplay;
+            TransitionState(GameState::Gameplay);
             m_window->set_cursor_locked(true);
         } else if (m_state == GameState::OrbitalHub) {
             if (m_hub_ui) m_hub_ui->set_subview(MenuSubView::Main);
-            m_state = GameState::MainMenu;
+            TransitionState(GameState::MainMenu);
         } else if (m_state == GameState::Debrief) {
             if (m_hub_ui) m_hub_ui->set_subview(MenuSubView::Main);
-            m_state = GameState::MainMenu;
+            TransitionState(GameState::MainMenu);
         } else if (m_state == GameState::MainMenu) {
             if (m_hub_ui && m_hub_ui->subview() != MenuSubView::Main) {
                 m_hub_ui->set_subview(MenuSubView::Main);
@@ -936,6 +1136,7 @@ void Application::process_input(int key, int action) {
 
 void Application::fixed_tick(float dt) {
     m_current_tick++;
+    AudioSystem::Update(dt);
 
     if (m_state != GameState::Gameplay) {
         return;
@@ -957,7 +1158,7 @@ void Application::fixed_tick(float dt) {
         if (m_death_timer >= DEATH_SEQUENCE_DURATION) {
             m_death_sequence = false;
             m_inventory.finalize_run(m_selected_level, false);
-            m_state = GameState::Debrief;
+            TransitionState(GameState::Debrief);
             m_window->set_cursor_locked(false);
             m_debrief_input_lock = 1.2f; // Prevent immediate accidental click-through
         }
@@ -1029,7 +1230,7 @@ void Application::fixed_tick(float dt) {
                     glm::ivec3(0, 1, 0),
                     it->material_id()
                 );
-                m_renderer->trigger_dust_kickup(1.2f);
+                m_renderer->trigger_dust_kickup(1.5f);
             }
             if (m_audio) {
                 m_audio->play_sound_3d(SoundCue::VoxelHit, glm::vec3(res.place_pos), 0.85f);
@@ -1048,15 +1249,25 @@ void Application::fixed_tick(float dt) {
                 m_host->broadcast_block_delta(cx, cy, cz, idx, it->material_id(), 0);
             }
             if (glm::distance(player_pos, glm::vec3(res.place_pos)) < 8.0f) {
-                m_player->add_trauma(0.08f);
-                m_trauma = std::min(m_trauma + 0.08f, 1.0f);
+                m_player->add_trauma(0.12f);
+                m_trauma = std::min(m_trauma + 0.12f, 1.0f);
             }
             // Debris crash sound event in cavern space
             m_noise_meter.add_debris_crash_sound(glm::vec3(res.place_pos), it->block_count());
+
+            // Crushing impact damages nearby hostiles caught under falling ceiling blocks
+            glm::vec3 ground_pos = glm::vec3(res.place_pos) + glm::vec3(0.5f, 0.5f, 0.5f);
+            m_stalkers.damage_nearest(ground_pos, 2.4f, 40.0f);
+            m_burrowers.damage_nearest(ground_pos, 2.6f, 45.0f, true);
         }
 
         if (res.hit_player) {
-            float applied_dmg = m_player->take_damage(res.damage, true);
+            float dmg = res.damage;
+            if (m_extraction && m_extraction->is_player_in_perimeter(player_pos)) {
+                float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+                dmg *= resist;
+            }
+            float applied_dmg = m_player->take_damage(dmg, PlayerController::DamageSource::FallingDebris);
             m_player->add_trauma(0.35f);
             m_trauma = std::min(m_trauma + 0.35f, 1.0f);
             m_hud->trigger_damage_flash(0.7f);
@@ -1073,34 +1284,58 @@ void Application::fixed_tick(float dt) {
     }
 
     // 4. Update Hazard Clock, Extraction, Surveying, and Particles
+    if (m_hazard && m_player) {
+        m_hazard->set_player_position(m_player->position());
+    }
     m_hazard->update(dt);
 
     // Sustained Tectonic Tremor Shaking & Spalling
     if (m_hazard && m_hazard->is_tremoring()) {
+        glm::vec3 epicenter = m_hazard->active_tremor_epicenter();
+        float radius = m_hazard->active_tremor_radius();
+        float dist = glm::distance(m_player->position(), epicenter);
+        float proximity = std::clamp(1.0f - (dist / radius), 0.0f, 1.0f);
+
         float tremor_int = m_hazard->tremor_intensity();
         if (tremor_int <= 0.0f) tremor_int = 1.0f;
-        m_trauma = std::max(m_trauma, 0.70f * tremor_int);
-        // Seismic rumble sound event emitted across cavern
-        m_noise_meter.add_seismic_sound(m_player->position(), tremor_int * dt);
-        if (m_audio) {
-            m_audio->set_seismic_rumble(tremor_int);
+
+        // Screen shake ONLY affects user if in proximity to the tremor area!
+        if (proximity > 0.05f) {
+            m_trauma = std::max(m_trauma, 0.85f * tremor_int * proximity);
         }
+
+        // Seismic rumble sound event emitted from the epicenter
+        m_noise_meter.add_seismic_sound(epicenter, tremor_int * dt);
+        if (m_audio) {
+            m_audio->set_seismic_rumble(tremor_int * proximity);
+        }
+
+        // Secondary aftershock cascades: periodic detachment waves throughout the tremor
+        m_aftershock_wave_timer += dt;
+        if (m_aftershock_wave_timer >= 0.85f) {
+            m_aftershock_wave_timer = 0.0f;
+            spawn_ceiling_cavein_wave(epicenter, radius, 4, 8);
+        }
+
         m_tremor_spall_timer += dt;
-        if (m_tremor_spall_timer >= 0.35f) {
+        if (m_tremor_spall_timer >= 0.25f) {
             m_tremor_spall_timer = 0.0f;
-            if (m_renderer && m_world && m_player) {
-                m_renderer->trigger_dust_kickup(1.5f);
-                glm::vec3 p = m_player->position();
-                for (int i = 0; i < 4; ++i) {
-                    float ox = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
-                    float oz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
-                    float oy = 3.0f + static_cast<float>(rand() % 4);
-                    m_renderer->spawn_break_particles(p + glm::vec3(ox, oy, oz), glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
+            if (m_renderer && m_world) {
+                if (proximity > 0.2f) {
+                    m_renderer->trigger_dust_kickup(2.5f * proximity);
+                }
+                // Particles spawn ONLY at the tremor zone ceiling, NOT above player!
+                for (int i = 0; i < 8; ++i) {
+                    float ox = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 6.0f;
+                    float oz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 6.0f;
+                    float oy = 3.0f + static_cast<float>(rand() % 5);
+                    m_renderer->spawn_break_particles(epicenter + glm::vec3(ox, oy, oz), glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
                 }
             }
         }
     } else {
         m_tremor_spall_timer = 0.0f;
+        m_aftershock_wave_timer = 0.0f;
         if (m_audio && !m_death_sequence) {
             m_audio->set_seismic_rumble(0.0f);
         }
@@ -1127,8 +1362,8 @@ void Application::fixed_tick(float dt) {
     }
 
     // Update Mining Noise Meter & natural decay
-    // Wire crouch stealth mechanic: Left Ctrl held = crouching = faster noise decay & stealth movement
-    bool is_crouching = m_window->is_key_down(GLFW_KEY_LEFT_CONTROL);
+    // Wire crouch stealth mechanic: Left Ctrl / C held = crouching = faster noise decay & stealth movement
+    bool is_crouching = m_player ? m_player->is_crouching() : m_window->is_key_down(GLFW_KEY_LEFT_CONTROL);
     m_noise_meter.set_crouching(is_crouching);
 
     // Continuous Movement & Exo-Thruster Acoustic Sound Emissions:
@@ -1146,22 +1381,75 @@ void Application::fixed_tick(float dt) {
 
     // Update active sound event lifetimes and noise meter decay
     m_noise_meter.update(dt);
+    // Tick the agitation state machine: decrements enrage timer, transitions
+    // ENRAGED → COOLDOWN after 30 s, then COOLDOWN → CALM over 15 s.
+    // Without this call the enrage state is permanent (timer never decrements).
+    SwarmManager::instance().Update(dt);
 
     // Industrial Drill contact grinding: continuous damage against hostile enemies in front of the bit
     if (m_player->is_drilling()) {
         glm::vec3 drill_tip = m_player->position() + m_player->forward() * 1.5f;
         m_noise_meter.add_drill_sound(drill_tip, dt, 14.0f);
         if (m_hazard) {
-            m_hazard->add_seismic_stress(1.5f * dt);
+            // Sustained drill contact generates continuous seismic micro-fracture stress in this excavation zone.
+            m_hazard->add_seismic_stress(drill_tip, 3.8f * dt);
         }
-        bool hit_stalker = m_stalkers.damage_nearest(drill_tip, 2.2f, 35.0f * dt);
-        bool hit_burrower = m_burrowers.damage_nearest(drill_tip, 2.6f, 40.0f * dt, false);
-        if ((hit_stalker || hit_burrower) && m_renderer) {
+        bool is_crit_stalker = false;
+        float dmg_dealt_stalker = 0.0f;
+        bool hit_stalker = m_stalkers.damage_nearest(drill_tip, 2.2f, 35.0f * dt, true, &is_crit_stalker, &dmg_dealt_stalker);
+
+        bool is_crit_burrower = false;
+        float dmg_dealt_burrower = 0.0f;
+        bool hit_burrower = m_burrowers.damage_nearest(drill_tip, 2.6f, 40.0f * dt, false, true, &is_crit_burrower, &dmg_dealt_burrower);
+
+        if (is_crit_stalker || is_crit_burrower) {
+            float total_crit_dmg = is_crit_stalker ? dmg_dealt_stalker : dmg_dealt_burrower;
+            if (m_hud) {
+                m_hud->trigger_hit_marker(true, total_crit_dmg);
+                m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
+            }
+            if (m_audio) {
+                m_audio->play_sound_3d(SoundCue::CritHit, drill_tip, 1.0f);
+            }
+        } else if (hit_stalker || hit_burrower) {
+            if (m_hud) {
+                m_hud->trigger_hit_marker(false, 35.0f * dt);
+            }
+        }
+
+        // Harvest persistent physical carcasses (+1-2 Chitinous Carapace / Organic Biomass)
+        int out_carapace = 0;
+        int out_biomass = 0;
+        glm::vec3 shatter_pos(0.0f);
+        bool harvested = CarcassManager::instance().harvest_nearest(drill_tip, 2.2f, 35.0f * dt, out_carapace, out_biomass, &shatter_pos);
+        if (harvested) {
+            m_inventory.scrap_metal += (out_carapace + out_biomass);
+            m_inventory.total_run_score += 20 * (out_carapace + out_biomass);
+            if (m_renderer) {
+                m_renderer->spawn_break_particles(shatter_pos, glm::ivec3(0, 1, 0), MAT_VOLCANIC_BASALT);
+            }
+            if (m_hud) {
+                m_hud->add_loot_toast("CHITINOUS CARAPACE", glm::vec4(0.9f, 0.45f, 0.15f, 1.0f), out_carapace);
+                m_hud->add_loot_toast("ORGANIC BIOMASS", glm::vec4(0.2f, 0.95f, 0.45f, 1.0f), out_biomass);
+            }
+            if (m_audio) {
+                m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, shatter_pos, 0.85f);
+            }
+        }
+
+        if ((hit_stalker || hit_burrower || harvested) && m_renderer) {
             m_renderer->spawn_crack_debris(drill_tip, glm::ivec3(0, 1, 0), 0.6f, 3);
         }
     }
 
     // Update Void Stalker hostile entities AI & collision (Sound-driven hearing + LOS-gated attacks)
+    if (m_stalker_spotted_audio_cooldown > 0.0f) {
+        m_stalker_spotted_audio_cooldown = std::max(0.0f, m_stalker_spotted_audio_cooldown - dt);
+    }
+    if (m_stalker_investigate_audio_cooldown > 0.0f) {
+        m_stalker_investigate_audio_cooldown = std::max(0.0f, m_stalker_investigate_audio_cooldown - dt);
+    }
+
     glm::vec3 headlamp_dir = m_player->forward();
     bool headlamp_on = m_renderer ? m_renderer->headlamp().enabled : true;
     bool is_drilling = m_player->is_drilling();
@@ -1182,8 +1470,17 @@ void Application::fixed_tick(float dt) {
         );
     }
 
+    // Step pacing manager and persistent carcass ragdoll physics
+    m_spawn_mgr.update(dt, *m_world, m_stalkers, m_player->position());
+    CarcassManager::instance().update(dt, *m_world);
+
     if (stalker_res.total_damage > 0.0f) {
-        float applied = m_player->take_damage(stalker_res.total_damage, false);
+        float dmg = stalker_res.total_damage;
+        if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
+            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+            dmg *= resist;
+        }
+        float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
         m_player->add_trauma(0.45f);
         m_trauma = std::min(m_trauma + 0.45f, 1.0f);
         m_hud->trigger_damage_flash(0.75f);
@@ -1197,42 +1494,106 @@ void Application::fixed_tick(float dt) {
         }
     }
     if (stalker_res.any_projectile_fired) {
-        m_hud->show_warning("<< INCOMING VOID SPINES >>", 1.5f);
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::VoxelBreakVoidite, m_player->position() + m_player->forward() * 4.0f, 0.9f);
         }
     }
     if (stalker_res.any_lunge) {
         m_player->add_trauma(0.25f);
-        m_hud->show_warning("! AGGRESSIVE APEX LUNGE !", 1.6f);
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::StalkerLunge, m_player->position(), 1.0f);
+        }
     }
     if (stalker_res.any_spotted) {
-        m_hud->show_warning("<< ALERT: SHADOW PREDATOR TRACKING YOU >>", 2.2f);
+        if (m_audio && m_stalker_spotted_audio_cooldown <= 0.0f) {
+            glm::vec3 s_pos = m_player->position();
+            for (const auto& s : m_stalkers.stalkers()) {
+                if (s.state == StalkerState::Stalking || s.has_player_los) {
+                    s_pos = s.position;
+                    break;
+                }
+            }
+            m_audio->play_sound_3d(SoundCue::StalkerSpotted, s_pos, 1.0f);
+            m_stalker_spotted_audio_cooldown = 2.0f;
+        }
     } else if (stalker_res.any_heard_sound) {
-        m_hud->show_warning("<< ACOUSTIC DISTURBANCE: CREATURE INVESTIGATING NOISE >>", 1.8f);
+        if (m_audio && m_stalker_investigate_audio_cooldown <= 0.0f) {
+            glm::vec3 s_pos = m_player->position();
+            for (const auto& s : m_stalkers.stalkers()) {
+                if (s.state == StalkerState::Investigating) {
+                    s_pos = s.position;
+                    break;
+                }
+            }
+            m_audio->play_sound_3d(SoundCue::StalkerChitter, s_pos, 0.95f);
+            m_stalker_investigate_audio_cooldown = 2.5f;
+        }
     }
     if (stalker_res.stalkers_killed > 0) {
         m_inventory.total_run_score += 100 * stalker_res.stalkers_killed;
         m_skills.add_demolitions_xp(25 * stalker_res.stalkers_killed);
         m_hud->show_warning("VOID STALKER ELIMINATED (+100 PTS)", 2.0f);
     }
+    if (stalker_res.stalkers_escaped > 0) {
+        if (m_renderer) {
+            m_renderer->trigger_dust_kickup(1.5f);
+        }
+    }
 
     // Update Seismic Burrower hostile entities AI, excavation & cave-in triggers
-    auto burrower_res = m_burrowers.update(dt, m_player->position(), *m_world, m_noise_meter.recent_sounds());
+    auto burrower_res = m_burrowers.update(dt, m_player->position(), *m_world, m_noise_meter.recent_sounds(), is_crouching);
+
+    // Localized visibility check: burrow particles should only spawn if visible from cavern without intervening walls
+    auto is_burrow_visible = [&](const glm::vec3& world_pt) -> bool {
+        if (!m_player || !m_world) return true;
+        glm::vec3 cam = m_player->eye_position();
+        glm::vec3 diff = world_pt - cam;
+        float d = glm::length(diff);
+        if (d > 35.0f) return false; // Beyond cavern acoustic/visual particle threshold
+        if (d < 0.25f) return true;
+        RaycastHit hit = m_world->raycast(cam, diff / d, d - 0.25f);
+        return !hit.hit; // If obstructed by an intervening rock wall, it is occluded
+    };
+
+    // Spawn localized burrowing particle effects for excavated voxels bordering exposed cavern air
+    if (m_renderer && !burrower_res.excavated_voxels.empty()) {
+        static const glm::ivec3 air_dirs[6] = {
+            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+        };
+        for (const auto& ev : burrower_res.excavated_voxels) {
+            bool on_surface = false;
+            for (const auto& d : air_dirs) {
+                if (!m_world->is_solid(ev.pos + d)) {
+                    on_surface = true;
+                    break;
+                }
+            }
+            if (!on_surface) continue; // Skip voxels completely sealed inside subterranean bedrock
+
+            glm::vec3 vpos = glm::vec3(ev.pos) + glm::vec3(0.5f);
+            if (is_burrow_visible(vpos)) {
+                m_renderer->spawn_burrow_particles(vpos, glm::vec3(0, 0, 1), ev.original_mat, 8);
+                m_renderer->spawn_crack_debris(vpos, glm::ivec3(0, 1, 0), 0.6f, ev.original_mat);
+            }
+        }
+    }
 
     if (burrower_res.total_damage > 0.0f) {
-        float applied = m_player->take_damage(burrower_res.total_damage, false);
+        float dmg = burrower_res.total_damage;
+        if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
+            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+            dmg *= resist;
+        }
+        float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
         m_player->add_trauma(0.55f);
         m_trauma = std::min(m_trauma + 0.55f, 1.0f);
         m_hud->trigger_damage_flash(0.85f);
-        m_hud->show_warning("! TECTONIC RAM IMPACT (-" + std::to_string(static_cast<int>(applied)) + " HP) !", 2.5f);
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::ExplosiveBlast, m_player->position(), 1.0f);
         }
     }
     if (burrower_res.any_breach) {
         m_player->add_trauma(0.35f);
-        m_hud->show_warning("! SEISMIC BURROWER BREACH !", 2.5f);
         if (m_renderer) {
             m_renderer->trigger_dust_kickup(3.0f);
         }
@@ -1242,7 +1603,6 @@ void Application::fixed_tick(float dt) {
     }
     if (burrower_res.any_cavein_triggered) {
         m_hazard->force_tremor(1.4f);
-        m_hud->show_warning("! BURROWER SHOCKWAVE TRIGGERED CAVE-IN !", 2.5f);
     }
     if (burrower_res.max_rumble > 0.1f) {
         m_trauma = std::max(m_trauma, burrower_res.max_rumble * 0.18f);
@@ -1268,7 +1628,19 @@ void Application::fixed_tick(float dt) {
         // Gunshot acoustic muzzle blast sound event
         m_noise_meter.add_gunshot_sound(m_player->position() + m_player->forward() * 0.8f, static_cast<int>(m_player->weapon_archetype()));
         m_player->add_trauma(m_player->weapon_stats().trauma_kick);
-    }
+
+        // Muzzle concussion through rock — each shot adds seismic microstress to the cavern.
+        // Railgun needle is most destabilising (hypersonic shockwave), shotgun least (spread).
+        if (m_hazard) {
+            float muzzle_stress = 8.0f;
+            switch (m_player->weapon_archetype()) {
+                case WeaponArchetype::MagmaScattergun: muzzle_stress = 6.0f;  break;
+                case WeaponArchetype::PlasmaCarbine:   muzzle_stress = 8.0f;  break;
+                case WeaponArchetype::NeedlerRailgun:  muzzle_stress = 15.0f; break;
+            }
+            m_hazard->on_weapon_impact(muzzle_stress);
+        }
+    } // end if(try_fire_weapon)
 
     // Update active plasma bolts
     for (auto& bolt : m_plasma_bolts) {
@@ -1288,49 +1660,171 @@ void Application::fixed_tick(float dt) {
         Voxel v = m_world->get_voxel(bx, by, bz);
         if (v.is_solid()) {
             bolt.active = false;
-            if (m_renderer) {
-                m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.5f, MAT_VOIDITE_CRYSTAL);
+
+            // Compute hit face normal based on bullet velocity
+            glm::ivec3 hit_norm(0, 1, 0);
+            glm::vec3 abs_vel = glm::abs(bolt.velocity);
+            if (abs_vel.x > abs_vel.y && abs_vel.x > abs_vel.z) {
+                hit_norm = glm::ivec3(bolt.velocity.x > 0.0f ? -1 : 1, 0, 0);
+            } else if (abs_vel.y > abs_vel.z) {
+                hit_norm = glm::ivec3(0, bolt.velocity.y > 0.0f ? -1 : 1, 0);
+            } else {
+                hit_norm = glm::ivec3(0, 0, bolt.velocity.z > 0.0f ? -1 : 1);
             }
+
+            float stress_impact = 5.0f;
+            uint8_t bullet_block_damage = 6;
+            if (m_player->weapon_archetype() == WeaponArchetype::MagmaScattergun) {
+                stress_impact = 2.5f;
+                bullet_block_damage = 4;
+            } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
+                stress_impact = 10.0f;
+                bullet_block_damage = 15; // Railgun instantly fractures/shatters standard voxels
+            }
+
+            // Bullet impact acoustic distraction sound event on rock wall
+            m_noise_meter.add_bullet_impact_sound(next_pos, stress_impact);
             if (m_audio) {
                 m_audio->play_sound_3d(SoundCue::PlasmaHit, next_pos, 0.70f);
             }
-            float stress_impact = 2.5f;
-            if (m_player->weapon_archetype() == WeaponArchetype::MagmaScattergun) {
-                stress_impact = 1.0f;
-            } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
-                stress_impact = 4.0f;
-            }
-            // Bullet impact acoustic distraction sound event on rock wall
-            m_noise_meter.add_bullet_impact_sound(next_pos, stress_impact);
-            if (m_hazard) {
-                m_hazard->on_weapon_impact(stress_impact);
+
+            // Ballistic block damage & fracture mechanics
+            if (v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_REINFORCED_VAULT_DOOR) {
+                uint8_t current_damage = v.flags_and_damage & 0x0F;
+                uint8_t new_damage = current_damage + bullet_block_damage;
+                if (new_damage >= 15) {
+                    // Block completely breaks under heavy ballistic impact!
+                    m_world->set_voxel(bx, by, bz, Voxel{MAT_AIR, 0}, true);
+                    on_block_broken(bx, by, bz, hit_norm, v.material_id, v.flags_and_damage);
+                    m_noise_meter.add_voxel_break_sound(next_pos, v.material_id);
+                    SoundCue break_cue = (v.material_id == MAT_VOIDITE_CRYSTAL) ? SoundCue::VoxelBreakVoidite :
+                                         (v.material_id == MAT_INDUSTRIAL_BULKHEAD) ? SoundCue::VoxelBreakBulkhead :
+                                         SoundCue::VoxelBreakBasalt;
+                    if (m_audio) {
+                        m_audio->play_sound_3d(break_cue, next_pos, 0.85f);
+                    }
+
+                    // Destabilize stratum: bullet-shattered block triggers localized seismic tremor!
+                    if (m_hazard) {
+                        m_hazard->on_weapon_impact(next_pos, stress_impact * 2.5f);
+                    }
+
+                    // Localized seismic tremor event in the area where the bullet hit
+                    m_noise_meter.add_seismic_sound(next_pos, 0.75f);
+                    float micro_trauma = 0.08f;
+                    float impact_dist = glm::distance(m_player->position(), next_pos);
+                    if (impact_dist < 6.0f) {
+                        float impact_prox = 1.0f - (impact_dist / 6.0f);
+                        m_player->add_trauma(micro_trauma * impact_prox);
+                        m_trauma = std::min(m_trauma + micro_trauma * impact_prox, 1.0f);
+                    }
+
+                    if (m_renderer) {
+                        m_renderer->trigger_dust_kickup(1.2f);
+                        for (int i = 0; i < 4; ++i) {
+                            float ox = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 1.5f;
+                            float oz = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 1.5f;
+                            m_renderer->spawn_break_particles(next_pos + glm::vec3(ox, 2.5f, oz), glm::ivec3(0, -1, 0), v.material_id);
+                        }
+                    }
+                } else {
+                    // Accumulate ballistic damage and spawn progressive crack debris
+                    v.flags_and_damage = (v.flags_and_damage & 0xF0) | (new_damage & 0x0F);
+                    m_world->set_voxel(bx, by, bz, v, true);
+                    if (m_renderer) {
+                        m_renderer->spawn_crack_debris(next_pos, hit_norm, static_cast<float>(new_damage) / 15.0f, v.material_id);
+                        m_renderer->trigger_dust_kickup(0.25f + stress_impact * 0.03f);
+                    }
+                    if (m_hazard) {
+                        m_hazard->on_weapon_impact(next_pos, stress_impact);
+                    }
+                }
+            } else {
+                if (m_renderer) {
+                    m_renderer->spawn_crack_debris(next_pos, hit_norm, 0.5f, MAT_VOIDITE_CRYSTAL);
+                    m_renderer->trigger_dust_kickup(0.35f + stress_impact * 0.05f);
+                }
+                if (m_hazard) {
+                    m_hazard->on_weapon_impact(next_pos, stress_impact);
+                }
             }
             continue;
         }
 
         // 2. Enemy hit detection: Void Stalkers
-        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage)) {
+        bool is_crit = false;
+        float damage_dealt = 0.0f;
+        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage, true, &is_crit, &damage_dealt)) {
             bolt.active = false;
             if (m_renderer) {
                 m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.8f, MAT_VOIDITE_CRYSTAL);
             }
-            if (m_audio) {
-                m_audio->play_sound_3d(SoundCue::PlasmaHit, next_pos, 0.95f);
+            if (is_crit) {
+                if (m_hud) {
+                    m_hud->trigger_hit_marker(true, damage_dealt);
+                    m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
+                }
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::CritHit, next_pos, 1.0f);
+                }
+            } else {
+                if (m_hud) {
+                    m_hud->trigger_hit_marker(false, bolt.damage);
+                }
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::PlasmaHit, next_pos, 0.95f);
+                }
             }
-            m_inventory.total_run_score += 15;
+            m_inventory.total_run_score += is_crit ? 45 : 15;
+            float enemy_stress = 3.5f;
+            if (m_player->weapon_archetype() == WeaponArchetype::MagmaScattergun) {
+                enemy_stress = 1.5f;
+            } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
+                enemy_stress = 7.0f;
+            }
+            m_noise_meter.add_bullet_impact_sound(next_pos, enemy_stress);
+            if (m_hazard) {
+                m_hazard->on_weapon_impact(next_pos, enemy_stress);
+            }
             continue;
         }
 
         // 3. Enemy hit detection: Seismic Burrowers
-        if (m_burrowers.damage_nearest(next_pos, 2.4f, bolt.damage, false)) {
+        bool is_b_crit = false;
+        float b_damage_dealt = 0.0f;
+        if (m_burrowers.damage_nearest(next_pos, 2.4f, bolt.damage, false, true, &is_b_crit, &b_damage_dealt)) {
             bolt.active = false;
             if (m_renderer) {
                 m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.9f, MAT_TITANIUM);
+                m_renderer->trigger_dust_kickup(0.5f);
             }
-            if (m_audio) {
-                m_audio->play_sound_3d(SoundCue::PlasmaHit, next_pos, 0.95f);
+            if (is_b_crit) {
+                if (m_hud) {
+                    m_hud->trigger_hit_marker(true, b_damage_dealt);
+                    m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
+                }
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::CritHit, next_pos, 1.0f);
+                }
+            } else {
+                if (m_hud) {
+                    m_hud->trigger_hit_marker(false, bolt.damage);
+                }
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::PlasmaHit, next_pos, 0.95f);
+                }
             }
-            m_inventory.total_run_score += 25;
+            m_inventory.total_run_score += is_b_crit ? 75 : 25;
+            float burrower_stress = 5.5f;
+            if (m_player->weapon_archetype() == WeaponArchetype::MagmaScattergun) {
+                burrower_stress = 2.2f;
+            } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
+                burrower_stress = 9.0f;
+            }
+            m_noise_meter.add_bullet_impact_sound(next_pos, burrower_stress);
+            if (m_hazard) {
+                m_hazard->on_weapon_impact(next_pos, burrower_stress);
+            }
             continue;
         }
 
@@ -1350,6 +1844,23 @@ void Application::fixed_tick(float dt) {
             m_player->mine_progress(),
             glm::vec3(m_player->target_block()) + glm::vec3(0.5f)
         );
+
+        if (m_player->is_drilling()) {
+            static float drill_strata_timer = 0.0f;
+            drill_strata_timer += dt;
+            if (drill_strata_timer >= 0.45f) {
+                drill_strata_timer = 0.0f;
+                glm::ivec3 tb = m_player->target_block();
+                uint8_t target_mat = m_world->get_voxel(tb.x, tb.y, tb.z).material_id;
+                SoundCue strataCue = SoundCue::DrillStrataBasalt;
+                if (target_mat == MAT_TITANIUM) {
+                    strataCue = SoundCue::DrillStrataTitanium;
+                } else if (target_mat == MAT_VOIDITE_CRYSTAL) {
+                    strataCue = SoundCue::DrillStrataVoidite;
+                }
+                AudioSystem::instance().TriggerRandomizedCue(strataCue, 0.40f);
+            }
+        }
 
         // Footsteps
         static float footstep_timer = 0.0f;
@@ -1375,23 +1886,56 @@ void Application::fixed_tick(float dt) {
             if (s.just_screeched) {
                 s.just_screeched = false;
                 // Pure directional 3D audio echo without HUD text clutter (leaves the player relying on hearing)
-                m_audio->play_sound_3d(SoundCue::StalkerEchoScreech, s.position, 0.90f);
+                float pitch = 1.0f;
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 0.90f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerEchoScreech, s.position, 0.90f, pitch);
             }
             if (s.just_chittered) {
                 s.just_chittered = false;
                 // Subtle 3D mandible clicking in the dark (very quiet, creepy stealth cue)
-                m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 0.45f);
+                float pitch = 1.0f;
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerChitter, 0.65f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 0.65f, pitch);
+            }
+            glm::vec3 burrow_loc = (glm::length(s.burrow_entry) > 0.01f) ? s.burrow_entry : s.position;
+            if (s.state == StalkerState::Burrowing && m_renderer) {
+                // Directional rock chipping particles localized at borehole surface entry point
+                if (s.state_timer < 1.1f && is_burrow_visible(burrow_loc)) {
+                    m_renderer->spawn_burrow_particles(burrow_loc, s.burrow_dir, MAT_FRACTURED_GRANITE, s.just_dug ? 8 : 2);
+                }
+            }
+            if (s.just_dug) {
+                s.just_dug = false;
+                m_audio->play_sound_3d(SoundCue::MonsterDigging, s.position, 0.85f);
+                if (m_renderer && is_burrow_visible(burrow_loc)) {
+                    m_renderer->spawn_crack_debris(burrow_loc, glm::ivec3(-s.burrow_dir.x, -s.burrow_dir.y, -s.burrow_dir.z), 0.75f, MAT_FRACTURED_GRANITE);
+                    m_renderer->trigger_dust_kickup(0.35f);
+                }
+            }
+            if (s.just_escaped) {
+                s.just_escaped = false;
+                m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, s.position, 0.75f);
+                if (m_renderer && is_burrow_visible(burrow_loc)) {
+                    m_renderer->spawn_burrow_particles(burrow_loc, s.burrow_dir, MAT_FRACTURED_GRANITE, 16);
+                    m_renderer->spawn_crack_debris(burrow_loc, glm::ivec3(0, 1, 0), 1.0f, MAT_FRACTURED_GRANITE);
+                    m_renderer->trigger_dust_kickup(1.2f);
+                }
+                SwarmManager::instance().on_hostile_killed();
             }
             if (s.just_spotted_player) {
                 s.just_spotted_player = false;
                 // Predatory throat hiss when stalking delver
-                m_audio->play_sound_3d(SoundCue::StalkerHiss, s.position, 0.65f);
+                float pitch = 1.0f;
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerHiss, 0.65f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerHiss, s.position, 0.65f, pitch);
             }
             if (s.just_lunged) {
                 s.just_lunged = false;
                 // Adrenaline spike: duck background ambient drone by 70% during visceral leap attack
                 m_audio->trigger_ducking(0.28f, 0.45f, 1.8f);
-                m_audio->play_sound_3d(SoundCue::StalkerLunge, s.position, 1.05f);
+                float pitch = 1.0f;
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 1.05f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerLunge, s.position, 1.05f, pitch);
             }
             if (s.just_hit_player) {
                 s.just_hit_player = false;
@@ -1400,31 +1944,55 @@ void Application::fixed_tick(float dt) {
             }
             if (s.just_died) {
                 s.just_died = false;
+                // Apply smooth gain fade-out tail rather than an immediate hard stop
+                AudioSystem::StopVoice(VOICE_ENEMY, 0.4f);
                 m_audio->play_sound_3d(SoundCue::StalkerDie, s.position, 0.70f);
+                SwarmManager::instance().on_hostile_killed();
             }
         }
         m_stalkers.remove_dead();
+        if (m_stalkers.active_count() == 0 && SwarmManager::instance().IsEnraged()) {
+            SwarmManager::instance().EndEnrage();
+        }
 
-        // Seismic Burrower 3D Audio Cues
+        // Seismic Burrower 3D Audio & Particle Cues
         for (auto& b : m_burrowers.burrowers_mut()) {
             if (b.just_roared) {
                 b.just_roared = false;
-                float dist = glm::distance(b.position, m_player->position());
-                std::string loc_str = get_relative_direction_str(m_player->position(), m_player->yaw(), b.position);
-                if (dist < 16.0f) {
-                    m_hud->show_warning("<< SEISMIC ALERT: BURROWER ROARING " + loc_str + " >>", 2.4f);
-                } else {
-                    m_hud->show_warning("<< SEISMIC CONTACT: DEEP SUBTERRANEAN BORER " + loc_str + " >>", 2.0f);
-                }
                 m_audio->play_sound_3d(SoundCue::BurrowerRoar, b.position, 1.05f);
+            }
+            if (b.just_chattered) {
+                b.just_chattered = false;
+                float pitch = 0.82f;
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerChitter, 0.60f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerChitter, b.position, 0.60f, pitch);
             }
             if (b.just_ground) {
                 b.just_ground = false;
-                m_audio->play_sound_3d(SoundCue::BurrowerGrind, b.position, 0.85f);
+                m_audio->play_sound_3d(SoundCue::MonsterDigging, b.position, 0.90f);
+                if (m_renderer) {
+                    glm::vec3 tip_pos = b.position + b.forward() * 0.90f;
+                    if (is_burrow_visible(tip_pos)) {
+                        m_renderer->spawn_burrow_particles(tip_pos, b.forward(), MAT_VOLCANIC_BASALT, 12);
+                        m_renderer->spawn_crack_debris(tip_pos, glm::ivec3(0, 1, 0), 0.65f, MAT_VOLCANIC_BASALT);
+                    }
+                }
+            }
+            if (b.state == BurrowerState::Burrowing && m_renderer) {
+                glm::vec3 tip_pos = b.position + b.forward() * 0.90f;
+                if (is_burrow_visible(tip_pos)) {
+                    m_renderer->spawn_burrow_particles(tip_pos, b.forward(), MAT_VOLCANIC_BASALT, 3);
+                }
             }
             if (b.just_died) {
                 b.just_died = false;
                 m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, b.position, 0.80f);
+                if (m_renderer && is_burrow_visible(b.position)) {
+                    m_renderer->spawn_burrow_particles(b.position, glm::vec3(0, 1, 0), MAT_VOLCANIC_BASALT, 24);
+                    m_renderer->spawn_crack_debris(b.position, glm::ivec3(0, 1, 0), 1.0f, MAT_VOLCANIC_BASALT);
+                    m_renderer->trigger_dust_kickup(2.0f);
+                }
+                SwarmManager::instance().on_hostile_killed();
             }
         }
         m_burrowers.remove_dead();
@@ -1458,10 +2026,48 @@ void Application::fixed_tick(float dt) {
         m_audio->set_current_room_type(room_shape);
 
         static int s_last_room_shape = -1;
+        static float s_room_transition_debounce = 0.0f;
+        s_room_transition_debounce = std::max(0.0f, s_room_transition_debounce - dt);
         if (room_shape != s_last_room_shape && room_shape >= 0) {
             s_last_room_shape = room_shape;
-            // Room transition acoustic arrival cue
-            m_audio->trigger_room_micro_event(room_shape, 0.45f);
+            // Room transition acoustic arrival cue (spaced by 12s debounce so doorway steps do not repeat)
+            if (s_room_transition_debounce <= 0.0f) {
+                m_audio->trigger_room_micro_event(room_shape, 0.45f);
+                s_room_transition_debounce = 12.0f;
+            }
+
+            // Proactive Environmental Hazard & Biome HUD Telegraph on Room Entry
+            if (m_hud) {
+                if (room_shape == static_cast<int>(RoomShapeType::RadioactiveCoreSanctuary)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING IRRADIATED CORE SANCTUARY (HIGH RAD)", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::FungoidBioGrotto)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING SPORE GROTTO (BIO-TOXIC GAS VENTS)", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::MagmaCalderaLake)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING VOLCANIC CALDERA (THERMITE SLAG)", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::SpikeTrenchArena)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING PUNJI SPIKE TRENCH ARENA", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::VoidSingularityRift)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING GRAVITATIONAL VOID SINGULARITY", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::FaultLineCrevasse)) {
+                    m_hud->show_warning("HAZARD ADVISORY: ENTERING TECTONIC FAULT CREVASSE (GAS & LAVA)", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::SubterraneanAquiferOasis)) {
+                    m_hud->show_warning("BIOME ADVISORY: SUBTERRANEAN AQUIFER OASIS — CRYSTAL BASINS & FLORA", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::ColossalAbyssalChasm)) {
+                    m_hud->show_warning("CRITICAL HAZARD: COLOSSAL ABYSSAL CHASM — LETHAL DROP & SPIKE PIT", 3.2f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::MoltenMagmaFoundry)) {
+                    m_hud->show_warning("HAZARD ADVISORY: MOLTEN MAGMA FOUNDRY — BOILING THERMITE FLUMES", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::ToxicMiasmaSwamp)) {
+                    m_hud->show_warning("BIOHAZARD ADVISORY: TOXIC MIASMA SWAMP — VISIBLE NEUROTOXIN POCKETS", 3.2f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::PrismaticCrystalCathedral)) {
+                    m_hud->show_warning("BIOME ADVISORY: PRISMATIC CRYSTAL CATHEDRAL — COLOSSAL PILLARS", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::AncientTitanNecropolis)) {
+                    m_hud->show_warning("ANOMALY ADVISORY: ANCIENT TITAN NECROPOLIS — SKELETAL EXCAVATION", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::BioluminescentGlowwormGrotto)) {
+                    m_hud->show_warning("BIOME ADVISORY: BIOLUMINESCENT GLOWWORM GROTTO — REFLECTING CANOPY", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::PrecursorCoolantReservoir)) {
+                    m_hud->show_warning("HAZARD ADVISORY: PRECURSOR COOLANT RESERVOIR — PRESSURE PIPELINES", 3.0f);
+                }
+            }
         }
 
         // Calculate dynamic proximity to hazards
@@ -1470,37 +2076,162 @@ void Application::fixed_tick(float dt) {
         float void_dist = 999.0f;
 
         if (current_room) {
-            if (current_room->type == RoomShapeType::MagmaCalderaLake) {
+            if (current_room->type == RoomShapeType::MagmaCalderaLake || current_room->type == RoomShapeType::MoltenMagmaFoundry) {
                 lava_dist = glm::distance(m_player->position(), glm::vec3(current_room->center.x, static_cast<float>(current_room->floor_y), current_room->center.z));
             } else if (current_room->type == RoomShapeType::FaultLineCrevasse) {
                 lava_dist = std::abs(m_player->position().x - static_cast<float>(current_room->center.x));
-            } else if (current_room->type == RoomShapeType::SpikeTrenchArena) {
+            } else if (current_room->type == RoomShapeType::SpikeTrenchArena || current_room->type == RoomShapeType::ColossalAbyssalChasm) {
                 spike_dist = std::max(0.0f, m_player->position().y - (static_cast<float>(current_room->floor_y) + 1.0f));
             } else if (current_room->type == RoomShapeType::VoidSingularityRift) {
                 void_dist = glm::distance(m_player->position(), glm::vec3(current_room->center.x, static_cast<float>(current_room->floor_y), current_room->center.z));
             }
         }
 
-        // Check underfoot / vertical drop
-        if (m_player->position().y <= 4.0f) {
-            void_dist = std::min(void_dist, std::max(0.0f, m_player->position().y - 1.8f));
+        // Check underfoot / vertical drop into bottomless abyss
+        // Only trigger void proximity if the player is not grounded and actually suspended over void/air
+        if (m_player && !m_player->isGrounded() && m_player->position().y <= 4.0f && m_world) {
+            int check_gx = static_cast<int>(std::floor(m_player->position().x));
+            int check_gy = static_cast<int>(std::floor(m_player->position().y - 1.0f));
+            int check_gz = static_cast<int>(std::floor(m_player->position().z));
+            if (m_world->get_voxel(check_gx, check_gy, check_gz).material_id == MAT_AIR) {
+                void_dist = std::min(void_dist, std::max(0.0f, m_player->position().y - 1.8f));
+            }
         }
 
         int ground_x = static_cast<int>(std::floor(m_player->position().x));
         int ground_y = static_cast<int>(std::floor(m_player->position().y - 0.96f));
         int ground_z = static_cast<int>(std::floor(m_player->position().z));
         Voxel underfoot = m_world->get_voxel(ground_x, ground_y, ground_z);
-        if (underfoot.material_id == MAT_THERMITE_SLAG) {
+        if (underfoot.material_id == MAT_THERMITE_SLAG || underfoot.material_id == MAT_MOLTEN_MAGMA) {
             lava_dist = 0.5f;
         }
-        if (underfoot.flags_and_damage == 0x0F) {
+        if (underfoot.material_id == MAT_OBSIDIAN_SPIKES) {
             spike_dist = 0.5f;
+        }
+
+        // Dynamic spatial query for distant telegraphed toxic gas plumes (visible up to 45m away)
+        float gas_dist = 999.0f;
+        glm::vec3 pp = m_player->position();
+
+        static float s_gas_pfx_timer = 0.0f;
+        s_gas_pfx_timer += dt;
+        bool spawn_gas_pfx = (s_gas_pfx_timer >= 0.14f);
+        if (spawn_gas_pfx) s_gas_pfx_timer = 0.0f;
+
+        if (m_world && m_renderer) {
+            for (const auto& gpos_i : m_world->toxic_gas_sources()) {
+                glm::vec3 gpos(gpos_i);
+                float d = glm::distance(pp, gpos + glm::vec3(0.5f));
+                gas_dist = std::min(gas_dist, d);
+                // Telegraph visible pockets of toxic gas particles across wide rooms up to 45m away
+                if (spawn_gas_pfx && d < 45.0f && (rand() % 6 == 0)) {
+                    m_renderer->spawn_toxic_gas_cloud(gpos, 1);
+                }
+            }
+        }
+
+        // Local legacy gas check fallback
+        int px = static_cast<int>(std::floor(pp.x));
+        int py = static_cast<int>(std::floor(pp.y));
+        int pz = static_cast<int>(std::floor(pp.z));
+        for (int dy = -2; dy <= 2; ++dy) {
+            for (int dz = -5; dz <= 5; ++dz) {
+                for (int dx = -5; dx <= 5; ++dx) {
+                    Voxel vox = m_world->get_voxel(px + dx, py + dy, pz + dz);
+                    if (vox.material_id == MAT_GAS || vox.material_id == MAT_TOXIC_GAS) {
+                        glm::vec3 gpos(px + dx, py + dy, pz + dz);
+                        float d = glm::distance(pp, gpos + glm::vec3(0.5f));
+                        gas_dist = std::min(gas_dist, d);
+                        if (spawn_gas_pfx && d < 12.0f && m_renderer) {
+                            m_renderer->spawn_toxic_gas_cloud(gpos, 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Spawn ambient ionizing sparks near radioactive ore (visible up to 40m away)
+        if (m_world && m_renderer) {
+            static float s_rad_pfx_timer = 0.0f;
+            s_rad_pfx_timer += dt;
+            if (s_rad_pfx_timer >= 0.18f) {
+                s_rad_pfx_timer = 0.0f;
+                for (const auto& rpos_i : m_world->radioactive_sources()) {
+                    glm::vec3 rpos(rpos_i);
+                    float d = glm::distance(pp, rpos + glm::vec3(0.5f));
+                    if (d < 40.0f && (rand() % 5 == 0)) {
+                        m_renderer->spawn_radiation_glimmer(rpos, 1);
+                    }
+                }
+            }
+        }
+
+        // Spawn ambient crystal water mist near subterranean aquifers & waterfalls (visible up to 35m)
+        if (m_world && m_renderer) {
+            static float s_water_pfx_timer = 0.0f;
+            s_water_pfx_timer += dt;
+            if (s_water_pfx_timer >= 0.20f) {
+                s_water_pfx_timer = 0.0f;
+                for (const auto& wpos_i : m_world->aquifer_sources()) {
+                    glm::vec3 wpos(wpos_i);
+                    float d = glm::distance(pp, wpos + glm::vec3(0.5f));
+                    if (d < 35.0f && (rand() % 8 == 0)) {
+                        m_renderer->spawn_water_mist(wpos, 1);
+                    }
+                }
+            }
+        }
+
+        // Spawn ambient embers near lava (visible up to 35m)
+        if (m_world && m_renderer) {
+            static float s_lava_pfx_timer = 0.0f;
+            s_lava_pfx_timer += dt;
+            if (s_lava_pfx_timer >= 0.22f) {
+                s_lava_pfx_timer = 0.0f;
+                for (const auto& lpos_i : m_world->lava_sources()) {
+                    glm::vec3 lpos(lpos_i);
+                    float d = glm::distance(pp, lpos + glm::vec3(0.5f));
+                    if (d < 35.0f && (rand() % 6 == 0)) {
+                        m_renderer->spawn_lava_embers(lpos, 1);
+                    }
+                }
+            }
+        }
+
+        // Pre-damage warning when approaching toxic gas
+        if (gas_dist < 8.0f && gas_dist > 1.5f) {
+            static float s_gas_near_warn = 0.0f;
+            s_gas_near_warn += dt;
+            if (s_gas_near_warn >= 3.0f) {
+                s_gas_near_warn = 0.0f;
+                m_hud->show_warning("CAUTION: TOXIC ATMOSPHERE AHEAD — BIO-GAS ESCAPING", 2.2f);
+            }
+        }
+
+        // Pre-damage warning when approaching molten magma / lava
+        if (lava_dist < 6.0f && lava_dist > 1.2f) {
+            static float s_lava_near_warn = 0.0f;
+            s_lava_near_warn += dt;
+            if (s_lava_near_warn >= 3.0f) {
+                s_lava_near_warn = 0.0f;
+                m_hud->show_warning("WARNING: THERMAL HAZARD AHEAD — MOLTEN MAGMA", 2.2f);
+            }
+        }
+
+        // Pre-damage warning when approaching spikes
+        if (spike_dist < 3.0f && spike_dist > 0.8f && m_player->position().y <= 8.0f) {
+            static float s_spike_near_warn = 0.0f;
+            s_spike_near_warn += dt;
+            if (s_spike_near_warn >= 3.0f) {
+                s_spike_near_warn = 0.0f;
+                m_hud->show_warning("CAUTION: PUNCTURE HAZARD — OBSIDIAN SPIKES AHEAD", 2.2f);
+            }
         }
 
         float amb_rad_val = m_hazard->radiation_level();
         float prox_rad_val = m_proximity_radiation * 100.0f;
         float rad_val = std::max(amb_rad_val, prox_rad_val);
-        m_audio->update_hazard_proximity_audio(dt, lava_dist, rad_val, spike_dist, void_dist);
+        m_audio->update_hazard_proximity_audio(dt, lava_dist, rad_val, spike_dist, void_dist, gas_dist);
 
         // Update player biometrics (cardiac & respiration vitals)
         float health_pct = (m_player->max_health() > 0.0f) ? (m_player->health() / m_player->max_health()) : 0.0f;
@@ -1551,21 +2282,20 @@ void Application::fixed_tick(float dt) {
         }
 
         if (rad_damage > 0.0f) {
-            m_player->take_damage(rad_damage * dt, false);
+            if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
+                float resist = (m_selected_level <= 1) ? 0.50f : (m_selected_level == 2 ? 0.70f : 0.85f);
+                rad_damage *= resist;
+            }
+            // Apply radiation damage with ZERO screen shake trauma!
+            m_player->take_damage(rad_damage * dt, PlayerController::DamageSource::Radiation);
 
-            // Periodic HUD warning for radiation exposure
-            static float s_rad_warn_timer = 0.0f;
-            s_rad_warn_timer += dt;
-            if (s_rad_warn_timer >= 3.0f) {
-                s_rad_warn_timer = 0.0f;
-                if (rad >= 95.0f) {
-                    m_hud->show_warning("☢ LETHAL RADIATION — EVACUATE IMMEDIATELY ☢", 3.0f);
-                } else if (rad >= 80.0f) {
-                    m_hud->show_warning("☢ CRITICAL RADIATION EXPOSURE — SUIT FAILING ☢", 2.5f);
-                } else if (m_proximity_radiation > 0.45f) {
-                    m_hud->show_warning("☢ HIGH PROXIMITY RADIATION — RADIOACTIVE ORE NEARBY ☢", 2.0f);
-                } else {
-                    m_hud->show_warning("☢ RADIATION ACCUMULATING — CONSIDER EXTRACTION ☢", 2.0f);
+            // Periodic vocal groaning from the delver under radiation sickness
+            static float s_rad_groan_timer = 0.0f;
+            s_rad_groan_timer += dt;
+            if (s_rad_groan_timer >= 1.75f) {
+                s_rad_groan_timer = 0.0f;
+                if (m_audio) {
+                    m_audio->trigger_player_groan(0.85f);
                 }
             }
         }
@@ -1586,45 +2316,120 @@ void Application::fixed_tick(float dt) {
         Voxel gas_check = m_world->get_voxel(gx, gy, gz);
         Voxel gas_head  = m_world->get_voxel(gx, gy + 1, gz);
         if (gas_check.material_id == MAT_GAS || gas_head.material_id == MAT_GAS) {
-            m_player->take_damage(3.5f * dt, false); // 3.5 HP/sec in gas
+            // Toxic gas damage: subtle cough shudder only (0.02f), NOT violent screen shake!
+            m_player->take_damage(3.5f * dt, PlayerController::DamageSource::ToxicGas);
             m_player->exo_mut().integrity = std::max(0.0f, m_player->exo().integrity - 8.0f * dt);
+
+            // Trigger on-screen visor toxic mist particles and asphyxiation coughing
+            if (m_hud) {
+                m_hud->set_toxic_gas_exposure(1.0f, dt);
+            }
+
+            static float s_gas_asphyx_timer = 0.0f;
+            s_gas_asphyx_timer += dt;
+            if (s_gas_asphyx_timer >= 1.35f) {
+                s_gas_asphyx_timer = 0.0f;
+                if (m_audio) {
+                    m_audio->trigger_player_asphyxiation(0.90f);
+                }
+            }
+
             static float s_gas_warn_timer = 0.0f;
             s_gas_warn_timer += dt;
             if (s_gas_warn_timer >= 2.5f) {
                 s_gas_warn_timer = 0.0f;
-                m_hud->show_warning("⚠ TOXIC GAS — SUIT CORRODING ⚠", 2.0f);
+                m_hud->show_warning("⚠ TOXIC GAS INHALATION — DELVER ASPHYXIATING ⚠", 2.0f);
             }
         }
     }
 
     // ═══ Extraction Holdout Wave Escalation ═══
-    // During the 40s beacon countdown, spawn increasingly dangerous waves
+    // Scale holdout pacing and enemy density smoothly by sector level.
+    // Level 1: 20s holdout, 2 solitary stalkers, zero burrowers, zero tremors.
+    // Level 2: 30s holdout, 4 stalkers + 1 burrower, mild final tremor (protected LZ).
+    // Level 3: 40s holdout, 7 stalkers + 1 burrower, severe tectonic tremor.
     if (m_extraction->phase() == ExtractionPhase::BeaconDeployed) {
+        float total_cd = std::max(1.0f, m_extraction->initial_countdown());
         float cd = m_extraction->countdown();
-        // T=30s mark: 2 flanking stalkers
-        if (cd <= 30.0f && cd > 29.5f) {
-            int wave_count = 2 + (m_selected_level >= 2 ? 1 : 0);
-            m_stalkers.spawn_wave(m_player->position(), wave_count, *m_world);
-            m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE REINFORCEMENTS !", 2.5f);
-            m_player->add_trauma(0.2f);
-        }
-        // T=15s mark: 3 stalkers + Seismic Burrower threat
-        if (cd <= 15.0f && cd > 14.5f) {
-            int wave_count = 3 + (m_selected_level >= 2 ? 2 : 0);
-            m_stalkers.spawn_wave(m_player->position(), wave_count, *m_world);
-            if (m_burrowers.active_count() == 0) {
-                m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
+        float progress = 1.0f - std::clamp(cd / total_cd, 0.0f, 1.0f);
+
+        if (m_selected_level <= 1) {
+            // Level 1 (Sector 1: Perimeter Drift) - Introductory Gentle Holdout (20s)
+            // Stage 1 (progress >= 0.45, ~9s elapsed): 1 solitary stalker scout
+            if (m_holdout_stage == 0 && progress >= 0.45f) {
+                m_holdout_stage = 1;
+                m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
+                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE SCOUT INBOUND !", 2.5f);
+                m_player->add_trauma(0.12f);
             }
-            m_hud->show_warning("!! CRITICAL WAVE & SEISMIC BURROWER INCOMING !!", 3.5f);
-            m_player->add_trauma(0.40f);
-            if (m_audio) {
-                m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.65f);
+            // Stage 2 (progress >= 0.80, ~16s elapsed): 1 additional stalker
+            else if (m_holdout_stage == 1 && progress >= 0.80f) {
+                m_holdout_stage = 2;
+                m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
+                m_hud->show_warning("! FINAL EXTRACTION PUSH: HOSTILE APPROACHING !", 2.5f);
+                m_player->add_trauma(0.15f);
             }
-        }
-        // T=5s mark: seismic tremor + final push
-        if (cd <= 5.0f && cd > 4.5f) {
-            m_hazard->force_tremor(1.5f);
-            m_hud->show_warning("!!! FINAL SURGE — EVAC POD INBOUND !!!", 3.0f);
+            // Stage 3 (progress >= 0.95, ~19s elapsed): Evac pod touchdown warning (NO burrowers, NO tremors)
+            else if (m_holdout_stage == 2 && progress >= 0.95f) {
+                m_holdout_stage = 3;
+                m_hud->show_warning("!! EVACUATION POD TOUCHDOWN IMMINENT !!", 2.0f);
+            }
+        } else if (m_selected_level == 2) {
+            // Level 2 (Sector 2: Volatile Fault) - Moderate Holdout (30s)
+            // Stage 1 (progress >= 0.35, ~10.5s elapsed): 2 flanking stalkers
+            if (m_holdout_stage == 0 && progress >= 0.35f) {
+                m_holdout_stage = 1;
+                m_stalkers.spawn_wave(m_player->position(), 2, *m_world);
+                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE REINFORCEMENTS !", 2.5f);
+                m_player->add_trauma(0.20f);
+            }
+            // Stage 2 (progress >= 0.70, ~21s elapsed): 2 stalkers + 1 burrower
+            else if (m_holdout_stage == 1 && progress >= 0.70f) {
+                m_holdout_stage = 2;
+                m_stalkers.spawn_wave(m_player->position(), 2, *m_world);
+                if (m_burrowers.active_count() == 0) {
+                    m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
+                }
+                m_hud->show_warning("!! CRITICAL REINFORCEMENTS & BURROWER INCOMING !!", 3.0f);
+                m_player->add_trauma(0.35f);
+                if (m_audio) {
+                    m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.60f);
+                }
+            }
+            // Stage 3 (progress >= 0.90, ~27s elapsed): Mild tremor (LZ is shielded from rocks)
+            else if (m_holdout_stage == 2 && progress >= 0.90f) {
+                m_holdout_stage = 3;
+                m_hazard->force_tremor(0.7f);
+                m_hud->show_warning("!!! EVAC POD ON FINAL DESCENT !!!", 2.5f);
+            }
+        } else {
+            // Level 3+ (Sector 3: Abyssal Mantle) - Endgame High-Intensity Holdout (40s)
+            // Stage 1 (progress >= 0.25, ~10s elapsed): 3 aggressive stalkers
+            if (m_holdout_stage == 0 && progress >= 0.25f) {
+                m_holdout_stage = 1;
+                m_stalkers.spawn_wave(m_player->position(), 3, *m_world);
+                m_hud->show_warning("! EXTRACTION HOLDOUT: APEX SWARM DETECTED !", 2.5f);
+                m_player->add_trauma(0.25f);
+            }
+            // Stage 2 (progress >= 0.65, ~26s elapsed): 4 stalkers + 1 burrower
+            else if (m_holdout_stage == 1 && progress >= 0.65f) {
+                m_holdout_stage = 2;
+                m_stalkers.spawn_wave(m_player->position(), 4, *m_world);
+                if (m_burrowers.active_count() == 0) {
+                    m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
+                }
+                m_hud->show_warning("!! CRITICAL APEX WAVE & SEISMIC BURROWER INCOMING !!", 3.5f);
+                m_player->add_trauma(0.40f);
+                if (m_audio) {
+                    m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.65f);
+                }
+            }
+            // Stage 3 (progress >= 0.88, ~35s elapsed): Severe tremor + final push
+            else if (m_holdout_stage == 2 && progress >= 0.88f) {
+                m_holdout_stage = 3;
+                m_hazard->force_tremor(1.5f);
+                m_hud->show_warning("!!! FINAL TECTONIC SURGE — EVAC POD INBOUND !!!", 3.0f);
+            }
         }
     }
 
@@ -1637,6 +2442,7 @@ void Application::fixed_tick(float dt) {
             m_inventory.suit_failed = true;
             m_expedition_success = false;
             m_trauma = 1.0f;
+            AudioSystem::PlayDeathSound();
             if (m_audio) {
                 m_audio->play_sound_2d(SoundCue::DamageWarning, 1.0f);
             }
@@ -1651,6 +2457,7 @@ void Application::fixed_tick(float dt) {
         m_inventory.suit_failed = true;
         m_expedition_success = false;
         m_trauma = 1.0f;
+        AudioSystem::PlayDeathSound();
         if (m_audio) {
             m_audio->play_sound_2d(SoundCue::DamageWarning, 1.0f);
         }
@@ -1686,13 +2493,19 @@ void Application::render(float dt) {
         cam_pos = m_player->position();
 
         // Camera view setup with non-linear impulse trauma screen shake (clamped to prevent wall clipping)
-        if (m_trauma > 0.001f) {
-            float shake_amount = std::min(m_trauma * m_trauma * 0.35f, 0.15f);
+        float active_trauma = std::max(m_trauma, m_player ? m_player->trauma() : 0.0f);
+        if (active_trauma > 0.001f) {
+            float shake_amount = std::min(active_trauma * active_trauma * 0.35f, 0.18f);
             float shake_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
             float shake_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
+            float shake_roll = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * (shake_amount * 5.0f);
             view = glm::translate(view, glm::vec3(shake_x, shake_y, 0.0f));
+            view = glm::rotate(view, glm::radians(shake_roll), glm::vec3(0.0f, 0.0f, 1.0f));
             if (m_state == GameState::Gameplay) {
                 m_trauma = (std::max)(0.0f, m_trauma - dt * 0.8f);
+                if (m_player) {
+                    m_player->set_trauma((std::max)(0.0f, m_player->trauma() - dt * 0.8f));
+                }
             }
         }
 
@@ -1816,6 +2629,19 @@ void Application::render(float dt) {
         }
     }
 
+    // 3. Placed Explosive Charge Strobe Beacon Light
+    if (m_player && m_player->has_placed_charge()) {
+        glm::vec3 n = glm::vec3(m_player->placed_charge_normal());
+        glm::vec3 cpos = glm::vec3(m_player->placed_charge_pos()) + glm::vec3(0.5f) + n * 0.55f;
+        float blink = 0.5f + 0.5f * std::sin(current_time * 12.0f);
+        PointLight cl;
+        cl.position = cpos;
+        cl.color = glm::vec3(1.0f, 0.55f, 0.08f);
+        cl.radius = 8.0f;
+        cl.intensity = 2.5f * blink;
+        m_renderer->add_point_light(cl);
+    }
+
     // Dynamic point lights for stalking/lunging hostiles (max 4 nearest)
     int added_stalker_lights = 0;
     for (const auto& s : m_stalkers.stalkers()) {
@@ -1875,6 +2701,9 @@ void Application::render(float dt) {
     // Render Void Stalker hostile entities and void spine projectiles
     m_renderer->render_stalkers(m_stalkers.stalkers(), m_stalkers.projectiles());
 
+    // Render Persistent Enemy Carcasses
+    m_renderer->render_carcasses(CarcassManager::instance().carcasses());
+
     // Render Seismic Burrower massive subterranean enemies
     m_renderer->render_burrowers(m_burrowers.burrowers());
 
@@ -1911,6 +2740,14 @@ void Application::render(float dt) {
         m_renderer->render_block_cracks(m_player->target_block(), m_player->crack_stage(), m_player->target_normal(), v.material_id);
     }
 
+    // Render Placed Explosive Charge (Demolition Stun / Breach Distraction)
+    if (m_player && m_player->has_placed_charge()) {
+        m_renderer->render_placed_charge(m_player->placed_charge_pos(), m_player->placed_charge_normal(), static_cast<float>(glfwGetTime()));
+    }
+
+    // Render 3D World Break, Burrow, and Dust Particles with scene depth testing
+    m_renderer->render_particles();
+
     // Render 1st-Person Drill & Animated Hands Viewmodel (Module 3)
     bool render_vm = (m_state == GameState::Gameplay && m_viewmodel);
     if (m_config.capture_models) {
@@ -1935,7 +2772,11 @@ void Application::render(float dt) {
             is_in_range,
             m_player->active_tool(),
             drill_target,
-            m_player->is_firing_weapon()
+            m_player->is_firing_weapon(),
+            m_player->is_crouching(),
+            m_player->is_reloading(),
+            m_player->reload_progress(),
+            m_player->has_placed_charge()
         );
     }
 
@@ -1979,7 +2820,7 @@ void Application::render(float dt) {
     } else if (m_state == GameState::OrbitalHub) {
         // Redundant staging wall bypassed - route directly to MainMenu
         m_hub_ui->set_subview(MenuSubView::Main);
-        m_state = GameState::MainMenu;
+        TransitionState(GameState::MainMenu);
     } else if (m_state == GameState::Debrief) {
         if (m_debrief_input_lock > 0.0f) {
             m_debrief_input_lock -= dt;
@@ -1995,7 +2836,7 @@ void Application::render(float dt) {
         } else if (action == DebriefAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             m_hub_ui->set_subview(MenuSubView::Main);
-            m_state = GameState::MainMenu;
+            TransitionState(GameState::MainMenu);
             m_window->set_cursor_locked(false);
         }
     } else if (m_state == GameState::Paused) {
@@ -2022,7 +2863,7 @@ void Application::render(float dt) {
 
         if (action == PauseMenuAction::Resume) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
-            m_state = GameState::Gameplay;
+            TransitionState(GameState::Gameplay);
             m_window->set_cursor_locked(true);
         } else if (action == PauseMenuAction::Abandon || action == PauseMenuAction::ReturnToStartup || action == PauseMenuAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
@@ -2063,7 +2904,7 @@ void Application::render(float dt) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
 
             m_hub_ui->set_subview(MenuSubView::Main);
-            m_state = GameState::MainMenu;
+            TransitionState(GameState::MainMenu);
             m_window->set_cursor_locked(false);
         }
     } else {
@@ -2072,7 +2913,7 @@ void Application::render(float dt) {
             if (m_hud) {
                 m_hud->set_death_sequence(m_death_sequence, m_death_timer, DEATH_SEQUENCE_DURATION);
             }
-            m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj, &m_surveying, &m_noise_meter, m_stalkers.active_count());
+            m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj, &m_surveying, &m_noise_meter, m_stalkers.active_count(), &m_stalkers.stalkers(), &m_burrowers.burrowers());
         }
     }
 
@@ -2123,17 +2964,20 @@ void Application::test_upgrade_and_respec_cycle() {
                 "), ReinforcedPlating (T" + std::to_string(m_user_profile.upgrades.reinforcedPlatingTier) + 
                 ") [Spent: " + std::to_string(total_spent) + " Coins].");
 
-    // Perform respec (85% recovery)
-    int refunded = 0;
-    m_user_profile.upgrades.respec(refunded);
-    m_user_profile.total_coins += refunded;
+    // Perform respec (100% full recovery)
+    int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
+    m_user_profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
+    m_user_profile.total_coins += ref_coins;
+    m_user_profile.total_voidite += ref_voidite;
+    m_user_profile.total_titanium += ref_titanium;
 
-    VF_LOG_INFO("Testing", "Respec executed: refunded " + std::to_string(refunded) + " Coins (85% recovery), all tiers reset to 0.");
+    VF_LOG_INFO("Testing", "Respec executed: refunded 100% (" + std::to_string(ref_coins) + " Coins, " +
+                std::to_string(ref_voidite) + " Voidite, " + std::to_string(ref_titanium) + " Titanium), all tiers reset to 0.");
     SaveSystem::save_profile(m_user_profile, m_active_save_file);
     sync_profile_with_player();
 
     if (m_hud) {
-        m_hud->show_warning("TEST RESPEC: REFUNDED " + std::to_string(refunded) + " COINS");
+        m_hud->show_warning("TEST RESPEC: REFUNDED 100% (" + std::to_string(ref_coins) + " COINS)");
     }
 }
 
@@ -2186,7 +3030,7 @@ void Application::run() {
                     start_expedition(m_selected_level);
                 } else {
                     m_hub_ui->set_active_tab(HubTab::SectorSelect);
-                    m_state = GameState::OrbitalHub;
+                    TransitionState(GameState::OrbitalHub);
                 }
             }
             enter_down_last = enter_now;
@@ -2233,7 +3077,7 @@ void Application::run() {
             static bool hub_back_down_last = false;
             bool hub_back_now = m_window->is_key_down(GLFW_KEY_TAB);
             if (hub_back_now && !hub_back_down_last) {
-                m_state = GameState::OrbitalHub;
+                TransitionState(GameState::OrbitalHub);
             }
             hub_back_down_last = hub_back_now;
 
@@ -2253,7 +3097,10 @@ void Application::run() {
                     ? (m_inventory.vault_breached && m_inventory.relic_extracted)
                     : (m_inventory.voidite >= m_inventory.target_voidite);
                 if (quota_met) {
-                    m_extraction->deploy_beacon(m_player->position());
+                    float holdout_duration = (m_selected_level <= 1) ? 20.0f :
+                                             (m_selected_level == 2)  ? 30.0f : 40.0f;
+                    m_extraction->deploy_beacon(m_player->position(), holdout_duration);
+                    m_holdout_stage = 0;
                     m_surveying.reset(); // Clear any sonar X-ray overlay on beacon deployment
                 } else {
                     if (m_hud) {
@@ -2420,15 +3267,19 @@ void Application::run() {
                 m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
                 VF_LOG_INFO("AutoPlayTest", "Testing: Granted resources, purchased Tier 1 DrillSpeed & ThrusterTank with Coins.");
             }
-            // Frame 36: Testing: Test respec points feature (85% recovery verification)
+            // Frame 36: Testing: Test respec points feature (100% full recovery verification)
             else if (m_auto_test_frame == 36) {
-                int refunded = 0;
-                m_user_profile.upgrades.respec(refunded);
-                m_user_profile.total_coins += refunded;
-                VF_LOG_INFO("AutoPlayTest", "Testing: Respec verified, refunded " + std::to_string(refunded) + " Coins (85% recovery).");
+                int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
+                m_user_profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
+                m_user_profile.total_coins += ref_coins;
+                m_user_profile.total_voidite += ref_voidite;
+                m_user_profile.total_titanium += ref_titanium;
+                VF_LOG_INFO("AutoPlayTest", "Testing: Respec verified, refunded 100% (" + std::to_string(ref_coins) + " Coins, " +
+                            std::to_string(ref_voidite) + " Voidite, " + std::to_string(ref_titanium) + " Titanium).");
                 // Re-purchase upgrades to showcase active purchased upgrade nodes in the terminal UI screenshot
                 int lvl = m_user_profile.get_player_level();
                 m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
+                m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
                 m_user_profile.upgrades.purchase(UpgradeType::KineticDynamo, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
                 m_user_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
             }
@@ -2487,13 +3338,33 @@ void Application::run() {
             else if (m_auto_test_frame == 106) {
                 m_player->set_drilling(false);
             }
+            // Frame 107: Test Fall Damage & Screen Shake Trauma
+            else if (m_auto_test_frame == 107) {
+                m_player->apply_fall_impact(16.5f); // triggers fall damage, damage flash vignette & camera shake trauma
+                VF_LOG_INFO("AutoPlayTest", "Testing: Player took fall impact damage! HP=" << m_player->health()
+                            << ", trauma=" << m_trauma << ", damage flash=" << (m_hud ? m_hud->damage_flash_timer() : 0.0f));
+            }
+            // Frame 108: Test Swarm Breach (Threat Peak) trigger
+            else if (m_auto_test_frame == 108) {
+                m_noise_meter.inject_noise(100.0f);
+                m_noise_meter.update(static_cast<float>(fixed_dt));
+                VF_LOG_INFO("AutoPlayTest", "Testing: Swarm Breach triggered! IsEnraged=" << SwarmManager::instance().IsEnraged()
+                            << ", Alert=" << m_noise_meter.alert_string());
+            }
+            // Frame 110: Test Swarm Breach recovery (standing still drains noise, clears Threat Peak & returns to original meter)
+            else if (m_auto_test_frame == 110) {
+                VF_LOG_INFO("AutoPlayTest", "Testing: Player standing still after peak. Noise="
+                            << m_noise_meter.noise_percent() << "%, IsEnraged="
+                            << SwarmManager::instance().IsEnraged() << ", Alert=" << m_noise_meter.alert_string()
+                            << ", PostCombatCooldownActive=" << m_noise_meter.is_post_event_cooldown_active());
+            }
             // Frame 112: Test Ability 1 - Seismic Sonar Pulse scan
             else if (m_auto_test_frame == 112) {
                 on_sonar_cast(m_player->position());
             }
-            // Frame 118: Test Tool 2 - Industrial Bulkhead placement
+            // Frame 118: Test Quick Bulkhead placement on Mining Drill
             else if (m_auto_test_frame == 118) {
-                m_player->set_active_tool(ToolSlot::IndustrialBulkhead);
+                m_player->set_active_tool(ToolSlot::MiningDrill);
                 glm::ivec3 place_pos = glm::ivec3(std::floor(m_player->position().x), std::floor(m_player->position().y) + 1, std::floor(m_player->position().z) + 3);
                 m_world->set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED}, true);
                 on_block_placed(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
@@ -2535,7 +3406,7 @@ void Application::run() {
             }
             // Frame 150: Pause Game (In-Game Esc Menu)
             else if (m_auto_test_frame == 150) {
-                m_state = GameState::Paused;
+                TransitionState(GameState::Paused);
                 m_window->set_cursor_locked(false);
                 if (m_pause_menu) m_pause_menu->set_active_tab(PauseTab::Mission);
             }
@@ -2555,10 +3426,20 @@ void Application::run() {
             }
             // Frame 160: Resume gameplay from pause and deploy extraction beacon
             else if (m_auto_test_frame == 160) {
-                m_state = GameState::Gameplay;
+                TransitionState(GameState::Gameplay);
                 m_window->set_cursor_locked(true);
-                m_extraction->deploy_beacon(m_player->position());
+                float holdout_duration = (m_selected_level <= 1) ? 20.0f :
+                                         (m_selected_level == 2)  ? 30.0f : 40.0f;
+                m_extraction->deploy_beacon(m_player->position(), holdout_duration);
+                m_holdout_stage = 0;
                 m_surveying.reset(); // Clear sonar X-ray so beacon screenshot is clean
+            }
+            // Frame 164: Test concurrent tactical & threat notifications during holdout
+            else if (m_auto_test_frame == 164) {
+                if (m_hud) {
+                    m_hud->show_warning("! CRITICAL NOISE: VOID SWARM INCOMING !", 4.0f);
+                    m_hud->show_warning("VOID STALKER ELIMINATED (+100 PTS)", 4.0f);
+                }
             }
             // Frame 174: Capture Extraction Beacon Holdout
             else if (m_auto_test_frame == 174) {

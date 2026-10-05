@@ -112,6 +112,7 @@ private:
     int   m_carousel_page{0};   // which page of 3 sector cards is shown (0-indexed)
     std::string m_terminal_msg;
     glm::vec4 m_terminal_msg_col{0.2f, 0.95f, 0.4f, 1.0f};
+    int m_selected_upgrade_idx{0};
 
     Shader m_ui_shader;
     Shader m_text_shader;

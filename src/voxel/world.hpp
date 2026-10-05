@@ -81,6 +81,11 @@ public:
     // Spatial proximity radiation query (samples active radioactive ores & vents)
     float query_radiation_proximity(const glm::vec3& pos, float max_radius = 12.0f) const;
 
+    const std::vector<glm::ivec3>& radioactive_sources() const { return m_radioactive_sources; }
+    const std::vector<glm::ivec3>& toxic_gas_sources() const { return m_toxic_gas_sources; }
+    const std::vector<glm::ivec3>& lava_sources() const { return m_lava_sources; }
+    const std::vector<glm::ivec3>& aquifer_sources() const { return m_aquifer_sources; }
+
 private:
     void generate_chunk_terrain(Chunk& chunk);
     float sample_cavern_noise(float x, float y, float z) const;
@@ -96,6 +101,9 @@ private:
     mutable std::mutex m_world_mutex;
     std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash> m_chunks;
     std::vector<glm::ivec3> m_radioactive_sources;
+    std::vector<glm::ivec3> m_toxic_gas_sources;
+    std::vector<glm::ivec3> m_lava_sources;
+    std::vector<glm::ivec3> m_aquifer_sources;
 
     // Background meshing thread pool
     std::vector<std::thread> m_workers;

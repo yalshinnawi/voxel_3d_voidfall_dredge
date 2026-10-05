@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <glm/glm.hpp>
 #include "../src/entities/enemies/void_stalker.hpp"
+#include "../src/systems/stealth_system.hpp"
+#include "../src/systems/noise_meter.hpp"
 #include "../src/voxel/world.hpp"
 
 using namespace Voidfall;
@@ -198,7 +200,9 @@ int main() {
 
         // 5d: Final lethal blow
         manager.damage_nearest(player_pos, 10.0f, 15.0f);
-        CHECK(manager.stalkers()[0].is_dead(), "Stalker at 0 HP should be marked Dead");
+        CHECK(manager.stalkers()[0].is_dying() || manager.stalkers()[0].is_dead(), "Stalker at 0 HP should be marked Dying or Dead");
+        manager.update(0.80f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+        CHECK(manager.stalkers()[0].is_dead(), "Stalker at 0 HP should be marked Dead after collapse");
 
         // Remove dead
         manager.remove_dead();
@@ -643,7 +647,209 @@ int main() {
         std::cout << " -> 0.2s crossfade blending and play rate velocity modulation verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 15 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 16: Explosive Charges & Concussive Blast Distraction Mechanics
+    {
+        std::cout << "[Test 16] Testing Explosive Charges & Concussive Blast Distraction Mechanics..." << std::endl;
+        VoidStalkerManager manager;
+        World world;
+        glm::vec3 stalker_pos(16.0f, 20.0f, 20.0f);
+        manager.spawn_melee(stalker_pos);
+
+        // Player is at (16, 20, 32) (12m away)
+        glm::vec3 player_pos(16.0f, 20.0f, 32.0f);
+
+        // 16a: Stalker is initially stalking or idle
+        manager.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 0.0f, false, world, {}, true);
+
+        // 16b: Player places and detonates an explosive charge across the cavern at (38, 20, 10)
+        glm::vec3 blast_pos(38.0f, 20.0f, 10.0f);
+        std::vector<SoundEvent> sounds;
+        SoundEvent demo_blast;
+        demo_blast.type = SoundEventType::DemolitionBlast;
+        demo_blast.position = blast_pos;
+        demo_blast.intensity = 45.0f;
+        demo_blast.audible_radius = 60.0f;
+        demo_blast.age = 0.0f;
+        demo_blast.lifetime = 1.2f;
+        sounds.push_back(demo_blast);
+
+        // Concussive shockwave tremor accompanying the blast
+        SoundEvent tremor_sound;
+        tremor_sound.type = SoundEventType::SeismicTremor;
+        tremor_sound.position = blast_pos;
+        tremor_sound.intensity = 20.0f;
+        tremor_sound.audible_radius = 65.0f;
+        tremor_sound.age = 0.0f;
+        tremor_sound.lifetime = 1.0f;
+        sounds.push_back(tremor_sound);
+
+        // Stalker hears the massive explosion away from the player
+        manager.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 0.0f, false, world, sounds, true);
+        const auto& s = manager.stalkers()[0];
+
+        CHECK(s.state == StalkerState::Investigating, "Stalker must enter Investigating state upon hearing explosive charge blast");
+        CHECK(glm::distance(s.investigation_target, blast_pos) < 0.1f, "Stalker investigation target must be set to the explosive blast location!");
+        CHECK(glm::distance(s.target_pos, blast_pos) < 0.1f, "Stalker target_pos must point to explosion location, NOT player position!");
+        CHECK(s.investigation_timer > 3.0f, "Investigation timer must be set for blast investigation");
+
+        // Stalker moves physically toward blast site over subsequent frames
+        float initial_dist_to_blast = glm::distance(s.position, blast_pos);
+        for (int step = 0; step < 20; ++step) {
+            manager.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 0.0f, false, world, {}, true);
+        }
+        CHECK(glm::distance(manager.stalkers()[0].position, blast_pos) < initial_dist_to_blast,
+              "Stalker must run toward the explosive distraction site, luring it away from player!");
+
+        std::cout << " -> Explosive charge detonation distraction mechanics verified successfully." << std::endl;
+    }
+
+    // Test 17: Sneaking Stealth Mechanism, Alertness Dissipation & Sneak Attack Critical Hits
+    {
+        std::cout << "[Test 17] Testing Sneaking Stealth Mechanism, Alertness Dissipation & Sneak Attack Critical Hits..." << std::endl;
+
+        // 17.1 Acoustic stealth sound dampening in NoiseMeter
+        NoiseMeter stealth_meter;
+        glm::vec3 emit_pos(10.0f, 20.0f, 10.0f);
+        
+        // Emitting sound while standing
+        stealth_meter.set_crouching(false);
+        stealth_meter.emit_sound(SoundEventType::FootstepSprint, emit_pos, 10.0f, 20.0f);
+        const auto& standing_sound = stealth_meter.recent_sounds().back();
+        float standing_intensity = standing_sound.intensity;
+        float standing_radius = standing_sound.audible_radius;
+
+        // Emitting sound while crouching (sneaking)
+        stealth_meter.set_crouching(true);
+        stealth_meter.emit_sound(SoundEventType::FootstepSprint, emit_pos, 10.0f, 20.0f);
+        const auto& crouch_sound = stealth_meter.recent_sounds().back();
+        CHECK(crouch_sound.intensity < standing_intensity * 0.5f, "Crouch stealth must heavily dampen sound intensity (-65%)");
+        CHECK(crouch_sound.audible_radius < standing_radius * 0.6f, "Crouch stealth must heavily dampen audible radius (-55%)");
+        CHECK(std::abs(crouch_sound.intensity - (10.0f * StealthSystem::STEALTH_SOUND_INTENSITY_MUL)) < 0.01f, "Intensity matches stealth multiplier");
+        CHECK(std::abs(crouch_sound.audible_radius - (20.0f * StealthSystem::STEALTH_SOUND_RADIUS_MUL)) < 0.01f, "Radius matches stealth multiplier");
+
+        // 17.2 Alertness dissipation when delver sneaks/crouches
+        VoidStalkerManager manager;
+        World stalker_world;
+        glm::vec3 s_pos(16.0f, 20.0f, 16.0f);
+        manager.spawn_melee(s_pos);
+        CHECK(manager.stalkers()[0].is_unalerted(), "Freshly spawned stalker must be unalerted");
+
+        // Alert the stalker with a nearby sound event
+        std::vector<SoundEvent> alert_sounds;
+        SoundEvent gunshot;
+        gunshot.type = SoundEventType::Gunshot;
+        gunshot.position = glm::vec3(22.0f, 20.0f, 16.0f);
+        gunshot.intensity = 25.0f;
+        gunshot.audible_radius = 35.0f;
+        gunshot.lifetime = 0.5f;
+        alert_sounds.push_back(gunshot);
+
+        glm::vec3 player_pos(10.0f, 20.0f, 10.0f);
+        manager.update(0.1f, player_pos, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, stalker_world, alert_sounds, true);
+        CHECK(manager.stalkers()[0].state == StalkerState::Investigating, "Stalker must be alerted to Investigating state by gunfire");
+        CHECK(!manager.stalkers()[0].is_unalerted(), "Alerted stalker must not report is_unalerted() == true");
+
+        // When player is crouching, investigation timer drains at 2.5x speed and stalker quickly calms down
+        // Run update for 2 seconds while player is crouching
+        for (int i = 0; i < 20; ++i) {
+            manager.update(0.1f, player_pos, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false /* drilling */, stalker_world, {}, true /* crouching */);
+        }
+        // Investigation timer has depleted much faster than 2 seconds, dropping back to Idle
+        CHECK(manager.stalkers()[0].state == StalkerState::Idle, "Sneaking player must allow stalker suspicion to dissipate back to Idle");
+        CHECK(manager.stalkers()[0].is_unalerted(), "Stalker that has returned to Idle without sound targets is unalerted again");
+
+        // 17.3 Sneak attack critical hit on unalerted enemy (3.0x damage)
+        bool out_crit = false;
+        float out_dealt = 0.0f;
+        float initial_hp = manager.stalkers()[0].hp;
+        glm::vec3 hit_pos = manager.stalkers()[0].position;
+        bool damaged = manager.damage_nearest(hit_pos, 3.0f, 10.0f, true /* allow_crit */, &out_crit, &out_dealt);
+        CHECK(damaged, "damage_nearest must hit stalker in range");
+        CHECK(out_crit, "Attack on unalerted enemy must be a critical hit");
+        CHECK(std::abs(out_dealt - 30.0f) < 0.01f, "Sneak attack critical hit must deal 3.0x damage (10.0 * 3 = 30.0)");
+        CHECK(std::abs(manager.stalkers()[0].hp - (initial_hp - 30.0f)) < 0.01f, "Stalker HP must reflect 30.0 damage taken");
+
+        // 17.4 Attack on alerted/engaged enemy deals normal 1.0x damage (NO critical hit)
+        // Stalker is now pursuing the attacker after being hit
+        CHECK(!manager.stalkers()[0].is_unalerted(), "Damaged stalker must now be pursuing attacker");
+        bool second_crit = false;
+        float second_dealt = 0.0f;
+        damaged = manager.damage_nearest(manager.stalkers()[0].position, 3.0f, 5.0f, true /* allow_crit */, &second_crit, &second_dealt);
+        CHECK(damaged, "Second damage call must hit stalker");
+        CHECK(!second_crit, "Attack on alerted/pursuing stalker must NOT be a critical hit");
+        CHECK(std::abs(second_dealt - 5.0f) < 0.01f, "Non-critical attack deals normal 1.0x damage");
+
+        std::cout << " -> Sneaking stealth sound suppression, alertness dissipation, and sneak attack crits verified." << std::endl;
+    }
+
+    // Test 18: Monster Chattering, Wall Drilling/Digging Noises, and Burrowing Escape
+    {
+        std::cout << "[Test 18] Testing Monster Chattering, Wall Drilling & Burrowing Escape..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 spawn_pos(16.0f, 20.0f, 16.0f);
+        manager.spawn_melee(spawn_pos);
+        auto& s = manager.stalkers_mut()[0];
+
+        // 18.1: Monster Chattering Noises in Idle and Active states
+        s.chitter_timer = 0.05f; // Ready to chatter immediately
+        glm::vec3 player_pos(16.0f, 20.0f, 30.0f);
+        auto res_chatter = manager.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 0.0f, false, world);
+        CHECK(s.just_chittered, "Monster must emit chattering noise when chitter_timer elapses");
+        CHECK(res_chatter.any_chitter, "FrameResult must report any_chitter == true");
+
+        // 18.2: Fleeing into Wall triggers Burrowing Escape
+        // Place solid granite wall slab directly in path of flee direction (+Z)
+        for (int wx = 14; wx <= 18; ++wx) {
+            for (int wy = 18; wy <= 22; ++wy) {
+                world.set_voxel(wx, wy, 18, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+                world.set_voxel(wx, wy, 19, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+        }
+
+        s.hp = 8.0f; // Critically damaged (< 12 HP flee threshold)
+        s.state = StalkerState::Fleeing;
+        s.position = glm::vec3(16.0f, 20.0f, 17.0f); // 1.0m from solid wall
+
+        // Player is at z=12, so flee direction is away from player towards +Z (directly into the wall at z=18)
+        glm::vec3 player_behind(16.0f, 20.0f, 12.0f);
+        auto res_flee = manager.update(0.1f, player_behind, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world);
+
+        CHECK(s.state == StalkerState::Burrowing, "Fleeing monster hitting solid wall must transition to Burrowing state to escape");
+        CHECK(s.is_burrowing(), "is_burrowing() helper must return true");
+        CHECK(s.is_escaping(), "is_escaping() helper must return true");
+        CHECK(!s.has_collision(), "Burrowing monster must disable standard obstacle collision");
+        CHECK(s.burrow_duration >= 1.5f, "Burrow duration must be set for animated escape sequence");
+
+        // 18.3: Drilling / Digging Noises while burrowing through walls
+        bool heard_digging = false;
+        bool heard_chatter_while_burrowing = false;
+        for (int i = 0; i < 8; ++i) {
+            auto res_burrow = manager.update(0.1f, player_behind, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world);
+            if (res_burrow.any_digging) heard_digging = true;
+            if (res_burrow.any_chitter) heard_chatter_while_burrowing = true;
+        }
+        CHECK(heard_digging, "Monster burrowing through walls must emit drilling or digging noises");
+        CHECK(heard_chatter_while_burrowing, "Monster burrowing through walls must make chattering noises");
+
+        // 18.4: Animation duration completion -> successful wall escape
+        // Advance remaining burrow duration (> 2.0s)
+        bool saw_escape_signal = false;
+        for (int i = 0; i < 20; ++i) {
+            auto res_esc = manager.update(0.1f, player_behind, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world);
+            if (s.just_escaped || res_esc.stalkers_escaped > 0) {
+                saw_escape_signal = true;
+            }
+        }
+        CHECK(saw_escape_signal, "just_escaped or stalkers_escaped signal must trigger upon completing burrow duration");
+        CHECK(s.is_dead(), "Burrowing monster must be marked Dead/Escaped upon completing burrow duration");
+
+        manager.remove_dead();
+        CHECK(manager.active_count() == 0, "Escaped monster must be cleaned up without leaving a carcass");
+
+        std::cout << " -> Monster chattering noises, wall drilling/digging, and animated burrow escape verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 18 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

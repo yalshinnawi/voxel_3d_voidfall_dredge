@@ -121,12 +121,12 @@
     },
     "stalker_echo_screech": {
       "file": "stalker_echo_screech.wav",
-      "duration_seconds": 1.8,
+      "duration_seconds": 2.2,
       "peak_dbfs": -4.0,
       "lowpass_cutoff_hz": 6800.0,
       "is_loop": false,
       "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
-      "description": "Long-range alien hunting shriek echoing through cavern shafts"
+      "description": "Long-range alien hunting shriek echoing through cavern shafts with smooth 0.75s fade-out"
     },
     "stalker_chitter": {
       "file": "stalker_chitter.wav",
@@ -165,67 +165,97 @@
       "description": "Tectonic grinding teeth chewing through solid stone"
     },
     "ambient_cavern": {
-      "file": "ambient_cavern.wav",
-      "duration_seconds": 9.75,
-      "peak_dbfs": -7.0,
-      "lowpass_cutoff_hz": 5800.0,
+      "file": "ambient_orbit_hub.mp3",
+      "fallback_file": "ambient_cavern.wav",
+      "duration_seconds": 156.4,
+      "peak_dbfs": -6.5,
+      "lowpass_cutoff_hz": 6000.0,
       "is_loop": true,
-      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
-      "description": "Subterranean sub-bass tension drone and void airflow"
+      "artist": "Kevin MacLeod (incompetech.com)",
+      "track_name": "Phantom from Space",
+      "license": "Creative Commons: By Attribution 4.0 License",
+      "description": "Orbital Hub & Subterranean station dark ambient instrumental theme"
     },
     "ambient_sector1": {
-      "file": "ambient_sector1.wav",
-      "duration_seconds": 8.443,
-      "peak_dbfs": -7.5,
-      "lowpass_cutoff_hz": 6800.0,
+      "file": "ambient_sector1_music.mp3",
+      "fallback_file": "ambient_sector1.wav",
+      "duration_seconds": 146.2,
+      "peak_dbfs": -6.8,
+      "lowpass_cutoff_hz": 7000.0,
       "is_loop": true,
-      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
-      "description": "Sector 1 (Perimeter Drift): Crystalline resonant airflow and quartz harmonics"
+      "artist": "Kevin MacLeod (incompetech.com)",
+      "track_name": "Blue Sizzle",
+      "license": "Creative Commons: By Attribution 4.0 License",
+      "description": "Sector 1 (Perimeter Drift): Ethereal, contemplative crystalline ambient composition"
     },
     "ambient_sector2": {
-      "file": "ambient_sector2.wav",
-      "duration_seconds": 9.75,
-      "peak_dbfs": -7.0,
-      "lowpass_cutoff_hz": 4500.0,
+      "file": "ambient_sector2_music.mp3",
+      "fallback_file": "ambient_sector2.wav",
+      "duration_seconds": 122.1,
+      "peak_dbfs": -6.2,
+      "lowpass_cutoff_hz": 5200.0,
       "is_loop": true,
-      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
-      "description": "Sector 2 (Volatile Fault): Geothermal magma hum & basalt tectonic strain"
+      "artist": "Kevin MacLeod (incompetech.com)",
+      "track_name": "Deep Haze",
+      "license": "Creative Commons: By Attribution 4.0 License",
+      "description": "Sector 2 (Volatile Fault): Tense geothermal haze with heavy subterranean undertones"
     },
     "ambient_sector3": {
-      "file": "ambient_sector3.wav",
-      "duration_seconds": 9.75,
-      "peak_dbfs": -7.0,
-      "lowpass_cutoff_hz": 3800.0,
+      "file": "ambient_sector3_music.mp3",
+      "fallback_file": "ambient_sector3.wav",
+      "duration_seconds": 210.5,
+      "peak_dbfs": -6.0,
+      "lowpass_cutoff_hz": 4200.0,
       "is_loop": true,
-      "source_url": "https://sfxmint.com/dl/horror-drone-25.wav",
-      "description": "Sector 3 (Void Cradle): Deep abyssal mantle drone, gravitational void pulse & dread"
+      "artist": "Kevin MacLeod (incompetech.com)",
+      "track_name": "Aftermath",
+      "license": "Creative Commons: By Attribution 4.0 License",
+      "description": "Sector 3 (Void Cradle): Deep abyssal dread & atmospheric spatial orchestral instrumentation"
     },
     "sector_arrival_1": {
       "file": "sector_arrival_1.wav",
-      "duration_seconds": 3.0,
+      "duration_seconds": 4.2,
       "peak_dbfs": -5.0,
       "lowpass_cutoff_hz": 7500.0,
       "is_loop": false,
       "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
-      "description": "Sector 1 arrival stinger: Ethereal crystalline descent harmonic triad"
+      "description": "Sector arrival stinger variant 1: Ethereal crystalline descent screech with smooth 1.4s fade-out"
     },
     "sector_arrival_2": {
       "file": "sector_arrival_2.wav",
-      "duration_seconds": 3.0,
+      "duration_seconds": 4.2,
       "peak_dbfs": -4.5,
       "lowpass_cutoff_hz": 5000.0,
       "is_loop": false,
       "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
-      "description": "Sector 2 arrival stinger: Industrial geothermal brass & tectonic pressure swell"
+      "description": "Sector arrival stinger variant 2: Subterranean tectonic screamer with 42Hz sub-rumble and 1.4s fade-out"
     },
     "sector_arrival_3": {
       "file": "sector_arrival_3.wav",
-      "duration_seconds": 3.2,
+      "duration_seconds": 4.5,
       "peak_dbfs": -4.0,
-      "lowpass_cutoff_hz": 4200.0,
+      "lowpass_cutoff_hz": 4000.0,
       "is_loop": false,
       "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
-      "description": "Sector 3 arrival stinger: Terrifying abyssal void strike and sub-bass impact"
+      "description": "Sector arrival stinger variant 3: Abyssal void wail with dimensional comb resonance and 1.5s fade-out"
+    },
+    "sector_arrival_4": {
+      "file": "sector_arrival_4.wav",
+      "duration_seconds": 3.8,
+      "peak_dbfs": -4.8,
+      "lowpass_cutoff_hz": 6800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Sector arrival stinger variant 4: Distant cavern hunter screech with acoustic delay slapback and 1.3s fade-out"
+    },
+    "sector_arrival_5": {
+      "file": "sector_arrival_5.wav",
+      "duration_seconds": 4.2,
+      "peak_dbfs": -4.5,
+      "lowpass_cutoff_hz": 5800.0,
+      "is_loop": false,
+      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
+      "description": "Sector arrival stinger variant 5: Swarm infrasound alien howl with dual-pitch choral dissonance and 1.4s fade-out"
     },
     "crystal_chime": {
       "file": "crystal_chime.wav",
@@ -496,6 +526,30 @@
       "is_loop": false,
       "source_url": "https://sfxmint.com/dl/horror-heartbeat-34.wav",
       "description": "Cardiovascular systolic / diastolic panic pulse"
+    },
+    "plasma_carbine_reload": {
+      "file": "plasma_carbine_reload.wav",
+      "duration_seconds": 1.25,
+      "peak_dbfs": -4.2,
+      "lowpass_cutoff_hz": 8000.0,
+      "is_loop": false,
+      "description": "Vanguard: thermal plasma magazine ejection, cell latch, and plasma accumulator charge up"
+    },
+    "scattergun_reload": {
+      "file": "scattergun_reload.wav",
+      "duration_seconds": 1.6,
+      "peak_dbfs": -4.0,
+      "lowpass_cutoff_hz": 7500.0,
+      "is_loop": false,
+      "description": "Demolitionist: breach unlatch, heavy shell feed chambering, and lock click"
+    },
+    "railgun_reload": {
+      "file": "railgun_reload.wav",
+      "duration_seconds": 1.1,
+      "peak_dbfs": -4.2,
+      "lowpass_cutoff_hz": 8500.0,
+      "is_loop": false,
+      "description": "Scout: magnetic capacitor rack discharge, micro-needle cassette insertion, and rail lock"
     }
   }
 }

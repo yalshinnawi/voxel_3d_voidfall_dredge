@@ -28,7 +28,8 @@ This document catalogs the 3 specialized subterranean contractor archetypes in *
     - *Capacity*: 6-round revolving drum (manual reload)
     - *Fire Mode*: 5-flechette thermite buckshot cone (37.5 max burst dmg, 38 m/s, amber tracer)
     - *Tactical Role*: Close-quarters predator breaker with heavy concussive knockback.
-  - **Tactical Ability**: Concussion Blast (18.0s recharge; triggers directional tunnel blast and stuns enemies)
+  - **Tactical Ability [C]**: **Concussion Shockwave** (18.0s recharge; omni-directional seismic disruption pulse that stuns nearby stalkers/burrowers and shatters loose ceiling rubble)
+  - **Breaching Ordnance [4]**: **Deployable Satchel Charge & Remote Detonator** (plants physical C-4/voidite demolition block onto voxel faces; remote radio detonator triggers remote detonation to blast open Reinforced Vault Doors or blow giant tunnel cavities)
   - **Passive Trait**: *Surgical Blast & Volatile Refining* (+25% extra yield from Volatile Quartz clusters; directional demolition charges avoid collateral damage to fragile minerals).
 
 ---

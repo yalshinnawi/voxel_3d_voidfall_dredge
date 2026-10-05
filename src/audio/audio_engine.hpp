@@ -34,6 +34,7 @@ enum class SoundCue : uint16_t {
     StalkerHiss,           // Low menacing predatory threat hiss when provoked
     BurrowerRoar,          // Deep tectonic subterranean borer roar and earth rumble
     BurrowerGrind,         // High-torque borer teeth grinding through stone
+    MonsterDigging,        // High-torque claws and borer teeth drilling/digging into rock walls
 
     // ── Ambience, Hazards & Biome Atmosphere ──
     AmbientCavern,         // Legacy/fallback deep subterranean sub-bass drone and void wind
@@ -43,6 +44,8 @@ enum class SoundCue : uint16_t {
     SectorArrival1,        // Sector 1 arrival stinger: Ethereal crystalline descent chord
     SectorArrival2,        // Sector 2 arrival stinger: Heavy industrial seismic brass swell
     SectorArrival3,        // Sector 3 arrival stinger: Abyssal void strike & sub-bass tension impact
+    SectorArrival4,        // Sector arrival stinger 4: Distant cavern hunter screech & reflection
+    SectorArrival5,        // Sector arrival stinger 5: Swarm infrasound alien howl & choral dissonance
     CavernDrip,            // Procedural subterranean moisture droplet acoustic ping
     CavernGroan,           // Tectonic rock stratum stress and structural groan
     CrystalChime,          // Sector 1: Delicate harmonic quartz crystalline resonance
@@ -58,6 +61,9 @@ enum class SoundCue : uint16_t {
     PlasmaHit,             // Kinetic thermal plasma impact on alien armor or rock
     ScattergunFire,        // Demolitionist: Heavy kinetic boom + mechanical flechette spread
     RailgunFire,           // Scout: Supersonic electromagnetic whip crack + inductive discharge
+    PlasmaCarbineReload,   // Vanguard: Thermal cell eject, plasma canister slam & charge chirp
+    ScattergunReload,      // Demolitionist: Heavy drum latch release, cylinder ratchet & solid clamp
+    RailgunReload,         // Scout: Pneumatic needle rack eject, magnetic cell insert & coil whine
 
     // ── Player & Abilities ──
     Footstep,              // Subterranean boot strike on stone floor
@@ -86,6 +92,24 @@ enum class SoundCue : uint16_t {
     PebbleSkitter,         // Loose stone gravel & debris skittering from ceiling (Crumbling Canyon / Quarry)
     SpikeRattle,           // Hollow bone/metal rattle echoing through spike trench (Spike Arena)
 
+    // ── Multi-Sample Variants & Subterranean Atmosphere ──
+    VoidStalkerRoar,       // Vocalization variants for aberrant stalkers
+    CavernSettling,        // Deep earth tectonic settling
+    RockSlide,             // Echoing loose rock slide and scree fall
+    DrillStrataTitanium,   // Dense metallic resonant drilling
+    DrillStrataVoidite,    // Brittle crystalline harmonic drilling
+    DrillStrataBasalt,     // Heavy dull stone drill scraping
+    PlayerDeath,           // Critical suit failure and collapse sequence
+    SuitPuncture,          // Atmospheric decompression & puncture hiss
+    PlayerBreathing,       // Strained Delver respiration under stress
+    PlayerGroan,           // Delver vocal pain groan & strain under radiation sickness / systemic damage
+    PlayerAsphyxiation,    // Delver violent coughing, gasping & choking spasms from toxic gas inhalation
+    ToxicGasHiss,          // Pressurized escaping toxic gas & caustic chemical vent hiss
+    BoneCrack,             // Brutal bone snapping fracture crunch on high-speed fall impact
+    EnemyFleshHit,         // Visceral flesh tearing / claw laceration impact on player from alien attack
+    DebrisArmorImpact,     // Crashing stone rubble & armor deflecting heavy falling debris
+    CritHit,               // High-impact sneak attack / critical strike sound cue (crunch punch + resonant ring)
+
     Count
 };
 
@@ -107,19 +131,20 @@ inline SoundCategory get_sound_category(SoundCue cue) {
         case SoundCue::StalkerEchoScreech:
         case SoundCue::StalkerChitter:
         case SoundCue::StalkerHiss:
+        case SoundCue::VoidStalkerRoar:
         case SoundCue::BurrowerRoar:
         case SoundCue::BurrowerGrind:
+        case SoundCue::MonsterDigging:
             return SoundCategory::Enemy;
 
         case SoundCue::AmbientCavern:
         case SoundCue::AmbientSector1:
         case SoundCue::AmbientSector2:
         case SoundCue::AmbientSector3:
-        case SoundCue::SectorArrival1:
-        case SoundCue::SectorArrival2:
-        case SoundCue::SectorArrival3:
         case SoundCue::CavernDrip:
         case SoundCue::CavernGroan:
+        case SoundCue::CavernSettling:
+        case SoundCue::RockSlide:
         case SoundCue::CrystalChime:
         case SoundCue::GeothermalVent:
         case SoundCue::VoidDistortion:
@@ -138,6 +163,7 @@ inline SoundCategory get_sound_category(SoundCue cue) {
         case SoundCue::HydraulicExhaust:
         case SoundCue::PebbleSkitter:
         case SoundCue::SpikeRattle:
+        case SoundCue::ToxicGasHiss:
             return SoundCategory::Ambience;
 
         case SoundCue::UIBlip:
@@ -171,6 +197,9 @@ struct AudioVoice {
     float pan_left{0.707f};
     float pan_right{0.707f};
     float current_gain{0.0f};
+    bool fading_out{false};
+    float fade_out_remaining{0.0f};
+    float fade_out_total{0.030f};
 
     // Distance low-pass filter (simulates air absorption and cavern wall muffling for distant sounds)
     float distance_lp_alpha{1.0f};
@@ -242,11 +271,17 @@ public:
     /// Trigger 3D sound cue positioned in world space
     void play_sound_3d(SoundCue cue, const glm::vec3& world_pos, float volume = 1.0f, float pitch = 1.0f);
 
-    /// Stop specific sound cue (e.g. looping sounds like drill or ambient)
-    void stop_sound(SoundCue cue);
+    /// Stop specific sound cue (with smooth anti-click fade-out by default)
+    void stop_sound(SoundCue cue, bool instant = false);
 
-    /// Stop all active sound voices
-    void stop_all();
+    /// Stop all active sound voices (instant cutoff by default for tests & scene transitions)
+    void stop_all(bool instant = true);
+
+    /// Play non-repetitive sector arrival stinger with organic pitch modulation
+    void play_arrival_stinger(int sector);
+
+    /// Play class-specific weapon reload sound with organic pitch modulation
+    void play_weapon_reload(int archetype);
 
     /// Modulate active continuous sounds
     void set_drill_active(bool active, float progress = 0.0f, const glm::vec3& pos = glm::vec3(0.0f));
@@ -272,7 +307,15 @@ public:
     void trigger_cavern_micro_event(int sector, int room_shape, float volume = 0.4f);
 
     /// Update dynamic environmental hazard proximity (smooth distance-based modulation)
-    void update_hazard_proximity_audio(float dt, float lava_dist, float rad_level, float spike_dist, float void_dist);
+    void update_hazard_proximity_audio(float dt, float lava_dist, float rad_level, float spike_dist, float void_dist, float gas_dist = 999.0f);
+
+    /// Environmental hazard acoustic trigger helpers
+    void trigger_player_groan(float volume = 0.85f);
+    void trigger_player_asphyxiation(float volume = 0.90f);
+    void trigger_toxic_gas_hiss(float volume = 0.65f);
+    void trigger_bone_crack(float volume = 1.0f);
+    void trigger_enemy_flesh_hit(float volume = 1.0f);
+    void trigger_debris_impact(float volume = 1.0f);
 
     /// Trigger dynamic ducking of ambient / background noise (Dead Space / Alien Isolation negative space)
     void trigger_ducking(float target_attenuation = 0.28f, float hold_seconds = 0.8f, float recovery_rate = 1.35f);
@@ -294,6 +337,13 @@ public:
 
     /// Count of currently active playing voices
     int active_voice_count() const;
+
+    /// Test / telemetry inspection helpers
+    const std::vector<SoundCue>& recent_arrival_stingers() const { return m_recent_arrival_stingers; }
+    const std::vector<SoundCue>& recent_micro_cues() const { return m_recent_micro_cues; }
+    float seismic_rumble_cooldown() const { return m_seismic_rumble_cooldown; }
+    float void_hazard_cooldown() const { return m_void_hazard_cooldown; }
+    const std::array<AudioVoice, MAX_VOICES>& voices() const { return m_voices; }
 
     /// Ear Safety & Hearing Protection Metrics
     struct SafetyMetrics {
@@ -369,6 +419,15 @@ private:
     uint32_t m_geiger_seed{98765};
     float m_micro_ambience_timer{0.0f};
     uint32_t m_ambience_seed{77711};
+    std::vector<SoundCue> m_recent_arrival_stingers;
+    std::vector<SoundCue> m_recent_micro_cues;
+
+    // Environmental Hazard & Rumble Spacing Cooldowns (prevents repetitive sound washes)
+    float m_void_hazard_cooldown{0.0f};
+    float m_lava_hazard_cooldown{0.0f};
+    float m_spike_hazard_cooldown{0.0f};
+    float m_gas_hazard_cooldown{0.0f};
+    float m_seismic_rumble_cooldown{0.0f};
 
     // Dynamic Threat Ducking (creates negative space for horror stings)
     float m_ducking_attenuation{1.0f};

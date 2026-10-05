@@ -38,8 +38,15 @@ public:
         bool is_in_range,
         ToolSlot active_tool,
         const glm::vec3& drill_target_pos = glm::vec3(0.0f),
-        bool is_firing = false
+        bool is_firing = false,
+        bool is_crouching = false,
+        bool is_reloading = false,
+        float reload_progress = 0.0f,
+        bool has_placed_charge = false
     );
+
+    bool is_reloading() const { return m_is_reloading; }
+    float reload_progress() const { return m_reload_progress; }
 
 private:
     void init_geometry();
@@ -120,6 +127,14 @@ private:
     unsigned int m_railgun_vbo{0};
     size_t m_railgun_count{0};
 
+    unsigned int m_detonator_vao{0};
+    unsigned int m_detonator_vbo{0};
+    size_t m_detonator_count{0};
+
+    unsigned int m_plunger_vao{0};
+    unsigned int m_plunger_vbo{0};
+    size_t m_plunger_count{0};
+
     float m_total_time{0.0f};
     float m_drill_rotation{0.0f};
     float m_switch_timer{0.0f};
@@ -129,6 +144,8 @@ private:
     int m_drill_speed_tier{0};
     int m_drill_durability_tier{0};
     float m_spark_timer{0.0f};
+    bool m_is_reloading{false};
+    float m_reload_progress{0.0f};
 
     std::function<void(const glm::vec3&, const glm::vec3&)> m_on_spark;
 };

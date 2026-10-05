@@ -14,8 +14,40 @@ uniform vec3 uHeadlampColor;
 uniform float uHeadlampEnabled;
 uniform float uStateGlow;
 uniform int uState; // 0=Idle, 1=Stalking, 2=Circling, 3=Lunging, 4=Stunned, 5=Fleeing
+uniform float uDissolveThreshold; // 0.0 = solid, 1.0 = fully dissolved
+uniform float u_dissolveThreshold;
+
+// 3D procedural noise for dissolve burn-away cutouts
+float hash3D(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.1, 0.1, 0.1));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float noise3D(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3D(p + vec3(0,0,0)), hash3D(p + vec3(1,0,0)), f.x),
+                   mix(hash3D(p + vec3(0,1,0)), hash3D(p + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash3D(p + vec3(0,0,1)), hash3D(p + vec3(1,0,1)), f.x),
+                   mix(hash3D(p + vec3(0,1,1)), hash3D(p + vec3(1,1,1)), f.x), f.y), f.z);
+}
 
 void main() {
+    // Void Dissolution / Alpha Burn-Away cutoff
+    float dissolve = max(max(uDissolveThreshold, u_dissolveThreshold), 1.0 - vColor.a);
+    vec3 dissolveRim = vec3(0.0);
+    if (dissolve > 0.001) {
+        float noiseVal = noise3D(vFragPos * 2.0);
+        if (noiseVal < dissolve) {
+            discard;
+        }
+        // Glowing cyan/amber burn rim along edge boundaries
+        if (noiseVal < dissolve + 0.05) {
+            dissolveRim = vec3(0.0, 0.95, 1.0) * 3.0;
+        }
+    }
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uCamPos - vFragPos);
 
@@ -79,6 +111,6 @@ void main() {
         emissive *= (1.5 + 0.5 * sin(uStateGlow * 20.0));
     }
 
-    vec3 finalColor = ambient + headlampLight + rimLight + emissive;
+    vec3 finalColor = ambient + headlampLight + rimLight + emissive + dissolveRim;
     FragColor = vec4(finalColor, vColor.a);
 }

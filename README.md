@@ -146,6 +146,15 @@ cmake --build build --config Release
 ./build/Release/VoidfallDredge.exe --client 127.0.0.1 --name "Delver_2"
 ```
 
+### 📦 Packaging for Distribution
+To create a standalone, self-contained ZIP archive for friends (containing the Release executable, assets, runtime DLLs, and player guide):
+```bash
+python scripts/package_release.py
+# Or double-click:
+./package_game.bat
+```
+The output package will be generated at `dist/VoidfallDredge_v1.0.zip`.
+
 ---
 
 ## 📜 License
