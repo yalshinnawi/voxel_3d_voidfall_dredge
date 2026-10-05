@@ -101,6 +101,12 @@ public:
         m_death_duration = max_duration;
     }
 
+    void SetReloadStatus(bool show, float timer = 0.0f) { m_show_reload = show; m_reload_status_timer = timer; }
+    void ClearReloadStatus() { m_show_reload = false; m_reload_status_timer = 0.0f; }
+    void set_reload_status(bool show, float timer = 0.0f) { SetReloadStatus(show, timer); }
+    void clear_reload_status() { ClearReloadStatus(); }
+    bool is_reload_status_active() const { return m_show_reload; }
+
     const std::deque<HudNotification>& notifications() const { return m_notifications; }
     void clear_notifications() { m_notifications.clear(); }
     size_t notification_count() const { return m_notifications.size(); }
@@ -238,6 +244,10 @@ private:
     std::string m_tool_switch_name{""};
     std::string m_tool_switch_details{""};
     glm::vec4 m_tool_switch_color{0.0f, 0.898f, 1.0f, 1.0f};
+
+    // Weapon Reload HUD state
+    bool m_show_reload{false};
+    float m_reload_status_timer{0.0f};
 };
 
 } // namespace Voidfall

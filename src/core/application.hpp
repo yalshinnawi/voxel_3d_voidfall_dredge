@@ -91,6 +91,7 @@ private:
     void on_explosive_blast(const glm::ivec3& origin, const glm::ivec3& dir, bool is_micro);
     void on_tactical_ability(CharacterClass cls, const glm::vec3& pos, const glm::vec3& dir);
     void setup_hazard_system();
+    void setup_extraction_callbacks();
     void spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float radius, int min_blocks, int max_blocks);
     void sync_profile_with_player();
     void sync_audio_settings();

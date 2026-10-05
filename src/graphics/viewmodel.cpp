@@ -41,7 +41,7 @@ ViewModel::~ViewModel() {
 }
 
 void ViewModel::on_tool_switched() {
-    m_switch_timer = 0.50f;  // Two-phase lower-out / raise-in animation
+    m_switch_timer = 0.20f;  // 0.2s downward dip and raise transition
 }
 
 void ViewModel::add_box(
@@ -303,6 +303,40 @@ void ViewModel::add_cone(
     }
 }
 
+void ViewModel::add_forearm_and_gauntlet(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& elbow_origin,
+    const glm::vec3& wrist_pos,
+    const glm::vec3& palm_pos,
+    const glm::vec4& sleeve_col,
+    const glm::vec4& accent_col,
+    const glm::vec4& glove_col,
+    bool is_right_arm
+) {
+    glm::vec4 mat_cloth(0.02f, 0.88f, 0.0f, 0.85f);
+    glm::vec4 mat_armor(0.45f, 0.40f, 0.0f, 0.90f);
+    glm::vec4 mat_metal(0.72f, 0.35f, 0.0f, 0.90f);
+    glm::vec4 mat_rubber(0.05f, 0.75f, 0.0f, 0.80f);
+    glm::vec4 col_armor_plate(0.25f, 0.28f, 0.32f, 1.0f);
+    glm::vec4 col_chassis_dark(0.13f, 0.14f, 0.16f, 1.0f);
+
+    // 1. Dual-segmented Forearm Sleeve (Upper segment entering from viewport corner)
+    add_capsule(verts, elbow_origin, wrist_pos, 0.048f, 0.036f, 10, sleeve_col, mat_cloth);
+
+    // 2. Forearm Reinforced Armor Plating with Class Accent Trim
+    glm::vec3 mid_arm = (elbow_origin + wrist_pos) * 0.5f + (is_right_arm ? glm::vec3(0.015f, 0.015f, 0.0f) : glm::vec3(-0.015f, 0.015f, 0.0f));
+    add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.015f, 0.05f), mid_arm - glm::vec3(0.0f, -0.015f, 0.05f), 0.018f, 0.015f, 8, col_armor_plate, mat_armor);
+    add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.018f, 0.04f), mid_arm - glm::vec3(0.0f, -0.012f, 0.04f), 0.007f, 0.005f, 6, accent_col, mat_metal);
+
+    // 3. Wrist Cuff Seal Ring
+    add_capsule(verts, wrist_pos + glm::vec3(0.005f, -0.005f, 0.010f), wrist_pos - glm::vec3(0.005f, -0.005f, 0.010f), 0.038f, 0.038f, 12, col_chassis_dark, mat_metal);
+    add_capsule(verts, wrist_pos + glm::vec3(0.003f, -0.003f, 0.006f), wrist_pos - glm::vec3(0.003f, -0.003f, 0.006f), 0.040f, 0.040f, 12, accent_col, mat_metal);
+
+    // 4. Glove Palm & Knuckle Guard
+    add_capsule(verts, wrist_pos, palm_pos, 0.030f, 0.026f, 8, glove_col, mat_rubber);
+    add_capsule(verts, palm_pos + glm::vec3(0.0f, 0.012f, 0.010f), palm_pos + glm::vec3(0.0f, -0.015f, 0.010f), 0.012f, 0.010f, 6, col_armor_plate, mat_armor);
+}
+
 void ViewModel::set_character_class(CharacterClass cls) {
     if (m_character_class != cls) {
         m_character_class = cls;
@@ -328,10 +362,26 @@ void ViewModel::init_geometry() {
     if (m_plunger_vao) { glDeleteVertexArrays(1, &m_plunger_vao); m_plunger_vao = 0; }
     if (m_plunger_vbo) { glDeleteBuffers(1, &m_plunger_vbo); m_plunger_vbo = 0; }
 
-    CharacterAttributes char_attr = get_character_attributes(m_character_class);
-    glm::vec4 col_suit_arm = char_attr.suitSleeveColor;
-    glm::vec4 col_suit_glove = char_attr.gloveColor;
-    glm::vec4 col_suit_accent = char_attr.primaryAccentColor;
+    glm::vec4 col_suit_arm;
+    glm::vec4 col_suit_accent;
+    glm::vec4 col_suit_glove;
+
+    if (m_character_class == CharacterClass::Demolitionist) {
+        // Demolitionist (Kaelen): Industrial Hazard Orange / Dark Charcoal
+        col_suit_accent = glm::vec4(1.0f, 0.55f, 0.0f, 1.0f);   // Industrial Hazard Orange
+        col_suit_arm    = glm::vec4(0.12f, 0.12f, 0.14f, 1.0f); // Dark Charcoal
+        col_suit_glove  = glm::vec4(0.20f, 0.18f, 0.16f, 1.0f);
+    } else if (m_character_class == CharacterClass::Vanguard) {
+        // Vanguard (Rhodes): Heavy Slate Gray / Reinforced Bronze
+        col_suit_arm    = glm::vec4(0.32f, 0.35f, 0.40f, 1.0f); // Heavy Slate Gray
+        col_suit_accent = glm::vec4(0.72f, 0.50f, 0.22f, 1.0f); // Reinforced Bronze
+        col_suit_glove  = glm::vec4(0.24f, 0.26f, 0.30f, 1.0f);
+    } else {
+        // Scout (Vesper): Electric Cyan / Matte White
+        col_suit_accent = glm::vec4(0.0f, 0.90f, 1.0f, 1.0f);   // Electric Cyan
+        col_suit_arm    = glm::vec4(0.88f, 0.90f, 0.92f, 1.0f); // Matte White
+        col_suit_glove  = glm::vec4(0.20f, 0.24f, 0.28f, 1.0f);
+    }
     glm::vec4 col_glove_rubber(0.12f, 0.13f, 0.15f, 1.0f);
     glm::vec4 col_armor_plate(0.25f, 0.28f, 0.32f, 1.0f);
 
@@ -743,21 +793,22 @@ void ViewModel::init_geometry() {
     add_box(carbine_verts, {-0.004f, -0.070f, -0.045f}, {0.004f, -0.040f, 0.0f}, col_carbine_rails, mat_carbine_chrome);
     add_box(carbine_verts, {-0.003f, -0.062f, -0.025f}, {0.003f, -0.044f, -0.015f}, col_carbine_rails, mat_carbine_chrome);
 
-    // 4.6 Delver Heavy Gauntleted Hands Holding the Carbine
-    // Right hand gripping pistol grip:
-    glm::vec3 r_grip_palm(0.0f, -0.085f, 0.02f);
-    add_capsule(carbine_verts, r_grip_palm + glm::vec3(0.015f, 0.010f, 0.05f), r_grip_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.024f, 0.020f, 8, col_suit_glove, mat_rubber);
-    add_capsule(carbine_verts, r_grip_palm + glm::vec3(0.018f, 0.015f, 0.04f), r_grip_palm + glm::vec3(0.014f, 0.015f, -0.005f), 0.012f, 0.010f, 6, col_armor_plate, mat_armor); // Knuckle plate
+    // 4.6 Delver Exo-Suit Arms & Heavy Gauntleted Hands Holding the Carbine
+    glm::vec3 r_carb_elbow(0.24f, -0.32f, 0.32f);
+    glm::vec3 r_carb_wrist(0.06f, -0.15f, 0.10f);
+    glm::vec3 r_carb_palm(0.0f, -0.085f, 0.02f);
+    add_forearm_and_gauntlet(carbine_verts, r_carb_elbow, r_carb_wrist, r_carb_palm, col_suit_arm, col_suit_accent, col_suit_glove, true);
     // Right index trigger finger extended onto receiver
-    add_capsule(carbine_verts, r_grip_palm + glm::vec3(-0.014f, 0.018f, 0.01f), glm::vec3(-0.012f, -0.055f, -0.025f), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
+    add_capsule(carbine_verts, r_carb_palm + glm::vec3(-0.014f, 0.018f, 0.01f), glm::vec3(-0.012f, -0.055f, -0.025f), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
 
-    // Left hand holding forward tactical shroud under barrel:
-    glm::vec3 l_fore_palm(-0.032f, -0.048f, -0.26f);
-    add_capsule(carbine_verts, l_fore_palm + glm::vec3(-0.020f, -0.025f, 0.04f), l_fore_palm, 0.022f, 0.019f, 8, col_suit_glove, mat_rubber);
-    // Left fingers clamped under shroud:
+    // Left arm holding forward tactical shroud under barrel:
+    glm::vec3 l_carb_elbow(-0.28f, -0.30f, 0.18f);
+    glm::vec3 l_carb_wrist(-0.12f, -0.11f, -0.12f);
+    glm::vec3 l_carb_palm(-0.032f, -0.048f, -0.26f);
+    add_forearm_and_gauntlet(carbine_verts, l_carb_elbow, l_carb_wrist, l_carb_palm, col_suit_arm, col_suit_accent, col_suit_glove, false);
     for (int lf = 0; lf < 4; ++lf) {
         float lz = -0.24f - lf * 0.014f;
-        add_capsule(carbine_verts, l_fore_palm + glm::vec3(-0.005f, 0.005f, lz - l_fore_palm.z), glm::vec3(0.022f, -0.038f, lz), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
+        add_capsule(carbine_verts, l_carb_palm + glm::vec3(-0.005f, 0.005f, lz - l_carb_palm.z), glm::vec3(0.022f, -0.038f, lz), 0.007f, 0.006f, 6, col_glove_rubber, mat_rubber);
     }
 
     m_carbine_count = carbine_verts.size();
@@ -829,14 +880,17 @@ void ViewModel::init_geometry() {
     scat_grip = glm::rotate(scat_grip, glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     add_transformed_box(scatter_verts, scat_grip, glm::vec3(0.016f, 0.055f, 0.024f), col_scatter_grip, mat_carbine_rubber);
 
-    // 5.5 Demolitionist Hands Holding Scattergun
+    // 5.5 Demolitionist Forearms, Gauntlets & Hands Holding Scattergun
+    glm::vec3 r_scat_elbow(0.24f, -0.32f, 0.32f);
+    glm::vec3 r_scat_wrist(0.06f, -0.15f, 0.10f);
     glm::vec3 r_scat_palm(0.0f, -0.088f, 0.03f);
-    add_capsule(scatter_verts, r_scat_palm + glm::vec3(0.016f, 0.010f, 0.05f), r_scat_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.025f, 0.022f, 8, col_suit_glove, mat_rubber);
-    add_capsule(scatter_verts, r_scat_palm + glm::vec3(0.020f, 0.015f, 0.04f), r_scat_palm + glm::vec3(0.014f, 0.015f, -0.005f), 0.014f, 0.012f, 6, col_suit_accent, mat_armor); // Hazard Orange plate
+    add_forearm_and_gauntlet(scatter_verts, r_scat_elbow, r_scat_wrist, r_scat_palm, col_suit_arm, col_suit_accent, col_suit_glove, true);
 
-    // Left hand gripping pump fore-end slide
+    // Left arm and hand gripping pump fore-end slide
+    glm::vec3 l_scat_elbow(-0.28f, -0.30f, 0.18f);
+    glm::vec3 l_scat_wrist(-0.12f, -0.12f, -0.12f);
     glm::vec3 l_scat_palm(-0.032f, -0.060f, -0.26f);
-    add_capsule(scatter_verts, l_scat_palm + glm::vec3(-0.020f, -0.025f, 0.04f), l_scat_palm, 0.024f, 0.020f, 8, col_suit_glove, mat_rubber);
+    add_forearm_and_gauntlet(scatter_verts, l_scat_elbow, l_scat_wrist, l_scat_palm, col_suit_arm, col_suit_accent, col_suit_glove, false);
     for (int lf = 0; lf < 4; ++lf) {
         float lz = -0.23f - lf * 0.015f;
         add_capsule(scatter_verts, l_scat_palm + glm::vec3(-0.005f, 0.005f, lz - l_scat_palm.z), glm::vec3(0.026f, -0.048f, lz), 0.008f, 0.007f, 6, col_suit_accent, mat_rubber);
@@ -908,14 +962,17 @@ void ViewModel::init_geometry() {
     rail_grip = glm::rotate(rail_grip, glm::radians(18.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     add_transformed_box(rail_verts, rail_grip, glm::vec3(0.013f, 0.052f, 0.020f), col_rail_grip, mat_carbine_rubber);
 
-    // Right hand
+    // 6.5 Scout Forearms, Gauntlets & Hands Holding Railgun
+    glm::vec3 r_rail_elbow(0.24f, -0.32f, 0.32f);
+    glm::vec3 r_rail_wrist(0.06f, -0.14f, 0.09f);
     glm::vec3 r_rail_palm(0.0f, -0.080f, 0.02f);
-    add_capsule(rail_verts, r_rail_palm + glm::vec3(0.014f, 0.010f, 0.05f), r_rail_palm + glm::vec3(0.010f, -0.010f, -0.01f), 0.022f, 0.018f, 8, col_suit_glove, mat_rubber);
-    add_capsule(rail_verts, r_rail_palm + glm::vec3(0.016f, 0.015f, 0.04f), r_rail_palm + glm::vec3(0.012f, 0.015f, -0.005f), 0.011f, 0.009f, 6, col_suit_accent, mat_armor);
+    add_forearm_and_gauntlet(rail_verts, r_rail_elbow, r_rail_wrist, r_rail_palm, col_suit_arm, col_suit_accent, col_suit_glove, true);
 
     // Left hand steadying forward shroud
+    glm::vec3 l_rail_elbow(-0.28f, -0.29f, 0.16f);
+    glm::vec3 l_rail_wrist(-0.12f, -0.10f, -0.14f);
     glm::vec3 l_rail_palm(-0.028f, -0.042f, -0.28f);
-    add_capsule(rail_verts, l_rail_palm + glm::vec3(-0.018f, -0.020f, 0.035f), l_rail_palm, 0.020f, 0.017f, 8, col_suit_glove, mat_rubber);
+    add_forearm_and_gauntlet(rail_verts, l_rail_elbow, l_rail_wrist, l_rail_palm, col_suit_arm, col_suit_accent, col_suit_glove, false);
     for (int lf = 0; lf < 4; ++lf) {
         float lz = -0.26f - lf * 0.012f;
         add_capsule(rail_verts, l_rail_palm + glm::vec3(-0.004f, 0.004f, lz - l_rail_palm.z), glm::vec3(0.018f, -0.032f, lz), 0.006f, 0.005f, 6, col_suit_accent, mat_rubber);
@@ -993,8 +1050,10 @@ void ViewModel::init_geometry() {
     add_cylinder(det_verts, {0.0f, -0.055f, -0.025f}, 0.012f, 0.010f, 10, col_brass, mat_metal, 2);
 
     // E. Suited Arm and Glove Holding Detonator
-    add_cylinder(det_verts, {0.10f, -0.22f, 0.12f}, 0.035f, 0.18f, 10, col_suit_arm, mat_cloth, 1);
-    add_cylinder(det_verts, {0.08f, -0.15f, 0.08f}, 0.038f, 0.04f, 10, col_suit_accent, mat_armor, 1);
+    glm::vec3 r_det_elbow(0.24f, -0.32f, 0.30f);
+    glm::vec3 r_det_wrist(0.08f, -0.15f, 0.10f);
+    glm::vec3 r_det_palm(0.02f, -0.05f, 0.01f);
+    add_forearm_and_gauntlet(det_verts, r_det_elbow, r_det_wrist, r_det_palm, col_suit_arm, col_suit_accent, col_suit_glove, true);
     add_capsule(det_verts, {0.040f, -0.040f, 0.02f}, {0.042f, -0.035f, -0.02f}, 0.014f, 0.012f, 6, col_suit_glove, mat_rubber);
     add_capsule(det_verts, {0.040f, -0.070f, 0.02f}, {0.042f, -0.065f, -0.02f}, 0.014f, 0.012f, 6, col_suit_glove, mat_rubber);
     add_capsule(det_verts, {-0.035f, 0.010f, 0.03f}, {-0.010f, 0.050f, 0.01f}, 0.015f, 0.012f, 6, col_suit_glove, mat_rubber);
@@ -1068,22 +1127,21 @@ void ViewModel::render(
     float switch_roll_deg = 0.0f;
     if (m_switch_timer > 0.0f) {
         m_switch_timer -= dt;
-        float progress = 1.0f - (std::max(0.0f, m_switch_timer) / 0.50f); // 0→1
+        float progress = 1.0f - (std::max(0.0f, m_switch_timer) / 0.20f); // 0→1 over 0.2s
         if (progress < 0.5f) {
-            // Phase 1: Lower old weapon out — ease-in (acceleration)
-            float p    = progress / 0.5f;           // 0→1 over first 0.25s
+            // Phase 1: Lower old weapon out (0.1s dip)
+            float p    = progress / 0.5f;           // 0→1 over first 0.1s
             float ease = p * p;                     // Quadratic ease-in
-            switch_dip_y    = -0.28f * ease;        // Drop down
-            switch_push_z   =  0.06f * ease;        // Pull slightly toward screen
-            switch_roll_deg = -18.0f * ease;        // Tilt CW as it drops away
+            switch_dip_y    = -0.22f * ease;        // Drop down
+            switch_push_z   =  0.05f * ease;        // Pull slightly toward screen
+            switch_roll_deg = -15.0f * ease;        // Tilt CW as it drops away
         } else {
-            // Phase 2: Raise new weapon in — ease-out (deceleration to rest)
-            float p    = (progress - 0.5f) / 0.5f; // 0→1 over second 0.25s
+            // Phase 2: Raise new weapon in (0.1s raise)
+            float p    = (progress - 0.5f) / 0.5f; // 0→1 over second 0.1s
             float ease = 1.0f - (1.0f - p) * (1.0f - p); // Quadratic ease-out
-            switch_dip_y    = -0.28f * (1.0f - ease);     // Rise from below
-            switch_push_z   =  0.06f * (1.0f - ease);     // Settle forward
-            // Slight counter-roll as weapon springs into place then settles
-            switch_roll_deg =  9.0f * (1.0f - ease) * (1.0f - ease);
+            switch_dip_y    = -0.22f * (1.0f - ease);     // Rise from below
+            switch_push_z   =  0.05f * (1.0f - ease);     // Settle forward
+            switch_roll_deg =  8.0f * (1.0f - ease) * (1.0f - ease);
         }
     }
 
@@ -1091,12 +1149,12 @@ void ViewModel::render(
     glm::mat4 proj = glm::perspective(glm::radians(68.0f), aspect, 0.05f, 10.0f);
     glm::mat4 view = glm::mat4(1.0f);
 
-    // 2. Idle Lissajous breathing sway & crouch stance shift
+    // 2. Procedural walking bob using Lissajous curve: x = A*sin(w*t), y = B*cos(2*w*t)
     float crouch_offset_y = is_crouching ? -0.08f : 0.0f;
     float crouch_offset_z = is_crouching ? -0.05f : 0.0f;
-    float sway_scale = is_crouching ? 0.5f : 1.0f; // 50% reduced sway amplitude when crouched
-    float lissajous_x = std::sin(m_total_time * 1.8f) * 0.005f * sway_scale;
-    float lissajous_y = std::cos(m_total_time * 3.6f) * 0.004f * sway_scale;
+    float sway_scale = is_crouching ? 0.5f : 1.0f;
+    float lissajous_x = std::sin(m_total_time * 4.5f) * 0.008f * sway_scale;
+    float lissajous_y = std::cos(m_total_time * 9.0f) * 0.006f * sway_scale;
 
     glDisable(GL_CULL_FACE);
 
@@ -1270,15 +1328,15 @@ void ViewModel::render(
         float jitter_y = 0.0f;
 
         if (is_drilling) {
-            float rot_speed = 1800.0f * (1.0f + 0.15f * m_drill_speed_tier);
-            m_drill_rotation += rot_speed * dt;
+            m_drill_rotation += 1800.0f * dt;
             if (m_drill_rotation > 360000.0f) m_drill_rotation -= 360000.0f;
 
-            recoil_z = std::sin(m_total_time * 65.0f) * 0.016f + ((static_cast<float>(rand() % 100) / 1000.0f) - 0.05f) * 0.25f;
-            jitter_x = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.004f;
-            jitter_y = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.004f;
+            // Recoil oscillation along view vector (Z offset jitter +-0.03m at 45 Hz)
+            recoil_z = std::sin(m_total_time * (2.0f * 3.14159265f * 45.0f)) * 0.030f;
+            jitter_x = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.003f;
+            jitter_y = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.003f;
 
-            piston_z = std::sin(m_total_time * 55.0f) * 0.030f;
+            piston_z = std::sin(m_total_time * (2.0f * 3.14159265f * 45.0f)) * 0.030f;
 
             if (is_in_range && m_on_spark) {
                 m_spark_timer += dt;

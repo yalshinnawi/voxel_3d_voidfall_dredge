@@ -56,9 +56,9 @@ void PlayerController::handle_input(const Window& window, float dt) {
 
     // Tool selection: 1 (Mining Drill), 2 (Combat Weapon), 3/4 (Demolition Charge)
     // Bulkhead is placed directly with Right Click while on Mining Drill (bulk tool slot removed)
-    if (window.is_key_down(GLFW_KEY_1)) m_active_tool = ToolSlot::MiningDrill;
-    if (window.is_key_down(GLFW_KEY_2)) m_active_tool = ToolSlot::CombatWeapon;
-    if (window.is_key_down(GLFW_KEY_3) || window.is_key_down(GLFW_KEY_4)) m_active_tool = ToolSlot::DemolitionCharge;
+    if (window.is_key_down(GLFW_KEY_1)) set_active_tool(ToolSlot::MiningDrill);
+    if (window.is_key_down(GLFW_KEY_2)) set_active_tool(ToolSlot::CombatWeapon);
+    if (window.is_key_down(GLFW_KEY_3) || window.is_key_down(GLFW_KEY_4)) set_active_tool(ToolSlot::DemolitionCharge);
 
     // Mouse scroll wheel tool cycling: scroll down -> next weapon, scroll up -> prev weapon
     double scroll_y = const_cast<Window&>(window).get_scroll_delta_y();
@@ -124,7 +124,8 @@ void PlayerController::handle_input(const Window& window, float dt) {
         m_velocity.z *= (1.0f - 1.5f * dt);
     }
 
-    // 3. Jump & Exo-Suit Thrusters
+    // 3. Jump, Exo-Suit Thrusters & Thruster Air-Brake
+    m_thruster_air_braking = false;
     if (window.is_key_down(GLFW_KEY_SPACE)) {
         if (m_on_ground) {
             m_velocity.y = 8.5f;
@@ -133,15 +134,26 @@ void PlayerController::handle_input(const Window& window, float dt) {
             if (m_on_jump) {
                 m_on_jump(m_position);
             }
-        } else if (!m_exo.overheated && m_exo.power > 5.0f) {
-            // Jetpack vertical hover thrusters
-            m_velocity.y += 18.0f * dt;
-            m_velocity.y = glm::clamp(m_velocity.y, -4.0f, 9.0f);
-            float overburden_drain = (m_carry_weight_multiplier < 0.99f) ? (1.0f + (1.0f - m_carry_weight_multiplier) * 1.5f) : 1.0f;
-            m_exo.power -= 25.0f * dt * overburden_drain;
-            float heat_buildup = drill_heat_buildup_rate();
-            m_exo.heat += heat_buildup * dt;
-            m_current_buttons |= BTN_THRUSTER;
+        } else if (!m_exo.overheated && m_exo.power > 3.0f) {
+            // Thruster Air-Brake: Holding SPACE while falling at high downward velocity (vy < -12.0 m/s)
+            // consumes jetpack fuel to cap terminal velocity at a survivable -5.0 m/s.
+            if (m_velocity.y < -12.0f) {
+                m_thruster_air_braking = true;
+                m_velocity.y = std::max(-5.0f, m_velocity.y + 45.0f * dt);
+                if (m_velocity.y > -5.0f) m_velocity.y = -5.0f;
+                m_exo.power = std::max(0.0f, m_exo.power - 25.0f * dt);
+                m_current_buttons |= BTN_THRUSTER;
+                add_trauma(0.02f * dt);
+            } else {
+                // Jetpack vertical hover thrusters
+                m_velocity.y += 18.0f * dt;
+                m_velocity.y = glm::clamp(m_velocity.y, -4.0f, 9.0f);
+                float overburden_drain = (m_carry_weight_multiplier < 0.99f) ? (1.0f + (1.0f - m_carry_weight_multiplier) * 1.5f) : 1.0f;
+                m_exo.power -= 25.0f * dt * overburden_drain;
+                float heat_buildup = drill_heat_buildup_rate();
+                m_exo.heat += heat_buildup * dt;
+                m_current_buttons |= BTN_THRUSTER;
+            }
         }
     }
 
@@ -255,11 +267,17 @@ void PlayerController::update_physics(float dt, World& world) {
         m_eyeHeight = targetEyeHeight;
     }
 
+    if (m_vault_timer > 0.0f) {
+        m_vault_timer = std::max(0.0f, m_vault_timer - dt);
+    }
+
     // 0. Update Combat Firearm cooldowns & passive capacitor recharge
     if (m_fire_cooldown > 0.0f) {
         m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
     }
-    if (m_reload_timer > 0.0f) {
+    if (m_active_tool != ToolSlot::CombatWeapon || m_weapon_ammo >= m_weapon_stats.max_ammo) {
+        m_reload_timer = 0.0f;
+    } else if (m_reload_timer > 0.0f) {
         m_reload_timer -= dt;
         if (m_reload_timer <= 0.0f) {
             m_reload_timer = 0.0f;
@@ -793,6 +811,33 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
         }
     } else if (axis == 0) { // 2. X Axis (Walls)
+        auto try_mantle_x = [&](int check_x) -> bool {
+            if (!(m_current_buttons & BTN_FORWARD) || m_vault_timer > 0.0f) return false;
+            bool has_edge = false;
+            for (int z = min_bz; z <= max_bz; ++z) {
+                if (world.is_solid(glm::ivec3(check_x, max_by, z)) ||
+                    world.is_solid(glm::ivec3(check_x, min_by + 1, z))) {
+                    has_edge = true;
+                    break;
+                }
+            }
+            if (!has_edge) return false;
+            for (int z = min_bz; z <= max_bz; ++z) {
+                if (world.is_solid(glm::ivec3(check_x, max_by + 1, z)) ||
+                    world.is_solid(glm::ivec3(check_x, max_by + 2, z))) {
+                    return false;
+                }
+            }
+            // Pull player vertically over the ledge (+1.8m) with camera vault motion
+            m_position.y += 1.8f;
+            m_velocity.y = std::max(2.5f, m_velocity.y);
+            m_vault_timer = 0.35f;
+            add_trauma(0.08f);
+            m_on_ground = true;
+            m_isGrounded = true;
+            return true;
+        };
+
         if (m_velocity.x > 0.0f) {
             int check_x = static_cast<int>(std::floor(box_max.x));
             bool has_collision = false;
@@ -833,6 +878,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     m_position.y += 1.0f;
                     m_on_ground = true;
                     m_isGrounded = true;
+                } else if (try_mantle_x(check_x)) {
+                    // Mantled successfully over ledge
                 } else {
                     m_position.x = static_cast<float>(check_x) - half_extents.x - 0.001f;
                     m_velocity.x = 0.0f;
@@ -879,6 +926,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     m_position.y += 1.0f;
                     m_on_ground = true;
                     m_isGrounded = true;
+                } else if (try_mantle_x(check_x)) {
+                    // Mantled successfully over ledge
                 } else {
                     m_position.x = static_cast<float>(check_x + 1) + half_extents.x + 0.001f;
                     m_velocity.x = 0.0f;
@@ -887,6 +936,33 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
         }
     } else if (axis == 2) { // 3. Z Axis (Walls)
+        auto try_mantle_z = [&](int check_z) -> bool {
+            if (!(m_current_buttons & BTN_FORWARD) || m_vault_timer > 0.0f) return false;
+            bool has_edge = false;
+            for (int x = min_bx; x <= max_bx; ++x) {
+                if (world.is_solid(glm::ivec3(x, max_by, check_z)) ||
+                    world.is_solid(glm::ivec3(x, min_by + 1, check_z))) {
+                    has_edge = true;
+                    break;
+                }
+            }
+            if (!has_edge) return false;
+            for (int x = min_bx; x <= max_bx; ++x) {
+                if (world.is_solid(glm::ivec3(x, max_by + 1, check_z)) ||
+                    world.is_solid(glm::ivec3(x, max_by + 2, check_z))) {
+                    return false;
+                }
+            }
+            // Pull player vertically over the ledge (+1.8m) with camera vault motion
+            m_position.y += 1.8f;
+            m_velocity.y = std::max(2.5f, m_velocity.y);
+            m_vault_timer = 0.35f;
+            add_trauma(0.08f);
+            m_on_ground = true;
+            m_isGrounded = true;
+            return true;
+        };
+
         if (m_velocity.z > 0.0f) {
             int check_z = static_cast<int>(std::floor(box_max.z));
             bool has_collision = false;
@@ -927,6 +1003,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     m_position.y += 1.0f;
                     m_on_ground = true;
                     m_isGrounded = true;
+                } else if (try_mantle_z(check_z)) {
+                    // Mantled successfully over ledge
                 } else {
                     m_position.z = static_cast<float>(check_z) - half_extents.z - 0.001f;
                     m_velocity.z = 0.0f;
@@ -973,6 +1051,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     m_position.y += 1.0f;
                     m_on_ground = true;
                     m_isGrounded = true;
+                } else if (try_mantle_z(check_z)) {
+                    // Mantled successfully over ledge
                 } else {
                     m_position.z = static_cast<float>(check_z + 1) + half_extents.z + 0.001f;
                     m_velocity.z = 0.0f;
@@ -1107,9 +1187,9 @@ void PlayerController::MineBlock(float dt, World& world) {
                 m_target_block = glm::ivec3(-1);
             }
         } else {
-            // Player looked away or hit bedrock: decay back to 0
+            // Player looked away or hit bedrock: decay back to 0 over 0.8s
             if (m_drillDamageAccumulator > 0.0f) {
-                float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) * 2.0f;
+                float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) / 0.8f;
                 m_drillDamageAccumulator = std::max(0.0f, m_drillDamageAccumulator - decay_rate * dt);
                 m_target_block_damage = m_drillDamageAccumulator;
                 m_mine_timer = m_drillDamageAccumulator;
@@ -1119,9 +1199,9 @@ void PlayerController::MineBlock(float dt, World& world) {
             }
         }
     } else {
-        // Player released LMB: decay target block damage back to 0
+        // Player released LMB: decay target block damage back to 0 over 0.8s
         if (m_drillDamageAccumulator > 0.0f) {
-            float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) * 2.0f;
+            float decay_rate = (m_block_hardness > 0.0f ? m_block_hardness : 1.0f) / 0.8f;
             m_drillDamageAccumulator = std::max(0.0f, m_drillDamageAccumulator - decay_rate * dt);
             m_target_block_damage = m_drillDamageAccumulator;
             m_mine_timer = m_drillDamageAccumulator;
@@ -1288,21 +1368,21 @@ bool PlayerController::try_fire_weapon(glm::vec3& out_origin, glm::vec3& out_dir
 
 void PlayerController::cycle_tool_forward() {
     if (m_active_tool == ToolSlot::MiningDrill) {
-        m_active_tool = ToolSlot::CombatWeapon;
+        set_active_tool(ToolSlot::CombatWeapon);
     } else if (m_active_tool == ToolSlot::CombatWeapon) {
-        m_active_tool = ToolSlot::DemolitionCharge;
+        set_active_tool(ToolSlot::DemolitionCharge);
     } else {
-        m_active_tool = ToolSlot::MiningDrill;
+        set_active_tool(ToolSlot::MiningDrill);
     }
 }
 
 void PlayerController::cycle_tool_backward() {
     if (m_active_tool == ToolSlot::MiningDrill) {
-        m_active_tool = ToolSlot::DemolitionCharge;
+        set_active_tool(ToolSlot::DemolitionCharge);
     } else if (m_active_tool == ToolSlot::DemolitionCharge) {
-        m_active_tool = ToolSlot::CombatWeapon;
+        set_active_tool(ToolSlot::CombatWeapon);
     } else {
-        m_active_tool = ToolSlot::MiningDrill;
+        set_active_tool(ToolSlot::MiningDrill);
     }
 }
 

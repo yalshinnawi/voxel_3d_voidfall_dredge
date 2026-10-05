@@ -101,6 +101,17 @@ private:
         const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
     );
 
+    void add_forearm_and_gauntlet(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& elbow_origin,
+        const glm::vec3& wrist_pos,
+        const glm::vec3& palm_pos,
+        const glm::vec4& sleeve_col,
+        const glm::vec4& accent_col,
+        const glm::vec4& glove_col,
+        bool is_right_arm
+    );
+
     Shader m_shader;
 
     unsigned int m_chassis_vao{0};

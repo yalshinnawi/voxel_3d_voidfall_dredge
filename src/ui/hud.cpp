@@ -614,11 +614,14 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
         // Ammo counter pill below crosshair
         std::string ammo_str;
         glm::vec4 ammo_col = theme_col;
-        if (player.is_reloading()) {
-            ammo_str = (arch == WeaponArchetype::MagmaScattergun) ? "RELOADING DRUM..." :
-                       (arch == WeaponArchetype::NeedlerRailgun)  ? "CHAMBERING NEEDLE..." : "RECHARGING CAPACITOR...";
+        bool is_reloading = (m_show_reload || player.is_reloading()) && (player.weapon_ammo() < player.weapon_max_ammo());
+        if (is_reloading) {
+            float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
+            int sec = static_cast<int>(std::ceil(rem_time));
+            ammo_str = "RELOADING: " + std::to_string(sec) + "s";
             ammo_col = Typography::COLOR_AMBER;
         } else {
+            ClearReloadStatus();
             ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
             if (player.weapon_ammo() <= 2) {
                 ammo_col = Typography::COLOR_CRIMSON;
@@ -628,7 +631,10 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
         draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f));
         draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
     } else {
-        float progress = player.mine_progress();
+        // Clear reload status immediately upon switching to Mining Drill (Slot 1)
+        ClearReloadStatus();
+
+        float progress = glm::clamp(player.mine_progress(), 0.0f, 1.0f);
         // Dynamic crosshair tightens as drilling progresses
         float gap = (8.0f - progress * 5.0f) * ui_scale;
         float len = 10.0f * ui_scale;
@@ -645,6 +651,34 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
 
         // Center point
         draw_rect(cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, ch_col);
+
+        // Dynamic radial progress ring around HUD crosshair (filling 0° to 360° for CrackRatio)
+        float ring_rad = 18.0f * ui_scale;
+        float track_alpha = (progress > 0.01f) ? 0.35f : 0.12f;
+        const int ring_segs = 36;
+        for (int i = 0; i < ring_segs; ++i) {
+            float a1 = glm::radians(i * (360.0f / ring_segs));
+            float a2 = glm::radians((i + 1) * (360.0f / ring_segs));
+            draw_line_segment(cx + std::cos(a1) * ring_rad, cy + std::sin(a1) * ring_rad,
+                              cx + std::cos(a2) * ring_rad, cy + std::sin(a2) * ring_rad,
+                              1.2f * ui_scale, glm::vec4(0.12f, 0.22f, 0.32f, track_alpha));
+        }
+
+        if (progress > 0.01f) {
+            int active_segs = std::max(1, static_cast<int>(std::ceil(progress * ring_segs)));
+            glm::vec4 arc_col = (progress < 0.5f) ?
+                glm::mix(Typography::COLOR_CYAN, Typography::COLOR_AMBER, progress * 2.0f) :
+                glm::mix(Typography::COLOR_AMBER, glm::vec4(1.0f, 0.95f, 0.85f, 1.0f), (progress - 0.5f) * 2.0f);
+            for (int i = 0; i < active_segs; ++i) {
+                float f1 = static_cast<float>(i) / static_cast<float>(ring_segs);
+                float f2 = std::min(progress, static_cast<float>(i + 1) / static_cast<float>(ring_segs));
+                float a1 = glm::radians(-90.0f + f1 * 360.0f);
+                float a2 = glm::radians(-90.0f + f2 * 360.0f);
+                draw_line_segment(cx + std::cos(a1) * ring_rad, cy + std::sin(a1) * ring_rad,
+                                  cx + std::cos(a2) * ring_rad, cy + std::sin(a2) * ring_rad,
+                                  2.5f * ui_scale, arc_col);
+            }
+        }
     }
 
     // ── Hit Marker Rendering (Normal vs Sneak Attack Critical Hit) ──

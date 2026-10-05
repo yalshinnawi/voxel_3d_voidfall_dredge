@@ -81,6 +81,7 @@ public:
     void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);
     void render_grapple_cable(const glm::vec3& start, const glm::vec3& end);
     void render_extraction_beacon(const glm::vec3& beacon_pos, float siren_pulse, float time, bool is_pod_landed);
+    void render_extraction_pod(const glm::vec3& beacon_pos, float drill_progress, float ramp_extension, float time, bool is_anchored);
     void trigger_dust_kickup(float duration = 3.0f);
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);

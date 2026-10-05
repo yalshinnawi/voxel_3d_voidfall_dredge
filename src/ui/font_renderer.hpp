@@ -37,7 +37,86 @@ public:
         return s_metrics;
     }
 
-    static float get_text_width(const std::string& text, float scale) {
+    static std::string sanitize_ascii(const std::string& text) {
+        std::string out;
+        out.reserve(text.size() + 16);
+        for (size_t i = 0; i < text.size(); ) {
+            unsigned char c = static_cast<unsigned char>(text[i]);
+            // Check for 3-byte UTF-8 sequences starting with 0xE2
+            if (c == 0xE2 && i + 2 < text.size()) {
+                unsigned char c1 = static_cast<unsigned char>(text[i + 1]);
+                unsigned char c2 = static_cast<unsigned char>(text[i + 2]);
+                if (c1 == 0x80) {
+                    if (c2 == 0x94) { // Em-dash: '—'
+                        out += " // ";
+                        i += 3;
+                        continue;
+                    } else if (c2 == 0x93) { // En-dash: '–'
+                        out += " - ";
+                        i += 3;
+                        continue;
+                    } else if (c2 == 0xA2) { // Bullet: '•'
+                        out += " * ";
+                        i += 3;
+                        continue;
+                    } else if (c2 == 0xA6) { // Ellipsis: '…'
+                        out += "...";
+                        i += 3;
+                        continue;
+                    } else if (c2 == 0x98 || c2 == 0x99) { // Single curly quotes
+                        out += '\'';
+                        i += 3;
+                        continue;
+                    } else if (c2 == 0x9C || c2 == 0x9D) { // Double curly quotes
+                        out += '"';
+                        i += 3;
+                        continue;
+                    }
+                } else if (c1 == 0x86 && c2 == 0x92) { // Right arrow: '→'
+                    out += " -> ";
+                    i += 3;
+                    continue;
+                } else if (c1 == 0x9A && c2 == 0xA0) { // Warning: '⚠'
+                    out += "[!]";
+                    i += 3;
+                    continue;
+                }
+            }
+            // Check for 2-byte UTF-8 degree sign 0xC2 0xB0 '°'
+            if (c == 0xC2 && i + 1 < text.size()) {
+                unsigned char c1 = static_cast<unsigned char>(text[i + 1]);
+                if (c1 == 0xB0) {
+                    out += " deg";
+                    i += 2;
+                    continue;
+                }
+            }
+            // Standard ASCII
+            if (c < 128) {
+                out += static_cast<char>(c);
+                ++i;
+            } else if ((c & 0xE0) == 0xC0) {
+                // 2-byte UTF-8 sequence fallback
+                i += std::min<size_t>(2, text.size() - i);
+                out += ' ';
+            } else if ((c & 0xF0) == 0xE0) {
+                // 3-byte UTF-8 sequence fallback
+                i += std::min<size_t>(3, text.size() - i);
+                out += " // ";
+            } else if ((c & 0xF8) == 0xF0) {
+                // 4-byte UTF-8 sequence fallback
+                i += std::min<size_t>(4, text.size() - i);
+                out += ' ';
+            } else {
+                // Stray byte
+                ++i;
+            }
+        }
+        return out;
+    }
+
+    static float get_text_width(const std::string& raw_text, float scale) {
+        std::string text = sanitize_ascii(raw_text);
         const auto& metrics = get_metrics();
         float width = 0.0f;
         for (char c : text) {
@@ -49,10 +128,11 @@ public:
     }
 
     static void build_text_vertices(
-        const std::string& text,
+        const std::string& raw_text,
         float start_x, float start_y, float scale,
         std::vector<float>& out_vertices
     ) {
+        std::string text = sanitize_ascii(raw_text);
         const auto& metrics = get_metrics();
         float cur_x = start_x;
         float cur_y = start_y;
@@ -113,7 +193,8 @@ public:
     }
 
     // Wraps text by pixel width (proportional font accurate)
-    static std::vector<std::string> wrap_text(const std::string& text, float max_width, float draw_scale) {
+    static std::vector<std::string> wrap_text(const std::string& raw_text, float max_width, float draw_scale) {
+        std::string text = sanitize_ascii(raw_text);
         std::vector<std::string> lines;
         if (text.empty() || max_width <= 0.0f) return lines;
 

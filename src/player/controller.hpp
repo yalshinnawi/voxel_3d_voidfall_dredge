@@ -65,7 +65,10 @@ public:
 
     float eye_height() const { return m_eyeHeight; }
     float GetCurrentEyeHeight() const { return m_eyeHeight; }
-    glm::vec3 eye_position() const { return m_position + glm::vec3(0.0f, m_eyeHeight - half_extents().y, 0.0f); }
+    glm::vec3 eye_position() const {
+        float vault_boost = (m_vault_timer > 0.0f) ? (0.12f * std::sin((m_vault_timer / 0.35f) * 3.14159f)) : 0.0f;
+        return m_position + glm::vec3(0.0f, m_eyeHeight - half_extents().y + vault_boost, 0.0f);
+    }
     glm::vec3 half_extents() const { return m_is_crouching ? glm::vec3(0.3f, 0.55f, 0.3f) : glm::vec3(0.3f, 0.9f, 0.3f); }
     glm::vec3 GetHalfExtents() const { return half_extents(); }
 
@@ -110,7 +113,12 @@ public:
     ExoStatus& exo_mut() { return m_exo; }
 
     ToolSlot active_tool() const { return m_active_tool; }
-    void set_active_tool(ToolSlot tool) { m_active_tool = tool; }
+    void set_active_tool(ToolSlot tool) {
+        m_active_tool = tool;
+        if (m_active_tool != ToolSlot::CombatWeapon) {
+            m_reload_timer = 0.0f;
+        }
+    }
     void cycle_tool_forward();
     void cycle_tool_backward();
 
@@ -138,8 +146,11 @@ public:
     const WeaponStats& weapon_stats() const { return m_weapon_stats; }
     const std::string& weapon_name() const { return m_weapon_stats.name; }
     const std::string& weapon_short_name() const { return m_weapon_stats.short_name; }
-    bool is_reloading() const { return m_reload_timer > 0.0f; }
-    float reload_progress() const { return (m_weapon_stats.reload_time > 0.0f) ? (1.0f - m_reload_timer / m_weapon_stats.reload_time) : 1.0f; }
+    bool is_reloading() const { return m_reload_timer > 0.0f && m_weapon_ammo < m_weapon_stats.max_ammo && m_active_tool == ToolSlot::CombatWeapon; }
+    float reload_timer() const { return std::max(0.0f, m_reload_timer); }
+    float reload_progress() const { return (m_weapon_stats.reload_time > 0.0f) ? (1.0f - std::max(0.0f, m_reload_timer) / m_weapon_stats.reload_time) : 1.0f; }
+    bool is_thruster_air_braking() const { return m_thruster_air_braking; }
+    bool is_vaulting() const { return m_vault_timer > 0.0f; }
     void reload_weapon();
     bool try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts, float dt);
     bool try_fire_weapon(glm::vec3& out_origin, glm::vec3& out_dir, float dt);
@@ -343,6 +354,8 @@ private:
     float m_fire_cooldown{0.0f};
     float m_reload_timer{0.0f};
     float m_recharge_delay{0.0f};
+    bool m_thruster_air_braking{false};
+    float m_vault_timer{0.0f};
 
     // Sonar pulse cooldown (seconds)
     float m_sonar_cooldown{0.0f};

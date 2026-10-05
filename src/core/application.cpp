@@ -263,13 +263,7 @@ void Application::init_systems() {
     });
 
     m_extraction = std::make_unique<ExtractionSystem>();
-    m_extraction->set_on_complete([this]() {
-        m_expedition_success = true;
-        m_inventory.finalize_run(m_selected_level, true);
-        TransitionState(GameState::Debrief);
-        m_window->set_cursor_locked(false);
-        std::cout << "[Extraction] Delver extraction complete! Returning to debrief." << std::endl;
-    });
+    setup_extraction_callbacks();
 
     // 6. UI systems
     m_hud = std::make_unique<HUD>(m_window->width(), m_window->height());
@@ -492,13 +486,7 @@ void Application::start_expedition(int level) {
 
     m_extraction = std::make_unique<ExtractionSystem>();
     m_holdout_stage = 0;
-    m_extraction->set_on_complete([this]() {
-        m_expedition_success = true;
-        if (m_audio) m_audio->play_sound_2d(SoundCue::EvacTouchdown, 1.0f);
-        m_inventory.finalize_run(m_selected_level, true); // Safe evac!
-        TransitionState(GameState::Debrief);
-        m_window->set_cursor_locked(false);
-    });
+    setup_extraction_callbacks();
 
     if (m_audio) {
         m_audio->stop_all();
@@ -532,6 +520,76 @@ void Application::start_expedition(int level) {
 
     m_window->set_cursor_locked(true);
     TransitionState(GameState::Gameplay);
+}
+
+void Application::setup_extraction_callbacks() {
+    if (!m_extraction) return;
+
+    m_extraction->set_on_complete([this]() {
+        m_expedition_success = true;
+        if (m_audio) m_audio->play_sound_2d(SoundCue::EvacTouchdown, 1.0f);
+        m_inventory.finalize_run(m_selected_level, true); // Safe evac!
+        TransitionState(GameState::Debrief);
+        m_window->set_cursor_locked(false);
+        std::cout << "[Extraction] Delver extraction complete! Returning to debrief." << std::endl;
+    });
+
+    m_extraction->set_on_ceiling_warning([this](const glm::vec3& beacon_pos) {
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::MonsterDigging, beacon_pos + glm::vec3(0.0f, 16.0f, 0.0f), 1.0f);
+        }
+        if (m_hud) {
+            m_hud->show_warning("! EXTRACTION POD INBOUND: CEILING BREACH DETECTED !", 3.5f);
+        }
+        if (m_renderer) {
+            // Spawn falling dust and rock debris from cavern ceiling above beacon
+            for (int i = 0; i < 8; ++i) {
+                float ox = static_cast<float>(rand() % 40 - 20) * 0.1f;
+                float oz = static_cast<float>(rand() % 40 - 20) * 0.1f;
+                glm::vec3 dust_pos = beacon_pos + glm::vec3(ox, 14.0f + static_cast<float>(rand() % 20) * 0.1f, oz);
+                m_renderer->spawn_break_particles(dust_pos, glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
+            }
+            m_renderer->trigger_dust_kickup(3.0f);
+        }
+        if (m_player) {
+            m_player->add_trauma(0.25f);
+        }
+    });
+
+    m_extraction->set_on_pod_arrival([this](const glm::vec3& beacon_pos) {
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::EvacTouchdown, beacon_pos, 1.0f);
+        }
+        if (m_hud) {
+            m_hud->show_warning("EXTRACTION POD TOUCHDOWN: BOARD THE RAMP TO EXTRACT!", 4.0f);
+        }
+        if (m_renderer) {
+            // Heavy impact dust ring around pod touchdown
+            for (int angle = 0; angle < 360; angle += 30) {
+                float rad = glm::radians(static_cast<float>(angle));
+                glm::vec3 ring_pos = beacon_pos + glm::vec3(std::cos(rad) * 2.8f, 0.2f, std::sin(rad) * 2.8f);
+                m_renderer->spawn_break_particles(ring_pos, glm::ivec3(0, 1, 0), MAT_FRACTURED_GRANITE);
+            }
+            m_renderer->trigger_dust_kickup(4.0f);
+        }
+        if (m_player) {
+            m_player->add_trauma(0.4f);
+        }
+    });
+
+    m_extraction->set_on_steam_vent([this](const glm::vec3& beacon_pos) {
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::GeothermalVent, beacon_pos + glm::vec3(0.0f, 2.0f, 0.0f), 0.85f);
+        }
+        if (m_renderer) {
+            // Emit pressurized steam/gas clouds from pod vents
+            for (int i = 0; i < 4; ++i) {
+                float angle = static_cast<float>(i) * 1.5708f;
+                glm::vec3 vent_pos = beacon_pos + glm::vec3(std::cos(angle) * 1.4f, 3.2f, std::sin(angle) * 1.4f);
+                m_renderer->spawn_water_mist(vent_pos, 4);
+            }
+        }
+    });
 }
 
 void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags) {
@@ -1352,6 +1410,20 @@ void Application::fixed_tick(float dt) {
     }
 
     m_extraction->update(dt, m_player->position());
+
+    // Spawn falling dust and spall from cavern ceiling directly above beacon during ceiling drill countdown
+    if (m_extraction && m_extraction->is_ceiling_drill_active() && m_renderer) {
+        static float s_dust_accum = 0.0f;
+        s_dust_accum += dt;
+        if (s_dust_accum >= 0.12f) {
+            s_dust_accum = 0.0f;
+            float rx = static_cast<float>(rand() % 40 - 20) * 0.08f;
+            float rz = static_cast<float>(rand() % 40 - 20) * 0.08f;
+            glm::vec3 dust_pos = m_extraction->beacon_position() + glm::vec3(rx, 15.0f, rz);
+            m_renderer->spawn_break_particles(dust_pos, glm::ivec3(0, -1, 0), MAT_FRACTURED_GRANITE);
+        }
+    }
+
     m_surveying.update(dt);
     m_hud->update(dt);
     m_renderer->update_particles(dt);
@@ -2051,21 +2123,21 @@ void Application::fixed_tick(float dt) {
                 } else if (room_shape == static_cast<int>(RoomShapeType::FaultLineCrevasse)) {
                     m_hud->show_warning("HAZARD ADVISORY: ENTERING TECTONIC FAULT CREVASSE (GAS & LAVA)", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::SubterraneanAquiferOasis)) {
-                    m_hud->show_warning("BIOME ADVISORY: SUBTERRANEAN AQUIFER OASIS — CRYSTAL BASINS & FLORA", 3.0f);
+                    m_hud->show_warning("BIOME ADVISORY: SUBTERRANEAN AQUIFER OASIS // CRYSTAL BASINS & FLORA", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::ColossalAbyssalChasm)) {
-                    m_hud->show_warning("CRITICAL HAZARD: COLOSSAL ABYSSAL CHASM — LETHAL DROP & SPIKE PIT", 3.2f);
+                    m_hud->show_warning("CRITICAL HAZARD: COLOSSAL ABYSSAL CHASM // LETHAL DROP & SPIKE PIT", 3.2f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::MoltenMagmaFoundry)) {
-                    m_hud->show_warning("HAZARD ADVISORY: MOLTEN MAGMA FOUNDRY — BOILING THERMITE FLUMES", 3.0f);
+                    m_hud->show_warning("HAZARD ADVISORY: MOLTEN MAGMA FOUNDRY // BOILING THERMITE FLUMES", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::ToxicMiasmaSwamp)) {
-                    m_hud->show_warning("BIOHAZARD ADVISORY: TOXIC MIASMA SWAMP — VISIBLE NEUROTOXIN POCKETS", 3.2f);
+                    m_hud->show_warning("BIOHAZARD ADVISORY: TOXIC MIASMA SWAMP // VISIBLE NEUROTOXIN POCKETS", 3.2f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::PrismaticCrystalCathedral)) {
-                    m_hud->show_warning("BIOME ADVISORY: PRISMATIC CRYSTAL CATHEDRAL — COLOSSAL PILLARS", 3.0f);
+                    m_hud->show_warning("BIOME ADVISORY: PRISMATIC CRYSTAL CATHEDRAL // COLOSSAL PILLARS", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::AncientTitanNecropolis)) {
-                    m_hud->show_warning("ANOMALY ADVISORY: ANCIENT TITAN NECROPOLIS — SKELETAL EXCAVATION", 3.0f);
+                    m_hud->show_warning("ANOMALY ADVISORY: ANCIENT TITAN NECROPOLIS // SKELETAL EXCAVATION", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::BioluminescentGlowwormGrotto)) {
-                    m_hud->show_warning("BIOME ADVISORY: BIOLUMINESCENT GLOWWORM GROTTO — REFLECTING CANOPY", 3.0f);
+                    m_hud->show_warning("BIOME ADVISORY: BIOLUMINESCENT GLOWWORM GROTTO // REFLECTING CANOPY", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::PrecursorCoolantReservoir)) {
-                    m_hud->show_warning("HAZARD ADVISORY: PRECURSOR COOLANT RESERVOIR — PRESSURE PIPELINES", 3.0f);
+                    m_hud->show_warning("HAZARD ADVISORY: PRECURSOR COOLANT RESERVOIR // PRESSURE PIPELINES", 3.0f);
                 }
             }
         }
@@ -2204,7 +2276,7 @@ void Application::fixed_tick(float dt) {
             s_gas_near_warn += dt;
             if (s_gas_near_warn >= 3.0f) {
                 s_gas_near_warn = 0.0f;
-                m_hud->show_warning("CAUTION: TOXIC ATMOSPHERE AHEAD — BIO-GAS ESCAPING", 2.2f);
+                m_hud->show_warning("CAUTION: TOXIC ATMOSPHERE AHEAD // BIO-GAS ESCAPING", 2.2f);
             }
         }
 
@@ -2214,7 +2286,7 @@ void Application::fixed_tick(float dt) {
             s_lava_near_warn += dt;
             if (s_lava_near_warn >= 3.0f) {
                 s_lava_near_warn = 0.0f;
-                m_hud->show_warning("WARNING: THERMAL HAZARD AHEAD — MOLTEN MAGMA", 2.2f);
+                m_hud->show_warning("WARNING: THERMAL HAZARD AHEAD // MOLTEN MAGMA", 2.2f);
             }
         }
 
@@ -2224,7 +2296,7 @@ void Application::fixed_tick(float dt) {
             s_spike_near_warn += dt;
             if (s_spike_near_warn >= 3.0f) {
                 s_spike_near_warn = 0.0f;
-                m_hud->show_warning("CAUTION: PUNCTURE HAZARD — OBSIDIAN SPIKES AHEAD", 2.2f);
+                m_hud->show_warning("CAUTION: PUNCTURE HAZARD // OBSIDIAN SPIKES AHEAD", 2.2f);
             }
         }
 
@@ -2338,7 +2410,7 @@ void Application::fixed_tick(float dt) {
             s_gas_warn_timer += dt;
             if (s_gas_warn_timer >= 2.5f) {
                 s_gas_warn_timer = 0.0f;
-                m_hud->show_warning("⚠ TOXIC GAS INHALATION — DELVER ASPHYXIATING ⚠", 2.0f);
+                m_hud->show_warning("! TOXIC GAS INHALATION // DELVER ASPHYXIATING !", 2.0f);
             }
         }
     }
@@ -2428,7 +2500,7 @@ void Application::fixed_tick(float dt) {
             else if (m_holdout_stage == 2 && progress >= 0.88f) {
                 m_holdout_stage = 3;
                 m_hazard->force_tremor(1.5f);
-                m_hud->show_warning("!!! FINAL TECTONIC SURGE — EVAC POD INBOUND !!!", 3.0f);
+                m_hud->show_warning("!!! FINAL TECTONIC SURGE // EVAC POD INBOUND !!!", 3.0f);
             }
         }
     }
@@ -2721,6 +2793,13 @@ void Application::render(float dt) {
     if (m_extraction->phase() == ExtractionPhase::BeaconDeployed || m_extraction->phase() == ExtractionPhase::PodLanded) {
         bool is_landed = (m_extraction->phase() == ExtractionPhase::PodLanded);
         m_renderer->render_extraction_beacon(m_extraction->beacon_position(), m_extraction->siren_pulse(), static_cast<float>(glfwGetTime()), is_landed);
+        if (is_landed) {
+            m_renderer->render_extraction_pod(m_extraction->beacon_position(),
+                                              m_extraction->pod_drill_progress(),
+                                              m_extraction->ramp_extension(),
+                                              static_cast<float>(glfwGetTime()),
+                                              m_extraction->is_pod_anchored());
+        }
     }
 
     // Render Grapple Cable (Module 4)

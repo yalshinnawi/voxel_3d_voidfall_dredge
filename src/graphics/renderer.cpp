@@ -710,7 +710,7 @@ void Renderer::spawn_water_mist(const glm::vec3& block_pos, int count) {
 }
 
 void Renderer::render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id) {
-    if (progress <= 0.0f || m_cable_vao == 0) return;
+    if (progress <= 0.05f || m_cable_vao == 0) return;
 
     progress = glm::clamp(progress, 0.0f, 1.0f);
     int stage = std::min(5, static_cast<int>(progress * 6.0f));
@@ -2286,6 +2286,207 @@ void Renderer::render_delver(const glm::vec3& pos, float yaw, CharacterClass cls
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vert_count));
         glBindVertexArray(0);
     }
+}
+
+void Renderer::render_extraction_pod(const glm::vec3& beacon_pos, float drill_progress, float ramp_extension, float time, bool is_anchored) {
+    if (m_stalker_vao == 0) return;
+
+    static std::vector<StalkerVertex> s_pod_verts;
+    s_pod_verts.clear();
+    if (s_pod_verts.capacity() < 8192) {
+        s_pod_verts.reserve(8192);
+    }
+
+    drill_progress = glm::clamp(drill_progress, 0.0f, 1.0f);
+    ramp_extension = glm::clamp(ramp_extension, 0.0f, 1.0f);
+
+    float descent_y = beacon_pos.y + (1.0f - drill_progress) * 16.0f;
+    glm::vec3 pod_base = glm::vec3(beacon_pos.x, descent_y, beacon_pos.z);
+    glm::mat4 base_model = glm::translate(glm::mat4(1.0f), pod_base);
+
+    glm::vec4 col_hull(0.20f, 0.22f, 0.26f, 1.0f);           // Heavy titanium composite armor
+    glm::vec4 col_inner_hull(0.12f, 0.14f, 0.16f, 1.0f);     // Dark interior cabin
+    glm::vec4 col_hazard_orange(0.95f, 0.55f, 0.08f, 1.0f);  // Industrial extraction orange
+    glm::vec4 col_hazard_yellow(0.96f, 0.82f, 0.12f, 1.0f);  // Warning chevron stripe
+    glm::vec4 col_hazard_dark(0.08f, 0.08f, 0.09f, 1.0f);
+    glm::vec4 col_steel(0.55f, 0.58f, 0.62f, 1.0f);
+    glm::vec4 col_drill_teeth(0.78f, 0.72f, 0.65f, 1.0f);    // Tungsten carbide teeth
+    glm::vec4 col_cabin_glow(0.20f, 0.95f, 1.0f, 1.0f);      // Cyan airlock cabin illumination
+    glm::vec4 col_amber_warning(1.0f, 0.68f, 0.10f, 1.0f);   // Pulsating amber warning strip
+
+    glm::vec4 mat_armor(0.45f, 0.40f, 0.0f, 0.90f);
+    glm::vec4 mat_metal(0.72f, 0.35f, 0.0f, 0.90f);
+    float pulse = 0.65f + 0.35f * std::sin(time * 8.0f);
+    glm::vec4 mat_amber_led(0.0f, 0.2f, 4.0f * pulse, 1.0f);
+    glm::vec4 mat_cabin_led(0.0f, 0.1f, 3.5f, 1.0f);
+
+    // 1. MAIN CYLINDRICAL EXTRACTION CAPSULE HULL (8 faceted armor bulkheads)
+    const int num_sides = 8;
+    float hull_radius = 1.45f;
+    float hull_bottom = 0.45f;
+    float hull_top = 4.20f;
+    float hull_mid_y = (hull_bottom + hull_top) * 0.5f;
+
+    for (int i = 0; i < num_sides; ++i) {
+        float a0 = glm::radians(i * (360.0f / num_sides));
+        float a1 = glm::radians((i + 1) * (360.0f / num_sides));
+        float mid_a = (a0 + a1) * 0.5f;
+
+        // Skip front panel (+Z) where airlock door is situated
+        if (i == 1 || i == 2) {
+            // Door frame header & threshold
+            glm::mat4 header_m = glm::translate(base_model, glm::vec3(std::cos(mid_a) * hull_radius * 0.95f, hull_top - 0.35f, std::sin(mid_a) * hull_radius * 0.95f));
+            header_m = glm::rotate(header_m, mid_a, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_pod_verts, header_m, glm::vec3(0.45f, 0.35f, 0.12f), col_hazard_orange, mat_armor);
+
+            glm::mat4 thresh_m = glm::translate(base_model, glm::vec3(std::cos(mid_a) * hull_radius * 0.95f, hull_bottom + 0.15f, std::sin(mid_a) * hull_radius * 0.95f));
+            thresh_m = glm::rotate(thresh_m, mid_a, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_pod_verts, thresh_m, glm::vec3(0.45f, 0.15f, 0.14f), col_hazard_orange, mat_armor);
+            continue;
+        }
+
+        glm::vec3 c_pos = glm::vec3(std::cos(mid_a) * hull_radius, hull_mid_y, std::sin(mid_a) * hull_radius);
+        glm::mat4 panel_m = glm::translate(base_model, c_pos);
+        panel_m = glm::rotate(panel_m, mid_a, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // Outer reinforced bulkhead panel
+        add_stalker_box(s_pod_verts, panel_m, glm::vec3(0.55f, (hull_top - hull_bottom) * 0.5f, 0.10f), col_hull, mat_armor);
+
+        // Orange reinforced rib across the middle
+        glm::mat4 rib_m = glm::translate(panel_m, glm::vec3(0.0f, 0.0f, 0.08f));
+        add_stalker_box(s_pod_verts, rib_m, glm::vec3(0.50f, 0.16f, 0.04f), col_hazard_orange, mat_metal);
+
+        // Warning chevrons near bottom
+        glm::mat4 chv_m = glm::translate(panel_m, glm::vec3(0.0f, -1.20f, 0.08f));
+        glm::vec4 chv_col = (i % 2 == 0) ? col_hazard_yellow : col_hazard_dark;
+        add_stalker_box(s_pod_verts, chv_m, glm::vec3(0.48f, 0.12f, 0.03f), chv_col, mat_armor);
+    }
+
+    // Interior warm cabin chamber (visible through open door)
+    glm::mat4 cabin_m = glm::translate(base_model, glm::vec3(0.0f, 2.0f, 0.0f));
+    add_stalker_box(s_pod_verts, cabin_m, glm::vec3(0.85f, 1.4f, 0.85f), col_inner_hull, mat_armor);
+    // Interior glowing status console
+    glm::mat4 console_m = glm::translate(cabin_m, glm::vec3(0.0f, 0.2f, -0.70f));
+    add_stalker_box(s_pod_verts, console_m, glm::vec3(0.60f, 0.45f, 0.08f), col_cabin_glow, mat_cabin_led);
+
+    // 2. TOP CONICAL AUGER DRILL BIT (Rotates down from ceiling)
+    float drill_rot = is_anchored ? 0.0f : (time * 18.0f);
+    glm::mat4 drill_base = glm::translate(base_model, glm::vec3(0.0f, hull_top, 0.0f));
+    drill_base = glm::rotate(drill_base, drill_rot, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    // Conical tiers
+    for (int t = 0; t < 4; ++t) {
+        float ty = t * 0.65f;
+        float trad = hull_radius * (1.0f - t * 0.22f);
+        glm::mat4 tier_m = glm::translate(drill_base, glm::vec3(0.0f, ty + 0.32f, 0.0f));
+        add_stalker_box(s_pod_verts, tier_m, glm::vec3(trad, 0.32f, trad), col_steel, mat_metal);
+
+        // Fluted diamond cutting teeth along periphery
+        for (int tooth = 0; tooth < 4; ++tooth) {
+            float ta = glm::radians(tooth * 90.0f + t * 25.0f);
+            glm::mat4 tooth_m = glm::translate(tier_m, glm::vec3(std::cos(ta) * trad * 1.02f, 0.0f, std::sin(ta) * trad * 1.02f));
+            tooth_m = glm::rotate(tooth_m, ta, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_pod_verts, tooth_m, glm::vec3(0.12f, 0.24f, 0.12f), col_drill_teeth, mat_metal);
+        }
+    }
+    // Drill apex borer spike
+    glm::mat4 spike_m = glm::translate(drill_base, glm::vec3(0.0f, 2.80f, 0.0f));
+    add_stalker_box(s_pod_verts, spike_m, glm::vec3(0.20f, 0.45f, 0.20f), col_drill_teeth, mat_metal);
+
+    // 3. FOUR HEAVY HYDRAULIC ANCHORING STRUTS & GROUND PADS
+    for (int leg = 0; leg < 4; ++leg) {
+        float leg_ang = glm::radians(leg * 90.0f + 45.0f);
+        float lx = std::cos(leg_ang);
+        float lz = std::sin(leg_ang);
+
+        // Upper angled shoulder boom
+        glm::vec3 boom_start = glm::vec3(lx * (hull_radius * 0.85f), 2.2f, lz * (hull_radius * 0.85f));
+        glm::vec3 boom_end = glm::vec3(lx * 2.10f, 1.4f, lz * 2.10f);
+        glm::mat4 boom_m = glm::translate(base_model, (boom_start + boom_end) * 0.5f);
+        boom_m = glm::rotate(boom_m, leg_ang, glm::vec3(0.0f, 1.0f, 0.0f));
+        add_stalker_box(s_pod_verts, boom_m, glm::vec3(0.16f, 0.18f, 0.55f), col_hazard_orange, mat_armor);
+
+        // Vertical hydraulic cylinder
+        glm::vec3 cyl_pos = glm::vec3(lx * 2.10f, 0.70f, lz * 2.10f);
+        glm::mat4 cyl_m = glm::translate(base_model, cyl_pos);
+        add_stalker_box(s_pod_verts, cyl_m, glm::vec3(0.12f, 0.65f, 0.12f), col_steel, mat_metal);
+
+        // Heavy footing pad anchored on bedrock
+        glm::vec3 foot_pos = glm::vec3(lx * 2.10f, 0.08f, lz * 2.10f);
+        glm::mat4 foot_m = glm::translate(base_model, foot_pos);
+        add_stalker_box(s_pod_verts, foot_m, glm::vec3(0.35f, 0.08f, 0.35f), col_hull, mat_armor);
+    }
+
+    // 4. SIDE AIRLOCK BOARDING RAMP (Pivots down toward +Z when anchored)
+    if (ramp_extension > 0.01f) {
+        float ramp_len = 2.4f * ramp_extension;
+        float ramp_pitch = glm::radians(18.0f); // Incline from threshold to floor
+
+        glm::vec3 hinge_pos = glm::vec3(0.0f, 0.45f, hull_radius * 0.95f);
+        glm::mat4 ramp_m = glm::translate(base_model, hinge_pos);
+        ramp_m = glm::rotate(ramp_m, ramp_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+        glm::mat4 ramp_deck = glm::translate(ramp_m, glm::vec3(0.0f, -0.04f, ramp_len * 0.5f));
+
+        // Walkway deck
+        add_stalker_box(s_pod_verts, ramp_deck, glm::vec3(0.55f, 0.04f, ramp_len * 0.5f), col_steel, mat_armor);
+
+        // Hazard chevron stripes on deck
+        for (int s = 0; s < 5; ++s) {
+            float sz = (s - 2) * (ramp_len * 0.18f);
+            glm::mat4 chv_bar = glm::translate(ramp_deck, glm::vec3(0.0f, 0.045f, sz));
+            glm::vec4 chv_c = (s % 2 == 0) ? col_hazard_yellow : col_hazard_dark;
+            add_stalker_box(s_pod_verts, chv_bar, glm::vec3(0.48f, 0.005f, 0.08f), chv_c, mat_armor);
+        }
+
+        // Left and Right Handrails with Pulsating Amber LED Warning Strips
+        glm::mat4 rail_l = glm::translate(ramp_deck, glm::vec3(-0.55f, 0.35f, 0.0f));
+        add_stalker_box(s_pod_verts, rail_l, glm::vec3(0.04f, 0.32f, ramp_len * 0.5f), col_hazard_orange, mat_metal);
+        glm::mat4 strip_l = glm::translate(rail_l, glm::vec3(0.045f, 0.28f, 0.0f));
+        add_stalker_box(s_pod_verts, strip_l, glm::vec3(0.015f, 0.03f, ramp_len * 0.48f), col_amber_warning, mat_amber_led);
+
+        glm::mat4 rail_r = glm::translate(ramp_deck, glm::vec3(0.55f, 0.35f, 0.0f));
+        add_stalker_box(s_pod_verts, rail_r, glm::vec3(0.04f, 0.32f, ramp_len * 0.5f), col_hazard_orange, mat_metal);
+        glm::mat4 strip_r = glm::translate(rail_r, glm::vec3(-0.045f, 0.28f, 0.0f));
+        add_stalker_box(s_pod_verts, strip_r, glm::vec3(0.015f, 0.03f, ramp_len * 0.48f), col_amber_warning, mat_amber_led);
+    }
+
+    // 5. EMERGENCY STEAM / PRESSURE VENT PORTS
+    for (int vent = 0; vent < 2; ++vent) {
+        float vx = (vent == 0) ? -hull_radius * 0.95f : hull_radius * 0.95f;
+        glm::mat4 vent_m = glm::translate(base_model, glm::vec3(vx, hull_top - 0.40f, 0.0f));
+        add_stalker_box(s_pod_verts, vent_m, glm::vec3(0.12f, 0.18f, 0.35f), col_steel, mat_metal);
+        glm::mat4 vent_grate = glm::translate(vent_m, glm::vec3((vent == 0 ? -0.13f : 0.13f), 0.0f, 0.0f));
+        add_stalker_box(s_pod_verts, vent_grate, glm::vec3(0.02f, 0.14f, 0.28f), col_amber_warning, mat_amber_led);
+    }
+
+    if (s_pod_verts.empty()) return;
+
+    // Render physical 3D extraction pod into HDR buffer with full depth testing
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
+    m_stalker_shader.use();
+    m_stalker_shader.set_mat4("uProjection", m_proj);
+    m_stalker_shader.set_mat4("uView", m_view);
+    m_stalker_shader.set_mat4("uModel", glm::mat4(1.0f));
+    m_stalker_shader.set_vec3("uCamPos", m_cam_pos);
+    m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
+    m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
+    m_stalker_shader.set_vec3("uHeadlampColor", m_headlamp.color);
+    m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
+    m_stalker_shader.set_float("uStateGlow", time);
+    m_stalker_shader.set_int("uState", 0);
+    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
+    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
+
+    size_t vert_count = std::min(s_pod_verts.size(), static_cast<size_t>(16384));
+    glBindVertexArray(m_stalker_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_stalker_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vert_count * sizeof(StalkerVertex), s_pod_verts.data());
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vert_count));
+    glBindVertexArray(0);
 }
 
 } // namespace Voidfall
