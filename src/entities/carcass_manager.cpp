@@ -58,10 +58,17 @@ uint32_t CarcassManager::spawn_carcass(
 
 void CarcassManager::update(float dt, World& world) {
     for (auto& c : m_carcasses) {
+        c.lifetime += dt;
+        // Persist on cavern floor for 45s before decaying into ash
+        if (c.lifetime >= c.max_lifetime && !c.is_dissolving) {
+            c.is_dissolving = true;
+            c.dissolve_timer = 0.0f;
+        }
+
         // Alpha burn-away dissolver shader processing
         if (c.is_dissolving) {
             c.dissolve_timer += dt;
-            c.alpha = std::max(0.0f, 1.0f - (c.dissolve_timer / 1.4f));
+            c.alpha = std::max(0.0f, 1.0f - (c.dissolve_timer / 2.0f));
             continue;
         }
 

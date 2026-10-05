@@ -47,6 +47,8 @@ public:
 
     bool is_reloading() const { return m_is_reloading; }
     float reload_progress() const { return m_reload_progress; }
+    const glm::vec3& recoil_offset() const { return m_recoil_offset; }
+    float recoil_pitch() const { return m_recoil_pitch; }
 
 private:
     void init_geometry();
@@ -157,6 +159,8 @@ private:
     float m_spark_timer{0.0f};
     bool m_is_reloading{false};
     float m_reload_progress{0.0f};
+    glm::vec3 m_recoil_offset{0.0f};
+    float m_recoil_pitch{0.0f};
 
     std::function<void(const glm::vec3&, const glm::vec3&)> m_on_spark;
 };

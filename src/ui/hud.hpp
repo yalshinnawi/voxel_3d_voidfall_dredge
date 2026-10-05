@@ -146,7 +146,8 @@ public:
         const NoiseMeter* noise_meter = nullptr,
         int enemy_count = 0,
         const std::vector<VoidStalker>* stalkers = nullptr,
-        const std::vector<SeismicBurrower>* burrowers = nullptr
+        const std::vector<SeismicBurrower>* burrowers = nullptr,
+        const class MissionSystem* mission = nullptr
     );
 
 private:

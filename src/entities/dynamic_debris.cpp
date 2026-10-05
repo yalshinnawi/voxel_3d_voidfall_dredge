@@ -159,8 +159,8 @@ DynamicDebris::CollisionResult DynamicDebris::update(
 
     m_life_time += dt;
 
-    // Apply subterranean acceleration due to gravity
-    m_velocity.y -= 19.6f * dt;
+    // Apply subterranean acceleration due to gravity (g = 18.0 m/s^2)
+    m_velocity.y -= 18.0f * dt;
 
     glm::vec3 next_pos = m_position + m_velocity * dt;
 
@@ -187,9 +187,9 @@ DynamicDebris::CollisionResult DynamicDebris::update(
             res.shatter_mat = m_material_id;
             return res;
         } else {
-            // Player takes crushing damage: 18 Suit Integrity damage
+            // Proportional kinetic crushing damage: 15 HP - 45 HP based on fall velocity
             res.hit_player = true;
-            res.damage = 18.0f;
+            res.damage = std::clamp(15.0f + std::abs(m_velocity.y) * 1.5f, 15.0f, 45.0f);
             m_velocity.x += ((static_cast<float>(rand() % 100) / 50.0f) - 1.0f) * 1.5f;
             m_velocity.z += ((static_cast<float>(rand() % 100) / 50.0f) - 1.0f) * 1.5f;
         }

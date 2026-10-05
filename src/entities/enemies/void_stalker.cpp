@@ -22,6 +22,27 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3& pos, float difficulty_mu
     s.hp = 40.0f * difficulty_mul;
     s.max_hp = s.hp;
     s.damage = 18.0f * difficulty_mul;
+    s.scale = 1.3f;
+    s.move_speed = 4.8f;
+
+    if (role == StalkerRole::VoidDrifter) {
+        // Spore / Void Drifter (Aerial Harasser)
+        s.hp = 25.0f * difficulty_mul;
+        s.max_hp = s.hp;
+        s.damage = 22.0f * difficulty_mul;
+        s.scale = 1.15f;
+        s.move_speed = 5.6f;
+        s.boid_altitude_target = (pos.y >= 10.0f) ? pos.y : std::clamp(pos.y + 7.0f, 8.0f, 22.0f);
+        s.position.y = s.boid_altitude_target;
+    } else if (role == StalkerRole::ChitinGoliath) {
+        // Chitin Goliath (Heavy Carapace Breacher)
+        s.hp = 180.0f * difficulty_mul;
+        s.max_hp = s.hp;
+        s.damage = 36.0f * difficulty_mul;
+        s.scale = 2.1f;
+        s.move_speed = 2.4f;
+    }
+
     s.state = StalkerState::Idle;
     s.state_timer = 0.0f;
     s.glow_phase = static_cast<float>(m_next_id) * 1.7f; // Offset pulsing
@@ -269,11 +290,65 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
         s.state_timer += dt;
         s.glow_phase += dt * 2.0f;
+        s.hit_flash_timer = std::max(0.0f, s.hit_flash_timer - dt);
         s.attack_cooldown = std::max(0.0f, s.attack_cooldown - dt);
         s.projectile_cooldown = std::max(0.0f, s.projectile_cooldown - dt);
         s.slash_fx_timer = std::max(0.0f, s.slash_fx_timer - dt);
 
         float dist_to_player = glm::distance(s.position, player_pos);
+
+        // Spore / Void Drifter (Aerial Harasser): 3D Boid ceiling flight & noise dive-bombs
+        if (s.role == StalkerRole::VoidDrifter) {
+            bool is_noisy = (noise_level_pct >= 60.0f) || (noise_level_pct >= 0.60f && noise_level_pct <= 1.0f);
+            bool should_dive = is_noisy || s.is_pursuing_attacker || s.is_dive_bombing;
+            if (should_dive) {
+                s.is_dive_bombing = true;
+                s.state = StalkerState::Lunging;
+                glm::vec3 dive_target = player_pos + glm::vec3(0.0f, 0.9f, 0.0f);
+                glm::vec3 dive_dir = (glm::length(dive_target - s.position) > 0.01f)
+                    ? glm::normalize(dive_target - s.position)
+                    : glm::vec3(0.0f, -1.0f, 0.0f);
+                s.velocity = glm::mix(s.velocity, dive_dir * 14.5f, 1.0f - std::exp(-8.0f * dt));
+                s.position += s.velocity * dt;
+                s.yaw = std::atan2(dive_dir.z, dive_dir.x);
+
+                if (dist_to_player < 2.2f && s.attack_cooldown <= 0.0f) {
+                    s.attack_cooldown = 1.8f;
+                    result.total_damage += s.damage;
+                    result.any_melee_hit = true;
+                    s.just_hit_player = true;
+                    s.is_dive_bombing = false; // Swoop back up to ceiling after strike
+                    s.velocity.y = 8.0f;
+                }
+            } else {
+                // Hovering & 3D Boid steering in cavern ceiling (6m - 15m)
+                s.state = StalkerState::Idle;
+                float hover_y = s.boid_altitude_target + std::sin(s.glow_phase * 1.5f) * 0.8f;
+                float dy = (hover_y - s.position.y);
+                s.velocity.y = glm::clamp(dy * 2.5f, -3.5f, 3.5f);
+
+                // Gentle horizontal wandering / boid separation
+                glm::vec3 horiz_dir(std::cos(s.glow_phase * 0.5f), 0.0f, std::sin(s.glow_phase * 0.5f));
+                s.velocity.x = horiz_dir.x * 2.5f;
+                s.velocity.z = horiz_dir.z * 2.5f;
+
+                // Repulsion from rock boundaries
+                int ix = static_cast<int>(std::floor(s.position.x));
+                int iy = static_cast<int>(std::floor(s.position.y));
+                int iz = static_cast<int>(std::floor(s.position.z));
+                for (int ox : {-1, 1}) {
+                    if (world.get_voxel(ix + ox, iy, iz).is_solid()) s.velocity.x -= ox * 4.0f;
+                }
+                for (int oz : {-1, 1}) {
+                    if (world.get_voxel(ix, iy, iz + oz).is_solid()) s.velocity.z -= oz * 4.0f;
+                }
+
+                s.position += s.velocity * dt;
+                s.yaw = std::atan2(s.velocity.z, s.velocity.x);
+            }
+            continue; // Bypasses surface crawling logic
+        }
+
         glm::vec3 to_player = player_pos - s.position;
         float horiz_dist = std::hypot(to_player.x, to_player.z);
         if (horiz_dist > 0.05f) {
@@ -1149,6 +1224,28 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
     if (nearest) {
         bool is_crit = false;
         float effective_damage = damage;
+
+        // Chitin Goliath Front Armor Plate Deflection (85% reduction on front arc)
+        if (nearest->role == StalkerRole::ChitinGoliath) {
+            glm::vec3 to_attacker = (glm::length(origin - nearest->position) > 0.001f)
+                ? glm::normalize(origin - nearest->position)
+                : glm::vec3(0.0f, 0.0f, 1.0f);
+            glm::vec3 facing(std::cos(nearest->yaw), 0.0f, std::sin(nearest->yaw));
+            float front_dot = glm::dot(facing, to_attacker);
+            if (front_dot > 0.1f) {
+                // Front armor deflection: 85% damage reduction
+                effective_damage *= 0.15f;
+                VF_LOG_INFO("VoidStalker", "Chitin Goliath front armor deflected attack! Reduced damage to " << effective_damage);
+            } else {
+                VF_LOG_INFO("VoidStalker", "Chitin Goliath rear weak point struck! Full damage=" << effective_damage);
+            }
+        } else if (nearest->role == StalkerRole::VoidDrifter) {
+            // Spore / Void Drifter weakness: single Needler or shotgun blast bursts it
+            if (damage >= 22.0f) {
+                effective_damage = std::max(effective_damage, nearest->hp);
+            }
+        }
+
         if (allow_crit && nearest->is_unalerted()) {
             is_crit = true;
             effective_damage *= StealthSystem::SNEAK_ATTACK_CRIT_MULTIPLIER;
@@ -1158,6 +1255,14 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
         if (out_is_crit) *out_is_crit = is_crit;
         if (out_damage_dealt) *out_damage_dealt = effective_damage;
 
+        // Apply hit-flash pulse (0.08s white emissive pulse) and knockback impulse along shot vector
+        nearest->hit_flash_timer = 0.08f;
+        glm::vec3 shot_dir = (glm::length(nearest->position - origin) > 0.001f)
+            ? glm::normalize(nearest->position - origin)
+            : glm::vec3(0.0f, 0.0f, 1.0f);
+        float knockback_mag = (nearest->role == StalkerRole::ChitinGoliath) ? 1.0f : 3.5f;
+        nearest->velocity += shot_dir * knockback_mag;
+
         nearest->hp -= effective_damage;
         if (nearest->hp <= 0.0f) {
             nearest->state = StalkerState::Dying;
@@ -1165,9 +1270,7 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
             nearest->death_timer = 0.0f;
             VF_LOG_INFO("VoidStalker", "Stalker " << nearest->id << " FATAL DAMAGE -> DYING collapse (damage=" << effective_damage << ")");
 
-            glm::vec3 lethal_dir = (glm::length(nearest->position - origin) > 0.001f)
-                ? glm::normalize(nearest->position - origin)
-                : glm::vec3(0.0f, 0.0f, 1.0f);
+            glm::vec3 lethal_dir = shot_dir;
             nearest->death_hit_dir = lethal_dir;
             glm::vec3 up_vec(0.0f, 1.0f, 0.0f);
             nearest->death_impulse = lethal_dir * 4.0f + up_vec * 1.5f;

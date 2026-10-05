@@ -42,8 +42,10 @@ using AIState = StalkerState;
 
 /// Archetype combat role for hostile subterranean stalkers
 enum class StalkerRole : uint8_t {
-    Melee,      // Crimson Red: Closes in, stalks, circles, and lunges for razor claw strikes. NEVER fires ranged projectiles.
-    Shooter     // Toxic Green: Skirmishes at distance, circles, and fires crystalline void spines. NEVER executes melee lunges.
+    Melee,          // Crimson Red: Closes in, stalks, circles, and lunges for razor claw strikes. NEVER fires ranged projectiles.
+    Shooter,        // Toxic Green: Skirmishes at distance, circles, and fires crystalline void spines. NEVER executes melee lunges.
+    VoidDrifter,    // Aerial Harasser: Flying bioluminescent creature hovering 6m-15m in ceilings, 3D boids, dive-bombs on noise > 60%.
+    ChitinGoliath   // Heavy Carapace Breacher: Subterranean tank with 85% front armor deflection, rear weak points, satchel/stalactite weakness.
 };
 
 /// Projectile spine fired by Void Stalkers at mid-range
@@ -161,6 +163,12 @@ struct VoidStalker {
     glm::vec3 death_angular_velocity{0.0f};
     glm::vec3 death_hit_dir{0.0f};
 
+    // Hit Reacts & Dynamic Archetype Modifiers
+    float hit_flash_timer{0.0f};        // White emissive shader flash (0.08s)
+    float boid_altitude_target{12.0f};  // Aerial hover ceiling altitude for VoidDrifter
+    bool is_dive_bombing{false};        // Dive-bomb swoop flag
+    float dive_timer{0.0f};
+
     /// Returns true if the stalker should be removed from the world
     bool is_dead() const { return state == StalkerState::Dead; }
     bool is_dying() const { return state == StalkerState::Dying; }
@@ -173,6 +181,8 @@ struct VoidStalker {
     bool IsAttackHitboxEnabled() const { return has_attack_hitbox(); }
     bool is_melee() const { return role == StalkerRole::Melee; }
     bool is_shooter() const { return role == StalkerRole::Shooter; }
+    bool is_drifter() const { return role == StalkerRole::VoidDrifter; }
+    bool is_goliath() const { return role == StalkerRole::ChitinGoliath; }
 
     /// Visual awareness classification for overhead indicators
     bool is_investigating_state() const {
@@ -200,7 +210,11 @@ struct VoidStalker {
             return glm::vec4(0.2f, 0.90f, 1.0f, 1.0f); // Electric cyan shock
         }
 
-        if (role == StalkerRole::Shooter) {
+        if (role == StalkerRole::VoidDrifter) {
+            return glm::vec4(0.1f, 0.95f, 1.0f, 1.0f); // Electric cyan bioluminescence
+        } else if (role == StalkerRole::ChitinGoliath) {
+            return glm::vec4(1.0f, 0.65f, 0.05f, 1.0f); // Molten amber-gold heavy core
+        } else if (role == StalkerRole::Shooter) {
             // Dedicated Toxic Emerald Green for Shooter Archetype
             switch (state) {
                 case StalkerState::Idle:          return glm::vec4(0.15f, 0.85f, 0.25f, 1.0f); // Neon toxic green idle
@@ -250,6 +264,8 @@ public:
     void spawn_stalker(const glm::vec3& pos, float difficulty_mul = 1.0f, StalkerRole role = StalkerRole::Melee);
     void spawn_shooter(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::Shooter); }
     void spawn_melee(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::Melee); }
+    void spawn_drifter(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::VoidDrifter); }
+    void spawn_goliath(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::ChitinGoliath); }
 
     /// Spawn an ambient prowling stalker inhabiting a distant cavern chamber
     void spawn_ambient_stalker(const glm::vec3& room_center, const World& world);

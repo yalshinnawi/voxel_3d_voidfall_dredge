@@ -1172,19 +1172,32 @@ void ViewModel::render(
         // COMBAT VIEWMODEL: CLASS ARHETYPE FIREARMS
         // (Demolitionist: Magma Scattergun, Vanguard: Plasma Carbine, Scout: Needler Railgun)
         // =============================================================
+        // Procedural recoil exponential spring decay (decaying back over ~0.12s at rate 22.0f)
+        m_recoil_offset = glm::mix(m_recoil_offset, glm::vec3(0.0f), 1.0f - std::exp(-22.0f * dt));
+        m_recoil_pitch  = glm::mix(m_recoil_pitch, 0.0f, 1.0f - std::exp(-22.0f * dt));
+
         if (is_firing) {
-            m_muzzle_flash_timer = 0.09f;
+            m_muzzle_flash_timer = 0.05f;
+            if (m_character_class == CharacterClass::Scout) {
+                // Needler Railgun Firing: offset camera-space viewmodel backwards by Z + 0.05m and pitch up by +3.5 deg
+                m_recoil_offset.z += 0.05f;
+                m_recoil_pitch += 3.5f;
+            } else if (m_character_class == CharacterClass::Demolitionist) {
+                m_recoil_offset.z += 0.075f;
+                m_recoil_pitch += 5.2f;
+            } else {
+                m_recoil_offset.z += 0.04f;
+                m_recoil_pitch += 2.8f;
+            }
         }
         if (m_muzzle_flash_timer > 0.0f) {
             m_muzzle_flash_timer -= dt;
         }
 
-        float kick_mult = (m_character_class == CharacterClass::Demolitionist) ? 1.6f :
-                          (m_character_class == CharacterClass::Scout) ? 1.25f : 1.0f;
-        float recoil_kick = (m_muzzle_flash_timer > 0.0f) ? (0.045f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
-        float kick_pitch = (m_muzzle_flash_timer > 0.0f) ? (3.8f * kick_mult * (m_muzzle_flash_timer / 0.09f)) : 0.0f;
+        float recoil_kick = m_recoil_offset.z;
+        float kick_pitch  = m_recoil_pitch;
 
-        // Multi-Stage Procedural Reload Animation
+        // Multi-Stage Procedural Reload Animation (3-Phase Keyframe Sequence)
         float reload_offset_x = 0.0f;
         float reload_offset_y = 0.0f;
         float reload_offset_z = 0.0f;
@@ -1195,68 +1208,48 @@ void ViewModel::render(
 
         if (is_reloading) {
             float p = std::clamp(reload_progress, 0.0f, 1.0f);
-            if (p < 0.35f) {
-                // Phase 1: Magazine unlatch / Breach open / Drop & cant inward
-                float t = p / 0.35f; // 0 -> 1
+            if (p < 0.30f) {
+                // Phase 1: Drop & Eject (0.0s – 0.3s): Gun angles down 25 deg, expended energy cell pops out and falls with gravity
+                float t = p / 0.30f; // 0 -> 1
                 float ease = t * t * (3.0f - 2.0f * t); // smoothstep
                 reload_offset_x = -0.04f * ease;
-                reload_offset_y = -0.12f * ease;
+                reload_offset_y = -0.15f * ease;
                 reload_offset_z =  0.06f * ease;
-                reload_roll_deg = -22.0f * ease;
-                reload_pitch_deg = 14.0f * ease;
-                reload_yaw_deg = 8.0f * ease;
-
-                // Archetype flavor
-                if (m_character_class == CharacterClass::Demolitionist) {
-                    // Break-action shotgun drops muzzle down
-                    reload_pitch_deg = -18.0f * ease;
-                    reload_roll_deg = -15.0f * ease;
-                }
-            } else if (p < 0.75f) {
-                // Phase 2: Insert new magazine / load shells / slam home
-                float t = (p - 0.35f) / 0.40f; // 0 -> 1
-                // Hold lowered pose with slight upward movement
-                reload_offset_x = -0.04f * (1.0f - t * 0.3f);
-                reload_offset_y = -0.12f + t * 0.04f;
+                reload_roll_deg = -18.0f * ease;
+                reload_pitch_deg = 25.0f * ease; // Gun angles down 25 deg
+                reload_yaw_deg = 6.0f * ease;
+            } else if (p < 0.70f) {
+                // Phase 2: Insert Cell (0.3s – 0.7s): Left suit hand reaches from off-screen, slams fresh glowing cell into receiver
+                float t = (p - 0.30f) / 0.40f; // 0 -> 1
+                reload_offset_x = -0.04f * (1.0f - t * 0.25f);
+                reload_offset_y = -0.15f + t * 0.05f;
                 reload_offset_z =  0.06f - t * 0.02f;
-                reload_roll_deg = -22.0f * (1.0f - t * 0.4f);
-                reload_pitch_deg = 14.0f * (1.0f - t * 0.3f);
-                reload_yaw_deg = 8.0f * (1.0f - t * 0.3f);
+                reload_roll_deg = -18.0f * (1.0f - t * 0.35f);
+                reload_pitch_deg = 25.0f * (1.0f - t * 0.35f);
+                reload_yaw_deg = 6.0f * (1.0f - t * 0.3f);
 
-                if (m_character_class == CharacterClass::Demolitionist) {
-                    reload_pitch_deg = -18.0f * (1.0f - t * 0.3f);
-                    reload_roll_deg = -15.0f * (1.0f - t * 0.4f);
-                }
-
-                // Magazine slam impulse at t in [0.50, 0.75]
-                if (t >= 0.50f && t <= 0.75f) {
-                    float slam_t = (t - 0.50f) / 0.25f; // 0 -> 1
+                // Heavy mechanical latch slam impulse at t in [0.55, 0.80]
+                if (t >= 0.55f && t <= 0.80f) {
+                    float slam_t = (t - 0.55f) / 0.25f; // 0 -> 1
                     float impulse = std::sin(slam_t * 3.14159f);
-                    reload_offset_y += impulse * 0.035f;
-                    reload_offset_z -= impulse * 0.040f;
-                    reload_pitch_deg -= impulse * 6.0f;
-                    reload_emissive_boost = impulse * 0.60f; // Glowing capacitor lock flash!
+                    reload_offset_y += impulse * 0.04f;
+                    reload_offset_z -= impulse * 0.045f;
+                    reload_pitch_deg -= impulse * 7.0f;
+                    reload_emissive_boost = impulse * 0.75f; // Glowing capacitor lock flash!
                 }
             } else {
-                // Phase 3: Charging handle rack / breach lock & return to rest
-                float t = (p - 0.75f) / 0.25f; // 0 -> 1
-                // Rack click jerk at start of phase 3
-                if (t < 0.35f) {
-                    float rack_t = t / 0.35f;
-                    float rack_kick = std::sin(rack_t * 3.14159f);
-                    reload_offset_z += rack_kick * 0.025f;
-                    reload_roll_deg += rack_kick * 5.0f;
-                    reload_emissive_boost = rack_kick * 0.30f;
-                }
-                // Smooth ease-out to 0
+                // Phase 3: Rack & Ready (0.7s – 1.0s): Gun snaps back to hip/aim stance with subtle settling shake
+                float t = (p - 0.70f) / 0.30f; // 0 -> 1
                 float ease = 1.0f - (1.0f - t) * (1.0f - t);
                 float return_factor = 1.0f - ease;
+                // Subtle settling shake
+                float settling_shake = std::sin(t * 22.0f) * std::exp(-t * 6.0f) * 0.007f;
                 reload_offset_x = -0.028f * return_factor;
-                reload_offset_y = -0.08f * return_factor;
+                reload_offset_y = -0.09f * return_factor + settling_shake;
                 reload_offset_z =  0.04f * return_factor;
-                reload_roll_deg = -13.0f * return_factor;
-                reload_pitch_deg = (m_character_class == CharacterClass::Demolitionist ? -12.0f : 10.0f) * return_factor;
-                reload_yaw_deg = 5.0f * return_factor;
+                reload_roll_deg = -12.0f * return_factor + settling_shake * 180.0f;
+                reload_pitch_deg = 16.0f * return_factor;
+                reload_yaw_deg = 4.0f * return_factor;
             }
         }
 

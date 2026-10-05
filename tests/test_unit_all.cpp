@@ -23,6 +23,9 @@
 #include "../src/core/save_system.hpp"
 #include "../src/net/packet_types.hpp"
 #include "../src/entities/dynamic_debris.hpp"
+#include "../src/entities/flare.hpp"
+#include "../src/systems/mission_system.hpp"
+#include "../src/entities/carcass_manager.hpp"
 
 using namespace Voidfall;
 
@@ -1233,6 +1236,179 @@ void test_satchel_charge_and_weapon_cycling() {
     log_pass("Class Weapon Archetype and Tactical Kit alignment (Demolitionist=SCAT, Vanguard=CARB, Scout=RAIL)");
 }
 
+// ─────────────────────────────────────────────────────────────
+// 15. CHEMICAL FLARES, ABERRANT ARCHETYPES, CARCASSES & OBJECTIVES
+// ─────────────────────────────────────────────────────────────
+void test_flares_aberrants_and_mission_objectives() {
+    std::cout << "\n=== [MODULE 15] Flares, Aberrant Archetypes, Carcasses & Mission Objectives ===" << std::endl;
+
+    // 1. Flare Manager & Chemical Flares
+    FlareManager::instance().clear();
+    TEST_CHECK(FlareManager::instance().flares().empty(), "Flares must initially be empty");
+
+    // Spawn 3 flares for the 3 character classes
+    FlareManager::instance().spawn_flare(glm::vec3(10.0f, 20.0f, 10.0f), glm::vec3(1.0f, 0.5f, 0.0f), CharacterClass::Scout);
+    FlareManager::instance().spawn_flare(glm::vec3(10.0f, 20.0f, 10.0f), glm::vec3(0.0f, 0.5f, 1.0f), CharacterClass::Vanguard);
+    FlareManager::instance().spawn_flare(glm::vec3(10.0f, 20.0f, 10.0f), glm::vec3(-1.0f, 0.5f, 0.0f), CharacterClass::Demolitionist);
+
+    TEST_CHECK(FlareManager::instance().flares().size() == 3, "Must have spawned 3 flares");
+    TEST_CHECK(FlareManager::instance().flares()[0].light_radius == 16.0f, "Flare light radius must be 16m");
+    TEST_CHECK(FlareManager::instance().flares()[0].lifetime == 60.0f, "Flare lifetime must be 60s");
+    // Class colors
+    TEST_CHECK(FlareManager::instance().flares()[0].color.r < 0.2f && FlareManager::instance().flares()[0].color.b > 0.8f, "Scout flare must be electric cyan");
+    TEST_CHECK(FlareManager::instance().flares()[1].color.r > 0.8f && FlareManager::instance().flares()[1].color.g > 0.6f, "Vanguard flare must be amber");
+    TEST_CHECK(FlareManager::instance().flares()[2].color.r > 0.8f && FlareManager::instance().flares()[2].color.b < 0.2f, "Demolitionist flare must be orange");
+
+    // Simulate physics and ground bounce
+    World world(1234);
+    // Flat floor at Y=10
+    for (int x = 0; x <= 20; ++x) {
+        for (int z = 0; z <= 20; ++z) {
+            world.set_voxel(x, 10, z, Voxel{MAT_FRACTURED_GRANITE, 0});
+        }
+    }
+    for (int step = 0; step < 120; ++step) {
+        FlareManager::instance().update(0.016f, world);
+    }
+    TEST_CHECK(FlareManager::instance().flares()[0].position.y >= 10.0f, "Flare must rest at or above floor level");
+    TEST_CHECK(FlareManager::instance().flares()[0].lifetime < 60.0f, "Flare lifetime must decay over time");
+    log_pass("Chemical Flare physics, bounce, class color illumination (Scout=Cyan, Vanguard=Amber, Demo=Orange) and 60s lifetime");
+
+    // 2. Player Flare Inventory & 15s Recharge
+    PlayerController player;
+    TEST_CHECK(player.flare_count() == 3, "Player must start with max 3 flares");
+    bool flare_thrown = false;
+    player.set_on_flare_thrown([&](const glm::vec3&, const glm::vec3&, CharacterClass) {
+        flare_thrown = true;
+    });
+    player.throw_flare();
+    TEST_CHECK(flare_thrown, "Throwing flare must invoke on_flare_thrown callback");
+    TEST_CHECK(player.flare_count() == 2, "Flare count must decrement to 2");
+    // Throw remaining flares
+    player.throw_flare();
+    player.throw_flare();
+    TEST_CHECK(player.flare_count() == 0, "Flare count must be 0 after throwing 3");
+    player.throw_flare(); // Capacity empty, should not throw
+    TEST_CHECK(player.flare_count() == 0, "Cannot throw when flare count is 0");
+
+    // Advance 15s recharge timer
+    player.update(15.1f, world);
+    TEST_CHECK(player.flare_count() == 1, "Player must recharge 1 flare after 15s");
+    log_pass("Player Chemical Flare 3-capacity inventory and 15s automatic recharge timer");
+
+    // 3. Breadcrumb Trail Auto-placement
+    player.set_position(glm::vec3(10.0f, 12.0f, 10.0f));
+    player.update(0.1f, world);
+    size_t crumbs_initial = player.breadcrumbs().size();
+    // Move player by 15 meters (> 12m threshold)
+    player.set_position(glm::vec3(25.0f, 12.0f, 10.0f));
+    player.update(0.1f, world);
+    TEST_CHECK(player.breadcrumbs().size() > crumbs_initial, "Moving > 12m must drop an automatic breadcrumb trail marker");
+    log_pass("3D Breadcrumb Trail automatic placement every 12m of subterranean exploration");
+
+    // 4. Mission System: Precursor Vault & Reactive Gas Pockets
+    MissionSystem mission;
+    mission.embed_precursor_vault(world, 1);
+    TEST_CHECK(mission.vault().exists, "Mission system must report vault embedded");
+    Voxel door_vox = world.get_voxel(mission.vault().door_pos.x, mission.vault().door_pos.y, mission.vault().door_pos.z);
+    TEST_CHECK(door_vox.material_id == MAT_REINFORCED_VAULT_DOOR, "Embedded vault door must be MAT_REINFORCED_VAULT_DOOR");
+
+    // Detonate satchel charge near vault door
+    bool breach_notified = false;
+    mission.set_on_notification([&](const std::string& msg, float) {
+        if (msg.find("BREACHED") != std::string::npos) breach_notified = true;
+    });
+    glm::vec3 door_world = glm::vec3(mission.vault().door_pos) + glm::vec3(0.5f);
+    bool breached = mission.check_satchel_vault_breach(world, door_world, 3.5f);
+    TEST_CHECK(breached, "Satchel charge blast must breach precursor vault bulkhead");
+    TEST_CHECK(mission.is_vault_breached(), "Vault state must be breached");
+    TEST_CHECK(world.get_voxel(mission.vault().door_pos.x, mission.vault().door_pos.y, mission.vault().door_pos.z).material_id == MAT_AIR, "Breached door voxel must be removed from world");
+
+    // Retrieve Relic Hyper-Core (player stands near relic)
+    glm::vec3 relic_world = glm::vec3(mission.vault().relic_pos) + glm::vec3(0.5f);
+    mission.update(0.1f, world, relic_world);
+    TEST_CHECK(mission.is_relic_retrieved(), "Relic state must be retrieved when approaching");
+    TEST_CHECK(mission.total_bonus_xp() == 350, "Relic extraction bonus must award +350 EXP");
+    TEST_CHECK(mission.total_bonus_titanium() == 5, "Relic extraction bonus must award +5 Titanium Cores");
+    log_pass("Precursor Vault Bulkhead Satchel breach and Relic Hyper-Core extraction reward (+350 EXP, +5 Titanium)");
+
+    // Reactive Gas Pockets: create gas voxels
+    for (int x = 14; x <= 16; ++x) {
+        for (int z = 14; z <= 16; ++z) {
+            world.set_voxel(x, 11, z, Voxel{MAT_GAS, 0});
+        }
+    }
+    VoidStalkerManager stalker_mgr;
+    stalker_mgr.stalkers_mut().clear();
+    // Spawn stalker near gas
+    stalker_mgr.spawn_stalker(glm::vec3(15.0f, 11.0f, 15.0f), 1.0f, StalkerRole::Melee);
+    bool gas_ignited = false;
+    mission.set_on_gas_ignited([&](const glm::vec3&, float) {
+        gas_ignited = true;
+    });
+    int ignited_count = mission.ignite_gas_pocket(world, glm::vec3(15.0f, 11.0f, 15.0f), 4.0f, stalker_mgr);
+    TEST_CHECK(ignited_count > 0, "Igniting gas pocket must burn gas voxels");
+    TEST_CHECK(gas_ignited, "Gas ignition callback must fire");
+    TEST_CHECK(world.get_voxel(15, 11, 15).material_id == MAT_AIR, "Ignited gas voxels must clear into air");
+    TEST_CHECK(stalker_mgr.stalkers()[0].is_dead() || stalker_mgr.stalkers()[0].is_dying(), "Fireball explosion must incinerate nearby aberrant swarm hostiles");
+    log_pass("Reactive Gas Pocket ignition, fireball detonation and swarm hostile incineration");
+
+    // 5. Aberrant Fauna Archetypes: VoidDrifter & ChitinGoliath
+    stalker_mgr.stalkers_mut().clear();
+    // Spawn Void Drifter
+    stalker_mgr.spawn_stalker(glm::vec3(15.0f, 20.0f, 15.0f), 1.0f, StalkerRole::VoidDrifter);
+    auto& drifter = stalker_mgr.stalkers_mut().back();
+    TEST_CHECK(drifter.role == StalkerRole::VoidDrifter, "Role must be VoidDrifter");
+    TEST_CHECK(drifter.boid_altitude_target >= 6.0f, "VoidDrifter target altitude must be high ceiling");
+
+    // Simulate quiet environment (noise = 20%)
+    glm::vec3 player_p(15.0f, 10.0f, 15.0f);
+    glm::vec3 player_f(0.0f, 0.0f, -1.0f);
+    stalker_mgr.update(0.016f, player_p, player_f, player_f, false, 20.0f, false, world);
+    TEST_CHECK(!drifter.is_dive_bombing, "VoidDrifter must hover calmly when noise <= 60%");
+
+    // Trigger loud noise (> 60%)
+    stalker_mgr.update(0.016f, player_p, player_f, player_f, false, 75.0f, false, world);
+    TEST_CHECK(drifter.is_dive_bombing, "VoidDrifter must initiate rapid dive-bomb swoop when noise > 60%");
+
+    // Weakness: 1-shot Needler Railgun burst (damage >= 22 deals fatal damage to VoidDrifter)
+    float drifter_dmg_dealt = 0.0f;
+    stalker_mgr.damage_nearest(drifter.position, 4.0f, 25.0f, false, nullptr, &drifter_dmg_dealt);
+    TEST_CHECK(drifter.is_dead() || drifter.is_dying(), "VoidDrifter must burst upon single high-impact shot");
+    log_pass("Void Drifter Aerial Harasser 3D boid ceiling hovering, noise dive-bombing and fragile burst weakness");
+
+    // Spawn Chitin Goliath facing East (+X, yaw = 0)
+    stalker_mgr.stalkers_mut().clear();
+    stalker_mgr.spawn_stalker(glm::vec3(15.0f, 10.0f, 15.0f), 1.0f, StalkerRole::ChitinGoliath);
+    auto& goliath = stalker_mgr.stalkers_mut().back();
+    TEST_CHECK(goliath.role == StalkerRole::ChitinGoliath, "Role must be ChitinGoliath");
+    TEST_CHECK(goliath.hp > 150.0f, "Chitin Goliath must have heavy armored HP pool");
+    goliath.yaw = 0.0f; // Facing East (+X)
+
+    // Shot from front: player is at +X (18, 10, 15), shooting toward Goliath at (15, 10, 15)
+    float front_dmg = 0.0f;
+    stalker_mgr.damage_nearest(glm::vec3(18.0f, 10.0f, 15.0f), 5.0f, 40.0f, false, nullptr, &front_dmg);
+    // 85% deflection: front_dmg should be 15% of 40 = 6 HP
+    TEST_CHECK(front_dmg <= 40.0f * 0.20f, "Frontal shots on Chitin Goliath must deflect 85% damage");
+
+    // Shot from rear: player is at -X (12, 10, 15), shooting from behind Goliath
+    float rear_dmg = 0.0f;
+    stalker_mgr.damage_nearest(glm::vec3(12.0f, 10.0f, 15.0f), 5.0f, 40.0f, false, nullptr, &rear_dmg);
+    TEST_CHECK(rear_dmg >= 35.0f, "Rear weak point shots on Chitin Goliath must deal full unmitigated damage");
+    log_pass("Chitin Goliath heavy tank front armor 85% deflection and rear weak point vulnerability");
+
+    // 6. Persistent Carcass Floor Skirmish Tracking
+    CarcassManager::instance().clear();
+    CarcassManager::instance().spawn_carcass(glm::vec3(12.0f, 10.0f, 12.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(0.0f), StalkerRole::Melee);
+    TEST_CHECK(CarcassManager::instance().carcasses().size() == 1, "Must spawn 1 persistent carcass");
+    TEST_CHECK(CarcassManager::instance().carcasses()[0].max_lifetime >= 45.0f, "Carcass must persist for 45s before decay");
+    CarcassManager::instance().update(20.0f, world);
+    TEST_CHECK(CarcassManager::instance().carcasses().size() == 1, "Carcass must still exist after 20s");
+    CarcassManager::instance().update(30.0f, world);
+    TEST_CHECK(CarcassManager::instance().carcasses().empty(), "Carcass must decay into ash after 45s+");
+    log_pass("Persistent enemy floor carcasses (45s lifetime before ash decay) for tracking skirmish sites");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE COMPREHENSIVE UNIT TEST SUITE" << std::endl;
@@ -1252,6 +1428,7 @@ int main() {
     test_cavern_luminaries_and_lighting();
     test_plasma_carbine_combat();
     test_satchel_charge_and_weapon_cycling();
+    test_flares_aberrants_and_mission_objectives();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;

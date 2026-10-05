@@ -255,10 +255,63 @@ void PlayerController::handle_input(const Window& window, float dt) {
         }
     }
     c_pressed_last = c_down;
+
+    // 9. Throwable Chemical Flares (G key or Middle Mouse)
+    static bool g_pressed_last = false;
+    bool g_down = window.is_key_down(GLFW_KEY_G) || window.is_mouse_button_down(GLFW_MOUSE_BUTTON_MIDDLE);
+    if (g_down && !g_pressed_last) {
+        if (m_flare_count > 0) {
+            throw_flare();
+        } else {
+            if (m_on_warning) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "FLARES DEPLETED (RECHARGING %.1fs)", m_flare_recharge_timer);
+                m_on_warning(std::string(buf));
+            }
+        }
+    }
+    g_pressed_last = g_down;
+}
+
+void PlayerController::throw_flare() {
+    if (m_flare_count <= 0) return;
+    m_flare_count--;
+    if (m_flare_recharge_timer <= 0.0f) {
+        m_flare_recharge_timer = m_flare_max_recharge;
+    }
+    if (m_on_flare_thrown) {
+        m_on_flare_thrown(eye_position(), m_front, m_char_attr.classType);
+    }
 }
 
 void PlayerController::update_physics(float dt, World& world) {
     m_current_world = &world;
+
+    // Flare recharge progression (15.0s per flare, capacity 3)
+    if (m_flare_count < MAX_FLARES) {
+        m_flare_recharge_timer -= dt;
+        if (m_flare_recharge_timer <= 0.0f) {
+            m_flare_count++;
+            m_flare_recharge_timer = (m_flare_count < MAX_FLARES) ? m_flare_max_recharge : 0.0f;
+        }
+    } else {
+        m_flare_recharge_timer = 0.0f;
+    }
+
+    // Breadcrumb trail placement (every 12m of horizontal distance traveled)
+    float dist_moved = glm::distance(glm::vec3(m_position.x, 0.0f, m_position.z),
+                                     glm::vec3(m_last_breadcrumb_pos.x, 0.0f, m_last_breadcrumb_pos.z));
+    if (dist_moved > 0.01f && dist_moved < 50.0f) {
+        m_dist_since_breadcrumb += dist_moved;
+        m_last_breadcrumb_pos = m_position;
+        if (m_dist_since_breadcrumb >= 12.0f) {
+            m_breadcrumbs.push_back(m_position);
+            m_dist_since_breadcrumb = 0.0f;
+            if (m_breadcrumbs.size() > 128) {
+                m_breadcrumbs.erase(m_breadcrumbs.begin());
+            }
+        }
+    }
 
     // Smoothly interpolate first-person camera eye offset between standing and crouching
     float targetEyeHeight = m_is_crouching ? EYE_HEIGHT_CROUCH : EYE_HEIGHT_STAND;

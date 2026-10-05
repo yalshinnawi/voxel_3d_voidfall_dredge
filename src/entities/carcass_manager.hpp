@@ -23,6 +23,8 @@ struct EnemyCarcass {
     float alpha{1.0f};
     bool is_dissolving{false};
     float dissolve_timer{0.0f};
+    float lifetime{0.0f};
+    float max_lifetime{45.0f}; // Persists on cavern floor for 45s before decaying into ash
     StalkerRole role{StalkerRole::Melee};
     glm::vec3 lethal_hit_dir{0.0f};
     bool harvested{false};
@@ -34,7 +36,7 @@ struct EnemyCarcass {
 /// harvest/salvage interactions, and capped circular pool dissolver decay.
 class CarcassManager {
 public:
-    static constexpr size_t MAX_CARCASSES = 24;
+    static constexpr size_t MAX_CARCASSES = 48;
 
     static CarcassManager& instance();
 

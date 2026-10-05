@@ -292,6 +292,28 @@ public:
     void reset_tactical_cooldown() { m_tactical_cooldown = 0.0f; }
     float tactical_recharge_progress() const { return m_tactical_max_cooldown > 0.0f ? std::clamp(1.0f - (m_tactical_cooldown / m_tactical_max_cooldown), 0.0f, 1.0f) : 1.0f; }
 
+    // Chemical Flares (Key: G or Middle Mouse)
+    static constexpr int MAX_FLARES = 3;
+    static constexpr float FLARE_RECHARGE_TIME = 15.0f;
+
+    using FlareThrownCallback = std::function<void(const glm::vec3& origin, const glm::vec3& dir, CharacterClass cls)>;
+    void set_on_flare_thrown(FlareThrownCallback cb) { m_on_flare_thrown = std::move(cb); }
+
+    int flare_count() const { return m_flare_count; }
+    int max_flares() const { return MAX_FLARES; }
+    float flare_recharge_timer() const { return m_flare_recharge_timer; }
+    float flare_recharge_progress() const {
+        return (m_flare_count < MAX_FLARES && m_flare_max_recharge > 0.0f)
+            ? std::clamp(1.0f - (m_flare_recharge_timer / m_flare_max_recharge), 0.0f, 1.0f)
+            : 1.0f;
+    }
+    bool can_throw_flare() const { return m_flare_count > 0; }
+    void throw_flare();
+
+    // Breadcrumb Trail (placed every 12m of travel)
+    const std::vector<glm::vec3>& breadcrumbs() const { return m_breadcrumbs; }
+    void clear_breadcrumbs() { m_breadcrumbs.clear(); m_dist_since_breadcrumb = 0.0f; }
+
 private:
     void update_camera_vectors();
     void resolve_voxel_collisions(World& world, glm::vec3& pos, glm::vec3& vel, float dt);
@@ -330,6 +352,7 @@ private:
     float m_thruster_regen_multiplier{1.0f};
     float m_drill_speed_multiplier{1.0f};
     bool m_allow_micro_charges{false};
+    float m_carry_weight_multiplier{1.0f};
 
     // Shaped charge deployment state
     bool m_has_placed_charge{false};
@@ -385,9 +408,19 @@ private:
     WeaponReloadCallback m_on_weapon_reload;
     DamageSource m_last_damage_source{DamageSource::Kinetic};
 
-    float m_carry_weight_multiplier{1.0f};
     float m_tactical_cooldown{0.0f};
     float m_tactical_max_cooldown{15.0f};
+
+    // Chemical Flare Inventory & Recharge
+    int m_flare_count{3};
+    float m_flare_recharge_timer{0.0f};
+    float m_flare_max_recharge{15.0f};
+    FlareThrownCallback m_on_flare_thrown;
+
+    // Breadcrumb Trail
+    std::vector<glm::vec3> m_breadcrumbs;
+    glm::vec3 m_last_breadcrumb_pos{16.0f, 25.0f, 16.0f};
+    float m_dist_since_breadcrumb{0.0f};
 
     // Environmental room hazard states
     bool m_is_in_lava{false};

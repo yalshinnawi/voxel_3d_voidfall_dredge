@@ -3,6 +3,7 @@
 #include "../entities/enemies/void_stalker.hpp"
 #include "../entities/enemies/seismic_burrower.hpp"
 #include "../entities/carcass_manager.hpp"
+#include "../entities/flare.hpp"
 #include "../core/logger.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -709,6 +710,25 @@ void Renderer::spawn_water_mist(const glm::vec3& block_pos, int count) {
     }
 }
 
+void Renderer::spawn_barrel_smoke(const glm::vec3& pos, const glm::vec3& dir, int count) {
+    for (int i = 0; i < count; ++i) {
+        BreakParticle p;
+        float rx = static_cast<float>(rand() % 100 - 50) / 150.0f;
+        float ry = static_cast<float>(rand() % 100) / 200.0f;
+        float rz = static_cast<float>(rand() % 100 - 50) / 150.0f;
+        p.pos = pos + dir * 0.15f;
+        p.vel = dir * 1.5f + glm::vec3(rx, 0.4f + ry, rz);
+        p.color = glm::vec4(0.72f, 0.76f, 0.80f, 0.45f); // Barrel heat smoke
+        p.size = 0.22f + static_cast<float>(rand() % 100) / 500.0f;
+        p.max_life = 0.5f + static_cast<float>(rand() % 100) / 250.0f;
+        p.life = p.max_life;
+        p.gravity = -0.5f; // Buoyant upward float
+        p.drag = 1.8f;
+        p.size_growth = 0.35f;
+        m_particles.push_back(p);
+    }
+}
+
 void Renderer::render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id) {
     if (progress <= 0.05f || m_cable_vao == 0) return;
 
@@ -999,6 +1019,165 @@ void Renderer::render_placed_charge(const glm::ivec3& block_pos, const glm::ivec
     glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(StalkerVertex), verts.data());
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
     glBindVertexArray(0);
+}
+
+void Renderer::render_flares(const std::vector<ChemicalFlare>& flares, float time) {
+    if (flares.empty() || m_stalker_vao == 0) return;
+
+    std::vector<StalkerVertex> verts;
+    verts.reserve(flares.size() * 48);
+
+    auto add_box = [&](const glm::vec3& center, const glm::vec3& half_extents,
+                       const glm::vec4& color, const glm::vec4& mat) {
+        glm::vec3 min_p = center - half_extents;
+        glm::vec3 max_p = center + half_extents;
+
+        auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
+            verts.push_back({a, n, color, mat});
+            verts.push_back({b, n, color, mat});
+            verts.push_back({c, n, color, mat});
+            verts.push_back({a, n, color, mat});
+            verts.push_back({c, n, color, mat});
+            verts.push_back({d, n, color, mat});
+        };
+
+        push_quad({min_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {0.0f, 0.0f, 1.0f});
+        push_quad({max_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {0.0f, 0.0f, -1.0f});
+        push_quad({max_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, max_p.z}, {1.0f, 0.0f, 0.0f});
+        push_quad({min_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, min_p.z}, {-1.0f, 0.0f, 0.0f});
+        push_quad({min_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {0.0f, 1.0f, 0.0f});
+        push_quad({min_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, max_p.z}, {min_p.x, min_p.y, max_p.z}, {0.0f, -1.0f, 0.0f});
+    };
+
+    for (const auto& f : flares) {
+        if (!f.is_alive()) continue;
+
+        // Flare casing (cylindrical stick/box)
+        glm::vec4 body_col = glm::vec4(0.22f, 0.24f, 0.26f, 1.0f);
+        glm::vec4 body_mat = glm::vec4(0.7f, 0.4f, 0.0f, 1.0f);
+        add_box(f.position, glm::vec3(0.04f, 0.16f, 0.04f), body_col, body_mat);
+
+        // Active chemical combustion tip (highly emissive class-colored burn head)
+        float burn_pulse = 0.85f + 0.15f * std::sin(time * 30.0f + static_cast<float>(f.id));
+        glm::vec4 tip_col = glm::vec4(f.color, 1.0f);
+        glm::vec4 tip_mat = glm::vec4(0.0f, 0.1f, 3.5f * burn_pulse, 1.0f);
+        add_box(f.position + glm::vec3(0.0f, 0.18f, 0.0f), glm::vec3(0.05f, 0.05f, 0.05f), tip_col, tip_mat);
+    }
+
+    if (verts.empty()) return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+
+    m_stalker_shader.use();
+    m_stalker_shader.set_mat4("uProjection", m_proj);
+    m_stalker_shader.set_mat4("uView", m_view);
+    m_stalker_shader.set_mat4("uModel", glm::mat4(1.0f));
+    m_stalker_shader.set_vec3("uCamPos", m_cam_pos);
+    m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
+    m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
+    m_stalker_shader.set_vec3("uHeadlampColor", m_headlamp.color);
+    m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
+    m_stalker_shader.set_float("uStateGlow", time);
+    m_stalker_shader.set_int("uState", 0);
+    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
+    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
+
+    glBindVertexArray(m_stalker_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_stalker_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(StalkerVertex), verts.data());
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
+    glBindVertexArray(0);
+}
+
+void Renderer::render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float time) {
+    if (crumbs.empty() || m_stalker_vao == 0) return;
+
+    std::vector<StalkerVertex> verts;
+    verts.reserve(crumbs.size() * 36);
+
+    auto add_box = [&](const glm::vec3& center, const glm::vec3& half_extents,
+                       const glm::vec4& color, const glm::vec4& mat) {
+        glm::vec3 min_p = center - half_extents;
+        glm::vec3 max_p = center + half_extents;
+
+        auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
+            verts.push_back({a, n, color, mat});
+            verts.push_back({b, n, color, mat});
+            verts.push_back({c, n, color, mat});
+            verts.push_back({a, n, color, mat});
+            verts.push_back({c, n, color, mat});
+            verts.push_back({d, n, color, mat});
+        };
+
+        push_quad({min_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {0.0f, 0.0f, 1.0f});
+        push_quad({max_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {0.0f, 0.0f, -1.0f});
+        push_quad({max_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, max_p.z}, {1.0f, 0.0f, 0.0f});
+        push_quad({min_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, min_p.z}, {-1.0f, 0.0f, 0.0f});
+        push_quad({min_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {0.0f, 1.0f, 0.0f});
+        push_quad({min_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, max_p.z}, {min_p.x, min_p.y, max_p.z}, {0.0f, -1.0f, 0.0f});
+    };
+
+    for (size_t i = 0; i < crumbs.size(); ++i) {
+        float pulse = 0.5f + 0.5f * std::sin(time * 3.0f + static_cast<float>(i) * 0.4f);
+        glm::vec4 crumb_col = glm::vec4(0.05f, 0.85f, 0.95f, 0.8f);
+        glm::vec4 crumb_mat = glm::vec4(0.0f, 0.2f, 1.8f * pulse, 1.0f);
+        add_box(crumbs[i] + glm::vec3(0.0f, 0.03f, 0.0f), glm::vec3(0.12f, 0.02f, 0.12f), crumb_col, crumb_mat);
+    }
+
+    if (verts.empty()) return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+
+    m_stalker_shader.use();
+    m_stalker_shader.set_mat4("uProjection", m_proj);
+    m_stalker_shader.set_mat4("uView", m_view);
+    m_stalker_shader.set_mat4("uModel", glm::mat4(1.0f));
+    m_stalker_shader.set_vec3("uCamPos", m_cam_pos);
+    m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
+    m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
+    m_stalker_shader.set_vec3("uHeadlampColor", m_headlamp.color);
+    m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
+    m_stalker_shader.set_float("uStateGlow", time);
+    m_stalker_shader.set_int("uState", 0);
+    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
+    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
+
+    glBindVertexArray(m_stalker_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_stalker_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(StalkerVertex), verts.data());
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
+    glBindVertexArray(0);
+}
+
+void Renderer::spawn_fireball(const glm::vec3& center, int count) {
+    for (int i = 0; i < count; ++i) {
+        BreakParticle p;
+        p.pos = center + glm::vec3(
+            ((rand() % 100) / 100.0f - 0.5f) * 1.5f,
+            ((rand() % 100) / 100.0f - 0.5f) * 1.5f,
+            ((rand() % 100) / 100.0f - 0.5f) * 1.5f
+        );
+        glm::vec3 rdir(
+            (rand() % 100) / 50.0f - 1.0f,
+            (rand() % 100) / 50.0f - 0.2f,
+            (rand() % 100) / 50.0f - 1.0f
+        );
+        if (glm::length(rdir) > 0.01f) rdir = glm::normalize(rdir);
+        p.vel = rdir * (4.0f + (rand() % 100) / 20.0f);
+        p.color = glm::vec4(1.0f, 0.45f + (rand() % 30) / 100.0f, 0.05f, 1.0f);
+        p.size = 0.25f + (rand() % 20) / 100.0f;
+        p.life = 0.6f + (rand() % 30) / 100.0f;
+        p.max_life = p.life;
+        p.gravity = -4.0f; // Buoyant upward rising flames
+        p.drag = 1.2f;
+        p.size_growth = 0.4f;
+        p.emissive = 3.0f;
+        m_particles.push_back(p);
+    }
 }
 
 void Renderer::update_particles(float dt) {
@@ -1302,30 +1481,55 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             base_model = glm::scale(base_model, glm::vec3(burrow_scale));
         }
 
-        // Material palettes based on dedicated combat archetype (Green Shooter vs Red Melee)
+        // Material palettes based on dedicated combat archetype
         bool is_shooter = (s.role == StalkerRole::Shooter);
+        bool is_drifter = (s.role == StalkerRole::VoidDrifter);
+        bool is_goliath = (s.role == StalkerRole::ChitinGoliath);
 
         // 1. Armored Chitin Carapace
-        glm::vec4 chitin_color = is_shooter
-            ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
-            : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f);  // Deep blood obsidian chitin
-        glm::vec4 chitin_mat(0.40f, 0.25f, 0.0f, 1.0f); // metallic, roughness, emissive, ao
+        glm::vec4 chitin_color = is_drifter
+            ? glm::vec4(0.08f, 0.35f, 0.45f, 0.85f)   // Bioluminescent translucent cyan mantle
+            : (is_goliath
+               ? glm::vec4(0.18f, 0.16f, 0.14f, 1.0f) // Heavy reinforced dark obsidian-iron
+               : (is_shooter
+                  ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
+                  : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f))); // Deep blood obsidian chitin
+        glm::vec4 chitin_mat(is_goliath ? 0.70f : 0.40f, 0.25f, is_drifter ? 1.5f : 0.0f, 1.0f); // metallic, roughness, emissive, ao
 
         // 2. Secondary Chitin / Ribs / Spines
-        glm::vec4 spine_color = is_shooter
-            ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)   // Acid emerald quills
-            : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f);  // Jagged crimson spines
-        glm::vec4 spine_mat(0.50f, 0.20f, 0.0f, 0.9f);
+        glm::vec4 spine_color = is_drifter
+            ? glm::vec4(0.15f, 0.85f, 1.0f, 0.90f)   // Glowing cyan bioluminescent tendrils
+            : (is_goliath
+               ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f) // Bronze armor reinforcing plates
+               : (is_shooter
+                  ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)   // Acid emerald quills
+                  : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f))); // Jagged crimson spines
+        glm::vec4 spine_mat(0.50f, 0.20f, is_drifter ? 2.5f : 0.0f, 0.9f);
 
         // 3. Serrated Fangs / Claws
-        glm::vec4 claw_color = is_shooter
-            ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)   // Toxic jade bone
-            : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f);  // Razor blood bone
+        glm::vec4 claw_color = is_drifter
+            ? glm::vec4(0.20f, 0.90f, 1.0f, 1.0f)
+            : (is_goliath
+               ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f) // Heavy iron ram horn
+               : (is_shooter
+                  ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)   // Toxic jade bone
+                  : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f))); // Razor blood bone
         glm::vec4 claw_mat(0.75f, 0.18f, 0.0f, 1.0f);
 
-        // 4. Bioluminescent Eye Color (Shooter: Neon Green, Melee: Crimson Red)
+        // 4. Bioluminescent Eye Color
         glm::vec4 eye_color = s.get_eye_color();
         glm::vec4 eye_mat(0.0f, 0.02f, 6.5f, 1.0f); // Massive emissive boost for bloom!
+
+        // White emissive hit-flash shader pulse (0.08s)
+        if (s.hit_flash_timer > 0.0f) {
+            float flash_k = std::clamp(s.hit_flash_timer / 0.08f, 0.0f, 1.0f);
+            chitin_color = glm::mix(chitin_color, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
+            spine_color  = glm::mix(spine_color,  glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
+            claw_color   = glm::mix(claw_color,   glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
+            chitin_mat.z += 8.5f * flash_k;
+            spine_mat.z  += 8.5f * flash_k;
+            claw_mat.z   += 8.5f * flash_k;
+        }
 
         // 5. Pulsing Void Core (beating heart)
         float core_pulse = 0.85f + 0.35f * std::sin(s.glow_phase * 5.0f);
@@ -1381,6 +1585,25 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
             glm::mat4 brow_m = glm::translate(skull_m, glm::vec3(0.0f, 0.12f, 0.02f));
             add_stalker_box(s_stalker_verts, brow_m, glm::vec3(0.24f, 0.05f, 0.18f), spine_color, spine_mat);
+
+            // Chitin Goliath: Heavy front reinforced blast armor plates
+            if (is_goliath) {
+                glm::mat4 shield_m = glm::translate(skull_m, glm::vec3(0.0f, -0.02f, 0.26f));
+                glm::vec4 shield_mat(0.85f, 0.20f, 0.0f, 1.0f);
+                add_stalker_box(s_stalker_verts, shield_m, glm::vec3(0.38f, 0.32f, 0.08f), glm::vec4(0.24f, 0.22f, 0.20f, 1.0f), shield_mat);
+            }
+
+            // Void Drifter: Translucent bioluminescent bell & trailing fringes
+            if (is_drifter) {
+                for (int t_idx = 0; t_idx < 4; ++t_idx) {
+                    float angle = static_cast<float>(t_idx) * 1.57f + s.glow_phase * 0.8f;
+                    float tx = std::cos(angle) * 0.18f;
+                    float tz = std::sin(angle) * 0.18f;
+                    float sway = std::sin(s.glow_phase * 2.5f + t_idx) * 0.06f;
+                    glm::mat4 tendril_m = glm::translate(base_model, glm::vec3(tx + sway, 0.06f, tz));
+                    add_stalker_box(s_stalker_verts, tendril_m, glm::vec3(0.025f, 0.24f, 0.025f), eye_color, eye_mat);
+                }
+            }
         }
 
         // F. Piercing Bioluminescent Compound Eyes

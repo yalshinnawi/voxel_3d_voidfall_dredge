@@ -54,6 +54,7 @@ struct BreakParticle {
     float gravity{16.0f};    // Downward gravity acceleration (negative = buoyant float)
     float drag{1.5f};        // Velocity damping
     float size_growth{0.0f}; // Expansion over lifetime (for vapor/smoke)
+    float emissive{0.0f};
 };
 
 class Renderer {
@@ -91,11 +92,15 @@ public:
     void spawn_radiation_glimmer(const glm::vec3& block_pos, int count = 2);
     void spawn_lava_embers(const glm::vec3& block_pos, int count = 2);
     void spawn_water_mist(const glm::vec3& block_pos, int count = 2);
+    void spawn_barrel_smoke(const glm::vec3& pos, const glm::vec3& dir, int count = 3);
     size_t active_particle_count() const { return m_particles.size(); }
     const std::vector<BreakParticle>& particles() const { return m_particles; }
 
     void render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id = 1);
     void render_placed_charge(const glm::ivec3& block_pos, const glm::ivec3& normal, float time);
+    void render_flares(const std::vector<struct ChemicalFlare>& flares, float time);
+    void render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float time);
+    void spawn_fireball(const glm::vec3& center, int count = 24);
     void update_particles(float dt);
     void render_particles();
 

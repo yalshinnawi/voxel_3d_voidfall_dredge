@@ -23,6 +23,8 @@
 #include "../entities/dynamic_debris.hpp"
 #include "../audio/audio_engine.hpp"
 #include "../systems/audio_system.hpp"
+#include "../systems/mission_system.hpp"
+#include "../entities/flare.hpp"
 #include "save_system.hpp"
 #include <vector>
 #include <memory>
@@ -76,6 +78,8 @@ public:
     const std::string& active_save_file() const { return m_active_save_file; }
     bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.capture_level_shapes; }
     AudioEngine* audio() { return m_audio.get(); }
+    const MissionSystem& mission() const { return m_mission; }
+    MissionSystem& mission_mut() { return m_mission; }
 
 private:
     void init_systems();
@@ -137,6 +141,8 @@ private:
     PlayerInventory m_inventory;
     SkillMatrix m_skills;
     SurveyingSystem m_surveying;
+    MissionSystem m_mission;
+    float m_muzzle_flash_timer{0.0f};
     int m_holdout_stage{0};
 
     uint32_t m_current_tick{0};

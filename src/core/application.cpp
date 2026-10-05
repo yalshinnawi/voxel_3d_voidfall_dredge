@@ -167,6 +167,32 @@ void Application::init_systems() {
         m_noise_meter.add_reload_sound(m_player->position());
     });
 
+    m_player->set_on_flare_thrown([this](const glm::vec3& origin, const glm::vec3& dir, CharacterClass cls) {
+        FlareManager::instance().spawn_flare(origin, dir, cls);
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::TacticalOvercharge, origin, 1.0f);
+        }
+        if (m_hud) {
+            m_hud->show_warning("CHEMICAL FLARE DEPLOYED (60s ILLUMINATION)", 2.0f);
+        }
+    });
+
+    m_mission.set_on_notification([this](const std::string& msg, float dur) {
+        if (m_hud) m_hud->show_warning(msg, dur);
+    });
+    m_mission.set_on_gas_ignited([this](const glm::vec3& center, float rad) {
+        if (m_renderer) {
+            m_renderer->spawn_fireball(center, 32);
+        }
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::ExplosiveBlast, center, 1.0f);
+        }
+        m_noise_meter.add_demolition_sound(center, true);
+        if (m_player && glm::distance(m_player->position(), center) < rad * 1.5f) {
+            m_player->add_trauma(0.35f);
+        }
+    });
+
     m_player->set_on_damage_source([this](float dmg, PlayerController::DamageSource source) {
         float flash_intensity = std::clamp(dmg * 0.025f + 0.45f, 0.45f, 0.95f);
         if (source == PlayerController::DamageSource::Radiation) {
@@ -420,14 +446,18 @@ void Application::start_expedition(int level) {
     m_burrowers.reset();
     m_spawn_mgr.reset(level, m_player->position());
     CarcassManager::instance().clear();
+    FlareManager::instance().reset();
+    m_player->clear_breadcrumbs();
+    m_mission.reset(level);
+    m_mission.embed_precursor_vault(*m_world, level);
     m_spawn_mgr.set_on_dust_burst([this](const glm::vec3& pos, const glm::vec3& normal) {
         if (m_renderer) {
-            m_renderer->spawn_break_particles(pos, glm::ivec3(glm::round(normal)), MAT_FRACTURED_GRANITE);
+            m_renderer->spawn_burrow_particles(pos, normal, MAT_FRACTURED_GRANITE, 10);
         }
     });
     m_spawn_mgr.set_on_audio_cue([this](const glm::vec3& pos) {
         if (m_audio) {
-            m_audio->play_sound_3d(SoundCue::StalkerChitter, pos, 1.0f);
+            m_audio->play_sound_3d(SoundCue::MonsterDigging, pos, 1.0f);
         }
     });
     m_plasma_bolts.clear();
@@ -452,13 +482,22 @@ void Application::start_expedition(int level) {
                            static_cast<float>(rooms[i].floor_y) + 1.2f,
                            static_cast<float>(rooms[i].center.z));
             m_stalkers.spawn_ambient_stalker(rpos, *m_world);
-        if (level >= 2 && (i % 2 == 0)) {
+            if (level >= 2 && (i % 2 == 0)) {
                 // Secondary prowling predator in larger hazard chambers
                 m_stalkers.spawn_ambient_stalker(rpos + glm::vec3(3.5f, 0.0f, -3.5f), *m_world);
             }
             // Add a third stalker in deep sectors (5+)
             if (level >= 5 && (i % 3 == 0)) {
                 m_stalkers.spawn_ambient_stalker(rpos + glm::vec3(-2.5f, 0.0f, 4.0f), *m_world);
+            }
+
+            // Spawn Aerial Harasser Void Drifters hovering in high cavern ceilings
+            if (i % 3 == 1) {
+                glm::vec3 ceiling_pos(rpos.x, rpos.y + 7.5f, rpos.z);
+                m_stalkers.spawn_drifter(ceiling_pos);
+            } else if (level >= 2 && i % 3 == 2) {
+                // Spawn Heavy Carapace Breacher Chitin Goliath
+                m_stalkers.spawn_goliath(rpos);
             }
 
             // High-threat tactical ambush spawns based on room archetype — scale shooter accuracy with sector
@@ -528,6 +567,12 @@ void Application::setup_extraction_callbacks() {
     m_extraction->set_on_complete([this]() {
         m_expedition_success = true;
         if (m_audio) m_audio->play_sound_2d(SoundCue::EvacTouchdown, 1.0f);
+        if (m_mission.is_relic_retrieved()) {
+            m_user_profile.total_exp += m_mission.total_bonus_xp();
+            m_user_profile.total_titanium += m_mission.total_bonus_titanium();
+            VF_LOG_INFO("MissionSystem", "Extraction bonus awarded: +" << m_mission.total_bonus_xp()
+                        << " EXP, +" << m_mission.total_bonus_titanium() << " Titanium Cores!");
+        }
         m_inventory.finalize_run(m_selected_level, true); // Safe evac!
         TransitionState(GameState::Debrief);
         m_window->set_cursor_locked(false);
@@ -717,9 +762,19 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_audio->play_sound_3d(cue, glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), 1.0f);
     }
 
-    // Authoritative Anchored Island BFS Cave-in Solver
+    // Drilling into porous bio-gas voxels creates a lingering green fume hazard cloud
+    if (mat == MAT_GAS || mat == MAT_TOXIC_GAS) {
+        if (m_renderer) {
+            m_renderer->spawn_toxic_gas_cloud(glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), 5);
+        }
+        if (m_hud) {
+            m_hud->show_warning("TOXIC BIO-GAS POCKET BREACHED!", 2.5f);
+        }
+    }
+
+    // Authoritative Anchored Island BFS Cave-in Solver (Bounded 48 voxels max search depth)
     if (m_config.is_host) {
-        auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 512);
+        auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 48);
         for (const auto& island : unanchored) {
             uint32_t did = m_next_debris_id++;
             glm::vec3 vel(0.0f, -1.5f, 0.0f);
@@ -872,6 +927,12 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
     if (m_renderer) {
         m_renderer->trigger_dust_kickup(is_micro ? 2.5f : 3.8f);
     }
+
+    // Check if blast breaches sealed Precursor Vault Bulkhead door (Secondary Objective)
+    m_mission.check_satchel_vault_breach(*m_world, blast_origin, is_micro ? 2.5f : 4.5f);
+
+    // Check if blast ignites nearby porous bio-gas pocket in a controlled fireball
+    m_mission.ignite_gas_pocket(*m_world, blast_origin, is_micro ? 3.5f : 6.0f, m_stalkers);
 
     if (is_micro) {
         // Surgical 1x1x3 (or 1x1x4 for Demolitionist) directional blast that removes a tunnel without destroying adjacent fragile ore
@@ -1272,6 +1333,12 @@ void Application::fixed_tick(float dt) {
 
     for (auto it = m_debris.begin(); it != m_debris.end();) {
         auto res = it->update(dt, *m_world, player_pos, covered_by_bulkhead);
+
+        // Falling island blocks crush any subterranean monsters in downward trajectory
+        if (it->velocity().y < -3.0f) {
+            float crush_dmg = std::clamp(15.0f + std::abs(it->velocity().y) * 1.5f, 15.0f, 45.0f);
+            m_stalkers.damage_nearest(it->position(), 1.6f, crush_dmg);
+        }
 
         if (res.shattered) {
             m_renderer->spawn_break_particles(res.shatter_pos, glm::ivec3(0, 1, 0), res.shatter_mat);
@@ -1694,6 +1761,13 @@ void Application::fixed_tick(float dt) {
             case WeaponArchetype::NeedlerRailgun:  cue = SoundCue::RailgunFire; break;
         }
 
+        if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
+            m_muzzle_flash_timer = 0.05f;
+            if (m_renderer) {
+                m_renderer->spawn_barrel_smoke(m_player->eye_position() + m_player->forward() * 0.7f, m_player->forward(), 4);
+            }
+        }
+
         if (m_audio) {
             m_audio->play_sound_2d(cue, 0.85f);
         }
@@ -1725,10 +1799,18 @@ void Application::fixed_tick(float dt) {
             continue;
         }
 
-        // 1. Raycast / voxel collision against solid blocks
+        // Check if bolt passes through or strikes reactive bio-gas pocket
         int bx = static_cast<int>(std::floor(next_pos.x));
         int by = static_cast<int>(std::floor(next_pos.y));
         int bz = static_cast<int>(std::floor(next_pos.z));
+        Voxel air_v = m_world->get_voxel(bx, by, bz);
+        if (air_v.material_id == MAT_GAS || air_v.material_id == MAT_VOLATILE_SMOKE) {
+            bolt.active = false;
+            m_mission.ignite_gas_pocket(*m_world, next_pos, 4.5f, m_stalkers);
+            continue;
+        }
+
+        // 1. Raycast / voxel collision against solid blocks
         Voxel v = m_world->get_voxel(bx, by, bz);
         if (v.is_solid()) {
             bolt.active = false;
@@ -2549,6 +2631,19 @@ void Application::fixed_tick(float dt) {
 
     // 5. Stream chunks around player
     m_world->update(m_player->position(), 2);
+
+    // Chemical Flare simulation update
+    FlareManager::instance().update(dt, *m_world);
+
+    // Multi-stage mission system update
+    if (m_player) {
+        m_mission.update(dt, *m_world, m_player->position());
+    }
+
+    // Railgun muzzle flash decay
+    if (m_muzzle_flash_timer > 0.0f) {
+        m_muzzle_flash_timer = std::max(0.0f, m_muzzle_flash_timer - dt);
+    }
 }
 
 void Application::render(float dt) {
@@ -2757,6 +2852,27 @@ void Application::render(float dt) {
         added_stalker_lights++;
     }
 
+    // Needler Railgun Muzzle Flash point light (electric cyan, r = 3.5m)
+    if (m_muzzle_flash_timer > 0.0f && m_player) {
+        PointLight ml;
+        ml.position = m_player->eye_position() + m_player->forward() * 0.7f + m_player->right() * 0.2f - m_player->up() * 0.1f;
+        ml.color = glm::vec3(0.05f, 0.90f, 1.0f); // Electric cyan
+        ml.radius = 3.5f;
+        ml.intensity = 5.0f * (m_muzzle_flash_timer / 0.05f);
+        m_renderer->add_point_light(ml);
+    }
+
+    // Active Chemical Flare point lights (r = 16.0m omni-light colored by class)
+    for (const auto& f : FlareManager::instance().flares()) {
+        if (!f.is_alive()) continue;
+        PointLight fl;
+        fl.position = f.position + glm::vec3(0.0f, 0.25f, 0.0f);
+        fl.color = f.color;
+        fl.radius = f.light_radius;
+        fl.intensity = 4.2f * std::clamp(f.lifetime / 2.0f, 0.0f, 1.0f);
+        m_renderer->add_point_light(fl);
+    }
+
     // Begin HDR Frame
     m_renderer->begin_frame(view, proj, cam_pos);
 
@@ -2822,6 +2938,14 @@ void Application::render(float dt) {
     // Render Placed Explosive Charge (Demolition Stun / Breach Distraction)
     if (m_player && m_player->has_placed_charge()) {
         m_renderer->render_placed_charge(m_player->placed_charge_pos(), m_player->placed_charge_normal(), static_cast<float>(glfwGetTime()));
+    }
+
+    // Render Throwable Chemical Flares
+    m_renderer->render_flares(FlareManager::instance().flares(), static_cast<float>(glfwGetTime()));
+
+    // Render Navigation Breadcrumb Trail Markers
+    if (m_player) {
+        m_renderer->render_breadcrumbs(m_player->breadcrumbs(), static_cast<float>(glfwGetTime()));
     }
 
     // Render 3D World Break, Burrow, and Dust Particles with scene depth testing
@@ -2992,7 +3116,7 @@ void Application::render(float dt) {
             if (m_hud) {
                 m_hud->set_death_sequence(m_death_sequence, m_death_timer, DEATH_SEQUENCE_DURATION);
             }
-            m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj, &m_surveying, &m_noise_meter, m_stalkers.active_count(), &m_stalkers.stalkers(), &m_burrowers.burrowers());
+            m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj, &m_surveying, &m_noise_meter, m_stalkers.active_count(), &m_stalkers.stalkers(), &m_burrowers.burrowers(), &m_mission);
         }
     }
 

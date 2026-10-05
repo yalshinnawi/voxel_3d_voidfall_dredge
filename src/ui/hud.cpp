@@ -4,6 +4,7 @@
 #include "../ai/swarm_manager.hpp"
 #include "../entities/enemies/void_stalker.hpp"
 #include "../entities/enemies/seismic_burrower.hpp"
+#include "../systems/mission_system.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include "../include/font8x8.h"
@@ -844,7 +845,8 @@ void HUD::render(
     const NoiseMeter* noise_meter,
     int enemy_count,
     const std::vector<VoidStalker>* stalkers,
-    const std::vector<SeismicBurrower>* burrowers
+    const std::vector<SeismicBurrower>* burrowers,
+    const class MissionSystem* mission
 ) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -910,20 +912,49 @@ void HUD::render(
         // Center reticle notch (active heading indicator)
         draw_rect(cx - 1.0f, comp_y, 2.0f, comp_h, Typography::COLOR_AMBER);
 
-        // Extraction Beacon Waypoint Blip on Compass Ribbon
-        if (extraction.phase() == ExtractionPhase::BeaconDeployed || extraction.phase() == ExtractionPhase::PodLanded) {
-            glm::vec3 to_beacon = extraction.beacon_position() - player.position();
-            float b_angle = glm::degrees(std::atan2(to_beacon.x, -to_beacon.z));
-            float b_heading = std::fmod(b_angle + 360.0f, 360.0f);
-            float b_diff = b_heading - current_heading;
-            while (b_diff < -180.0f) b_diff += 360.0f;
-            while (b_diff > 180.0f) b_diff -= 360.0f;
+        // Extraction Beacon / Drop Pod Waypoint Blip with Euclidean Distance on Compass Ribbon
+        glm::vec3 to_beacon = extraction.beacon_position() - player.position();
+        float b_dist = glm::length(to_beacon);
+        float b_angle = glm::degrees(std::atan2(to_beacon.x, -to_beacon.z));
+        float b_heading = std::fmod(b_angle + 360.0f, 360.0f);
+        float b_diff = b_heading - current_heading;
+        while (b_diff < -180.0f) b_diff += 360.0f;
+        while (b_diff > 180.0f) b_diff -= 360.0f;
 
-            float clamped_diff = std::clamp(b_diff, -fov_range, fov_range);
-            float b_x = cx + (clamped_diff / fov_range) * (comp_w * 0.46f);
-            bool is_landed = (extraction.phase() == ExtractionPhase::PodLanded);
-            glm::vec4 b_col = is_landed ? Typography::COLOR_GREEN : Typography::COLOR_AMBER;
-            draw_rect(b_x - 2.0f, comp_y + 1.0f, 4.0f, comp_h - 2.0f, b_col);
+        float clamped_diff = std::clamp(b_diff, -fov_range, fov_range);
+        float b_x = cx + (clamped_diff / fov_range) * (comp_w * 0.46f);
+        bool is_landed = (extraction.phase() == ExtractionPhase::PodLanded);
+        glm::vec4 b_col = is_landed ? Typography::COLOR_GREEN : Typography::COLOR_AMBER;
+        draw_rect(b_x - 2.0f, comp_y + 1.0f, 4.0f, comp_h - 2.0f, b_col);
+
+        if (std::abs(b_diff) <= fov_range) {
+            std::string dist_str = std::to_string(static_cast<int>(b_dist)) + "m";
+            draw_text(dist_str, b_x - 6.0f * ui_scale, comp_y + comp_h + 1.0f, 0.70f * ui_scale, b_col);
+        }
+
+        // Discovered Voidite clusters and high-value mineral anomalies on Compass Ribbon
+        if (surveying) {
+            int shown_anomalies = 0;
+            for (const auto& sv : surveying->surveyed_voxels()) {
+                if (shown_anomalies >= 8) break;
+                if (sv.material_id == MAT_VOIDITE_CRYSTAL || sv.material_id == MAT_PRISMATIC_CRYSTAL) {
+                    glm::vec3 to_anom = glm::vec3(sv.pos.x + 0.5f, sv.pos.y + 0.5f, sv.pos.z + 0.5f) - player.position();
+                    float anom_angle = glm::degrees(std::atan2(to_anom.x, -to_anom.z));
+                    float anom_heading = std::fmod(anom_angle + 360.0f, 360.0f);
+                    float a_diff = anom_heading - current_heading;
+                    while (a_diff < -180.0f) a_diff += 360.0f;
+                    while (a_diff > 180.0f) a_diff -= 360.0f;
+
+                    if (std::abs(a_diff) <= fov_range) {
+                        float a_x = cx + (a_diff / fov_range) * (comp_w * 0.46f);
+                        glm::vec4 a_col = (sv.material_id == MAT_VOIDITE_CRYSTAL)
+                            ? glm::vec4(0.85f, 0.25f, 1.0f, 0.95f) // Voidite purple
+                            : glm::vec4(0.2f, 1.0f, 0.85f, 0.95f); // Prismatic crystal
+                        draw_rect(a_x - 1.5f, comp_y + 2.0f, 3.0f, comp_h - 4.0f, a_col);
+                        shown_anomalies++;
+                    }
+                }
+            }
         }
     }
 
@@ -1009,6 +1040,13 @@ void HUD::render(
     }
     float obj_font_h = FontRenderer::get_rendered_height(1.02f * ui_scale);
     draw_text(obj_str, hz_x + 12.0f * ui_scale, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, obj_col);
+
+    // Multi-Stage Secondary Objective readout
+    if (mission && !mission->get_secondary_objective_text().empty()) {
+        float sec_y = hz_y + hz_h + 3.0f * ui_scale;
+        draw_text(mission->get_secondary_objective_text(), hz_x + 12.0f * ui_scale, sec_y, 0.80f * ui_scale,
+                  mission->is_relic_retrieved() ? Typography::COLOR_GREEN : Typography::COLOR_AMBER);
+    }
 
     // Subtle vertical divider line
     float div_x = hz_x + hz_w * 0.45f;   // 45% left / 55% right — prevents long objective text overflow
@@ -1326,6 +1364,23 @@ void HUD::render(
             draw_rect(mid_x + 4.0f, ab_y + ab_h - 2.0f, (half_w - 8.0f) * t_prog, 2.0f, Typography::COLOR_AMBER * 0.7f);
         }
         draw_text_centered_fitted(c_str, mid_x, ab_y, half_w, ab_h, 0.92f * ui_scale, c_col);
+
+        // 6a. Throwable Chemical Flare Status: [G] FLARE: X/3
+        float flare_y = ab_y - 20.0f * ui_scale;
+        float flare_w = ab_w;
+        float flare_h = 16.0f * ui_scale;
+        std::string fl_str = "[G] CHEMICAL FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
+        if (player.flare_count() < player.max_flares()) {
+            char fl_buf[32];
+            std::snprintf(fl_buf, sizeof(fl_buf), " (%.0fs)", player.flare_recharge_timer());
+            fl_str += fl_buf;
+        }
+        glm::vec4 fl_col = (player.flare_count() > 0) ? Typography::COLOR_CYAN : Typography::COLOR_AMBER;
+        draw_pill(ab_x, flare_y, flare_w, flare_h, glm::vec4(0.02f, 0.04f, 0.07f, 0.85f));
+        draw_text_centered_fitted(fl_str, ab_x, flare_y, flare_w, flare_h, 0.78f * ui_scale, fl_col);
+        if (player.flare_count() < player.max_flares()) {
+            draw_rect(ab_x + 4.0f, flare_y + flare_h - 2.0f, (flare_w - 8.0f) * player.flare_recharge_progress(), 2.0f, Typography::COLOR_CYAN * 0.7f);
+        }
 
         // 6b. Brief Equipment Switch Toast (Appears briefly when equipping/switching weapon)
         if (m_tool_switch_toast_timer > 0.0f) {

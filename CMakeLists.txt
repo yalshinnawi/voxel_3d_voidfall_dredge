@@ -83,6 +83,8 @@ set(ENGINE_CORE_SOURCES
     src/ai/swarm_manager.cpp
     src/systems/stealth_system.cpp
     src/entities/carcass_manager.cpp
+    src/entities/flare.cpp
+    src/systems/mission_system.cpp
     src/graphics/animation_controller.cpp
     src/graphics/shader.cpp
     src/ui/hud.cpp
