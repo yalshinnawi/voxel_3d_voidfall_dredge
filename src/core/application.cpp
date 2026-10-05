@@ -448,6 +448,8 @@ void Application::start_expedition(int level) {
     CarcassManager::instance().clear();
     FlareManager::instance().reset();
     m_player->clear_breadcrumbs();
+    m_player->reset_insertion_shield(4.0f);
+    m_terrain_scanner.reset();
     m_mission.reset(level);
     m_mission.embed_precursor_vault(*m_world, level);
     m_spawn_mgr.set_on_dust_burst([this](const glm::vec3& pos, const glm::vec3& normal) {
@@ -521,6 +523,20 @@ void Application::start_expedition(int level) {
                            static_cast<float>(rooms[room_idx].center.z));
             m_burrowers.spawn_burrower(bpos, 1.2f + b * 0.1f);
         }
+    }
+
+    // Populate active fauna placed by world generation
+    if (m_world) {
+        for (const auto& fauna : m_world->GetActiveEntities()) {
+            m_stalkers.spawn_roosting(fauna.pos, fauna.role);
+        }
+    }
+
+    // All pre-placed fauna must initialize in AIState::ROOSTING (dormant on walls/ceilings)
+    for (auto& s : m_stalkers.stalkers_mut()) {
+        s.state = StalkerState::Roosting;
+        s.state_timer = 0.0f;
+        s.velocity = glm::vec3(0.0f);
     }
 
     m_extraction = std::make_unique<ExtractionSystem>();
@@ -3117,6 +3133,12 @@ void Application::render(float dt) {
                 m_hud->set_death_sequence(m_death_sequence, m_death_timer, DEATH_SEQUENCE_DURATION);
             }
             m_hud->render(*m_player, *m_world, *m_hazard, *m_extraction, m_inventory, m_skills, m_selected_level, view, proj, &m_surveying, &m_noise_meter, m_stalkers.active_count(), &m_stalkers.stalkers(), &m_burrowers.burrowers(), &m_mission);
+
+            // 3D Holographic Terrain Scanner (TAB Minimap Projection)
+            if (m_terrain_scanner.fold_progress() > 0.001f) {
+                m_terrain_scanner.refresh_geometry(*m_world, m_player->position(), *m_player, *m_extraction, m_mission, static_cast<float>(glfwGetTime()));
+                m_terrain_scanner.render(m_window->width(), m_window->height(), m_player->position(), m_player->yaw());
+            }
         }
     }
 
@@ -3354,9 +3376,22 @@ void Application::run() {
 
             static bool tab_down_last = false;
             bool tab_now = m_window->is_key_down(GLFW_KEY_TAB);
-            if (tab_now && !tab_down_last) {
-                m_window->set_cursor_locked(!m_window->is_cursor_locked());
+            m_player->set_combat_inputs_paused(tab_now);
+            if (tab_now) {
+                if (m_window->is_cursor_locked()) {
+                    m_window->set_cursor_locked(false);
+                }
+                glm::dvec2 m_delta = m_window->get_cursor_delta();
+                bool mouse_drag = m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT) || m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
+                m_terrain_scanner.update(static_cast<float>(frame_time), true, m_player->position(),
+                                         static_cast<float>(m_delta.x), static_cast<float>(m_delta.y), mouse_drag);
+            } else {
+                if (!m_window->is_cursor_locked()) {
+                    m_window->set_cursor_locked(true);
+                }
+                m_terrain_scanner.update(static_cast<float>(frame_time), false, m_player->position(), 0.0f, 0.0f, false);
             }
+            tab_down_last = tab_now;
             m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
             m_player->handle_input(*m_window, static_cast<float>(frame_time));
         }

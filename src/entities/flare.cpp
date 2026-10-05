@@ -33,17 +33,17 @@ void FlareManager::spawn_flare(const glm::vec3& origin, const glm::vec3& forward
     f.owner_class = cls;
     f.color = get_flare_color(cls);
     f.position = origin + forward_dir * 0.4f;
-    f.velocity = glm::normalize(forward_dir + glm::vec3(0.0f, 0.15f, 0.0f)) * 17.5f + glm::vec3(0.0f, 2.5f, 0.0f);
+    f.velocity = forward_dir * 16.0f + glm::vec3(0.0f, 3.5f, 0.0f);
     f.lifetime = 60.0f;
     f.max_lifetime = 60.0f;
-    f.light_radius = 16.0f;
+    f.light_radius = 18.0f;
     f.is_grounded = false;
     m_flares.push_back(f);
 }
 
 void FlareManager::update(float dt, const World& world) {
     const float gravity = 14.0f;
-    const float restitution = 0.45f;
+    const float restitution = 0.55f;
     const float friction = 0.82f;
 
     for (auto it = m_flares.begin(); it != m_flares.end();) {

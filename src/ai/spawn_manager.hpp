@@ -26,8 +26,19 @@ struct TelegraphedSpawn {
 class SpawnManager {
 public:
     static constexpr float LEVEL_1_GRACE_PERIOD  = 45.0f; // Seconds before combat spawns trigger
-    static constexpr float SAFE_EXCLUSION_RADIUS = 24.0f; // Minimum Euclidean meters from insertion pod
+    static constexpr float SPAWN_SAFE_RADIUS     = 28.0f; // Minimum meters from insertion point
+    static constexpr float SAFE_EXCLUSION_RADIUS = 28.0f; // Minimum Euclidean meters from insertion pod
     static constexpr float EARLY_RAMP_DURATION   = 120.0f; // Minutes 0-2 threat cap window
+
+    static bool IsSpawnPointSafe(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos) {
+        return glm::distance(candidatePos, playerSpawnPos) >= SPAWN_SAFE_RADIUS;
+    }
+
+    /// Enforces insertion quarantine sphere when picking runtime spawn points
+    glm::vec3 FindSpawnPoint(const glm::vec3& near_pos, const World& world, const glm::vec3& player_spawn_pos) const;
+    glm::vec3 FindSpawnPoint(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos) const {
+        return FindSpawnPoint(candidatePos, *(const World*)nullptr, playerSpawnPos);
+    }
 
     SpawnManager();
 

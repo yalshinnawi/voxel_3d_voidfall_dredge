@@ -64,6 +64,16 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3& pos, float difficulty_mu
     m_stalkers.push_back(s);
 }
 
+void VoidStalkerManager::spawn_roosting(const glm::vec3& pos, StalkerRole role, float difficulty_mul) {
+    spawn_stalker(pos, difficulty_mul, role);
+    if (!m_stalkers.empty()) {
+        auto& s = m_stalkers.back();
+        s.state = StalkerState::Roosting;
+        s.state_timer = 0.0f;
+        s.velocity = glm::vec3(0.0f);
+    }
+}
+
 void VoidStalkerManager::spawn_ambient_stalker(const glm::vec3& room_center, const World& world) {
     static std::mt19937 rng(1337);
     std::uniform_real_distribution<float> offset_dist(-5.5f, 5.5f);
@@ -93,6 +103,8 @@ void VoidStalkerManager::spawn_ambient_stalker(const glm::vec3& room_center, con
     StalkerRole role = (m_next_id % 2 == 0) ? StalkerRole::Shooter : StalkerRole::Melee;
     spawn_stalker(spawn_pos, 1.0f, role);
     if (!m_stalkers.empty()) {
+        m_stalkers.back().state = StalkerState::Idle;
+        m_stalkers.back().state_timer = 0.0f;
         m_stalkers.back().patrol_anchor = spawn_pos;
         m_stalkers.back().patrol_waypoint = spawn_pos;
     }
@@ -298,7 +310,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         float dist_to_player = glm::distance(s.position, player_pos);
 
         // Spore / Void Drifter (Aerial Harasser): 3D Boid ceiling flight & noise dive-bombs
-        if (s.role == StalkerRole::VoidDrifter) {
+        if (s.role == StalkerRole::VoidDrifter && s.state != StalkerState::Roosting) {
             bool is_noisy = (noise_level_pct >= 60.0f) || (noise_level_pct >= 0.60f && noise_level_pct <= 1.0f);
             bool should_dive = is_noisy || s.is_pursuing_attacker || s.is_dive_bombing;
             if (should_dive) {
@@ -505,6 +517,63 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         // === FSM State Transitions & Behavior ===
         switch (s.state) {
 
+        case StalkerState::Roosting: {
+            // Roosting enemies remain stationary clamped to surfaces
+            s.velocity = glm::vec3(0.0f);
+
+            bool directly_damaged = (s.is_pursuing_attacker || s.hp < s.max_hp || s.hit_flash_timer > 0.0f);
+            bool loud_sound = (best_sound && best_sound->intensity > 65.0f);
+            bool loud_drilling = (player_is_drilling && dist_to_player <= 28.0f);
+            bool acoustic_spike = loud_sound || loud_drilling || (noise_level_pct >= 65.0f);
+
+            if (directly_damaged) {
+                // Disturbed by direct player fire -> immediately enter combat
+                s.state = StalkerState::Stalking;
+                s.state_timer = 0.0f;
+                s.target_pos = player_pos;
+                s.is_pursuing_attacker = true;
+                s.just_spotted_player = true;
+                result.any_spotted = true;
+                VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " DISTURBED by direct weapon damage!");
+                break;
+            }
+
+            if (acoustic_spike) {
+                // Disturbed early by loud acoustic spike (> 65 dB, e.g. satchel blast or drilling)
+                s.state = StalkerState::Investigating;
+                s.state_timer = 0.0f;
+                s.investigation_timer = 4.0f;
+                s.target_pos = (best_sound ? best_sound->position : player_pos);
+                VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " DISTURBED by acoustic spike (> 65 dB) -> Investigating!");
+                break;
+            }
+
+            // During the first 8.0 seconds of an expedition, ignore visual detection and subtle noise
+            if (s.state_timer < 8.0f) {
+                break;
+            }
+
+            // After 8.0 seconds: sound > 30 dB or line of sight can wake it up
+            if (can_see_player) {
+                s.state = StalkerState::Stalking;
+                s.state_timer = 0.0f;
+                s.target_pos = player_pos;
+                s.just_spotted_player = true;
+                result.any_spotted = true;
+                break;
+            }
+
+            if (s.has_sound_target && s.just_heard_sound && (best_sound && best_sound->intensity > 30.0f)) {
+                s.state = StalkerState::Investigating;
+                s.state_timer = 0.0f;
+                s.investigation_timer = 3.5f;
+                s.target_pos = s.investigation_target;
+                break;
+            }
+
+            break;
+        }
+
         case StalkerState::Idle: {
             // Priority 1: Visual contact -> Switch to combat tracking (Stalking or Ambush Lunge)
             if (can_see_player) {
@@ -573,7 +642,21 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         }
 
         case StalkerState::Investigating: {
-            // Priority 1: Gained direct Line of Sight to player while searching -> Attack!
+            bool sound_spike_70db = (best_sound && best_sound->intensity > 70.0f);
+            // If direct line-of-sight to player is established within 16m (or sound > 70 dB), screech and enter PURSUIT
+            if ((can_see_player && dist_to_player <= 16.0f) || sound_spike_70db) {
+                s.just_screeched = true;
+                result.any_screech = true;
+                s.state = StalkerState::Stalking; // AIState::PURSUIT
+                s.state_timer = 0.0f;
+                s.target_pos = player_pos;
+                s.just_spotted_player = true;
+                result.any_spotted = true;
+                VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " SCREECHES and enters PURSUIT!");
+                break;
+            }
+
+            // Gained line of sight beyond 16m -> Attack/stalk
             if (can_see_player) {
                 if (dist_to_player < 4.2f && s.role == StalkerRole::Melee) {
                     s.state = StalkerState::Lunging;
@@ -772,11 +855,21 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 float burst = 0.50f + 0.70f * std::abs(std::sin(s.walk_cycle * 0.45f));
                 float weave = 0.45f * std::sin(s.walk_cycle * 1.2f);
                 glm::vec3 move_xz = glm::normalize(dir_xz + perp * weave);
-                s.velocity.x = move_xz.x * effective_move_speed * burst;
-                s.velocity.z = move_xz.z * effective_move_speed * burst;
+
+                // Swarm Boid Separation: Add pairwise repulsive forces
+                std::vector<glm::vec3> other_pos;
+                for (const auto& other : m_stalkers) {
+                    if (&other != &s && other.state != StalkerState::Dead && other.state != StalkerState::Dying && other.state != StalkerState::Roosting) {
+                        other_pos.push_back(other.position);
+                    }
+                }
+                glm::vec3 f_sep = AberrantAI::calculate_swarm_separation(s.position, other_pos, 5.0f, 8.0f);
+
+                s.velocity.x = move_xz.x * effective_move_speed * burst + f_sep.x;
+                s.velocity.z = move_xz.z * effective_move_speed * burst + f_sep.z;
                 s.position.x += s.velocity.x * dt;
                 s.position.z += s.velocity.z * dt;
-                s.yaw = std::atan2(move_xz.x, move_xz.z);
+                s.yaw = std::atan2(s.velocity.x, s.velocity.z);
             }
 
             // Transition to circling at mid-range (6.8m to 12.0m) if in open sight
@@ -1260,8 +1353,19 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
         glm::vec3 shot_dir = (glm::length(nearest->position - origin) > 0.001f)
             ? glm::normalize(nearest->position - origin)
             : glm::vec3(0.0f, 0.0f, 1.0f);
-        float knockback_mag = (nearest->role == StalkerRole::ChitinGoliath) ? 1.0f : 3.5f;
-        nearest->velocity += shot_dir * knockback_mag;
+
+        if (effective_damage > 20.0f) {
+            nearest->stun_timer = 0.25f; // 0.25s flinch animation
+            nearest->velocity += shot_dir * 6.5f;
+        } else {
+            float knockback_mag = (nearest->role == StalkerRole::ChitinGoliath) ? 1.0f : 3.5f;
+            nearest->velocity += shot_dir * knockback_mag;
+        }
+
+        if (nearest->state == StalkerState::Roosting) {
+            nearest->state = StalkerState::Stalking;
+            nearest->is_pursuing_attacker = true;
+        }
 
         nearest->hp -= effective_damage;
         if (nearest->hp <= 0.0f) {

@@ -210,4 +210,21 @@ void AberrantAI::cancel_forward_momentum(
     }
 }
 
+glm::vec3 AberrantAI::calculate_swarm_separation(
+    const glm::vec3& self_pos,
+    const std::vector<glm::vec3>& other_positions,
+    float max_distance,
+    float separation_force)
+{
+    glm::vec3 total_force(0.0f);
+    for (const auto& other_pos : other_positions) {
+        glm::vec3 diff = self_pos - other_pos;
+        float dist_sq = glm::dot(diff, diff);
+        if (dist_sq > 0.0001f && dist_sq < max_distance * max_distance) {
+            total_force += (diff / dist_sq) * separation_force;
+        }
+    }
+    return total_force;
+}
+
 } // namespace Voidfall

@@ -46,6 +46,22 @@ public:
     static constexpr float STEALTH_SOUND_INTENSITY_MUL = 0.35f;
     static constexpr float STEALTH_SOUND_RADIUS_MUL    = 0.45f;
 
+    /// Standard Action Acoustic Impulses & Hearing Radii
+    static constexpr float NOISE_CROUCH_WALK_DB       = 0.0f;
+    static constexpr float NOISE_CROUCH_WALK_RADIUS   = 0.0f;
+
+    static constexpr float NOISE_NORMAL_WALK_DB       = 15.0f;
+    static constexpr float NOISE_NORMAL_WALK_RADIUS   = 10.0f;
+
+    static constexpr float NOISE_MINING_DRILL_DB      = 55.0f;
+    static constexpr float NOISE_MINING_DRILL_RADIUS  = 28.0f;
+
+    static constexpr float NOISE_WEAPON_FIRING_DB     = 75.0f;
+    static constexpr float NOISE_WEAPON_FIRING_RADIUS = 40.0f;
+
+    static constexpr float NOISE_SATCHEL_BLAST_DB     = 100.0f;
+    static constexpr float NOISE_SATCHEL_BLAST_RADIUS = 64.0f;
+
     /// Sneak attack critical hit multiplier on unalerted enemies (3.0x damage)
     static constexpr float SNEAK_ATTACK_CRIT_MULTIPLIER = 3.0f;
 

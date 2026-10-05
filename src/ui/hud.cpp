@@ -1526,6 +1526,65 @@ void HUD::render(
     // 8b. OVERHEAD ENEMY AWARENESS INDICATORS (Yellow '!' for Investigating, Red Triangle for Engaged/Attack)
     render_enemy_awareness_markers(view, proj, player.position(), world, stalkers, burrowers);
 
+    // 8c. 3D-to-2D PRECURSOR VAULT BULKHEAD WAYPOINT DIAMOND (When within 35m)
+    if (mission && mission->vault().exists && !mission->is_relic_retrieved()) {
+        glm::vec3 v_world = (mission->vault().state == VaultObjectiveState::Breached)
+            ? (glm::vec3(mission->vault().relic_pos) + glm::vec3(0.5f, 1.0f, 0.5f))
+            : (glm::vec3(mission->vault().door_pos) + glm::vec3(0.5f, 1.5f, 0.5f));
+
+        float dist = glm::distance(player.position(), v_world);
+        if (dist <= 35.0f) {
+            glm::vec4 clip = proj * view * glm::vec4(v_world, 1.0f);
+            if (clip.w > 0.1f) {
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                if (ndc.z >= -1.0f && ndc.z <= 1.0f) {
+                    float sx = (ndc.x * 0.5f + 0.5f) * static_cast<float>(m_width);
+                    float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(m_height);
+
+                    float pulse = 0.5f + 0.5f * std::sin(m_total_time * 5.0f);
+                    glm::vec4 marker_col = (mission->vault().state == VaultObjectiveState::Breached)
+                        ? glm::vec4(0.0f, 0.95f, 1.0f, 1.0f) // Cyan for unlocked relic
+                        : glm::mix(glm::vec4(0.0f, 0.85f, 1.0f, 1.0f), glm::vec4(1.0f, 0.75f, 0.1f, 1.0f), pulse);
+
+                    float d_sz = (16.0f + 2.0f * std::sin(m_total_time * 6.0f)) * ui_scale;
+                    glm::mat4 ui_proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+
+                    glm::mat4 d_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                    d_model = glm::rotate(d_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                    d_model = glm::scale(d_model, glm::vec3(d_sz, d_sz, 1.0f));
+                    d_model = glm::translate(d_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+
+                    m_ui_shader.use();
+                    m_ui_shader.set_mat4("uProjection", ui_proj * d_model);
+                    m_ui_shader.set_vec4("uColor", marker_col);
+
+                    glBindVertexArray(m_rect_vao);
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+                    float in_sz = d_sz - 4.0f * ui_scale;
+                    glm::mat4 in_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                    in_model = glm::rotate(in_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                    in_model = glm::scale(in_model, glm::vec3(in_sz, in_sz, 1.0f));
+                    in_model = glm::translate(in_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+                    m_ui_shader.set_mat4("uProjection", ui_proj * in_model);
+                    m_ui_shader.set_vec4("uColor", glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                    glBindVertexArray(0);
+
+                    std::string label = (mission->vault().state == VaultObjectiveState::Breached)
+                        ? ("[!] PRECURSOR RELIC [" + std::to_string(static_cast<int>(dist)) + "m] [INTERACT TO SECURE]")
+                        : ("[!] VAULT BULKHEAD [" + std::to_string(static_cast<int>(dist)) + "m] [BREACH WITH SATCHEL CHARGE]");
+
+                    float text_w = FontRenderer::get_rendered_width(label, 1.0f * ui_scale);
+                    float pill_w = text_w + 16.0f * ui_scale;
+                    float pill_h = 22.0f * ui_scale;
+                    draw_pill(sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, marker_col * 0.6f);
+                    draw_text_centered(label, sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, 1.0f * ui_scale, marker_col);
+                }
+            }
+        }
+    }
+
     // 9. ON-SCREEN TACTICAL NOTIFICATIONS STACK (Guaranteed non-overlapping, semantic colors)
     for (size_t i = 0; i < top_stack.notifications.size() && i < m_notifications.size(); ++i) {
         const auto& notif = m_notifications[i];
@@ -1723,6 +1782,32 @@ void HUD::render(
             draw_pill(d_x - d_rad, d_y - d_rad, d_rad * 2.0f, d_rad * 2.0f, dark_blood);
             draw_rect(d_x - d_rad * 0.6f, d_y - d_rad * 0.6f, d_rad * 1.2f, d_rad * 1.2f, core_blood);
         }
+    }
+
+    // 10e. INSERTION POD RECALL MATRIX SHIELD VIGNETTE
+    if (player.has_insertion_shield()) {
+        float s_alpha = std::clamp(player.insertion_shield_timer() / 4.0f, 0.0f, 1.0f);
+        float b_thick = 24.0f * ui_scale;
+        glm::vec4 shield_cyan(0.0f, 0.95f, 1.0f, s_alpha * 0.75f);
+        // Low-opacity cyan wash across full screen
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.0f, 0.80f, 1.0f, s_alpha * 0.12f));
+        // Outer cybernetic cyan border
+        draw_rect(0.0f, 0.0f, sw, b_thick, shield_cyan);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, shield_cyan);
+        draw_rect(0.0f, 0.0f, b_thick, sh, shield_cyan);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, shield_cyan);
+
+        // Active Recall Matrix Banner
+        std::string matrix_text = "// DROP POD RECALL MATRIX ACTIVE //";
+        float mat_scale = 1.15f * ui_scale;
+        float mat_w = FontRenderer::get_rendered_width(matrix_text, mat_scale);
+        float mat_box_w = mat_w + 32.0f * ui_scale;
+        float mat_box_h = 24.0f * ui_scale;
+        float mat_box_x = cx - mat_box_w * 0.5f;
+        float mat_box_y = 65.0f * ui_scale;
+        draw_rect(mat_box_x, mat_box_y, mat_box_w, mat_box_h, glm::vec4(0.02f, 0.08f, 0.14f, 0.85f * s_alpha));
+        draw_pill(mat_box_x, mat_box_y, mat_box_w, mat_box_h, shield_cyan);
+        draw_text_centered(matrix_text, mat_box_x, mat_box_y, mat_box_w, mat_box_h, mat_scale, glm::vec4(0.0f, 0.95f, 1.0f, s_alpha));
     }
 
     // 11. MINIMAL CONTROLS HINT (Bottom Center, Clean & Unobtrusive - auto-fades after 6s)

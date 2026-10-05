@@ -2,6 +2,8 @@
 #include "chunk.hpp"
 #include "greedy_mesher.hpp"
 #include "level_shapes.hpp"
+#include "../entities/enemies/void_stalker.hpp"
+#include "../entities/vault_door.hpp"
 #include <unordered_map>
 #include <memory>
 #include <vector>
@@ -25,6 +27,14 @@ struct RaycastHit {
     float distance{0.0f};
 };
 
+struct FaunaEntity {
+    glm::vec3 pos{0.0f};
+    glm::vec3 position{0.0f};
+    AIState state{AIState::ROOSTING};
+    StalkerRole role{StalkerRole::Melee};
+    uint32_t id{0};
+};
+
 class World {
 public:
     explicit World(uint32_t seed = 1337);
@@ -38,6 +48,18 @@ public:
     void generate_world(int sector_index, uint32_t seed = 0);
     void set_level_generator(std::unique_ptr<LevelGenerator> gen);
     int sector_index() const { return m_sector_index; }
+
+    void PopulateFauna();
+    void GenerateSectorStructures(int sector_index);
+
+    const std::vector<FaunaEntity>& GetActiveEntities() const { return m_active_entities; }
+    std::vector<FaunaEntity>& GetActiveEntities() { return m_active_entities; }
+
+    const glm::vec3& GetPlayerSpawnPos() const { return m_playerSpawnPos; }
+    void SetPlayerSpawnPos(const glm::vec3& p) { m_playerSpawnPos = p; }
+
+    const VaultDoor& vault_door() const { return m_vault_door; }
+    VaultDoor& vault_door_mut() { return m_vault_door; }
 
     Chunk* get_chunk(const ChunkPos& pos);
     const Chunk* get_chunk(const ChunkPos& pos) const;
@@ -104,6 +126,10 @@ private:
     std::vector<glm::ivec3> m_toxic_gas_sources;
     std::vector<glm::ivec3> m_lava_sources;
     std::vector<glm::ivec3> m_aquifer_sources;
+
+    glm::vec3 m_playerSpawnPos{16.0f, 5.1f, 16.0f};
+    std::vector<FaunaEntity> m_active_entities;
+    VaultDoor m_vault_door;
 
     // Background meshing thread pool
     std::vector<std::thread> m_workers;

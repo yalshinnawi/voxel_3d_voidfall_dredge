@@ -116,9 +116,9 @@ void MissionSystem::update(float /*dt*/, World& world, const glm::vec3& player_p
             world.set_voxel(m_vault.relic_pos.x, m_vault.relic_pos.y, m_vault.relic_pos.z, Voxel{MAT_AIR, 0}, true);
             m_vault.state = VaultObjectiveState::RelicRetrieved;
             if (m_on_notification) {
-                m_on_notification("RELIC HYPER-CORE RETRIEVED! (+350 EXP, +5 TITANIUM CORES ON EXTRACTION)", 5.0f);
+                m_on_notification("PRECURSOR RELIC SECURED (+350 EXP, +5 TITANIUM CORES)", 5.0f);
             }
-            VF_LOG_INFO("MissionSystem", "Relic Hyper-Core collected by player!");
+            VF_LOG_INFO("MissionSystem", "Precursor Relic secured by player!");
         }
     }
 }

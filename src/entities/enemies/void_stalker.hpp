@@ -23,11 +23,15 @@ enum class StalkerState : uint8_t {
     Burrowing,      // Escaping by burrowing through cavern rock walls
     Dying,          // Death animation collapse & tumbling before carcass transition
     Dead,           // Marked for removal
+    Roosting,       // Initial dormant state, clamped to surfaces with closed eyes/retracted limbs
 
     // Uppercase aliases for compatibility with AIState enum conventions
     IDLE = Idle,
+    ROOSTING = Roosting,
     INVESTIGATING = Investigating,
     STALKING = Stalking,
+    PURSUIT = Stalking,
+    Pursuit = Stalking,
     CIRCLING = Circling,
     LUNGING = Lunging,
     STUNNED = Stunned,
@@ -199,13 +203,17 @@ struct VoidStalker {
     /// Returns true if the stalker is completely unalerted (unaware of player / sounds)
     bool is_unalerted() const {
         return !is_dead() && !is_dying() &&
-               state == StalkerState::Idle &&
+               (state == StalkerState::Idle || state == StalkerState::Roosting) &&
                !is_pursuing_attacker &&
                !has_sound_target;
     }
 
     /// Returns the active emissive eye/core color based on behavioral state and role
     glm::vec4 get_eye_color() const {
+        if (state == StalkerState::Roosting) {
+            return glm::vec4(0.05f, 0.05f, 0.05f, 0.2f); // Dormant closed eyes
+        }
+
         if (state == StalkerState::Stunned) {
             return glm::vec4(0.2f, 0.90f, 1.0f, 1.0f); // Electric cyan shock
         }
@@ -266,6 +274,7 @@ public:
     void spawn_melee(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::Melee); }
     void spawn_drifter(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::VoidDrifter); }
     void spawn_goliath(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::ChitinGoliath); }
+    void spawn_roosting(const glm::vec3& pos, StalkerRole role = StalkerRole::Melee, float difficulty_mul = 1.0f);
 
     /// Spawn an ambient prowling stalker inhabiting a distant cavern chamber
     void spawn_ambient_stalker(const glm::vec3& room_center, const World& world);

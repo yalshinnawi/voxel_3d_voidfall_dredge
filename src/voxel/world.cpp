@@ -87,9 +87,119 @@ void World::generate_world(int sector_index, uint32_t seed) {
         }
     }
 
+    m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
+    GenerateSectorStructures(sector_index);
+    PopulateFauna();
+
     for (const auto& pos : to_mesh) {
         queue_chunk_for_meshing(pos);
     }
+}
+
+constexpr float SPAWN_SAFE_RADIUS = 28.0f; // Minimum meters from insertion point
+
+static inline bool IsSpawnPointSafe(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos) {
+    return glm::distance(candidatePos, playerSpawnPos) >= SPAWN_SAFE_RADIUS;
+}
+
+void World::PopulateFauna() {
+    m_active_entities.clear();
+    if (!m_level_gen) return;
+
+    const auto& rooms = m_level_gen->rooms();
+    uint32_t next_id = 1;
+
+    for (size_t i = 1; i < rooms.size(); ++i) { // Room 0 is player insertion arrival bay
+        glm::vec3 room_center(
+            static_cast<float>(rooms[i].center.x),
+            static_cast<float>(rooms[i].floor_y) + 1.2f,
+            static_cast<float>(rooms[i].center.z)
+        );
+
+        // Insertion Quarantine Sphere: discard candidate spawn point within 28m
+        if (!IsSpawnPointSafe(room_center, m_playerSpawnPos)) {
+            continue;
+        }
+
+        StalkerRole role = (i % 2 == 0) ? StalkerRole::Melee : StalkerRole::Shooter;
+        FaunaEntity e;
+        e.id = next_id++;
+        e.pos = room_center;
+        e.position = room_center;
+        e.state = AIState::ROOSTING;
+        e.role = role;
+        m_active_entities.push_back(e);
+
+        if (m_sector_index >= 2 && (i % 2 == 0)) {
+            glm::vec3 sec_pos = room_center + glm::vec3(3.5f, 0.0f, -3.5f);
+            if (IsSpawnPointSafe(sec_pos, m_playerSpawnPos)) {
+                FaunaEntity e2;
+                e2.id = next_id++;
+                e2.pos = sec_pos;
+                e2.position = sec_pos;
+                e2.state = AIState::ROOSTING;
+                e2.role = StalkerRole::Melee;
+                m_active_entities.push_back(e2);
+            }
+        }
+
+        if (i % 3 == 1) {
+            glm::vec3 drifter_pos = room_center + glm::vec3(0.0f, 7.5f, 0.0f);
+            if (IsSpawnPointSafe(drifter_pos, m_playerSpawnPos)) {
+                FaunaEntity ed;
+                ed.id = next_id++;
+                ed.pos = drifter_pos;
+                ed.position = drifter_pos;
+                ed.state = AIState::ROOSTING;
+                ed.role = StalkerRole::VoidDrifter;
+                m_active_entities.push_back(ed);
+            }
+        }
+    }
+}
+
+void World::GenerateSectorStructures(int sector_index) {
+    bool should_generate = (sector_index >= 2) || ((m_seed % 100) < 30);
+    if (!should_generate) {
+        m_vault_door = VaultDoor{};
+        return;
+    }
+
+    // Anchor vault into deep rock
+    int vx = (sector_index == 1) ? 46 : (sector_index == 2 ? 40 : 48);
+    int vy = 12;
+    int vz = (sector_index == 1) ? 44 : (sector_index == 2 ? 48 : 38);
+
+    // 7x5x7 sealed chamber:
+    // x in [vx - 3, vx + 3] (7 blocks wide)
+    // y in [vy, vy + 4] (5 blocks high)
+    // z in [vz - 3, vz + 3] (7 blocks deep)
+    for (int x = vx - 3; x <= vx + 3; ++x) {
+        for (int y = vy; y <= vy + 4; ++y) {
+            for (int z = vz - 3; z <= vz + 3; ++z) {
+                bool is_boundary = (x == vx - 3 || x == vx + 3 ||
+                                    y == vy || y == vy + 4 ||
+                                    z == vz - 3 || z == vz + 3);
+                if (is_boundary) {
+                    set_voxel(x, y, z, Voxel{MAT_PRECURSOR_STONE, VOXEL_FLAG_ANCHORED}, false);
+                } else {
+                    set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+    }
+
+    // Sealed by 3-block-tall MAT_VAULT_DOOR at entry portal
+    glm::ivec3 door_pos(vx - 3, vy + 1, vz);
+    for (int dy = 0; dy < 3; ++dy) {
+        set_voxel(door_pos.x, door_pos.y + dy, door_pos.z, Voxel{MAT_VAULT_DOOR, VOXEL_FLAG_ANCHORED}, false);
+    }
+    m_vault_door = VaultDoor(door_pos, 3);
+    m_vault_door.set_relic_position(glm::ivec3(vx, vy + 1, vz));
+
+    // Floating Relic Hyper-Core Pedestal in vault center
+    set_voxel(vx, vy, vz, Voxel{MAT_PRECURSOR_STONE, VOXEL_FLAG_ANCHORED}, false);
+    set_voxel(vx, vy + 1, vz, Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE}, false);
 }
 
 void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
@@ -129,6 +239,10 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
             }
         }
     }
+
+    m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
+    GenerateSectorStructures(m_sector_index);
+    PopulateFauna();
 
     for (const auto& pos : to_mesh) {
         queue_chunk_for_meshing(pos);

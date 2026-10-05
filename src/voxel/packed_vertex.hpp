@@ -41,6 +41,7 @@ constexpr uint8_t MAT_TOXIC_GAS = MAT_GAS;
 constexpr uint8_t MAT_MOLTEN_MAGMA = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_LAVA = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_SPIKES = MAT_OBSIDIAN_SPIKES;
+constexpr uint8_t MAT_PRECURSOR_STONE = MAT_DREDGE_BEDROCK;
 
 // Voxel bit flags
 constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;

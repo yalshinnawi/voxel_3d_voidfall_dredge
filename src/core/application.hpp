@@ -25,6 +25,7 @@
 #include "../systems/audio_system.hpp"
 #include "../systems/mission_system.hpp"
 #include "../entities/flare.hpp"
+#include "../ui/terrain_scanner.hpp"
 #include "save_system.hpp"
 #include <vector>
 #include <memory>
@@ -142,6 +143,7 @@ private:
     SkillMatrix m_skills;
     SurveyingSystem m_surveying;
     MissionSystem m_mission;
+    TerrainScanner m_terrain_scanner;
     float m_muzzle_flash_timer{0.0f};
     int m_holdout_stage{0};
 

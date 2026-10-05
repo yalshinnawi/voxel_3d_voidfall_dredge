@@ -210,6 +210,13 @@ public:
     float take_damage(float dmg, bool is_falling_debris = false);
     DamageSource last_damage_source() const { return m_last_damage_source; }
 
+    bool has_insertion_shield() const { return m_insertionShieldTimer > 0.0f; }
+    float insertion_shield_timer() const { return m_insertionShieldTimer; }
+    void reset_insertion_shield(float duration = 4.0f) { m_insertionShieldTimer = duration; }
+
+    void set_combat_inputs_paused(bool paused) { m_combat_inputs_paused = paused; }
+    bool are_combat_inputs_paused() const { return m_combat_inputs_paused; }
+
     void set_reel_speed_multiplier(float mul) { m_reel_speed_multiplier = mul; }
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
     void set_drill_speed_multiplier(float mul) { m_drill_speed_multiplier = mul; }
@@ -426,6 +433,10 @@ private:
     bool m_is_in_lava{false};
     bool m_is_in_spikes{false};
     float m_spike_damage_timer{0.0f};
+
+    // Insertion Pod Breach Shielding & Combat Pause
+    float m_insertionShieldTimer{0.0f};
+    bool m_combat_inputs_paused{false};
 
 public:
     void apply_fall_impact(float impact_speed);

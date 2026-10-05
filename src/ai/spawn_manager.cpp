@@ -47,9 +47,8 @@ bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candid
         return false;
     }
 
-    // Enforce Safe Spawn Exclusion Radius: No enemies within 24m of insertion pod
-    float dist_to_pod = glm::distance(candidate_pos, m_insertion_pod_pos);
-    if (dist_to_pod < SAFE_EXCLUSION_RADIUS) {
+    // Enforce Safe Spawn Exclusion Radius: No enemies within 28m of insertion pod
+    if (!IsSpawnPointSafe(candidate_pos, m_insertion_pod_pos)) {
         return false;
     }
 
@@ -58,6 +57,19 @@ bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candid
     }
 
     return true;
+}
+
+glm::vec3 SpawnManager::FindSpawnPoint(const glm::vec3& near_pos, const World& /*world*/, const glm::vec3& player_spawn_pos) const {
+    if (IsSpawnPointSafe(near_pos, player_spawn_pos)) {
+        return near_pos;
+    }
+    glm::vec3 dir = near_pos - player_spawn_pos;
+    if (glm::length(dir) < 0.001f) {
+        dir = glm::vec3(1.0f, 0.0f, 0.0f);
+    } else {
+        dir = glm::normalize(dir);
+    }
+    return player_spawn_pos + dir * (SPAWN_SAFE_RADIUS + 4.0f);
 }
 
 bool SpawnManager::request_spawn(const glm::vec3& pos, const glm::vec3& normal, StalkerRole role) {

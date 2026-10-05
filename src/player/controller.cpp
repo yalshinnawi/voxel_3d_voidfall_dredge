@@ -47,18 +47,20 @@ RaycastHit PlayerController::get_look_target(const World& world, float max_dist)
 void PlayerController::handle_input(const Window& window, float dt) {
     m_current_buttons = 0;
 
-    // 1. Mouse Look
-    glm::dvec2 mouse_delta = const_cast<Window&>(window).get_cursor_delta();
-    m_yaw   += static_cast<float>(mouse_delta.x) * m_mouse_sensitivity;
-    m_pitch += static_cast<float>(mouse_delta.y) * m_mouse_sensitivity;
-    m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
-    update_camera_vectors();
+    // 1. Mouse Look (Paused while orbiting 3D holographic terrain scanner)
+    if (!m_combat_inputs_paused) {
+        glm::dvec2 mouse_delta = const_cast<Window&>(window).get_cursor_delta();
+        m_yaw   += static_cast<float>(mouse_delta.x) * m_mouse_sensitivity;
+        m_pitch += static_cast<float>(mouse_delta.y) * m_mouse_sensitivity;
+        m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
+        update_camera_vectors();
 
-    // Tool selection: 1 (Mining Drill), 2 (Combat Weapon), 3/4 (Demolition Charge)
-    // Bulkhead is placed directly with Right Click while on Mining Drill (bulk tool slot removed)
-    if (window.is_key_down(GLFW_KEY_1)) set_active_tool(ToolSlot::MiningDrill);
-    if (window.is_key_down(GLFW_KEY_2)) set_active_tool(ToolSlot::CombatWeapon);
-    if (window.is_key_down(GLFW_KEY_3) || window.is_key_down(GLFW_KEY_4)) set_active_tool(ToolSlot::DemolitionCharge);
+        // Tool selection: 1 (Mining Drill), 2 (Combat Weapon), 3/4 (Demolition Charge)
+        // Bulkhead is placed directly with Right Click while on Mining Drill (bulk tool slot removed)
+        if (window.is_key_down(GLFW_KEY_1)) set_active_tool(ToolSlot::MiningDrill);
+        if (window.is_key_down(GLFW_KEY_2)) set_active_tool(ToolSlot::CombatWeapon);
+        if (window.is_key_down(GLFW_KEY_3) || window.is_key_down(GLFW_KEY_4)) set_active_tool(ToolSlot::DemolitionCharge);
+    }
 
     // Mouse scroll wheel tool cycling: scroll down -> next weapon, scroll up -> prev weapon
     double scroll_y = const_cast<Window&>(window).get_scroll_delta_y();
@@ -199,8 +201,8 @@ void PlayerController::handle_input(const Window& window, float dt) {
     // Slot 3 (Demolition Shaped Charges):
     //   LMB: Deploy shaped charge on targeted surface.
     //   RMB: Detonate placed shaped charges (blasts 3x1x1 tunnel).
-    bool lmb = window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
-    bool rmb = window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
+    bool lmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+    bool rmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
 
     if (m_active_tool == ToolSlot::MiningDrill) {
         if (lmb) m_current_buttons |= BTN_MINE_DRILL;
@@ -286,6 +288,8 @@ void PlayerController::throw_flare() {
 
 void PlayerController::update_physics(float dt, World& world) {
     m_current_world = &world;
+
+    m_insertionShieldTimer = std::max(0.0f, m_insertionShieldTimer - dt);
 
     // Flare recharge progression (15.0s per flare, capacity 3)
     if (m_flare_count < MAX_FLARES) {
@@ -1196,7 +1200,10 @@ void PlayerController::MineBlock(float dt, World& world) {
         glm::vec3 eye = eye_position();
         RaycastHit hit = world.raycast(eye, m_front, 6.5f);
 
-        if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK) {
+        if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK &&
+            hit.voxel.material_id != MAT_REINFORCED_VAULT_DOOR &&
+            hit.voxel.material_id != MAT_VAULT_DOOR &&
+            hit.voxel.material_id != MAT_PRECURSOR_STONE) {
             if (hit.block_pos != m_target_block) {
                 m_target_block = hit.block_pos;
                 m_target_normal = hit.normal;
@@ -1300,6 +1307,10 @@ void PlayerController::apply_attributes_and_upgrades(CharacterClass cls, const U
 }
 
 float PlayerController::take_damage(float dmg, DamageSource source) {
+    if (m_insertionShieldTimer > 0.0f) {
+        return 0.0f; // Suit takes 0 damage while Drop Pod Recall Matrix is active
+    }
+
     if (source == DamageSource::FallingDebris) {
         float reduction = debris_damage_reduction();
         dmg *= (1.0f - reduction);

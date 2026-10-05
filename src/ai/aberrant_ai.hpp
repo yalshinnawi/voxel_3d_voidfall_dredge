@@ -92,6 +92,15 @@ public:
         glm::vec3& velocity,
         const glm::vec3& attack_dir
     );
+
+    /// Calculates pairwise repulsive separation force between swarm entities:
+    /// F_sep = sum((pos_i - pos_j) / ||pos_i - pos_j||^2) * 8.0f
+    static glm::vec3 calculate_swarm_separation(
+        const glm::vec3& self_pos,
+        const std::vector<glm::vec3>& other_positions,
+        float max_distance = 6.0f,
+        float separation_force = 8.0f
+    );
 };
 
 } // namespace Voidfall
