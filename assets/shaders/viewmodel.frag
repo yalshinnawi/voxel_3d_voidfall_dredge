@@ -33,8 +33,8 @@ void main() {
     vec3 albedo = vColor.rgb;
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     
-    // Ambient with subtle cave hue
-    vec3 ambient = vec3(0.18, 0.20, 0.25) * albedo * ao;
+    // Ambient with subtle suit-visor reflectance
+    vec3 ambient = vec3(0.05, 0.06, 0.08) * albedo * ao;
     vec3 diffuse = (diff1 * 0.65 + diff2 + diff_head) * albedo * (1.0 - metallic) * ao;
     
     // Specular highlight: GGX / Blinn-Phong microfacet response

@@ -77,10 +77,44 @@ def run_model_capture():
         print("[!] Engine error during model capture:")
         print(err)
         return False
-
     return True
 
+CANONICAL_MODEL_FILES = {
+    "README.md",
+    "enemy_void_stalker.png",
+    "enemy_seismic_burrower.png",
+    "system_viewmodel_drill.png",
+    "character_demolitionist_kaelen.png",
+    "character_vanguard_rhodes.png",
+    "character_scout_vesper.png",
+    "models_roster_showcase.jpg",
+    "models_roster_showcase.png",
+    "models_visual_report.json",
+    "models_visual_report.txt",
+}
+
+def prune_stale_model_artifacts():
+    """Ensure that only up-to-date showcase models and reports exist in docs/models/"""
+    if not os.path.exists(MODELS_DIR):
+        return 0
+    removed = 0
+    for fname in os.listdir(MODELS_DIR):
+        if fname not in CANONICAL_MODEL_FILES:
+            fpath = os.path.join(MODELS_DIR, fname)
+            if os.path.isfile(fpath):
+                try:
+                    os.remove(fpath)
+                    removed += 1
+                    print(f"  [-] Pruned stale/untracked model asset: {fname}")
+                except OSError as e:
+                    print(f"  [!] Failed to prune {fname}: {e}")
+    if removed > 0:
+        print(f"  [+] Automatically pruned {removed} stale file(s) from {MODELS_DIR}/.")
+    return removed
+
 def verify_and_report():
+    prune_stale_model_artifacts()
+
     print("\n" + "=" * 80)
     print("  VOIDFALL DREDGE - 3D ROSTER & MODEL VISUAL ASSET CATALOG")
     print("=" * 80)

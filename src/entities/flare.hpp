@@ -16,7 +16,7 @@ struct ChemicalFlare {
     CharacterClass owner_class{CharacterClass::Scout};
     float lifetime{60.0f};
     float max_lifetime{60.0f};
-    float light_radius{16.0f};
+    float light_radius{22.0f};
     bool is_grounded{false};
 
     bool is_alive() const { return lifetime > 0.0f; }

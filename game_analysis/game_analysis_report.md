@@ -88,7 +88,7 @@ During the 40-second beacon countdown, defensive holdout waves escalate:
 | **Dedicated Firearm** | **Magma Scattergun** (Buckshot) | **Plasma Carbine** (Auto-Recharge) | **Needler Railgun** (Sniper Penetrator) |
 | **Max Ammo** | 6 | **16** ⭐ | 8 |
 | **Damage / Shot** | **37.5 dmg** (5 x 7.5) | 22.0 dmg | **42.0 dmg** ⭐ |
-| **Tactical Ability** | Concussion Blast (3x3x3) | Fortress Barricade (+15 HP) | Kinetic Dash & Sonar Stun |
+| **Tactical Ability** | Concussion Blast (3x3x3) | Kinetic Repulsor Field (+25 HP, Stun, Repel) | Kinetic Dash & Sonar Stun |
 | **Max Carry Weight** | 60 kg | **85 kg** ⭐ | 42 kg 🔻 |
 | **Fall Dmg Reduction** | 0% | **50%** ⭐ | 0% |
 

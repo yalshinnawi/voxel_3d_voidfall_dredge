@@ -71,7 +71,8 @@ enum class SoundCue : uint16_t {
     Land,                  // Kinetic boot impact thud
     SonarPulse,            // Surveying acoustic echolocation sweep with cavern reverb
     ExplosiveBlast,        // Demolition shaped-charge concussive blast
-    TacticalBarricade,     // Vanguard deployable fortress hiss and anchor
+    TacticalRepulsor,      // Vanguard kinetic repulsor pulse and magnetic discharge
+    TacticalBarricade = TacticalRepulsor, // Backwards compatibility alias
     TacticalOvercharge,    // Scout kinetic dash sonic release
 
     // ── Interface & Audio Feedback ──
@@ -109,6 +110,9 @@ enum class SoundCue : uint16_t {
     EnemyFleshHit,         // Visceral flesh tearing / claw laceration impact on player from alien attack
     DebrisArmorImpact,     // Crashing stone rubble & armor deflecting heavy falling debris
     CritHit,               // High-impact sneak attack / critical strike sound cue (crunch punch + resonant ring)
+    JetpackLoop,           // Exo-suit rocket hover thruster continuous combustion burn
+    GrappleFire,           // Pneumatic grapple anchor launch & cable shoot
+    GrappleReel,           // Electric motorized winch cable tension reel
 
     Count
 };
@@ -285,6 +289,8 @@ public:
 
     /// Modulate active continuous sounds
     void set_drill_active(bool active, float progress = 0.0f, const glm::vec3& pos = glm::vec3(0.0f));
+    void set_thruster_active(bool active, const glm::vec3& pos = glm::vec3(0.0f));
+    void set_grapple_active(bool active, bool reeling = false, const glm::vec3& pos = glm::vec3(0.0f));
     void set_ambient_intensity(float intensity);
     void set_hazard_phase(int phase);
     void set_seismic_rumble(float intensity);
@@ -403,6 +409,10 @@ private:
     bool m_drill_active{false};
     float m_drill_progress{0.0f};
     glm::vec3 m_drill_pos{0.0f};
+    bool m_thruster_active{false};
+    glm::vec3 m_thruster_pos{0.0f};
+    bool m_grapple_reeling{false};
+    glm::vec3 m_grapple_pos{0.0f};
     float m_ambient_intensity{0.5f};
     int m_current_sector{1};
     int m_current_room_type{-1};

@@ -130,11 +130,24 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         int mask_idx = x[u] + x[v] * CHUNK_SIZE;
                         mask[mask_idx].visible = false;
 
-                        if (!is_face_visible(chunk, get_neighbor, x[0], x[1], x[2], x[0] + q[0], x[1] + q[1], x[2] + q[2])) {
+                        Voxel current = chunk.get_voxel(x[0], x[1], x[2]);
+                        if (!current.is_solid()) {
                             continue;
                         }
 
-                        Voxel current = sample_voxel(chunk, get_neighbor, x[0], x[1], x[2]);
+                        int nx = x[0] + q[0];
+                        int ny = x[1] + q[1];
+                        int nz = x[2] + q[2];
+                        if (Chunk::in_bounds(nx, ny, nz)) {
+                            if (chunk.get_voxel(nx, ny, nz).is_solid()) {
+                                continue;
+                            }
+                        } else {
+                            if (sample_voxel(chunk, get_neighbor, nx, ny, nz).is_solid()) {
+                                continue;
+                            }
+                        }
+
                         mask[mask_idx].visible = true;
                         mask[mask_idx].voxel = current;
 

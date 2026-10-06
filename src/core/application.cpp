@@ -4,6 +4,8 @@
 #include "application.hpp"
 #include "logger.hpp"
 #include "screenshot.hpp"
+#include "../graphics/particle_system.hpp"
+#include "../ui/debrief_menu.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -35,13 +37,28 @@ inline std::string get_relative_direction_str(const glm::vec3& player_pos, float
 
 } // namespace
 
+static Application* s_app_instance = nullptr;
+
+Application* Application::instance() {
+    return s_app_instance;
+}
+
+void Application::LaunchSector(int sector_index) {
+    m_selected_level = sector_index;
+    start_expedition(m_selected_level);
+}
+
 Application::Application(const AppConfig& config)
     : m_config(config)
 {
+    s_app_instance = this;
     init_systems();
 }
 
 Application::~Application() {
+    if (s_app_instance == this) {
+        s_app_instance = nullptr;
+    }
 }
 
 void Application::TransitionState(GameState newState) {
@@ -87,6 +104,13 @@ void Application::init_systems() {
 
     // 2. Renderer & First-Person Viewmodel
     m_renderer = std::make_unique<Renderer>(m_window->width(), m_window->height());
+    ParticleSystem::SetRenderer(m_renderer.get());
+    DebriefMenu::SetRedeployHandler([this](int sector) {
+        LaunchSector(sector);
+    });
+    DebriefMenu::SetReturnToHubHandler([this]() {
+        TransitionState(GameState::OrbitalHub);
+    });
     m_viewmodel = std::make_unique<ViewModel>();
     m_viewmodel->set_on_spark_callback([this](const glm::vec3& origin, const glm::vec3& dir) {
         if (m_renderer) {
@@ -174,6 +198,17 @@ void Application::init_systems() {
         }
         if (m_hud) {
             m_hud->show_warning("CHEMICAL FLARE DEPLOYED (60s ILLUMINATION)", 2.0f);
+        }
+    });
+
+    m_player->set_on_melee_shove([this](const glm::vec3& cam_pos, const glm::vec3& cam_dir) {
+        int hits = m_stalkers.apply_melee_shove(cam_pos, cam_dir, 2.5f, 0.65f, 15.0f);
+        m_player->add_trauma(0.15f);
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::BulkheadDismantle, cam_pos, 1.0f);
+        }
+        if (hits > 0 && m_hud) {
+            m_hud->trigger_hit_marker(false, 15.0f);
         }
     });
 
@@ -439,6 +474,9 @@ void Application::start_expedition(int level) {
         m_world->level_generator()->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     m_player->set_position(spawn_pos);
     m_player->clamp_to_surface(*m_world);
+    m_trauma = 0.0f;
+    m_player->set_trauma(0.0f);
+    m_player->set_velocity(glm::vec3(0.0f));
 
     // Reset systems
     m_noise_meter.reset();
@@ -493,11 +531,7 @@ void Application::start_expedition(int level) {
                 m_stalkers.spawn_ambient_stalker(rpos + glm::vec3(-2.5f, 0.0f, 4.0f), *m_world);
             }
 
-            // Spawn Aerial Harasser Void Drifters hovering in high cavern ceilings
-            if (i % 3 == 1) {
-                glm::vec3 ceiling_pos(rpos.x, rpos.y + 7.5f, rpos.z);
-                m_stalkers.spawn_drifter(ceiling_pos);
-            } else if (level >= 2 && i % 3 == 2) {
+            if (level >= 2 && (i % 3 == 2)) {
                 // Spawn Heavy Carapace Breacher Chitin Goliath
                 m_stalkers.spawn_goliath(rpos);
             }
@@ -571,6 +605,7 @@ void Application::start_expedition(int level) {
     m_aftershock_wave_timer = 0.0f;
     if (m_hud) {
         m_hud->set_death_sequence(false);
+        m_hud->SetContractorBriefing(true, 8.0f);
     }
 
     m_window->set_cursor_locked(true);
@@ -1023,31 +1058,56 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
         m_burrowers.damage_nearest(glm::vec3(center), 8.0f, 100.0f, true);
 
     } else if (cls == CharacterClass::Vanguard) {
-        // Fortress deployable barricade: 3 wide x 2 high barrier in front of player
-        if (m_hud) m_hud->show_warning("TACTICAL: FORTRESS BARRICADE DEPLOYED!", 2.5f);
+        // Kinetic Repulsor Field: omni-directional shockwave repelling enemies, deflecting debris, restoring suit integrity
+        if (m_hud) m_hud->show_warning("TACTICAL: KINETIC REPULSOR FIELD!", 2.5f);
         if (m_audio) {
-            m_audio->play_sound_3d(SoundCue::TacticalBarricade, pos, 1.0f);
+            m_audio->play_sound_3d(SoundCue::TacticalRepulsor, pos, 1.2f);
         }
-        glm::vec3 flat_dir = glm::normalize(glm::vec3(dir.x, 0.0f, dir.z));
-        if (glm::length(flat_dir) < 0.1f) flat_dir = glm::vec3(0.0f, 0.0f, -1.0f);
-        glm::vec3 side(-flat_dir.z, 0.0f, flat_dir.x);
 
-        glm::vec3 wall_center = pos + flat_dir * 1.8f;
-        int cy = static_cast<int>(std::floor(pos.y));
-
-        for (int s = -1; s <= 1; ++s) {
-            glm::vec3 col_pos = wall_center + side * static_cast<float>(s);
-            int cx = static_cast<int>(std::floor(col_pos.x));
-            int cz = static_cast<int>(std::floor(col_pos.z));
-            for (int y = cy; y <= cy + 1; ++y) {
-                Voxel cur = m_world->get_voxel(cx, y, cz);
-                if (cur.material_id == MAT_AIR) {
-                    m_world->set_voxel(cx, y, cz, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED}, true);
+        // 1. Omni-directional repulsor wave against Void Stalkers (repel + stun + damage)
+        const float repulsor_radius = 8.5f;
+        for (auto& s : m_stalkers.stalkers_mut()) {
+            if (s.state == StalkerState::Dead || s.state == StalkerState::Dying) continue;
+            float dist = glm::distance(s.position, pos);
+            if (dist < repulsor_radius) {
+                glm::vec3 push_dir = (dist > 0.001f) ? glm::normalize(s.position - pos) : glm::vec3(0.0f, 1.0f, 0.0f);
+                s.velocity += push_dir * 18.0f + glm::vec3(0.0f, 4.0f, 0.0f);
+                s.state = StalkerState::Stunned;
+                s.stun_timer = 2.0f;
+                s.state_timer = 0.0f;
+                s.hp = std::max(0.0f, s.hp - 40.0f);
+                if (s.hp <= 0.0f) {
+                    s.state = StalkerState::Dying;
+                    s.state_timer = 0.0f;
                 }
             }
         }
+
+        // 2. Stun and disrupt nearby Seismic Burrowers
+        m_burrowers.apply_stun(pos, repulsor_radius, 2.5f);
+        m_burrowers.damage_nearest(pos, repulsor_radius, 60.0f, false);
+
+        // 3. Deflect falling dynamic debris outward away from the Vanguard
+        for (auto& deb : m_debris) {
+            if (deb.is_destroyed()) continue;
+            float dist = glm::distance(deb.position(), pos);
+            if (dist < 10.0f) {
+                glm::vec3 repel_dir = (dist > 0.001f) ? glm::normalize(deb.position() - pos) : glm::vec3(0.0f, 1.0f, 0.0f);
+                repel_dir.y = std::max(repel_dir.y, 0.4f);
+                deb.apply_impulse(glm::normalize(repel_dir) * 16.0f);
+            }
+        }
+
+        // 4. Armored Stabilizer Recovery: clear trauma, restore 25 HP suit integrity
         m_player->set_trauma(0.0f);
-        m_player->set_health(m_player->health() + 15.0f);
+        m_player->set_health(std::min(m_player->health() + 25.0f, m_player->max_health()));
+        m_noise_meter.add_explosive_noise(12.0f);
+
+        // 5. Visual VFX: radial dust kickup & kinetic shockwave particles
+        if (m_renderer) {
+            m_renderer->trigger_dust_kickup(3.0f);
+            m_renderer->spawn_break_particles(pos + glm::vec3(0.0f, 0.5f, 0.0f), glm::ivec3(0, 1, 0), MAT_INDUSTRIAL_BULKHEAD);
+        }
 
     } else if (cls == CharacterClass::Scout) {
         // Kinetic Dash Overcharge
@@ -1237,6 +1297,10 @@ void Application::process_input(int key, int action) {
 
     if (key == GLFW_KEY_ESCAPE) {
         if (m_state == GameState::Gameplay) {
+            if (m_hud && m_hud->is_manual_briefing_open()) {
+                m_hud->dismiss_help_briefing();
+                return;
+            }
             TransitionState(GameState::Paused);
             m_window->set_cursor_locked(false);
         } else if (m_state == GameState::Paused) {
@@ -1260,6 +1324,21 @@ void Application::process_input(int key, int action) {
             m_window->toggle_fullscreen();
             if (m_hud) {
                 m_hud->show_warning(m_window->is_fullscreen() ? "DISPLAY: FULLSCREEN" : "DISPLAY: WINDOWED (MAXIMIZED)", 1.5f);
+            }
+        }
+    } else if (key == GLFW_KEY_I) {
+        if (m_state == GameState::Gameplay) {
+            TransitionState(GameState::Paused);
+            m_window->set_cursor_locked(false);
+            if (m_pause_menu) {
+                m_pause_menu->set_active_tab(PauseTab::Inventory);
+            }
+        } else if (m_state == GameState::Paused) {
+            if (m_pause_menu && m_pause_menu->active_tab() == PauseTab::Inventory) {
+                TransitionState(GameState::Gameplay);
+                m_window->set_cursor_locked(true);
+            } else if (m_pause_menu) {
+                m_pause_menu->set_active_tab(PauseTab::Inventory);
             }
         }
     } else if (key == GLFW_KEY_H || key == GLFW_KEY_F1) {
@@ -1526,12 +1605,28 @@ void Application::fixed_tick(float dt) {
     bool is_sprinting = (m_player->current_buttons() & BTN_SPRINT) != 0;
     m_noise_meter.add_movement_sound(m_player->position(), dt, is_sprinting, is_crouching, m_player->is_grounded() && is_moving);
 
-    if ((m_player->current_buttons() & BTN_THRUSTER) != 0) {
+    bool is_thruster_active = (m_player->current_buttons() & BTN_THRUSTER) != 0;
+    if (is_thruster_active) {
         m_noise_meter.add_jetpack_sound(m_player->position(), dt);
     }
-    if (m_player->grapple().active) {
-        bool is_reeling = (m_player->current_buttons() & BTN_GRAPPLE_REEL) != 0;
-        m_noise_meter.add_grapple_sound(m_player->position(), is_reeling);
+    if (m_audio) {
+        m_audio->set_thruster_active(is_thruster_active, m_player->position());
+    }
+
+    if (m_player->grapple().just_fired) {
+        m_noise_meter.add_grapple_fire_sound(m_player->position());
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::GrappleFire, m_player->position(), 0.70f);
+        }
+        m_player->grapple_mut().just_fired = false;
+    }
+
+    bool is_reeling = m_player->grapple().active && ((m_player->current_buttons() & BTN_GRAPPLE_REEL) != 0);
+    if (is_reeling) {
+        m_noise_meter.add_grapple_reel_sound(m_player->position(), dt);
+    }
+    if (m_audio) {
+        m_audio->set_grapple_active(m_player->grapple().active, is_reeling, m_player->position());
     }
 
     // Update active sound event lifetimes and noise meter decay
@@ -2702,7 +2797,7 @@ void Application::render(float dt) {
             view = glm::translate(view, glm::vec3(0.0f, slump_y, 0.0f));
         }
 
-        m_renderer->headlamp().position = m_player->position();
+        m_renderer->headlamp().position = m_player->eye_position();
         m_renderer->headlamp().direction = m_player->forward();
 
         // Atmospheric Headlamp Flicker under tectonic tremors or critical suit health
@@ -2732,7 +2827,11 @@ void Application::render(float dt) {
         m_renderer->headlamp().direction = glm::normalize(glm::vec3(16.0f, 18.0f, 16.0f) - cam_pos);
     }
 
-    glm::mat4 proj = Renderer::create_projection(m_window->aspect_ratio(), m_settings.fov);
+    float effective_fov = m_settings.fov;
+    if ((m_state == GameState::Gameplay || m_state == GameState::Paused) && m_player) {
+        effective_fov = m_player->current_fov(m_settings.fov);
+    }
+    glm::mat4 proj = Renderer::create_projection(m_window->aspect_ratio(), effective_fov);
 
     // Setup dynamic point lights (Cavern luminaries, extraction beacon rotating siren, hostile stalker eyes)
     m_renderer->clear_point_lights();
@@ -2878,14 +2977,14 @@ void Application::render(float dt) {
         m_renderer->add_point_light(ml);
     }
 
-    // Active Chemical Flare point lights (r = 16.0m omni-light colored by class)
+    // Active Chemical Flare point lights (r = 22.0m omni-light colored by class)
     for (const auto& f : FlareManager::instance().flares()) {
         if (!f.is_alive()) continue;
         PointLight fl;
         fl.position = f.position + glm::vec3(0.0f, 0.25f, 0.0f);
         fl.color = f.color;
         fl.radius = f.light_radius;
-        fl.intensity = 4.2f * std::clamp(f.lifetime / 2.0f, 0.0f, 1.0f);
+        fl.intensity = 5.2f * std::clamp(f.lifetime / 2.0f, 0.0f, 1.0f);
         m_renderer->add_point_light(fl);
     }
 
@@ -2984,6 +3083,9 @@ void Application::render(float dt) {
             (glm::vec3(m_player->target_block()) + glm::vec3(0.5f) + glm::vec3(m_player->target_normal()) * 0.5f) :
             (m_player->position() + m_player->forward() * 2.0f);
 
+        float horizontal_speed = glm::length(glm::vec2(m_player->velocity().x, m_player->velocity().z));
+        bool is_grounded = m_player->is_grounded();
+
         m_viewmodel->render(
             dt,
             aspect,
@@ -2995,7 +3097,13 @@ void Application::render(float dt) {
             m_player->is_crouching(),
             m_player->is_reloading(),
             m_player->reload_progress(),
-            m_player->has_placed_charge()
+            m_player->has_placed_charge(),
+            m_player->is_melee_shoving(),
+            horizontal_speed,
+            is_grounded,
+            m_player->melee_shove_progress(),
+            m_player->is_aiming(),
+            m_player->zoom_progress()
         );
     }
 
@@ -3051,7 +3159,11 @@ void Application::render(float dt) {
             if (m_expedition_success) {
                 m_selected_level = std::min(3, m_selected_level + 1);
             }
-            start_expedition(m_selected_level);
+            LaunchSector(m_selected_level);
+        } else if (action == DebriefAction::RedeployExpedition) {
+            SaveSystem::save_profile(m_user_profile, m_active_save_file);
+            // Retain selected sector index, reset mission runtime data, and launch immediately
+            LaunchSector(m_selected_level);
         } else if (action == DebriefAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             m_hub_ui->set_subview(MenuSubView::Main);
@@ -3065,6 +3177,7 @@ void Application::render(float dt) {
             m_expedition_time,
             m_inventory,
             m_settings,
+            m_user_profile.selected_class_id,
             mouse_x,
             mouse_y,
             mouse_clicked
@@ -3344,15 +3457,8 @@ void Application::run() {
             }
             b_down_last = b_now;
 
-            static bool h_down_last = false;
-            bool h_now = m_window->is_key_down(GLFW_KEY_H);
-            if (h_now && !h_down_last) {
-                m_renderer->headlamp().enabled = !m_renderer->headlamp().enabled;
-                if (m_hud) {
-                    m_hud->show_warning(m_renderer->headlamp().enabled ? "HEADLAMP: ACTIVE" : "HEADLAMP: DISABLED [BIOLUMINESCENT OBSERVATION MODE]", 2.0f);
-                }
-            }
-            h_down_last = h_now;
+            // Synchronize headlamp with player suit controller state (compact icon rendered in suit vitals)
+            m_renderer->headlamp().enabled = m_player->is_headlamp_on();
 
             static bool lbrk_down_last = false;
             bool lbrk_now = m_window->is_key_down(GLFW_KEY_LEFT_BRACKET);
@@ -3378,17 +3484,10 @@ void Application::run() {
             bool tab_now = m_window->is_key_down(GLFW_KEY_TAB);
             m_player->set_combat_inputs_paused(tab_now);
             if (tab_now) {
-                if (m_window->is_cursor_locked()) {
-                    m_window->set_cursor_locked(false);
-                }
                 glm::dvec2 m_delta = m_window->get_cursor_delta();
-                bool mouse_drag = m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT) || m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
                 m_terrain_scanner.update(static_cast<float>(frame_time), true, m_player->position(),
-                                         static_cast<float>(m_delta.x), static_cast<float>(m_delta.y), mouse_drag);
+                                         static_cast<float>(m_delta.x), static_cast<float>(m_delta.y), true);
             } else {
-                if (!m_window->is_cursor_locked()) {
-                    m_window->set_cursor_locked(true);
-                }
                 m_terrain_scanner.update(static_cast<float>(frame_time), false, m_player->position(), 0.0f, 0.0f, false);
             }
             tab_down_last = tab_now;
@@ -3553,6 +3652,15 @@ void Application::run() {
                 m_player->set_look_angles(0.0f, -15.0f);
                 m_world->update(m_player->position(), 2);
                 VisualTestHarness::instance().record_phase(4, "GAMEPLAY CAVERN", "screenshots/05_gameplay_cavern.png", m_window->width(), m_window->height());
+            }
+            // Frame 76: Toggle Contractor Field Manual Briefing via [H]
+            else if (m_auto_test_frame == 76) {
+                if (m_hud) m_hud->toggle_help_briefing();
+            }
+            // Frame 77: Capture Full Centered Operations Manual & Briefing Menu, then close via [H]
+            else if (m_auto_test_frame == 77) {
+                capture_screenshot_png("screenshots/05b_briefing_manual_h.png", m_window->width(), m_window->height());
+                if (m_hud) m_hud->toggle_help_briefing();
             }
             // Frames 80 to 105: Player mines the cavern rock directly in front with drill
             else if (m_auto_test_frame >= 80 && m_auto_test_frame <= 105) {

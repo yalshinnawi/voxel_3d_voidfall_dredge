@@ -1392,6 +1392,103 @@ TEST(EnemyAttackBloodSplatterAndFallDamageBoneCrackTest, BloodSplatterIsolationA
               << " (verified blood splatters on enemy attacks, zero blood splatters on fall damage or debris)" << std::endl;
 }
 
+// ─── TEST 18: WeaponZoomAndFireMechanicsTest ──────────────────────────────────
+void WeaponZoomAndFireMechanicsTest() {
+    std::cout << "[ RUN      ] WeaponZoomAndFireMechanicsTest" << std::endl;
+
+    PlayerController controller(glm::vec3(0.0f, 10.0f, 0.0f));
+
+    // 1. DEMOLITIONIST: Magma Scattergun (~1.28x zoom, 0.78 FOV multiplier)
+    controller.set_character_class(CharacterClass::Demolitionist);
+    controller.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_TRUE(controller.is_weapon_equipped());
+    ASSERT_EQ(controller.weapon_archetype(), WeaponArchetype::MagmaScattergun);
+    ASSERT_FALSE(controller.is_aiming());
+    ASSERT_EQ(controller.zoom_progress(), 0.0f);
+    ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
+
+    // Hold right click to aim / zoom
+    controller.set_aiming(true);
+    ASSERT_TRUE(controller.is_aiming());
+    // Step forward past ads_time (0.20s)
+    controller.Update(0.25f);
+    ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+    float expected_scatter_fov = 75.0f * 0.78f;
+    ASSERT_NEAR(controller.current_fov(75.0f), expected_scatter_fov, 0.1f);
+
+    // Test weapon firing while zoomed in (Scattergun fires 5 buckshot pellets)
+    std::vector<PlayerPlasmaBolt> bolts;
+    controller.set_drilling(true); // Simulates LMB fire button
+    bool fired = controller.try_fire_weapon(bolts, 0.016f);
+    ASSERT_TRUE(fired);
+    ASSERT_EQ(bolts.size(), 5);
+    ASSERT_TRUE(controller.is_aiming()); // Remains zoomed while discharging
+
+    // Release aim: smooth zoom reset back to 1.0
+    controller.set_aiming(false);
+    controller.Update(0.25f);
+    ASSERT_FALSE(controller.is_aiming());
+    ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
+    ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
+
+    // 2. VANGUARD: Plasma Carbine (~1.54x zoom, 0.65 FOV multiplier)
+    controller.set_character_class(CharacterClass::Vanguard);
+    controller.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_EQ(controller.weapon_archetype(), WeaponArchetype::PlasmaCarbine);
+    controller.set_aiming(true);
+    ASSERT_TRUE(controller.is_aiming());
+    controller.Update(0.22f);
+    ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+    float expected_carbine_fov = 75.0f * 0.65f;
+    ASSERT_NEAR(controller.current_fov(75.0f), expected_carbine_fov, 0.1f);
+
+    // Fire carbine while zoomed
+    bolts.clear();
+    fired = controller.try_fire_weapon(bolts, 0.016f);
+    ASSERT_TRUE(fired);
+    ASSERT_EQ(bolts.size(), 1);
+    ASSERT_TRUE(controller.is_aiming());
+
+    controller.set_aiming(false);
+    controller.Update(0.22f);
+    ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
+
+    // 3. SCOUT: Needler Railgun (~2.50x sniper marksman scope, 0.40 FOV multiplier)
+    controller.set_character_class(CharacterClass::Scout);
+    controller.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_EQ(controller.weapon_archetype(), WeaponArchetype::NeedlerRailgun);
+    controller.set_aiming(true);
+    ASSERT_TRUE(controller.is_aiming());
+    controller.Update(0.25f);
+    ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+    float expected_railgun_fov = 75.0f * 0.40f; // 30 degrees
+    ASSERT_NEAR(controller.current_fov(75.0f), expected_railgun_fov, 0.1f);
+
+    // Fire railgun while zoomed
+    bolts.clear();
+    fired = controller.try_fire_weapon(bolts, 0.016f);
+    ASSERT_TRUE(fired);
+    ASSERT_EQ(bolts.size(), 1);
+    ASSERT_TRUE(controller.is_aiming());
+
+    // 4. TOOL ISOLATION & SWITCHING: Non-weapons cannot zoom, switching cancels zoom
+    // Switch to Mining Drill while still aiming
+    controller.set_active_tool(ToolSlot::MiningDrill);
+    ASSERT_FALSE(controller.is_weapon_equipped());
+    ASSERT_FALSE(controller.is_aiming()); // Must immediately cancel
+    ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
+    ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
+
+    // Attempting to aim with Mining Drill or Demolition Charge produces zero zoom
+    controller.set_aiming(true);
+    ASSERT_FALSE(controller.is_aiming());
+    controller.Update(0.25f);
+    ASSERT_EQ(controller.zoom_progress(), 0.0f);
+    ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
+
+    std::cout << "[ OK ] WeaponZoomAndFireMechanicsTest (all 3 weapon archetypes zoom and shoot seamlessly)" << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -1414,9 +1511,10 @@ int main() {
     ExplosiveDistractionAndBulletTremorMechanicsTest();
     EnvironmentalHazardDamageAndTelegraphTest_HazardTraumaIsolationAndVisualTelegraphs();
     EnemyAttackBloodSplatterAndFallDamageBoneCrackTest_BloodSplatterIsolationAndFallBoneCrackMechanics();
+    WeaponZoomAndFireMechanicsTest();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 17 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 18 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_set>
 #include <cstdint>
+#include <string>
 #include <memory>
 
 namespace Voidfall {
@@ -18,17 +19,32 @@ struct ScannerLineVertex {
     glm::vec4 color;
 };
 
+struct Shape2DVertex {
+    glm::vec2 pos;
+    glm::vec4 color;
+};
+
+enum class CavernCellType : uint8_t {
+    Unexplored = 0,
+    SolidRock = 1,
+    CaveWallRim = 2,
+    CaveFloor = 3,
+    HazardFloor = 4,
+    ChasmDrop = 5
+};
+
 class TerrainScanner {
 public:
-    static constexpr int GRID_DIM = 48; // 48x48x48 local occupancy grid
-    static constexpr float SCAN_RANGE = 24.0f; // Half-extent in meters
+    static constexpr int MAP_MIN = -32;
+    static constexpr int MAP_MAX = 160;
+    static constexpr int MAP_SPAN = MAP_MAX - MAP_MIN; // 192
 
     TerrainScanner();
     ~TerrainScanner();
 
     void reset();
 
-    /// Update scanner folding animation, player exploration tracking, and mouse orbit
+    /// Update scanner folding animation, player exploration tracking, and mouse pan
     void update(float dt, bool tab_held, const glm::vec3& player_pos,
                 float mouse_dx, float mouse_dy, bool mouse_dragging);
 
@@ -36,44 +52,75 @@ public:
     bool is_active() const { return m_active; }
     float fold_progress() const { return m_fold_progress; }
 
-    /// Re-samples local cavern boundary voxels into wireframe contour line vertices
+    /// Re-samples local cavern boundary voxels into 2D map geometry
     void refresh_geometry(const World& world, const glm::vec3& player_pos,
                           const PlayerController& player,
                           const ExtractionSystem& extraction,
                           const MissionSystem& mission,
                           float total_time);
 
-    /// Renders the 3D holographic projection with additive blending & depth test disabled
+    /// Renders the 2D tactical cartography map overlay
     void render(int screen_width, int screen_height, const glm::vec3& player_pos, float player_yaw);
 
-    // Orbit controls
+    // Orbit / Pan compatibility controls
     float orbit_yaw() const { return m_orbit_yaw; }
     float orbit_pitch() const { return m_orbit_pitch; }
     float orbit_distance() const { return m_orbit_distance; }
 
+    // Map discovery query
+    float discovery_percentage() const;
+
 private:
     void init_buffers();
-    void add_wire_box(std::vector<ScannerLineVertex>& lines, const glm::vec3& min_p, const glm::vec3& max_p, const glm::vec4& color);
-    void add_directional_cone(std::vector<ScannerLineVertex>& lines, const glm::vec3& apex, const glm::vec3& dir, float height, float radius, const glm::vec4& color);
-    void add_lock_icon(std::vector<ScannerLineVertex>& lines, const glm::vec3& center, float size, const glm::vec4& color);
-    void add_anchor_marker(std::vector<ScannerLineVertex>& lines, const glm::vec3& center, float size, const glm::vec4& color);
+    void init_font();
+    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, float alpha);
 
     bool m_active{false};
-    float m_fold_progress{0.0f}; // 0.0f folded in gauntlet, 1.0f fully projected
+    float m_fold_progress{0.0f}; // 0.0f closed, 1.0f fully open
 
+    // Orbit / Pan compatibility
     float m_orbit_yaw{45.0f};
     float m_orbit_pitch{32.0f};
     float m_orbit_distance{28.0f};
 
-    // Visited voxel spatial hash (coarse 2m cells for exploration memory)
-    std::unordered_set<uint64_t> m_visited_cells;
-    glm::vec3 m_last_scan_pos{0.0f};
-    float m_geom_refresh_timer{0.0f};
+    // 2D Map Pan & Zoom
+    float m_pan_x{0.0f};
+    float m_pan_y{0.0f};
+    float m_zoom{7.5f}; // Pixels per meter
 
-    unsigned int m_vao{0};
-    unsigned int m_vbo{0};
-    unsigned int m_shader_prog{0};
-    int m_vertex_count{0};
+    // Persistent Exploration Memory (Fog of War)
+    std::vector<uint8_t> m_discovered;
+    std::vector<uint8_t> m_cell_types;
+    int m_discovered_count{0};
+
+    float m_total_time{0.0f};
+    float m_geom_refresh_timer{0.0f};
+    glm::vec3 m_last_scan_pos{0.0f};
+
+    int m_screen_w{1600};
+    int m_screen_h{900};
+
+    // OpenGL resources
+    unsigned int m_shape_prog{0};
+    unsigned int m_shape_vao{0};
+    unsigned int m_shape_vbo{0};
+
+    unsigned int m_text_prog{0};
+    unsigned int m_text_vao{0};
+    unsigned int m_text_vbo{0};
+    unsigned int m_font_tex{0};
+
+    // Cached batches
+    std::vector<Shape2DVertex> m_cached_tris;
+    std::vector<Shape2DVertex> m_cached_lines;
+    struct TextCommand {
+        std::string text;
+        float x{0.0f};
+        float y{0.0f};
+        float scale{1.0f};
+        glm::vec4 color{1.0f};
+    };
+    std::vector<TextCommand> m_cached_texts;
 };
 
 } // namespace Voidfall

@@ -11,8 +11,9 @@ import time
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 
-# Always enforce silent headless audio for all tests and child processes
+# Always enforce silent headless audio and bypass background mesher for all test child processes
 os.environ["VOIDFALL_MUTE_AUDIO"] = "1"
+os.environ["VOIDFALL_HEADLESS_TEST"] = "1"
 
 CONFIG = "Release"
 BUILD_DIR = "build"
@@ -90,6 +91,45 @@ def build_targets(target=None):
         return False, dt
     return True, dt
 
+def check_sources_staleness(selected_test_keys):
+    """
+    Returns (True, reason) if any source/header file is newer than any selected test binary,
+    or if any test binary is missing.
+    """
+    watch_dirs = ["src", "include", "tests"]
+    max_src_mtime = 0.0
+    for d in watch_dirs:
+        if not os.path.exists(d):
+            continue
+        for root, _, files in os.walk(d):
+            for f in files:
+                if f.endswith((".cpp", ".c", ".hpp", ".h", ".glsl", ".comp")):
+                    p = os.path.join(root, f)
+                    try:
+                        m = os.path.getmtime(p)
+                        if m > max_src_mtime:
+                            max_src_mtime = m
+                    except OSError:
+                        pass
+
+    for k in selected_test_keys:
+        info = TESTS[k]
+        bin_path = os.path.join(BUILD_DIR, CONFIG, info["exe"])
+        if not os.path.exists(bin_path):
+            bin_path = os.path.join(BUILD_DIR, info["exe"])
+        if not os.path.exists(bin_path):
+            return True, f"Executable missing: {bin_path}"
+        try:
+            bin_mtime = os.path.getmtime(bin_path)
+            if max_src_mtime > bin_mtime:
+                t_src = time.strftime('%H:%M:%S', time.localtime(max_src_mtime))
+                t_bin = time.strftime('%H:%M:%S', time.localtime(bin_mtime))
+                return True, f"Source edited at {t_src} after binary build at {t_bin} ({info['exe']})"
+        except OSError:
+            return True, "Unable to inspect binary timestamp"
+
+    return False, "Binaries are fully up to date"
+
 def execute_single_test(key):
     info = TESTS[key]
     bin_path = os.path.join(BUILD_DIR, CONFIG, info["exe"])
@@ -108,8 +148,8 @@ def execute_single_test(key):
 def run_tests_parallel(test_keys, fail_fast=False):
     t_start = time.time()
     results = {}
-
-    with ThreadPoolExecutor(max_workers=min(len(test_keys), 4)) as executor:
+    max_threads = min(len(test_keys), os.cpu_count() or 8)
+    with ThreadPoolExecutor(max_workers=max_threads) as executor:
         futures = {executor.submit(execute_single_test, k): k for k in test_keys}
         for future in futures:
             key, passed, dt, msg = future.result()
@@ -191,8 +231,11 @@ def watch_loop(selected_tests, fail_fast):
 
 def main():
     parser = argparse.ArgumentParser(description="Voidfall Dredge - Ultra-Fast TDD Runner")
-    parser.add_argument("--test", choices=["unit", "progression", "e2e", "all"], default="all",
-                        help="Specific test target to run")
+    all_test_choices = list(TESTS.keys()) + ["all", "fast", "quick"]
+    parser.add_argument("--test", choices=all_test_choices, default="all",
+                        help="Specific test target to run ('fast' or 'quick' runs all sub-second tests)")
+    parser.add_argument("--fast", "--quick", dest="is_fast", action="store_true",
+                        help="Run all tests except heavy level generation collision tests for sub-second feedback")
     parser.add_argument("--no-build", action="store_true", help="Skip cmake build step")
     parser.add_argument("--fail-fast", action="store_true", help="Stop immediately on first test failure")
     parser.add_argument("--watch", action="store_true", help="Watch files for changes and re-run automatically")
@@ -200,7 +243,12 @@ def main():
 
     args = parser.parse_args()
 
-    selected_tests = list(TESTS.keys()) if args.test == "all" else [args.test]
+    if args.is_fast or args.test in ("fast", "quick"):
+        selected_tests = [k for k in TESTS.keys() if k != "collision"]
+    elif args.test == "all":
+        selected_tests = list(TESTS.keys())
+    else:
+        selected_tests = [args.test]
 
     if args.visual:
         print("[*] Building game executable...")
@@ -222,8 +270,17 @@ def main():
         return 0
 
     build_time = 0.0
-    if not args.no_build:
-        ok, build_time = build_targets()
+    should_build = not args.no_build
+    if args.no_build:
+        is_stale, reason = check_sources_staleness(selected_tests)
+        if is_stale:
+            print(f"\n[!] STALENESS GUARD: Overriding --no-build ({reason})")
+            print("    Automatically compiling fresh build to guarantee test fidelity...")
+            should_build = True
+
+    if should_build:
+        target_to_build = TESTS[args.test]["target"] if args.test in TESTS else None
+        ok, build_time = build_targets(target_to_build)
         if not ok:
             return 1
 

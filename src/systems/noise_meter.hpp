@@ -229,16 +229,49 @@ public:
         emit_sound(SoundEventType::JumpLanding, pos, intensity, radius, 0.5f);
     }
 
-    /// Jetpack thruster roaring burn in cavern
+    /// Jetpack thruster roaring burn in cavern (continuous noise + wide audible radius)
     void add_jetpack_sound(const glm::vec3& pos, float dt) {
-        emit_sound(SoundEventType::JetpackThruster, pos, 18.0f * dt, 22.0f, 0.4f);
+        float stealth_intensity_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_INTENSITY_MUL : 1.0f;
+        float intensity = 14.0f * dt * stealth_intensity_mul;
+        float dampening = (m_swarm_cooldown > 0.0f) ? 0.65f : 1.0f;
+        m_noise = std::min(m_max_noise, m_noise + intensity * m_noise_multiplier * dampening);
+        m_time_since_last_noise = 0.0f;
+
+        m_jetpack_event_timer += dt;
+        if (m_jetpack_event_timer >= 0.25f) {
+            m_jetpack_event_timer = 0.0f;
+            float stealth_radius_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_RADIUS_MUL : 1.0f;
+            m_recent_sounds.push_back({SoundEventType::JetpackThruster, pos, 28.0f * stealth_intensity_mul, 20.0f * stealth_radius_mul, 0.0f, 0.35f});
+        }
     }
 
-    /// Grapple winch cable snap / reel
+    /// Grapple hook pneumatic launch / anchor strike (quiet one-shot sound)
+    void add_grapple_fire_sound(const glm::vec3& pos) {
+        // Grapple firing is quiet: 1.2 noise, 5.0m radius
+        emit_sound(SoundEventType::GrappleAction, pos, 1.2f, 5.0f, 0.30f);
+    }
+
+    /// Grapple electric winch cable reel (very quiet continuous tension hum, ~6x quieter than jetpack)
+    void add_grapple_reel_sound(const glm::vec3& pos, float dt) {
+        float stealth_intensity_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_INTENSITY_MUL : 1.0f;
+        float intensity = 2.2f * dt * stealth_intensity_mul; // Much quieter than jetpack!
+        float dampening = (m_swarm_cooldown > 0.0f) ? 0.65f : 1.0f;
+        m_noise = std::min(m_max_noise, m_noise + intensity * m_noise_multiplier * dampening);
+        m_time_since_last_noise = 0.0f;
+
+        m_grapple_event_timer += dt;
+        if (m_grapple_event_timer >= 0.35f) {
+            m_grapple_event_timer = 0.0f;
+            float stealth_radius_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_RADIUS_MUL : 1.0f;
+            m_recent_sounds.push_back({SoundEventType::GrappleAction, pos, 5.0f * stealth_intensity_mul, 5.5f * stealth_radius_mul, 0.0f, 0.30f});
+        }
+    }
+
+    /// Grapple winch cable snap / reel (legacy overload)
     void add_grapple_sound(const glm::vec3& pos, bool reeling) {
-        float intensity = reeling ? 4.5f : 3.0f;
-        float radius = reeling ? 11.0f : 8.0f;
-        emit_sound(SoundEventType::GrappleAction, pos, intensity, radius, 0.35f);
+        if (reeling) {
+            add_grapple_reel_sound(pos, 0.016f);
+        }
     }
 
     /// Continuous drill grinding contact vibration
@@ -412,6 +445,8 @@ public:
         m_time_since_last_noise = 0.0f;
         m_post_event_cooldown_remaining = 0.0f;
         m_recent_sounds.clear();
+        m_jetpack_event_timer = 0.0f;
+        m_grapple_event_timer = 0.0f;
     }
 
 private:
@@ -434,6 +469,9 @@ private:
 
     float m_noise_multiplier{1.0f};      // Difficulty scaling
     bool m_is_crouching{false};
+
+    float m_jetpack_event_timer{0.0f};
+    float m_grapple_event_timer{0.0f};
 
     AlertLevel m_last_alert{AlertLevel::Silent};
     int m_swarm_count{0};

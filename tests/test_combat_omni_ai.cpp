@@ -505,7 +505,7 @@ void test_weapon_reload_cycle_and_audio() {
             total += dt;
             if (player.is_reloading()) {
                 ASSERT_GE(player.reload_progress(), last_progress);
-                ASSERT_TRUE(player.weapon_ammo() == spent_ammo || player.weapon_stats().auto_recharge);
+                ASSERT_EQ(player.weapon_ammo(), spent_ammo);
                 last_progress = player.reload_progress();
             }
         }
@@ -556,6 +556,52 @@ void test_viewmodel_reload_state_defaults() {
     std::cout << "  -> Passed." << std::endl;
 }
 
+// ─── TEST 10: Viewmodel melee animation contracts for each weapon ─────────────
+void test_viewmodel_melee_animations_all_weapons() {
+    std::cout << "[TEST 10] ViewModel melee animation states for Gun, Demo, and Mining Drill..." << std::endl;
+    PlayerController player(glm::vec3(16.0f, 20.0f, 16.0f));
+
+    // Initially off cooldown and not meleeing
+    ASSERT_FALSE(player.is_melee_shoving());
+    ASSERT_NEAR(player.melee_shove_progress(), 0.0f, 0.001f);
+    ASSERT_LE(player.melee_shove_cooldown(), 0.0f);
+
+    // Test melee execution across all 3 weapon slots
+    ToolSlot test_tools[] = {
+        ToolSlot::CombatWeapon,    // Gun (Carbine/Scattergun/Railgun)
+        ToolSlot::DemolitionCharge,// Demo (Tactical Clacker)
+        ToolSlot::MiningDrill      // Mining Drill Rig
+    };
+
+    for (ToolSlot tool : test_tools) {
+        player.set_active_tool(tool);
+        ASSERT_TRUE(player.active_tool() == tool);
+
+        // Reset cooldowns for test
+        player.update(1.0f);
+
+        // Execute melee shove
+        player.execute_melee_shove();
+        ASSERT_TRUE(player.is_melee_shoving());
+        ASSERT_NEAR(player.melee_shove_progress(), 0.0f, 0.05f);
+        ASSERT_TRUE(player.melee_shove_cooldown() > 0.70f);
+
+        // Advance to mid-strike impact window (approx 0.175s)
+        player.update(0.175f);
+        ASSERT_TRUE(player.is_melee_shoving());
+        float mid_p = player.melee_shove_progress();
+        ASSERT_GE(mid_p, 0.40f);
+        ASSERT_LE(mid_p, 0.60f);
+
+        // Advance past completion (remaining 0.20s -> total 0.375s > 0.35s)
+        player.update(0.20f);
+        ASSERT_FALSE(player.is_melee_shoving());
+        ASSERT_NEAR(player.melee_shove_progress(), 0.0f, 0.001f);
+    }
+
+    std::cout << "  -> Passed: All 3 weapon classes (Gun, Demo, Drill) correctly execute melee animation lifecycle." << std::endl;
+}
+
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 int main() {
     std::cout << "============================================================" << std::endl;
@@ -571,9 +617,10 @@ int main() {
     test_enemy_awareness_markers_investigating_and_engaged_states();
     test_weapon_reload_cycle_and_audio();
     test_viewmodel_reload_state_defaults();
+    test_viewmodel_melee_animations_all_weapons();
 
     std::cout << "============================================================" << std::endl;
-    std::cout << "ALL 9 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "ALL 10 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "============================================================" << std::endl;
     return 0;
 }

@@ -17,8 +17,18 @@ enum class PauseMenuAction {
 
 enum class PauseTab {
     Mission = 0,
-    AudioSettings = 1,
-    ControlsBriefing = 2
+    Inventory = 1,
+    AudioSettings = 2,
+    ControlsBriefing = 3
+};
+
+enum class DropItemType {
+    None,
+    Voidite,
+    Titanium,
+    Salvage,
+    Bulkhead,
+    DemolitionCharge
 };
 
 class PauseMenu {
@@ -37,11 +47,20 @@ public:
         return req;
     }
 
+    DropItemType check_and_clear_drop_request(int& out_amount) {
+        DropItemType item = m_requested_drop_item;
+        out_amount = m_requested_drop_amount;
+        m_requested_drop_item = DropItemType::None;
+        m_requested_drop_amount = 0;
+        return item;
+    }
+
     PauseMenuAction render(
         int sector,
         float time_elapsed,
-        const PlayerInventory& inventory,
+        PlayerInventory& inventory,
         GameSettings& settings,
+        int class_id,
         float mouse_x,
         float mouse_y,
         bool mouse_clicked
@@ -72,6 +91,8 @@ private:
 
     PauseTab m_active_tab{PauseTab::Mission};
     bool m_test_sound_requested{false};
+    DropItemType m_requested_drop_item{DropItemType::None};
+    int m_requested_drop_amount{0};
 };
 
 } // namespace Voidfall

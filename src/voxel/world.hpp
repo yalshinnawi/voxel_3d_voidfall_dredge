@@ -37,7 +37,7 @@ struct FaunaEntity {
 
 class World {
 public:
-    explicit World(uint32_t seed = 1337);
+    explicit World(uint32_t seed = 1337, bool enable_background_meshing = true);
     ~World();
 
     World(const World&) = delete;
@@ -131,7 +131,10 @@ private:
     std::vector<FaunaEntity> m_active_entities;
     VaultDoor m_vault_door;
 
+    bool is_background_meshing_enabled() const { return m_enable_background_meshing; }
+
     // Background meshing thread pool
+    bool m_enable_background_meshing{true};
     std::vector<std::thread> m_workers;
     std::queue<ChunkPos> m_mesh_queue;
     std::mutex m_queue_mutex;

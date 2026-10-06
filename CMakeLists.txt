@@ -10,6 +10,9 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     # /MP: Multi-processor parallel compilation across all CPU cores
     add_compile_options(/W3 /utf-8 /permissive- /MP)
+    # Aggressive optimization, intrinsic expansion, and dead-code elimination for Release
+    add_compile_options("$<$<CONFIG:Release>:/O2;/Oi;/Ot;/Gy>")
+    add_link_options("$<$<CONFIG:Release>:/OPT:REF;/OPT:ICF>")
 endif()
 
 include(FetchContent)
@@ -87,7 +90,9 @@ set(ENGINE_CORE_SOURCES
     src/systems/mission_system.cpp
     src/graphics/animation_controller.cpp
     src/graphics/shader.cpp
+    src/graphics/particle_system.cpp
     src/ui/hud.cpp
+    src/ui/debrief_menu.cpp
     src/entities/vault_door.cpp
     src/ui/terrain_scanner.cpp
 )
@@ -133,6 +138,8 @@ set(APP_SOURCES
 )
 
 add_executable(${PROJECT_NAME} ${APP_SOURCES})
+
+target_precompile_headers(${PROJECT_NAME} REUSE_FROM voidfall_engine_core)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     voidfall_engine_core
@@ -182,6 +189,24 @@ target_link_libraries(test_gameplay_mechanics PRIVATE voidfall_engine_core)
 
 add_executable(test_spawn_safety tests/test_spawn_safety.cpp)
 target_link_libraries(test_spawn_safety PRIVATE voidfall_engine_core)
+
+# ── Reuse Precompiled Headers Across All Test Executables ──
+set(VOIDFALL_TEST_TARGETS
+    test_progression
+    test_unit_all
+    test_e2e_expeditions
+    test_level_collision
+    test_enemy_stalker
+    test_enemy_burrower
+    test_audio
+    test_audio_system
+    test_combat_omni_ai
+    test_gameplay_mechanics
+    test_spawn_safety
+)
+foreach(tgt ${VOIDFALL_TEST_TARGETS})
+    target_precompile_headers(${tgt} REUSE_FROM voidfall_engine_core)
+endforeach()
 
 # ── CTest Integration (Enables `ctest --parallel` and test discovery) ──
 enable_testing()

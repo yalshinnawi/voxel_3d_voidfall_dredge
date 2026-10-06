@@ -22,9 +22,12 @@ $$\text{Salience} = \frac{\text{Intensity} \times M_{\text{type}} \times (\text{
 | **Seismic Tremor** | $25.0\,\text{m}$ | **$3.5\times$** | Natural tremors or Ballistic Voxel Shattering | Triggers subterranean burrower navigation |
 | **Drilling / Mining** | $12.0\,\text{m}$ | **$1.0\times$** | Power Drill extraction | Gradual predator accumulation |
 | **Gunfire / Weapon Discharge**| $22.0\,\text{m}$ | **$1.8\times$** | Plasma Carbine, Needler Railgun, Scattergun | Immediate detection in line of sight |
+| **Jetpack Thruster** | $20.0\,\text{m}$ | **$1.4\times$** | Vertical ascension & thruster hovering ($14\,\text{noise/s}$) | Prominent acoustic signature; alerts cave ceiling predators |
 | **Bullet Impact** | $10.0\,\text{m}$ | **$1.8\times$** | Projectile striking rock or bulkhead | Draws stalkers toward ricochet point |
 | **Voxel Break** | $8.0\,\text{m}$ | **$1.2\times$** | Block destruction | Mild alert pulse |
 | **Sprinting Footsteps** | $8.0\,\text{m}$ | **$1.0\times$** | Uncrouched movement | Alerts nearby prowlers |
+| **Grapple Hook Reel** | $5.5\,\text{m}$ | **$0.5\times$** | Electric winch cable reel ($2.2\,\text{noise/s}$) | Stealth traversal; >6x quieter than thrusters |
+| **Grapple Hook Launch** | $5.0\,\text{m}$ | **$0.4\times$** | Pneumatic anchor launch | Subtle mechanical click |
 | **Crouched Footsteps** | $2.5\,\text{m}$ | **$0.4\times$** | Stealth crouch walking | Near-silent movement |
 
 ---

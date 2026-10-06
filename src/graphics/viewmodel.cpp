@@ -1109,7 +1109,13 @@ void ViewModel::render(
     bool is_crouching,
     bool is_reloading,
     float reload_progress,
-    bool has_placed_charge
+    bool has_placed_charge,
+    bool is_melee_shoving,
+    float movement_speed,
+    bool is_grounded,
+    float melee_progress,
+    bool is_aiming,
+    float zoom_progress
 ) {
     if (m_chassis_vao == 0 || m_carbine_vao == 0) return;
 
@@ -1117,9 +1123,43 @@ void ViewModel::render(
     m_is_reloading = is_reloading;
     m_reload_progress = reload_progress;
 
+    // Advance walking bob phase only while actively moving on solid ground
+    bool is_moving = is_grounded && (movement_speed > 0.15f);
+    if (is_moving) {
+        // Frequency scales smoothly with delver movement speed (4.5 Hz at nominal 7 m/s sprint/run)
+        float bob_freq = glm::clamp(movement_speed / 7.0f, 0.75f, 1.6f) * 4.5f;
+        m_walk_bob_phase += dt * bob_freq;
+        if (m_walk_bob_phase > 6283.1853f) {
+            m_walk_bob_phase -= 6283.1853f;
+        }
+        // Smoothly ramp in walk bob weight
+        m_walk_bob_weight = glm::mix(m_walk_bob_weight, 1.0f, 1.0f - std::exp(-10.0f * dt));
+    } else {
+        // Smoothly decay walk bob weight to zero when stationary or airborne
+        m_walk_bob_weight = glm::mix(m_walk_bob_weight, 0.0f, 1.0f - std::exp(-10.0f * dt));
+        if (m_walk_bob_weight < 0.001f) {
+            m_walk_bob_weight = 0.0f;
+        }
+    }
+
     if (active_tool != m_last_tool) {
         on_tool_switched();
         m_last_tool = active_tool;
+    }
+
+    // Defensive Quick Melee Timing & Progress Calculation
+    if (is_melee_shoving && !m_was_melee_shoving) {
+        m_shove_timer = 0.35f;
+    }
+    m_was_melee_shoving = is_melee_shoving;
+
+    float melee_p = 0.0f;
+    if (melee_progress > 0.0f) {
+        melee_p = std::clamp(melee_progress, 0.0f, 1.0f);
+        m_shove_timer = (1.0f - melee_p) * 0.35f;
+    } else if (m_shove_timer > 0.0f) {
+        m_shove_timer = std::max(0.0f, m_shove_timer - dt);
+        melee_p = std::clamp(1.0f - (m_shove_timer / 0.35f), 0.0f, 1.0f);
     }
 
     float switch_dip_y   = 0.0f;
@@ -1145,16 +1185,28 @@ void ViewModel::render(
         }
     }
 
-    // 1. Dedicated Projection Matrix (FOV = 68.0f, near = 0.05f, far = 10.0f)
-    glm::mat4 proj = glm::perspective(glm::radians(68.0f), aspect, 0.05f, 10.0f);
+    // 1. Dedicated Projection Matrix (FOV = 68.0f down to 60.0f in ADS, near = 0.05f, far = 10.0f)
+    float vm_fov = glm::mix(68.0f, 60.0f, zoom_progress);
+    glm::mat4 proj = glm::perspective(glm::radians(vm_fov), aspect, 0.05f, 10.0f);
     glm::mat4 view = glm::mat4(1.0f);
 
-    // 2. Procedural walking bob using Lissajous curve: x = A*sin(w*t), y = B*cos(2*w*t)
+    // 2. Procedural walking bob & subtle idle breathing sway
     float crouch_offset_y = is_crouching ? -0.08f : 0.0f;
     float crouch_offset_z = is_crouching ? -0.05f : 0.0f;
     float sway_scale = is_crouching ? 0.5f : 1.0f;
-    float lissajous_x = std::sin(m_total_time * 4.5f) * 0.008f * sway_scale;
-    float lissajous_y = std::cos(m_total_time * 9.0f) * 0.006f * sway_scale;
+
+    // Locomotion bob (active strictly while moving)
+    float walk_bob_x = std::sin(m_walk_bob_phase) * 0.008f * sway_scale * m_walk_bob_weight;
+    float walk_bob_y = std::cos(m_walk_bob_phase * 2.0f) * 0.006f * sway_scale * m_walk_bob_weight;
+
+    // Idle breathing sway: very subtle 0.25 Hz physiological rise/fall, blends out during locomotion
+    float idle_weight = 1.0f - m_walk_bob_weight;
+    float breath_x = std::sin(m_total_time * 1.5f) * 0.0004f * idle_weight;
+    float breath_y = (std::sin(m_total_time * 1.5f) * 0.5f + 0.5f) * 0.0008f * idle_weight;
+
+    float ads_bob_scale = 1.0f - 0.75f * zoom_progress;
+    float lissajous_x = (walk_bob_x + breath_x) * ads_bob_scale;
+    float lissajous_y = (walk_bob_y + breath_y) * ads_bob_scale;
 
     glDisable(GL_CULL_FACE);
 
@@ -1253,19 +1305,124 @@ void ViewModel::render(
             }
         }
 
+        // =============================================================
+        // Procedural Melee Shove / Butt-Stroke Animation for Firearms
+        // =============================================================
+        float gun_melee_x = 0.0f;
+        float gun_melee_y = 0.0f;
+        float gun_melee_z = 0.0f;
+        float gun_melee_pitch = 0.0f;
+        float gun_melee_yaw = 0.0f;
+        float gun_melee_roll = 0.0f;
+        float gun_melee_emissive = 0.0f;
+
+        if (melee_p > 0.0f) {
+            float p = melee_p;
+            if (p < 0.22f) {
+                // Phase 1: Wind-up / Coiling back toward delver's chest & shoulder (0.0 -> 0.22)
+                float t = p / 0.22f;
+                float ease = t * t;
+                gun_melee_x = 0.035f * ease;
+                gun_melee_y = 0.030f * ease;
+                gun_melee_z = 0.070f * ease; // Pull back toward camera
+                gun_melee_pitch = 10.0f * ease;
+                gun_melee_yaw = 20.0f * ease;
+                gun_melee_roll = 15.0f * ease;
+            } else if (p < 0.45f) {
+                // Phase 2: Explosive Forward Strike & Butt-Stroke Slash (0.22 -> 0.45)
+                float t = (p - 0.22f) / 0.23f;
+                float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // Cubic snap forward
+
+                // Weapon archetype strike variations
+                float target_z = -0.25f;
+                float target_x = -0.09f;
+                float target_roll = -22.0f;
+                if (m_character_class == CharacterClass::Scout) {
+                    // Needler Railgun: Long bayonet-style forward spear thrust
+                    target_z = -0.29f;
+                    target_x = -0.06f;
+                    target_roll = -16.0f;
+                } else if (m_character_class == CharacterClass::Demolitionist) {
+                    // Magma Scattergun: Heavy bludgeon horizontal sweep
+                    target_z = -0.23f;
+                    target_x = -0.12f;
+                    target_roll = -28.0f;
+                }
+
+                gun_melee_x = glm::mix(0.035f, target_x, snap);
+                gun_melee_y = glm::mix(0.030f, -0.055f, snap);
+                gun_melee_z = glm::mix(0.070f, target_z, snap); // Drives deeply forward into the screen (-Z)
+                gun_melee_pitch = glm::mix(10.0f, -16.0f, snap);
+                gun_melee_yaw = glm::mix(20.0f, -24.0f, snap);
+                gun_melee_roll = glm::mix(15.0f, target_roll, snap);
+
+                if (t >= 0.50f) {
+                    float hit_pulse = std::sin((t - 0.50f) / 0.50f * 3.14159f);
+                    gun_melee_emissive = 0.45f * hit_pulse;
+                }
+            } else if (p < 0.58f) {
+                // Phase 3: Impact Shudder & Kinetic Shock Deceleration (0.45 -> 0.58)
+                float t = (p - 0.45f) / 0.13f;
+                float shake = std::sin(t * 38.0f) * std::exp(-t * 6.0f) * 0.007f;
+                float rebound_z = 0.035f * t;
+
+                float target_z = (m_character_class == CharacterClass::Scout) ? -0.29f : ((m_character_class == CharacterClass::Demolitionist) ? -0.23f : -0.25f);
+                float target_x = (m_character_class == CharacterClass::Demolitionist) ? -0.12f : ((m_character_class == CharacterClass::Scout) ? -0.06f : -0.09f);
+                float target_roll = (m_character_class == CharacterClass::Demolitionist) ? -28.0f : ((m_character_class == CharacterClass::Scout) ? -16.0f : -22.0f);
+
+                gun_melee_x = target_x + shake * 0.5f;
+                gun_melee_y = -0.055f + shake;
+                gun_melee_z = target_z + rebound_z + shake;
+                gun_melee_pitch = -16.0f + 2.0f * t;
+                gun_melee_yaw = -24.0f + 3.0f * t;
+                gun_melee_roll = target_roll + 3.0f * t;
+                gun_melee_emissive = 0.35f * (1.0f - t);
+            } else {
+                // Phase 4: Fluid Return to Ready Hip/Aim Stance (0.58 -> 1.0)
+                float t = (p - 0.58f) / 0.42f;
+                float ret = (1.0f - t) * (1.0f - t);
+
+                float start_z = ((m_character_class == CharacterClass::Scout) ? -0.29f : ((m_character_class == CharacterClass::Demolitionist) ? -0.23f : -0.25f)) + 0.035f;
+                float start_x = (m_character_class == CharacterClass::Demolitionist) ? -0.12f : ((m_character_class == CharacterClass::Scout) ? -0.06f : -0.09f);
+                float start_roll = ((m_character_class == CharacterClass::Demolitionist) ? -28.0f : ((m_character_class == CharacterClass::Scout) ? -16.0f : -22.0f)) + 3.0f;
+
+                gun_melee_x = start_x * ret;
+                gun_melee_y = -0.055f * ret;
+                gun_melee_z = start_z * ret;
+                gun_melee_pitch = -14.0f * ret;
+                gun_melee_yaw = -21.0f * ret;
+                gun_melee_roll = start_roll * ret;
+            }
+        }
+
+        // Aim-Down-Sights (ADS) centering alignment:
+        float target_gun_x = 0.0f;
+        float target_gun_y = -0.10f;
+        float target_gun_z = -0.30f;
+        float target_gun_yaw = 0.0f;
+        float target_gun_pitch = 0.0f;
+        float target_gun_roll = 0.0f;
+
+        float base_gun_x = glm::mix(0.15f, target_gun_x, zoom_progress);
+        float base_gun_y = glm::mix(-0.14f, target_gun_y, zoom_progress);
+        float base_gun_z = glm::mix(-0.34f, target_gun_z, zoom_progress);
+        float base_gun_yaw = glm::mix(-14.0f, target_gun_yaw, zoom_progress);
+        float base_gun_pitch = glm::mix(2.0f, target_gun_pitch, zoom_progress);
+        float base_gun_roll = glm::mix(3.0f, target_gun_roll, zoom_progress);
+
         glm::vec3 gun_pos(
-            0.15f + lissajous_x + reload_offset_x,
-            -0.14f + lissajous_y + switch_dip_y + crouch_offset_y + reload_offset_y,
-            -0.34f + recoil_kick + switch_push_z + crouch_offset_z + reload_offset_z
+            base_gun_x + lissajous_x + reload_offset_x + gun_melee_x,
+            base_gun_y + lissajous_y + switch_dip_y + crouch_offset_y + reload_offset_y + gun_melee_y,
+            base_gun_z + recoil_kick + switch_push_z + crouch_offset_z + reload_offset_z + gun_melee_z
         );
 
         glm::mat4 gun_model = glm::translate(glm::mat4(1.0f), gun_pos);
-        gun_model = glm::rotate(gun_model, glm::radians(-14.0f + reload_yaw_deg), glm::vec3(0.0f, 1.0f, 0.0f));           // Inward yaw
-        gun_model = glm::rotate(gun_model, glm::radians(2.0f - kick_pitch + reload_pitch_deg), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
-        gun_model = glm::rotate(gun_model, glm::radians(3.0f + switch_roll_deg + reload_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Cant + switch roll + reload roll
+        gun_model = glm::rotate(gun_model, glm::radians(base_gun_yaw + reload_yaw_deg + gun_melee_yaw), glm::vec3(0.0f, 1.0f, 0.0f));           // Inward yaw
+        gun_model = glm::rotate(gun_model, glm::radians(base_gun_pitch - kick_pitch + reload_pitch_deg + gun_melee_pitch), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
+        gun_model = glm::rotate(gun_model, glm::radians(base_gun_roll + switch_roll_deg + reload_roll_deg + gun_melee_roll), glm::vec3(0.0f, 0.0f, 1.0f)); // Cant + switch roll + reload roll
 
         m_shader.set_mat4("uModel", gun_model);
-        float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : (0.35f + reload_emissive_boost);
+        float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : (0.35f + reload_emissive_boost + gun_melee_emissive);
         m_shader.set_float("uEmissive", emissive);
 
         if (m_character_class == CharacterClass::Demolitionist) {
@@ -1284,22 +1441,83 @@ void ViewModel::render(
         // DEMOLITION VIEWMODEL: TACTICAL REMOTE DETONATOR
         // (Handheld clacker with armed safety beacon and tactile plunger)
         // =============================================================
-        float plunger_offset = is_firing ? -0.016f : 0.0f;
+        // Procedural Melee Animation for Tactical Detonator: Gauntlet Clacker Hammer Punch
+        float det_melee_x = 0.0f;
+        float det_melee_y = 0.0f;
+        float det_melee_z = 0.0f;
+        float det_melee_pitch = 0.0f;
+        float det_melee_yaw = 0.0f;
+        float det_melee_roll = 0.0f;
+        float det_melee_plunger = 0.0f;
+        float det_melee_emissive = 0.0f;
+
+        if (melee_p > 0.0f) {
+            float p = melee_p;
+            if (p < 0.20f) {
+                // Phase 1: Coiling back like a brass-knuckle fist (0.0 -> 0.20)
+                float t = p / 0.20f;
+                float ease = t * t;
+                det_melee_x = 0.035f * ease;
+                det_melee_y = 0.045f * ease;
+                det_melee_z = 0.080f * ease;
+                det_melee_pitch = 16.0f * ease;
+                det_melee_yaw = 14.0f * ease;
+                det_melee_roll = 12.0f * ease;
+            } else if (p < 0.42f) {
+                // Phase 2: Explosive Forward Piston Hammer Punch (0.20 -> 0.42)
+                float t = (p - 0.20f) / 0.22f;
+                float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+                det_melee_x = glm::mix(0.035f, -0.120f, snap); // Drives straight into center screen crosshair
+                det_melee_y = glm::mix(0.045f, -0.020f, snap);
+                det_melee_z = glm::mix(0.080f, -0.260f, snap); // Deep forward punch
+                det_melee_pitch = glm::mix(16.0f, -14.0f, snap);
+                det_melee_yaw = glm::mix(14.0f, -12.0f, snap);
+                det_melee_roll = glm::mix(12.0f, 22.0f, snap); // Knuckles horizontal locked
+                det_melee_plunger = -0.022f * std::sin(t * 3.14159f); // Plunger depresses under force
+                if (t >= 0.50f) {
+                    float hit_pulse = std::sin((t - 0.50f) / 0.50f * 3.14159f);
+                    det_melee_emissive = 0.70f * hit_pulse; // Armed beacon shock flash
+                }
+            } else if (p < 0.58f) {
+                // Phase 3: Punch Rebound & Settle (0.42 -> 0.58)
+                float t = (p - 0.42f) / 0.16f;
+                float shake = std::sin(t * 35.0f) * std::exp(-t * 5.0f) * 0.006f;
+                det_melee_x = -0.120f + 0.025f * t + shake * 0.5f;
+                det_melee_y = -0.020f + shake;
+                det_melee_z = -0.260f + 0.055f * t + shake;
+                det_melee_pitch = -14.0f + 3.0f * t;
+                det_melee_yaw = -12.0f + 3.0f * t;
+                det_melee_roll = 22.0f - 4.0f * t;
+                det_melee_emissive = 0.50f * (1.0f - t);
+            } else {
+                // Phase 4: Settle back to handheld inspection posture (0.58 -> 1.0)
+                float t = (p - 0.58f) / 0.42f;
+                float ret = (1.0f - t) * (1.0f - t);
+                det_melee_x = -0.095f * ret;
+                det_melee_y = -0.020f * ret;
+                det_melee_z = -0.205f * ret;
+                det_melee_pitch = -11.0f * ret;
+                det_melee_yaw = -9.0f * ret;
+                det_melee_roll = 18.0f * ret;
+            }
+        }
+
+        float plunger_offset = (is_firing ? -0.016f : 0.0f) + det_melee_plunger;
 
         glm::vec3 det_pos(
-            0.14f + lissajous_x,
-            -0.13f + lissajous_y + switch_dip_y + crouch_offset_y,
-            -0.32f + switch_push_z + crouch_offset_z
+            0.14f + lissajous_x + det_melee_x,
+            -0.13f + lissajous_y + switch_dip_y + crouch_offset_y + det_melee_y,
+            -0.32f + switch_push_z + crouch_offset_z + det_melee_z
         );
 
         glm::mat4 det_model = glm::translate(glm::mat4(1.0f), det_pos);
-        det_model = glm::rotate(det_model, glm::radians(-12.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
-        det_model = glm::rotate(det_model, glm::radians(10.0f), glm::vec3(1.0f, 0.0f, 0.0f));  // Upward pitch for LCD readability
-        det_model = glm::rotate(det_model, glm::radians(2.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f));
+        det_model = glm::rotate(det_model, glm::radians(-12.0f + det_melee_yaw), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
+        det_model = glm::rotate(det_model, glm::radians(10.0f + det_melee_pitch), glm::vec3(1.0f, 0.0f, 0.0f));  // Upward pitch for LCD readability
+        det_model = glm::rotate(det_model, glm::radians(2.0f + switch_roll_deg + det_melee_roll), glm::vec3(0.0f, 0.0f, 1.0f));
 
         m_shader.set_mat4("uModel", det_model);
         float pulse = 0.5f + 0.5f * std::sin(m_total_time * 15.0f);
-        float emissive = has_placed_charge ? (0.7f + 0.8f * pulse) : 0.35f;
+        float emissive = (has_placed_charge ? (0.7f + 0.8f * pulse) : 0.35f) + det_melee_emissive;
         m_shader.set_float("uEmissive", emissive);
 
         glBindVertexArray(m_detonator_vao);
@@ -1348,26 +1566,103 @@ void ViewModel::render(
             m_spark_timer = 0.0f;
         }
 
+        // =============================================================
+        // Procedural Melee Ram Animation for Heavy Mining Rig: Two-Handed Hydraulic Battering Ram
+        // =============================================================
+        float drill_melee_x = 0.0f;
+        float drill_melee_y = 0.0f;
+        float drill_melee_z = 0.0f;
+        float drill_melee_pitch = 0.0f;
+        float drill_melee_yaw = 0.0f;
+        float drill_melee_roll = 0.0f;
+        float drill_melee_piston_z = 0.0f;
+        float drill_melee_emissive = 0.0f;
+
+        if (melee_p > 0.0f) {
+            float p = melee_p;
+            if (p < 0.24f) {
+                // Phase 1: Heavy Kinetic Wind-up & Rev Surge (0.0 -> 0.24)
+                float t = p / 0.24f;
+                float ease = t * t;
+                drill_melee_x = -0.025f * ease;
+                drill_melee_y = -0.060f * ease; // Drops into low power stance
+                drill_melee_z = 0.110f * ease;  // Pulls heavy 50kg chassis back
+                drill_melee_pitch = -14.0f * ease; // Drill snout angles upward
+                drill_melee_yaw = 12.0f * ease;
+                drill_melee_roll = 8.0f * ease;
+                drill_melee_piston_z = -0.040f * ease; // Pistons retract under pressure
+                m_drill_rotation += 4200.0f * dt * ease; // Motor spools up with high RPM whine!
+            } else if (p < 0.48f) {
+                // Phase 2: Massive Hydraulic Battering Ram Strike (0.24 -> 0.48)
+                float t = (p - 0.24f) / 0.24f;
+                float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+                drill_melee_x = glm::mix(-0.025f, -0.095f, snap);
+                drill_melee_y = glm::mix(-0.060f, 0.075f, snap); // Powerful upward uppercut ram
+                drill_melee_z = glm::mix(0.110f, -0.300f, snap); // Drives -0.30m forward into enemy!
+                drill_melee_pitch = glm::mix(-14.0f, 18.0f, snap); // Plunges down into target
+                drill_melee_yaw = glm::mix(12.0f, -14.0f, snap);
+                drill_melee_roll = glm::mix(8.0f, -12.0f, snap);
+                drill_melee_piston_z = glm::mix(-0.040f, 0.080f, snap); // Pistons slam forward to full extension!
+                m_drill_rotation += 6500.0f * dt; // Violent rotational surge
+                float hit_pulse = std::sin(t * 3.14159f);
+                drill_melee_emissive = 0.75f * hit_pulse; // Superheated diamond auger glow
+
+                // Impact sparks trigger at peak extension
+                if (t >= 0.70f && t <= 0.85f && m_on_spark) {
+                    glm::vec3 spark_dir(
+                        ((rand() % 100) / 50.0f - 1.0f) * 2.0f,
+                        ((rand() % 100) / 50.0f) * 2.0f + 0.5f,
+                        -2.5f
+                    );
+                    m_on_spark(drill_target_pos, spark_dir);
+                }
+            } else if (p < 0.68f) {
+                // Phase 3: Heavy Machinery Impact Chatter & Pneumatic Exhaust (0.48 -> 0.68)
+                float t = (p - 0.48f) / 0.20f;
+                float shake = std::sin(t * 42.0f) * std::exp(-t * 4.5f) * 0.012f;
+                drill_melee_x = -0.095f + shake * 0.5f;
+                drill_melee_y = 0.075f - 0.035f * t + shake;
+                drill_melee_z = -0.300f + 0.075f * t + shake;
+                drill_melee_pitch = 18.0f - 4.0f * t;
+                drill_melee_yaw = -14.0f + 3.0f * t;
+                drill_melee_roll = -12.0f + 3.0f * t;
+                drill_melee_piston_z = 0.080f * (1.0f - t);
+                m_drill_rotation += 3500.0f * dt * (1.0f - t);
+                drill_melee_emissive = 0.45f * (1.0f - t);
+            } else {
+                // Phase 4: Delver Settles Weight Back to Neutral (0.68 -> 1.0)
+                float t = (p - 0.68f) / 0.32f;
+                float ret = (1.0f - t) * (1.0f - t);
+                drill_melee_x = -0.095f * ret;
+                drill_melee_y = 0.040f * ret;
+                drill_melee_z = -0.225f * ret;
+                drill_melee_pitch = 14.0f * ret;
+                drill_melee_yaw = -11.0f * ret;
+                drill_melee_roll = -9.0f * ret;
+            }
+        }
+
         glm::vec3 base_pos(
-            0.18f + lissajous_x + jitter_x,
-            -0.16f + lissajous_y + switch_dip_y + jitter_y + crouch_offset_y,
-            -0.42f + recoil_z + switch_push_z + crouch_offset_z
+            0.18f + lissajous_x + jitter_x + drill_melee_x,
+            -0.16f + lissajous_y + switch_dip_y + jitter_y + crouch_offset_y + drill_melee_y,
+            -0.42f + recoil_z + switch_push_z + crouch_offset_z + drill_melee_z
         );
 
         glm::mat4 root_model = glm::translate(glm::mat4(1.0f), base_pos);
-        root_model = glm::rotate(root_model, glm::radians(-22.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
-        root_model = glm::rotate(root_model, glm::radians(3.0f), glm::vec3(1.0f, 0.0f, 0.0f));   // Pitch down
-        root_model = glm::rotate(root_model, glm::radians(4.0f + switch_roll_deg), glm::vec3(0.0f, 0.0f, 1.0f)); // Natural cant + switch roll
+        root_model = glm::rotate(root_model, glm::radians(-22.0f + drill_melee_yaw), glm::vec3(0.0f, 1.0f, 0.0f)); // Inward yaw
+        root_model = glm::rotate(root_model, glm::radians(3.0f + drill_melee_pitch), glm::vec3(1.0f, 0.0f, 0.0f));   // Pitch down
+        root_model = glm::rotate(root_model, glm::radians(4.0f + switch_roll_deg + drill_melee_roll), glm::vec3(0.0f, 0.0f, 1.0f)); // Natural cant + switch roll
 
         // A. Render Chassis, Hands & Gauntlets
         m_shader.set_mat4("uModel", root_model);
-        m_shader.set_float("uEmissive", is_drilling ? (0.45f + 0.10f * m_drill_speed_tier) : 0.18f);
+        float chassis_emissive = (is_drilling ? (0.45f + 0.10f * m_drill_speed_tier) : 0.18f) + drill_melee_emissive * 0.5f;
+        m_shader.set_float("uEmissive", chassis_emissive);
 
         glBindVertexArray(m_chassis_vao);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_chassis_count));
 
         // B. Render Reciprocating Dual Pneumatic Pistons
-        glm::mat4 piston_model = glm::translate(root_model, glm::vec3(0.0f, 0.0f, piston_z));
+        glm::mat4 piston_model = glm::translate(root_model, glm::vec3(0.0f, 0.0f, piston_z + drill_melee_piston_z));
         m_shader.set_mat4("uModel", piston_model);
         glBindVertexArray(m_piston_vao);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_piston_count));
@@ -1379,7 +1674,7 @@ void ViewModel::render(
         bit_model = glm::rotate(bit_model, glm::radians(m_drill_rotation), glm::vec3(0.0f, 0.0f, 1.0f));
 
         m_shader.set_mat4("uModel", bit_model);
-        float bit_emissive = is_drilling ? (0.75f + 0.15f * m_drill_speed_tier) : (0.12f + 0.05f * m_drill_speed_tier);
+        float bit_emissive = (is_drilling ? (0.75f + 0.15f * m_drill_speed_tier) : (0.12f + 0.05f * m_drill_speed_tier)) + drill_melee_emissive;
         m_shader.set_float("uEmissive", bit_emissive);
 
         glBindVertexArray(m_bit_vao);

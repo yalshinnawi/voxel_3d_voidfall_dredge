@@ -41,4 +41,6 @@ tests/*.json
 test_*.json
 e2e_*.json
 save_data.json
+screenshots/previews/
+screenshots/temp/
 .aider*

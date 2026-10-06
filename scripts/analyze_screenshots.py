@@ -27,6 +27,34 @@ def cleanup_previews_folder():
     except OSError as e:
         print(f"[!] Warning cleaning preview directory: {e}")
         
+CANONICAL_SCREENSHOT_FILES = {
+    "README.md", "audio_safety_report.json",
+    "00_all_phases_montage.jpg", "00_all_phases_montage.png",
+    "01_main_menu.png", "02_level_select.png", "03_character_select.png",
+    "04_upgrades_terminal.png", "05_gameplay_cavern.png", "06_drilling_cracks.png",
+    "07_abilities_loot.png", "08_esc_menu.png", "09_extraction_beacon.png",
+    "10_mission_debrief.png", "visual_report.json", "visual_report.txt",
+    "enemy_visual_montage.jpg", "enemy_visual_montage.png",
+    "enemy_01_floor_crawl.png", "enemy_02_wall_climb.png", "enemy_03_ceiling_crawl.png",
+    "enemy_04_surface_transition.png", "enemy_05_aggressive_lunge.png", "enemy_06_sonar_stun.png",
+    "enemy_visual_report.json", "enemy_visual_report.txt"
+}
+
+def cleanup_stale_screenshots():
+    sc_dir = "screenshots"
+    if not os.path.exists(sc_dir):
+        return 0, 0
+    removed = 0
+    freed_bytes = 0
+    try:
+        for f in os.listdir(sc_dir):
+            p = os.path.join(sc_dir, f)
+            if os.path.isfile(p) and f not in CANONICAL_SCREENSHOT_FILES:
+                freed_bytes += os.path.getsize(p)
+                os.remove(p)
+                removed += 1
+    except OSError as e:
+        print(f"[!] Warning cleaning stale screenshots: {e}")
     return removed, freed_bytes
 
 def main():
@@ -34,14 +62,19 @@ def main():
     parser.add_argument("--keep-previews", action="store_true",
                         help="Preserve preview files in screenshots/previews/ instead of auto-cleaning")
     parser.add_argument("--clean-only", action="store_true",
-                        help="Clean preview files immediately without printing report")
+                        help="Clean preview files and stale screenshots immediately without printing report")
+    parser.add_argument("--clean-stale", action="store_true",
+                        help="Prune any non-canonical or stale screenshots")
 
     args = parser.parse_args()
 
-    if args.clean_only:
-        removed, freed = cleanup_previews_folder()
-        print(f"[*] Cleaned up {removed} preview images ({freed / 1024:.1f} KB freed).")
-        return 0
+    if args.clean_only or args.clean_stale:
+        p_removed, p_freed = cleanup_previews_folder()
+        s_removed, s_freed = cleanup_stale_screenshots()
+        total_freed = (p_freed + s_freed) / 1024.0
+        print(f"[*] Cleaned up {p_removed} previews and {s_removed} stale screenshots ({total_freed:.1f} KB freed).")
+        if args.clean_only:
+            return 0
 
     report_json_path = os.path.join("screenshots", "visual_report.json")
     report_txt_path = os.path.join("screenshots", "visual_report.txt")
@@ -112,11 +145,13 @@ def main():
 
     print("=" * 86)
 
-    # Post-analysis cleanup of previews to optimize disk space
+    # Post-analysis cleanup of previews and stale test artifacts to optimize disk space
     if not args.keep_previews:
         removed, freed = cleanup_previews_folder()
-        if removed > 0:
-            print(f"  [+] Auto-cleaned {removed} preview images ({freed / 1024:.1f} KB freed) from screenshots/previews/ to save space.")
+        stale_cnt, stale_freed = cleanup_stale_screenshots()
+        total_freed = freed + stale_freed
+        if (removed + stale_cnt) > 0:
+            print(f"  [+] Auto-cleaned {removed} preview images and {stale_cnt} stale files ({total_freed / 1024:.1f} KB freed) to keep screenshots pristine.")
             print("      (Tip: Use --keep-previews if you wish to retain temporary preview files).")
     else:
         print("  [*] Retained preview images in screenshots/previews/ (--keep-previews active).")

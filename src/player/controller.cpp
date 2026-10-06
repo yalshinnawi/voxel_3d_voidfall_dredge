@@ -50,8 +50,14 @@ void PlayerController::handle_input(const Window& window, float dt) {
     // 1. Mouse Look (Paused while orbiting 3D holographic terrain scanner)
     if (!m_combat_inputs_paused) {
         glm::dvec2 mouse_delta = const_cast<Window&>(window).get_cursor_delta();
-        m_yaw   += static_cast<float>(mouse_delta.x) * m_mouse_sensitivity;
-        m_pitch += static_cast<float>(mouse_delta.y) * m_mouse_sensitivity;
+        float sens = m_mouse_sensitivity;
+        if (m_zoom_progress > 0.0f && is_weapon_equipped()) {
+            // Scale sensitivity proportionally with FOV zoom level for precise tactical aim
+            float zoom_ratio = glm::mix(1.0f, m_weapon_stats.zoom_fov_multiplier, m_zoom_progress);
+            sens *= zoom_ratio;
+        }
+        m_yaw   += static_cast<float>(mouse_delta.x) * sens;
+        m_pitch += static_cast<float>(mouse_delta.y) * sens;
         m_pitch  = glm::clamp(m_pitch, -89.0f, 89.0f);
         update_camera_vectors();
 
@@ -104,7 +110,7 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (window.is_key_down(GLFW_KEY_A)) { wish_dir -= flat_right; m_current_buttons |= BTN_LEFT; }
     if (window.is_key_down(GLFW_KEY_D)) { wish_dir += flat_right; m_current_buttons |= BTN_RIGHT; }
     if (window.is_key_down(GLFW_KEY_LEFT_SHIFT)) { m_current_buttons |= BTN_SPRINT; }
-    bool crouch_held = window.is_key_down(GLFW_KEY_LEFT_CONTROL) || window.is_key_down(GLFW_KEY_C);
+    bool crouch_held = window.is_key_down(GLFW_KEY_LEFT_CONTROL);
     ProcessStanceChange(crouch_held);
 
     if (glm::length(wish_dir) > 0.001f) {
@@ -177,12 +183,23 @@ void PlayerController::handle_input(const Window& window, float dt) {
         m_exo.overheated = true;
     }
 
-    // 4. Grappling Hook (F key or Middle Mouse)
-    if (window.is_key_down(GLFW_KEY_F) || window.is_mouse_button_down(GLFW_MOUSE_BUTTON_MIDDLE)) {
+    // 4. Flashlight / Headlamp Toggle (F key, L key secondary)
+    static bool f_pressed_last = false;
+    bool f_down = window.is_key_down(GLFW_KEY_F) || window.is_key_down(GLFW_KEY_L);
+    if (f_down && !f_pressed_last) {
+        toggle_headlamp();
+        if (m_on_warning) {
+            m_on_warning(m_headlamp_on ? "FLASHLIGHT: ON [F]" : "FLASHLIGHT: OFF [F]");
+        }
+    }
+    f_pressed_last = f_down;
+
+    // 5. Grappling Hook Launch (G key)
+    if (window.is_key_down(GLFW_KEY_G)) {
         m_current_buttons |= BTN_GRAPPLE_FIRE;
     }
 
-    // 5. Reel Grapple (E key strictly reels grapple cable when active)
+    // Reel Grapple (E key strictly reels grapple cable when active)
     if (window.is_key_down(GLFW_KEY_E)) {
         if (m_grapple.active) {
             m_current_buttons |= BTN_GRAPPLE_REEL;
@@ -205,15 +222,18 @@ void PlayerController::handle_input(const Window& window, float dt) {
     bool rmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
 
     if (m_active_tool == ToolSlot::MiningDrill) {
+        m_is_aiming = false;
         if (lmb) m_current_buttons |= BTN_MINE_DRILL;
         if (rmb) m_current_buttons |= BTN_PLACE_BLOCK;
-    } else if (m_active_tool == ToolSlot::PlasmaCarbine) {
+    } else if (m_active_tool == ToolSlot::CombatWeapon) {
+        m_is_aiming = rmb; // Holding Right-Click zooms in with firearm!
         if (lmb) m_current_buttons |= BTN_MINE_DRILL; // Triggers weapon fire
-        if (rmb) m_current_buttons |= BTN_PLACE_BLOCK;
     } else if (m_active_tool == ToolSlot::IndustrialBulkhead) {
+        m_is_aiming = false;
         if (lmb) m_current_buttons |= BTN_PLACE_BLOCK;
         if (rmb) m_current_buttons |= BTN_REMOVE_BULKHEAD;
     } else if (m_active_tool == ToolSlot::DemolitionCharge) {
+        m_is_aiming = false;
         if (lmb) m_current_buttons |= BTN_SKILL_DEMO;       // Deploy shaped charge
         if (rmb) m_current_buttons |= BTN_DETONATE_CHARGE;   // Detonate placed charge
     }
@@ -258,10 +278,10 @@ void PlayerController::handle_input(const Window& window, float dt) {
     }
     c_pressed_last = c_down;
 
-    // 9. Throwable Chemical Flares (G key or Middle Mouse)
-    static bool g_pressed_last = false;
-    bool g_down = window.is_key_down(GLFW_KEY_G) || window.is_mouse_button_down(GLFW_MOUSE_BUTTON_MIDDLE);
-    if (g_down && !g_pressed_last) {
+    // 9. Throwable Chemical Flares (Key: T or Z)
+    static bool flare_pressed_last = false;
+    bool flare_down = window.is_key_down(GLFW_KEY_T) || window.is_key_down(GLFW_KEY_Z);
+    if (flare_down && !flare_pressed_last) {
         if (m_flare_count > 0) {
             throw_flare();
         } else {
@@ -272,7 +292,25 @@ void PlayerController::handle_input(const Window& window, float dt) {
             }
         }
     }
-    g_pressed_last = g_down;
+    flare_pressed_last = flare_down;
+
+    // 10. Defensive Quick Melee Shove (Key: V or Middle Mouse)
+    static bool v_pressed_last = false;
+    bool v_down = window.is_key_down(GLFW_KEY_V) || window.is_mouse_button_down(GLFW_MOUSE_BUTTON_MIDDLE);
+    if (v_down && !v_pressed_last) {
+        execute_melee_shove();
+    }
+    v_pressed_last = v_down;
+}
+
+void PlayerController::execute_melee_shove() {
+    if (m_melee_shove_cooldown > 0.0f) return;
+    m_melee_shove_cooldown = 0.8f;
+    m_melee_shove_timer = 0.35f;
+    add_trauma(0.15f);
+    if (m_on_melee_shove) {
+        m_on_melee_shove(eye_position(), m_front);
+    }
 }
 
 void PlayerController::throw_flare() {
@@ -328,10 +366,12 @@ void PlayerController::update_physics(float dt, World& world) {
         m_vault_timer = std::max(0.0f, m_vault_timer - dt);
     }
 
-    // 0. Update Combat Firearm cooldowns & passive capacitor recharge
+    // 0. Update Combat Firearm cooldowns & reload timer
     if (m_fire_cooldown > 0.0f) {
         m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
     }
+    m_melee_shove_cooldown = std::max(0.0f, m_melee_shove_cooldown - dt);
+    m_melee_shove_timer = std::max(0.0f, m_melee_shove_timer - dt);
     if (m_active_tool != ToolSlot::CombatWeapon || m_weapon_ammo >= m_weapon_stats.max_ammo) {
         m_reload_timer = 0.0f;
     } else if (m_reload_timer > 0.0f) {
@@ -340,18 +380,14 @@ void PlayerController::update_physics(float dt, World& world) {
             m_reload_timer = 0.0f;
             m_weapon_ammo = m_weapon_stats.max_ammo;
         }
-    } else if (m_weapon_stats.auto_recharge && m_weapon_ammo < m_weapon_stats.max_ammo) {
-        if (m_recharge_delay > 0.0f) {
-            m_recharge_delay -= dt;
-        } else {
-            // Passive recharge: 1 round every 0.35s when not firing
-            static float recharge_accum = 0.0f;
-            recharge_accum += dt;
-            if (recharge_accum >= 0.35f) {
-                recharge_accum = 0.0f;
-                m_weapon_ammo++;
-            }
-        }
+    }
+
+    // Smooth Aim-Down-Sights (ADS) zoom progression
+    float ads_speed = 1.0f / std::max(0.04f, m_weapon_stats.ads_time);
+    if (m_is_aiming && is_weapon_equipped()) {
+        m_zoom_progress = std::min(1.0f, m_zoom_progress + dt * ads_speed);
+    } else {
+        m_zoom_progress = std::max(0.0f, m_zoom_progress - dt * ads_speed);
     }
 
     // 1. Grapple Fire & Tension Cable Dynamics
@@ -363,6 +399,7 @@ void PlayerController::update_physics(float dt, World& world) {
             RaycastHit hit = world.raycast(ray_origin, m_front, m_grapple.max_length);
             if (hit.hit && hit.voxel.is_solid()) {
                 m_grapple.active = true;
+                m_grapple.just_fired = true;
                 m_grapple.anchor_point = glm::vec3(hit.block_pos) + glm::vec3(0.5f);
                 m_grapple.rest_length = glm::distance(m_position, m_grapple.anchor_point);
             }
@@ -635,13 +672,14 @@ void PlayerController::PlaceBulkhead(World& world, const glm::ivec3& place_pos) 
 
 void PlayerController::clamp_to_surface(const World& world) {
     // Search downwards starting from current y position down to 0 for immediate walkable floor
+    float h_y = half_extents().y;
     int start_y = std::min(25, static_cast<int>(std::floor(m_position.y + 1.0f)));
     for (int y = start_y; y >= 0; --y) {
         glm::ivec3 check_pos(static_cast<int>(std::floor(m_position.x)), y, static_cast<int>(std::floor(m_position.z)));
         if (world.is_solid(check_pos)) {
             if (!world.is_solid(check_pos + glm::ivec3(0, 1, 0)) &&
                 !world.is_solid(check_pos + glm::ivec3(0, 2, 0))) {
-                m_position.y = static_cast<float>(y + 1) + 0.95f;
+                m_position.y = static_cast<float>(y + 1) + h_y;
                 m_velocity.y = 0.0f;
                 m_on_ground = true;
                 m_isGrounded = true;
@@ -655,7 +693,7 @@ void PlayerController::clamp_to_surface(const World& world) {
         if (world.is_solid(check_pos)) {
             if (!world.is_solid(check_pos + glm::ivec3(0, 1, 0)) &&
                 !world.is_solid(check_pos + glm::ivec3(0, 2, 0))) {
-                m_position.y = static_cast<float>(y + 1) + 0.95f;
+                m_position.y = static_cast<float>(y + 1) + h_y;
                 m_velocity.y = 0.0f;
                 m_on_ground = true;
                 m_isGrounded = true;
@@ -664,7 +702,7 @@ void PlayerController::clamp_to_surface(const World& world) {
         }
     }
     float surface = world.get_highest_solid_surface(static_cast<int>(m_position.x), static_cast<int>(m_position.z));
-    m_position.y = surface + 0.95f;
+    m_position.y = surface + h_y;
     m_velocity.y = 0.0f;
     m_on_ground = true;
     m_isGrounded = true;
@@ -678,6 +716,32 @@ void PlayerController::UpdatePhysics(float dt) {
     }
     if (m_current_world) {
         update_physics(dt, *m_current_world);
+    } else {
+        // In headless / worldless test runs, update player cooldowns and timers
+        if (m_vault_timer > 0.0f) {
+            m_vault_timer = std::max(0.0f, m_vault_timer - dt);
+        }
+        if (m_fire_cooldown > 0.0f) {
+            m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
+        }
+        m_melee_shove_cooldown = std::max(0.0f, m_melee_shove_cooldown - dt);
+        m_melee_shove_timer = std::max(0.0f, m_melee_shove_timer - dt);
+        if (m_active_tool != ToolSlot::CombatWeapon || m_weapon_ammo >= m_weapon_stats.max_ammo) {
+            m_reload_timer = 0.0f;
+        } else if (m_reload_timer > 0.0f) {
+            m_reload_timer = std::max(0.0f, m_reload_timer - dt);
+            if (m_reload_timer == 0.0f) {
+                m_weapon_ammo = m_weapon_stats.max_ammo;
+            }
+        }
+
+        // Smooth Aim-Down-Sights (ADS) zoom progression in offline/test physics
+        float ads_speed = 1.0f / std::max(0.04f, m_weapon_stats.ads_time);
+        if (m_is_aiming && is_weapon_equipped()) {
+            m_zoom_progress = std::min(1.0f, m_zoom_progress + dt * ads_speed);
+        } else {
+            m_zoom_progress = std::max(0.0f, m_zoom_progress - dt * ads_speed);
+        }
     }
 }
 
@@ -1380,7 +1444,8 @@ bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts,
 
     // Unified Camera Center Raycast & Viewmodel Convergence Matrix:
     glm::vec3 eye = eye_position();
-    glm::vec3 base_origin = eye + m_front * 0.35f + m_right * 0.10f - m_up * 0.06f;
+    float right_offset = glm::mix(0.10f, 0.02f, m_zoom_progress);
+    glm::vec3 base_origin = eye + m_front * 0.35f + m_right * right_offset - m_up * 0.06f;
 
     // 1. Raycast forward from eye along camera front to find 3D world impact point
     glm::vec3 p_target = eye + m_front * 50.0f;
@@ -1394,11 +1459,16 @@ bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts,
     // 2. Aim projectile trajectory from muzzle to P_target
     glm::vec3 shot_dir = glm::normalize(p_target - base_origin);
 
+    float effective_spread = m_weapon_stats.spread;
+    if (is_aiming()) {
+        effective_spread *= 0.5f; // 50% tighter spread cone when aiming down sights
+    }
+
     for (int p = 0; p < m_weapon_stats.pellets; ++p) {
         glm::vec3 fire_dir = shot_dir;
-        if (m_weapon_stats.spread > 0.0f) {
-            float rx = ((rand() % 1000) / 500.0f - 1.0f) * m_weapon_stats.spread;
-            float ry = ((rand() % 1000) / 500.0f - 1.0f) * m_weapon_stats.spread;
+        if (effective_spread > 0.0f) {
+            float rx = ((rand() % 1000) / 500.0f - 1.0f) * effective_spread;
+            float ry = ((rand() % 1000) / 500.0f - 1.0f) * effective_spread;
             fire_dir = glm::normalize(shot_dir + m_right * rx + m_up * ry);
         }
 
@@ -1448,6 +1518,14 @@ void PlayerController::cycle_tool_backward() {
     } else {
         set_active_tool(ToolSlot::MiningDrill);
     }
+}
+
+float PlayerController::current_fov(float base_fov) const {
+    if (m_zoom_progress <= 0.0f || !is_weapon_equipped()) {
+        return base_fov;
+    }
+    float target_fov = base_fov * m_weapon_stats.zoom_fov_multiplier;
+    return glm::mix(base_fov, target_fov, m_zoom_progress);
 }
 
 } // namespace Voidfall

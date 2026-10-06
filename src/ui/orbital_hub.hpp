@@ -29,7 +29,8 @@ enum class GameState {
 enum class DebriefAction {
     None,
     ReturnToHub,
-    LaunchNextSector
+    LaunchNextSector,
+    RedeployExpedition
 };
 
 enum class MenuSubView {

@@ -35,23 +35,29 @@ cmake --build build --config Release
 
 ## 2. Running Automated Tests
 
-### A. High-Speed Parallel TDD Runner (Recommended)
+### A. High-Speed Parallel TDD Runner (Recommended & Mandatory for Agents)
 Use [scripts/tdd.py](file:///d:/Projects/voxel_3d_voidfall_dredge/scripts/tdd.py) for instantaneous parallel test execution and auto-builds:
 ```bash
-# Build and run all test suites in parallel (<0.1s test execution):
+# MANDATORY FOR AGENTS: Builds incrementally and runs ALL 10 test suites in parallel (~1s):
 python scripts/tdd.py
-
-# Skip cmake build step (run binaries immediately):
-python scripts/tdd.py --no-build
 
 # Continuous TDD watch mode (recompiles & re-tests automatically on file save):
 python scripts/tdd.py --watch
+
+# Developer rapid micro-iterations (bypasses heavy collision tests):
+python scripts/tdd.py --fast
 
 # Target a specific suite:
 python scripts/tdd.py --test unit
 python scripts/tdd.py --test progression
 python scripts/tdd.py --test e2e
+python scripts/tdd.py --test collision
+python scripts/tdd.py --test enemy
+python scripts/tdd.py --test burrower
+python scripts/tdd.py --test audio
 ```
+> [!NOTE]
+> `scripts/tdd.py` contains an automatic **Mtime Staleness Guard**. Even if `--no-build` is requested, it detects if source/header files were modified after the binaries and automatically forces an incremental build to ensure test fidelity.
 
 ### B. Parallel CTest Execution
 Run all test suites concurrently via CTest:
@@ -63,6 +69,14 @@ ctest --test-dir build -C Release -j 3 --output-on-failure
 - `./build/Release/test_unit_all.exe`
 - `./build/Release/test_e2e_expeditions.exe`
 - `./build/Release/test_progression.exe`
+- `./build/Release/test_level_collision.exe`
+- `./build/Release/test_enemy_stalker.exe`
+- `./build/Release/test_enemy_burrower.exe`
+- `./build/Release/test_audio.exe`
+- `./build/Release/test_audio_system.exe`
+- `./build/Release/test_combat_omni_ai.exe`
+- `./build/Release/test_gameplay_mechanics.exe`
+- `./build/Release/test_spawn_safety.exe`
 
 ---
 
@@ -86,8 +100,18 @@ This executes an automated 10-phase gameplay loop, computes visual metrics, and 
 > **Follow this 1-step workflow instead:**
 > 1. Run `python scripts/analyze_screenshots.py` for instantaneous metrics and **automatic cleanup of temporary previews** (saving disk space). Pass `--keep-previews` to retain them.
 > 2. Call `view_file` on `screenshots/00_all_phases_montage.jpg` to visually inspect all 10 screens simultaneously in a **single turn (< 1 second)**!
-> 3. Only if a specific anomaly is spotted, inspect that specific lightweight frame preview in `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg` using `--keep-previews`.
-
+### 3.1 Workspace Test Artifact & Screenshot Cleanup
+To prevent stale test files and unmanaged preview captures from dirtying the workspace:
+- **Full Workspace Test Artifact Cleanup**:
+  ```bash
+  python scripts/cleanup_test_artifacts.py
+  ```
+- **3D Model Reference Catalog**:
+  - Maintained strictly in `docs/models/` via:
+    ```bash
+    python scripts/capture_models.py
+    ```
+  - Automatically prunes any non-canonical files outside the 6 models, montages, and reports.
 
 ---
 

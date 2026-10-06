@@ -132,4 +132,6 @@ Or invoke the engine directly:
 ./build/Release/VoidfallDredge.exe --capture-models
 ```
 
-This ensures that any subsequent modifications to shaders, PBR parameters, lighting, or mesh geometry are immediately and accurately captured into the codebase repository.
+### Catalog Integrity & Auto-Pruning
+`scripts/capture_models.py` automatically prunes any stale or untracked files outside the canonical 6 models, contact sheets, and reports. Under no circumstance should ad-hoc animation snapshots or temporary testing artifacts be stored in this directory.
+

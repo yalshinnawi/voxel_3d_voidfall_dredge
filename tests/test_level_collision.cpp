@@ -112,7 +112,7 @@ void test_level_design_topology() {
 void test_wall_collision_and_anti_clipping() {
     std::cout << "\n=== [MODULE 2] Wall Collision & Anti-Clipping Stress Test ===" << std::endl;
 
-    World world(7777);
+    World world(7777, false);
     world.generate_world(2, 7777); // Sector 2 has vault bunkers, granites, basalts
 
     const auto& rooms = world.level_generator()->rooms();
@@ -206,7 +206,7 @@ void test_ceiling_flying_and_anti_clipping() {
     std::cout << "\n=== [MODULE 3] Ceiling Collision, Thrusters & Grapple Reel ===" << std::endl;
 
     for (int sector = 1; sector <= 3; ++sector) {
-        World world(8888 + sector);
+        World world(8888 + sector, false);
         world.generate_world(sector, 8888 + sector);
 
         const auto& rooms = world.level_generator()->rooms();
@@ -279,7 +279,7 @@ void test_ceiling_flying_and_anti_clipping() {
 void test_block_break_and_walkthrough() {
     std::cout << "\n=== [MODULE 4] Block Breaking & Broken Block Traversal ===" << std::endl;
 
-    World world(5555);
+    World world(5555, false);
     // Clear an open room in air from x=10..30, y=5..15, z=10..30
     for (int x = 10; x <= 30; ++x) {
         for (int y = 5; y <= 15; ++y) {
@@ -364,7 +364,7 @@ void test_block_break_and_walkthrough() {
 void test_diagonal_corner_and_depenetration() {
     std::cout << "\n=== [MODULE 5] Diagonal Corner Sliding & Static Depenetration ===" << std::endl;
 
-    World world(6666);
+    World world(6666, false);
     // Create an inner 90-degree corner at (15, y, 15) with walls at x >= 15 and z >= 15
     for (int x = 10; x <= 20; ++x) {
         for (int y = 5; y <= 12; ++y) {
@@ -439,7 +439,7 @@ void test_isolated_base_shapes_stress() {
     };
 
     for (const auto& [shape_type, shape_name] : all_shapes) {
-        World world(9000);
+        World world(9000, false);
         auto gen = std::make_unique<LevelGenerator>(2, 9000);
         gen->create_single_room_test_layout(shape_type);
         world.set_level_generator(std::move(gen));
@@ -557,7 +557,7 @@ void test_random_shape_permutations_integration() {
         for (uint32_t seed : test_seeds) {
             total_permutations_tested++;
 
-            World world(seed);
+            World world(seed, false);
             world.generate_world(sector, seed);
             const LevelGenerator* gen = world.level_generator();
             TEST_CHECK(gen != nullptr, "Level generator must be initialized");
@@ -772,7 +772,7 @@ void test_all_rooms_tour_and_visibility() {
     std::cout << "\n=== [MODULE 8] Full Sector Room-to-Room Sightlines & Traversal Tour ===" << std::endl;
 
     for (int sector = 1; sector <= 3; ++sector) {
-        World world(4242 + sector);
+        World world(4242 + sector, false);
         world.generate_world(sector, 4242 + sector);
 
         const auto* gen = world.level_generator();
@@ -925,7 +925,7 @@ void test_all_rooms_tour_and_visibility() {
 void test_flight_carving_and_mesh_integrity() {
     std::cout << "\n=== [MODULE 9] Flight Carving, Block Breaking & Mesh Integrity Stress Test ===" << std::endl;
 
-    World world(9999);
+    World world(9999, false);
     world.generate_world(1, 9999);
 
     // Initial flight spawn at elevated altitude
@@ -1047,7 +1047,7 @@ void test_flight_carving_and_mesh_integrity() {
 void test_environmental_room_dangers_and_mortality() {
     std::cout << "\n=== [MODULE 10] Environmental Room Dangers & Lethality Test ===" << std::endl;
 
-    World world(8888);
+    World world(8888, false);
     // Create an isolated testbed with bedrock base and open air above
     for (int x = 0; x < 32; ++x) {
         for (int z = 0; z < 32; ++z) {
@@ -1183,7 +1183,7 @@ void test_spawn_safety_and_full_level_walk_flight() {
     std::cout << "\n=== [MODULE 11] Spawn Safety, Hazard Placement & Full Level Traversal ===" << std::endl;
 
     for (int sector = 1; sector <= 3; ++sector) {
-        World world(1000 + sector * 77);
+        World world(1000 + sector * 77, false);
         world.generate_world(sector, 1000 + sector * 77);
         const LevelGenerator* gen = world.level_generator();
         TEST_CHECK(gen != nullptr, "Level generator must be initialized");

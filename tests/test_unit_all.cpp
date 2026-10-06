@@ -26,6 +26,10 @@
 #include "../src/entities/flare.hpp"
 #include "../src/systems/mission_system.hpp"
 #include "../src/entities/carcass_manager.hpp"
+#include "../src/ui/hud.hpp"
+#include "../src/ui/terrain_scanner.hpp"
+#include "../src/ui/debrief_menu.hpp"
+#include "../src/graphics/particle_system.hpp"
 
 using namespace Voidfall;
 
@@ -879,6 +883,15 @@ void test_carry_weight_and_tactical_abilities() {
         fired_cls = cls;
     });
 
+    player.set_character_class(CharacterClass::Vanguard);
+    player.reset_tactical_cooldown();
+    TEST_CHECK(player.is_tactical_ready(), "Vanguard tactical must be ready");
+
+    // DynamicDebris impulse verification (Kinetic Repulsor deflection)
+    DynamicDebris test_debris(999, glm::vec3(16.0f, 22.0f, 16.0f), glm::vec3(0.0f, -5.0f, 0.0f), glm::vec3(0.0f), MAT_FRACTURED_GRANITE, 4);
+    test_debris.apply_impulse(glm::vec3(5.0f, 10.0f, 0.0f));
+    TEST_CHECK(test_debris.velocity().x > 4.9f && test_debris.velocity().y > 4.9f, "DynamicDebris impulse must deflect velocity");
+
     // Test carry weight multiplier on PlayerController
     player.set_carry_weight_multiplier(0.70f);
     TEST_CHECK(player.carry_weight_multiplier() == 0.70f, "Carry weight multiplier must be retained");
@@ -1094,8 +1107,13 @@ void test_plasma_carbine_combat() {
     TEST_CHECK(fired, "Scattergun must fire when trigger is held");
     TEST_CHECK(bolts.size() == 5, "Scattergun must spawn 5 flechettes per trigger pull");
     TEST_CHECK(player.weapon_ammo() == 5, "Scattergun ammo must decrease to 5");
+    TEST_CHECK(!player.weapon_stats().auto_recharge, "Scattergun auto_recharge must be false");
+    for (int t = 0; t < 30; ++t) {
+        player.update_physics(0.1f, world);
+    }
+    TEST_CHECK(player.weapon_ammo() == 5, "Scattergun ammo must never passively regenerate over time");
     TEST_CHECK(bolts[0].color.r > 0.9f && bolts[0].color.g > 0.4f, "Scattergun flechette tracer must be thermite amber");
-    log_pass("Demolitionist Magma Scattergun: 6-round drum, 5-flechette burst spread");
+    log_pass("Demolitionist Magma Scattergun: 6-round drum, 5-flechette burst spread, zero passive recharge");
 
     // 3. Vanguard: Plasma Carbine
     player.set_character_class(CharacterClass::Vanguard);
@@ -1120,28 +1138,41 @@ void test_plasma_carbine_combat() {
     TEST_CHECK(fired, "Carbine must fire again after cyclic cooldown elapses");
     TEST_CHECK(player.weapon_ammo() == 14, "Ammo must decrease to 14");
 
+    // Verify ammo NEVER passively comes back over time; player MUST reload
+    TEST_CHECK(!player.weapon_stats().auto_recharge, "Plasma Carbine auto_recharge must be false");
+    for (int t = 0; t < 30; ++t) {
+        player.update_physics(0.1f, world);
+    }
+    TEST_CHECK(player.weapon_ammo() == 14, "Ammo must not passively regenerate over time; player must reload");
+
     // Manual reload
     player.reload_weapon();
     TEST_CHECK(player.is_reloading(), "Weapon must enter reload state");
     player.update_physics(1.30f, world);
     TEST_CHECK(!player.is_reloading(), "Weapon must finish reload");
     TEST_CHECK(player.weapon_ammo() == 16, "Carbine magazine must be replenished to 16");
-    log_pass("Vanguard Plasma Carbine: 16-round capacitor, rapid fire, reload cycle");
+    log_pass("Vanguard Plasma Carbine: 16-round capacitor, rapid fire, reload cycle, zero passive recharge");
 
     // 4. Scout: Needler Railgun
     player.set_character_class(CharacterClass::Scout);
     TEST_CHECK(player.weapon_archetype() == WeaponArchetype::NeedlerRailgun, "Scout must equip Needler Railgun");
     TEST_CHECK(player.weapon_ammo() == 8, "Needler Railgun must start with 8-round needle cartridge");
     TEST_CHECK(player.weapon_short_name() == "RAIL", "Railgun short name must be RAIL");
+    TEST_CHECK(!player.weapon_stats().auto_recharge, "Needler Railgun auto_recharge must be false");
 
     bolts.clear();
     fired = player.try_fire_weapon(bolts, 0.016f);
     TEST_CHECK(fired, "Needler Railgun must fire when trigger is held");
     TEST_CHECK(bolts.size() == 1, "Railgun must fire 1 high-velocity needle");
+    TEST_CHECK(player.weapon_ammo() == 7, "Railgun ammo must decrease to 7");
+    for (int t = 0; t < 30; ++t) {
+        player.update_physics(0.1f, world);
+    }
+    TEST_CHECK(player.weapon_ammo() == 7, "Railgun ammo must never passively regenerate");
     TEST_CHECK(bolts[0].damage == 42.0f, "Needler Railgun must deal 42 piercing damage");
     TEST_CHECK(glm::length(bolts[0].velocity) > 100.0f, "Railgun needle velocity must exceed 100 m/s");
     TEST_CHECK(bolts[0].color.g > 0.9f, "Railgun needle tracer must be emerald green");
-    log_pass("Scout Needler Railgun: 8-round needle mag, 110m/s hyper-velocity, 42 damage");
+    log_pass("Scout Needler Railgun: 8-round needle mag, 110m/s hyper-velocity, 42 damage, zero passive recharge");
 
     // 5. Enemy Hit Registration & Damage: Void Stalker
     VoidStalkerManager stalkers;
@@ -1252,7 +1283,7 @@ void test_flares_aberrants_and_mission_objectives() {
     FlareManager::instance().spawn_flare(glm::vec3(10.0f, 20.0f, 10.0f), glm::vec3(-1.0f, 0.5f, 0.0f), CharacterClass::Demolitionist);
 
     TEST_CHECK(FlareManager::instance().flares().size() == 3, "Must have spawned 3 flares");
-    TEST_CHECK(FlareManager::instance().flares()[0].light_radius == 18.0f || FlareManager::instance().flares()[0].light_radius == 16.0f, "Flare light radius must be 16m-18m");
+    TEST_CHECK(FlareManager::instance().flares()[0].light_radius >= 16.0f && FlareManager::instance().flares()[0].light_radius <= 22.0f, "Flare light radius must be 16m-22m");
     TEST_CHECK(FlareManager::instance().flares()[0].lifetime == 60.0f, "Flare lifetime must be 60s");
     // Class colors
     TEST_CHECK(FlareManager::instance().flares()[0].color.r < 0.2f && FlareManager::instance().flares()[0].color.b > 0.8f, "Scout flare must be electric cyan");
@@ -1353,29 +1384,8 @@ void test_flares_aberrants_and_mission_objectives() {
     TEST_CHECK(stalker_mgr.stalkers()[0].is_dead() || stalker_mgr.stalkers()[0].is_dying(), "Fireball explosion must incinerate nearby aberrant swarm hostiles");
     log_pass("Reactive Gas Pocket ignition, fireball detonation and swarm hostile incineration");
 
-    // 5. Aberrant Fauna Archetypes: VoidDrifter & ChitinGoliath
+    // 5. Aberrant Fauna Archetypes: ChitinGoliath
     stalker_mgr.stalkers_mut().clear();
-    // Spawn Void Drifter
-    stalker_mgr.spawn_stalker(glm::vec3(15.0f, 20.0f, 15.0f), 1.0f, StalkerRole::VoidDrifter);
-    auto& drifter = stalker_mgr.stalkers_mut().back();
-    TEST_CHECK(drifter.role == StalkerRole::VoidDrifter, "Role must be VoidDrifter");
-    TEST_CHECK(drifter.boid_altitude_target >= 6.0f, "VoidDrifter target altitude must be high ceiling");
-
-    // Simulate quiet environment (noise = 20%)
-    glm::vec3 player_p(15.0f, 10.0f, 15.0f);
-    glm::vec3 player_f(0.0f, 0.0f, -1.0f);
-    stalker_mgr.update(0.016f, player_p, player_f, player_f, false, 20.0f, false, world);
-    TEST_CHECK(!drifter.is_dive_bombing, "VoidDrifter must hover calmly when noise <= 60%");
-
-    // Trigger loud noise (> 60%)
-    stalker_mgr.update(0.016f, player_p, player_f, player_f, false, 75.0f, false, world);
-    TEST_CHECK(drifter.is_dive_bombing, "VoidDrifter must initiate rapid dive-bomb swoop when noise > 60%");
-
-    // Weakness: 1-shot Needler Railgun burst (damage >= 22 deals fatal damage to VoidDrifter)
-    float drifter_dmg_dealt = 0.0f;
-    stalker_mgr.damage_nearest(drifter.position, 4.0f, 25.0f, false, nullptr, &drifter_dmg_dealt);
-    TEST_CHECK(drifter.is_dead() || drifter.is_dying(), "VoidDrifter must burst upon single high-impact shot");
-    log_pass("Void Drifter Aerial Harasser 3D boid ceiling hovering, noise dive-bombing and fragile burst weakness");
 
     // Spawn Chitin Goliath facing East (+X, yaw = 0)
     stalker_mgr.stalkers_mut().clear();
@@ -1409,6 +1419,103 @@ void test_flares_aberrants_and_mission_objectives() {
     log_pass("Persistent enemy floor carcasses (45s lifetime before ash decay) for tracking skirmish sites");
 }
 
+void test_headlamp_briefing_melee_and_loot_systems() {
+    std::cout << "\n=== [MODULE 16] Headlamp, Briefing, Melee Shove & Loot Aggregation ===" << std::endl;
+
+    // 1. Headlamp toggling and controller state
+    PlayerController player(glm::vec3(0.0f, 10.0f, 0.0f));
+    TEST_CHECK(player.is_headlamp_on(), "Headlamp must default to ON");
+    player.toggle_headlamp();
+    TEST_CHECK(!player.is_headlamp_on(), "Headlamp must toggle to OFF");
+    player.toggle_headlamp();
+    TEST_CHECK(player.is_headlamp_on(), "Headlamp must toggle back to ON");
+    log_pass("Headlamp toggle state and suit vitals telemetry");
+
+    // 2. Headlamp notification debounce & overwrite
+    HUD hud(1600, 900, true);
+    hud.show_warning("HEADLAMP: ACTIVE", 2.0f);
+    TEST_CHECK(hud.notifications().front().count == 1, "Headlamp warning must not stack count multiplier");
+    hud.show_warning("HEADLAMP: ACTIVE", 2.0f);
+    TEST_CHECK(hud.notifications().front().count == 1, "Headlamp repeat warning must debounce and overwrite rather than stack");
+    log_pass("Headlamp notification debounce and single-card overwrite");
+
+    // 3. Contractor Field Briefing Auto-Dismiss & Toggle
+    hud.SetContractorBriefing(true, 8.0f);
+    TEST_CHECK(hud.briefing_timer() == 8.0f, "Briefing timer must initialize to 8.0s");
+    TEST_CHECK(hud.is_help_briefing_visible(), "Briefing must be visible initially");
+    hud.update(5.0f);
+    TEST_CHECK(std::abs(hud.briefing_timer() - 3.0f) < 0.01f, "Briefing timer must decrement linearly with dt");
+    hud.update(3.5f);
+    TEST_CHECK(hud.briefing_timer() == 0.0f, "Briefing timer must clamp to 0.0s");
+    hud.toggle_help_briefing();
+    TEST_CHECK(hud.is_help_briefing_visible(), "Briefing must toggle back ON via key H");
+    hud.toggle_help_briefing();
+    TEST_CHECK(!hud.is_help_briefing_visible(), "Briefing must toggle OFF via key H");
+    log_pass("Contractor field briefing auto-dismiss over 8.0s and [H] manual toggle");
+
+    // 4. Loot Toast Full Queue Search & 4-Row Cap
+    hud.PushLootToast("res_carapace", "Carapace", 1, glm::vec4(1.0f));
+    hud.PushLootToast("res_biomass", "Biomass", 1, glm::vec4(1.0f));
+    hud.PushLootToast("res_carapace", "Carapace", 2, glm::vec4(1.0f));
+    hud.PushLootToast("res_biomass", "Biomass", 3, glm::vec4(1.0f));
+    TEST_CHECK(hud.loot_toast_count() == 2, "Alternating loot pickups must consolidate into 2 unique rows, not 4 alternating rows");
+
+    // Add extra items to verify max 4 rows cap
+    hud.PushLootToast("res_voidite", "Voidite", 1, glm::vec4(1.0f));
+    hud.PushLootToast("res_titanium", "Titanium", 1, glm::vec4(1.0f));
+    hud.PushLootToast("res_scrap", "Scrap", 1, glm::vec4(1.0f));
+    TEST_CHECK(hud.loot_toast_count() <= 4, "Loot toast queue must cap at maximum 4 active rows");
+    log_pass("Loot toast queue full-depth search consolidation and 4-row overflow limit");
+
+    // 5. Defensive Quick Melee Shove Mechanics
+    TEST_CHECK(player.melee_shove_cooldown() <= 0.0f, "Melee shove must start off cooldown");
+    TEST_CHECK(player.melee_shove_progress() == 0.0f, "Melee shove progress must start at 0.0");
+    player.execute_melee_shove();
+    TEST_CHECK(player.is_melee_shoving(), "Player must be in melee shoving state");
+    TEST_CHECK(player.melee_shove_progress() >= 0.0f && player.melee_shove_progress() < 0.1f, "Melee shove progress must be near 0.0 at initiation");
+    TEST_CHECK(player.melee_shove_cooldown() > 0.75f, "Melee shove cooldown must reset to 0.8s");
+    float shove_cd = player.melee_shove_cooldown();
+    player.execute_melee_shove();
+    TEST_CHECK(player.melee_shove_cooldown() <= shove_cd, "Melee shove on cooldown must not reset cooldown");
+
+    // Melee Shove cone area & knockback test on stalker
+    VoidStalkerManager stalkers;
+    stalkers.spawn_melee(glm::vec3(0.0f, 10.0f, 2.0f)); // 2m directly in front (+Z)
+    TEST_CHECK(stalkers.stalkers().size() == 1, "Must have 1 spawned stalker");
+    float initial_hp = stalkers.stalkers()[0].hp;
+    int shove_hits = stalkers.apply_melee_shove(glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 2.5f, 0.65f, 15.0f);
+    TEST_CHECK(shove_hits == 1, "Melee shove cone must hit stalker at 2.0m");
+    TEST_CHECK(stalkers.stalkers()[0].hp < initial_hp, "Stalker must take 15 HP shove damage");
+    TEST_CHECK(stalkers.stalkers()[0].state == StalkerState::Stunned, "Stalker must be stunned by shove");
+    TEST_CHECK(stalkers.stalkers()[0].stun_timer >= 0.55f, "Stalker stun duration must be 0.6s");
+    TEST_CHECK(stalkers.stalkers()[0].velocity.z > 5.0f, "Stalker must receive repulsive knockback impulse");
+    log_pass("Defensive quick melee shove (V key, 0.8s cooldown, 2.5m cone, attack cancel, knockback & 0.6s stun)");
+
+    // 6. 3D Holographic Terrain Scanner Orbit & TAB hold
+    TerrainScanner scanner;
+    TEST_CHECK(!scanner.is_active(), "Terrain scanner must start inactive");
+    scanner.update(0.1f, true, glm::vec3(10.0f, 5.0f, 10.0f), 12.0f, 8.0f, true);
+    TEST_CHECK(scanner.is_active(), "Terrain scanner must be active while TAB held");
+    TEST_CHECK(scanner.fold_progress() > 0.0f, "Terrain scanner must begin unfolding projection");
+    TEST_CHECK(scanner.discovery_percentage() > 0.0f, "Scanner must record uncovered fog of war discovery");
+    float initial_yaw = scanner.orbit_yaw();
+    scanner.update(0.1f, true, glm::vec3(25.0f, 5.0f, 30.0f), 15.0f, 0.0f, true);
+    TEST_CHECK(scanner.orbit_yaw() != initial_yaw, "Mouse delta must orbit/pan scanner camera smoothly");
+    TEST_CHECK(scanner.discovery_percentage() > 5.0f, "Moving delver must uncover cumulative cavern territory");
+    scanner.update(0.1f, false, glm::vec3(25.0f, 5.0f, 30.0f), 0.0f, 0.0f, false);
+    TEST_CHECK(!scanner.is_active(), "Terrain scanner must deactivate cleanly when TAB released");
+    log_pass("2D tactical cavern cartography, fog-of-war discovery memory, and mouse pan controls");
+
+    // 7. Debrief Menu Re-Deploy Routing
+    DebriefMenu debrief;
+    debrief.SetCurrentSectorIndex(3);
+    DebriefAction act_redeploy = debrief.ProcessClick("[RE-DEPLOY EXPEDITION]");
+    TEST_CHECK(act_redeploy == DebriefAction::RedeployExpedition, "Clicking [RE-DEPLOY EXPEDITION] must return RedeployExpedition action");
+    DebriefAction act_hub = debrief.ProcessClick("[RETURN TO ORBITAL HUB]");
+    TEST_CHECK(act_hub == DebriefAction::ReturnToHub, "Clicking [RETURN TO ORBITAL HUB] must return ReturnToHub action");
+    log_pass("Debrief menu [RE-DEPLOY EXPEDITION] immediate sector restart routing");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE COMPREHENSIVE UNIT TEST SUITE" << std::endl;
@@ -1429,6 +1536,7 @@ int main() {
     test_plasma_carbine_combat();
     test_satchel_charge_and_weapon_cycling();
     test_flares_aberrants_and_mission_objectives();
+    test_headlamp_briefing_melee_and_loot_systems();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;

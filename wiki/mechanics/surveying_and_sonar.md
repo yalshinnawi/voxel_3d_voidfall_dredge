@@ -71,3 +71,35 @@ $$\alpha(t) = \text{clamp}\left(\frac{t_{\text{remaining}}}{t_{\text{duration}}}
    - Pressing `[Q]` while on cooldown triggers an on-screen warning: `SONAR RECHARGING (X.Xs)` without discharging audio or particles.
 3. **Orbital Hub & Debrief Matrices**:
    - Displays active Surveying Rank (`[RANK X/3]`) and detailed perk unlocks in the Delver Proficiency Matrix and debrief manifest.
+
+---
+
+## 5. 2D Tactical Cavern Cartography Map (`[TAB]` Key)
+
+When holding `[TAB]`, the delver deploys the **2D Tactical Cartography Map**, replacing the legacy 3D perspective wireframe with a clean, top-down orthographic navigation overlay designed for subterranean orienteering.
+
+### Cartography Visual Styling & Cavern Geometry
+The 2D map formats subterranean geometry into high-clarity floor plans inspired by tactical dungeon cartography:
+- **Discovered Cave Floor (`#34302B`)**: Walkable chambers and connecting corridors rendered in deep earthy stone with subtle coordinate variance.
+- **Cavern Wall Rim (`#BA8A42` / `#D4A359`)**: Sinuous warm golden-amber cliff contours outlining where open floor meets solid rock, delivering crisp corridor readability.
+- **Undiscovered Void (Fog of War)**: Unexplored strata remain in pitch-black void with faint tactical coordinate grid lines. As the delver moves, a 22-meter discovery horizon permanently records visited territory into persistent exploration memory.
+- **Hazard Zones (`#D9521E`)**: Molten thermite slag and irradiated pockets tinted with warning hues.
+
+### Navigation Markers & Objective Routing
+1. **Extraction Beacon / Landing Pod**:
+   - High-vis green (`#2ECC71`) diamond icon with animated expanding radar ping waves.
+   - Shows real-time distance and cardinal bearing (e.g., `EXTRACTION [48m] [NW]`).
+   - If outside the current map viewport, an edge marker arrow points towards the LZ.
+2. **Precursor Relic Vault**:
+   - Electric cyan (`#00F2FF`) vault lock marker showing breach/retrieval status and distance.
+3. **Active Waypoint Guidance Route**:
+   - An animated, flowing dashed route vector connects the player directly to the active objective (Precursor Vault until relic is secured, then Extraction Beacon).
+4. **Delver Heading & Avionics**:
+   - Sharp safety-amber (`#FFB300`) chevron rotating with player yaw.
+   - Translucent $55^\circ$ flashlight view cone extending forward 16 meters.
+   - Glowing cyan breadcrumb trail retracing visited paths.
+5. **Interactive Controls**:
+   - **`[TAB]`**: Open / close map overlay with smooth holographic deployment animation.
+   - **`[MOUSE DRAG]`**: Pan the cavern viewport to scout ahead.
+   - Defaults to auto-centering directly over the delver's current position.
+

@@ -2,7 +2,7 @@
 #include "font_renderer.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include "../include/font8x8.h"
+#include <font8x8.h>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -1793,7 +1793,11 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
     float b1_x = start_x;
     bool b1_hov = (mouse_x >= b1_x && mouse_x <= b1_x + bot_btn_w && mouse_y >= bot_y && mouse_y <= bot_y + bot_btn_h);
     if (b1_hov && mouse_clicked) {
-        result = DebriefAction::LaunchNextSector;
+        if (inventory.suit_failed || !success) {
+            result = DebriefAction::RedeployExpedition;
+        } else {
+            result = DebriefAction::LaunchNextSector;
+        }
     }
     std::string b1_label = (inventory.suit_failed || !success) ? "[RE-DEPLOY EXPEDITION]" : "[LAUNCH NEXT SECTOR]";
     glm::vec4 b1_col = (inventory.suit_failed || !success)

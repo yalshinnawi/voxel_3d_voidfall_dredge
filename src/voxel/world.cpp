@@ -7,6 +7,7 @@
 namespace Voidfall {
 
 static inline int floor_div(int a, int b) {
+    if (b == CHUNK_SIZE) return a >> 5;
     int res = a / b;
     int rem = a % b;
     if (rem != 0 && ((a < 0) ^ (b < 0))) {
@@ -16,6 +17,7 @@ static inline int floor_div(int a, int b) {
 }
 
 static inline int floor_mod(int a, int b) {
+    if (b == CHUNK_SIZE) return a & (CHUNK_SIZE - 1);
     int res = a % b;
     if (res < 0) {
         res += b;
@@ -23,15 +25,22 @@ static inline int floor_mod(int a, int b) {
     return res;
 }
 
-World::World(uint32_t seed)
-    : m_seed(seed)
+World::World(uint32_t seed, bool enable_background_meshing)
+    : m_seed(seed), m_enable_background_meshing(enable_background_meshing)
 {
+    const char* env_headless = std::getenv("VOIDFALL_HEADLESS_TEST");
+    if (env_headless && std::strcmp(env_headless, "1") == 0) {
+        m_enable_background_meshing = false;
+    }
+
     m_level_gen = std::make_unique<LevelGenerator>(1, seed);
 
-    // Start background meshing worker threads
-    unsigned int num_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
-    for (unsigned int i = 0; i < num_threads; ++i) {
-        m_workers.emplace_back(&World::worker_thread_loop, this);
+    if (m_enable_background_meshing) {
+        // Start background meshing worker threads
+        unsigned int num_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
+        for (unsigned int i = 0; i < num_threads; ++i) {
+            m_workers.emplace_back(&World::worker_thread_loop, this);
+        }
     }
 }
 
@@ -91,8 +100,10 @@ void World::generate_world(int sector_index, uint32_t seed) {
     GenerateSectorStructures(sector_index);
     PopulateFauna();
 
-    for (const auto& pos : to_mesh) {
-        queue_chunk_for_meshing(pos);
+    if (m_enable_background_meshing) {
+        for (const auto& pos : to_mesh) {
+            queue_chunk_for_meshing(pos);
+        }
     }
 }
 
@@ -140,19 +151,6 @@ void World::PopulateFauna() {
                 e2.state = AIState::ROOSTING;
                 e2.role = StalkerRole::Melee;
                 m_active_entities.push_back(e2);
-            }
-        }
-
-        if (i % 3 == 1) {
-            glm::vec3 drifter_pos = room_center + glm::vec3(0.0f, 7.5f, 0.0f);
-            if (IsSpawnPointSafe(drifter_pos, m_playerSpawnPos)) {
-                FaunaEntity ed;
-                ed.id = next_id++;
-                ed.pos = drifter_pos;
-                ed.position = drifter_pos;
-                ed.state = AIState::ROOSTING;
-                ed.role = StalkerRole::VoidDrifter;
-                m_active_entities.push_back(ed);
             }
         }
     }

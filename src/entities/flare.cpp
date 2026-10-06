@@ -36,7 +36,7 @@ void FlareManager::spawn_flare(const glm::vec3& origin, const glm::vec3& forward
     f.velocity = forward_dir * 16.0f + glm::vec3(0.0f, 3.5f, 0.0f);
     f.lifetime = 60.0f;
     f.max_lifetime = 60.0f;
-    f.light_radius = 18.0f;
+    f.light_radius = 22.0f;
     f.is_grounded = false;
     m_flares.push_back(f);
 }

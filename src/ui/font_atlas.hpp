@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <algorithm>
-#include "../include/font8x8.h"
+#include <font8x8.h>
 
 namespace Voidfall {
 

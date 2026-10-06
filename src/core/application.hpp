@@ -78,6 +78,9 @@ public:
     GameState current_state() const { return m_state; }
     const std::string& active_save_file() const { return m_active_save_file; }
     bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.capture_level_shapes; }
+    static Application* instance();
+    void LaunchSector(int sector_index);
+    int current_sector_index() const { return m_selected_level; }
     AudioEngine* audio() { return m_audio.get(); }
     const MissionSystem& mission() const { return m_mission; }
     MissionSystem& mission_mut() { return m_mission; }

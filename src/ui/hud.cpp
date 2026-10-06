@@ -7,7 +7,7 @@
 #include "../systems/mission_system.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include "../include/font8x8.h"
+#include <font8x8.h>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -152,8 +152,14 @@ void HUD::update(float dt) {
             ++it;
         }
     }
-    if (m_briefing_auto_timer > 0.0f) {
+    if (m_briefingTimer > 0.0f) {
+        m_briefingTimer = std::max(0.0f, m_briefingTimer - dt);
+        m_briefing_auto_timer = m_briefingTimer;
+    } else if (m_briefing_auto_timer > 0.0f) {
         m_briefing_auto_timer = std::max(0.0f, m_briefing_auto_timer - dt);
+    }
+    if (m_warning_debounce_timer > 0.0f) {
+        m_warning_debounce_timer = std::max(0.0f, m_warning_debounce_timer - dt);
     }
 
     if (m_noise_peak_timer > 0.0f) {
@@ -250,10 +256,35 @@ void HUD::trigger_enemy_blood_splatter(float intensity) {
 void HUD::show_warning(const std::string& msg, float duration) {
     if (msg.empty()) return;
 
-    // Check if matching notification is already active in queue
+    bool is_status_toggle = (msg.find("HEADLAMP") != std::string::npos ||
+                             msg.find("FLASHLIGHT") != std::string::npos ||
+                             msg.find("OBSERVATION") != std::string::npos ||
+                             msg.find("BRIGHTNESS") != std::string::npos ||
+                             msg.find("DISPLAY") != std::string::npos ||
+                             msg.find("FULLSCREEN") != std::string::npos ||
+                             msg.find("WINDOWED") != std::string::npos);
+
+    // Enforce 0.5s debounce for repeat status toggle messages
+    if (is_status_toggle && msg == m_last_warning_text && m_warning_debounce_timer > 0.0f) {
+        if (!m_notifications.empty() && m_notifications.front().text == msg) {
+            m_notifications.front().timer = duration;
+            m_notifications.front().max_timer = duration;
+            m_notifications.front().count = 1;
+        }
+        return;
+    }
+    m_last_warning_text = msg;
+    m_warning_debounce_timer = 0.5f;
+
+    // Check if matching notification is already active in queue:
+    // Status toggles overwrite single notification (count=1); gameplay events increment count
     for (auto it = m_notifications.begin(); it != m_notifications.end(); ++it) {
         if (it->text == msg) {
-            it->count++;
+            if (is_status_toggle) {
+                it->count = 1; // Overwrite rather than stacking [0x2], [0x3], [0x4]
+            } else {
+                it->count++;
+            }
             it->timer = duration;
             it->max_timer = duration;
             if (it != m_notifications.begin()) {
@@ -279,7 +310,8 @@ void HUD::show_warning(const std::string& msg, float duration) {
         msg.find("FULLSCREEN") != std::string::npos ||
         msg.find("WINDOWED") != std::string::npos ||
         msg.find("BRIGHTNESS") != std::string::npos ||
-        msg.find("HEADLAMP") != std::string::npos) {
+        msg.find("HEADLAMP") != std::string::npos ||
+        msg.find("FLASHLIGHT") != std::string::npos) {
         color = glm::vec4(0.20f, 0.95f, 0.45f, 1.0f); // Emerald / Green
     }
     // 2. Severe Damage / Hostile Swarms / Toxic Gas / Radiation
@@ -410,33 +442,45 @@ void HUD::clear_target_info() {
     // Explicit instant clearance of crosshair tooltip
 }
 
-void HUD::add_loot_toast(const std::string& resource_name, const glm::vec4& color, int count, int unit_points) {
-    if (!m_loot_toasts.empty() && m_loot_toasts.front().resource_name == resource_name) {
-        auto& toast = m_loot_toasts.front();
-        toast.count += count;
-        toast.lifetime = 2.5f;
-        toast.maxLifetime = 2.5f;
-        toast.label = "+" + std::to_string(toast.count) + " " + resource_name + " [x" + std::to_string(toast.count) + "]";
+void HUD::PushLootToast(const std::string& itemId, const std::string& displayName, int count, const glm::vec4& color) {
+    auto it = std::find_if(m_loot_toasts.begin(), m_loot_toasts.end(),
+        [&](const LootToast& toast) {
+            return (!toast.itemId.empty() && toast.itemId == itemId) ||
+                   toast.resource_name == displayName ||
+                   toast.displayName == displayName;
+        });
+
+    if (it != m_loot_toasts.end()) {
+        it->count += count;
+        it->lifetime = 2.5f; // Refresh timer
+        it->maxLifetime = 2.5f;
+        it->text = "+" + std::to_string(it->count) + " " + displayName + " [x" + std::to_string(it->count) + "]";
+        it->label = it->text;
         return;
     }
 
+    // If queue is full (max 4 distinct rows), pop oldest before adding
+    while (m_loot_toasts.size() >= 4) {
+        m_loot_toasts.pop_back();
+    }
+
     LootToast toast;
-    toast.resource_name = resource_name;
+    toast.itemId = itemId;
+    toast.displayName = displayName;
+    toast.resource_name = displayName;
     toast.count = count;
-    toast.unit_points = unit_points;
     toast.color = color;
     toast.lifetime = 2.5f;
     toast.maxLifetime = 2.5f;
-    if (count > 1) {
-        toast.label = "+" + std::to_string(count) + " " + resource_name + " [x" + std::to_string(count) + "]";
-    } else {
-        toast.label = "+1 " + resource_name;
-    }
-
+    toast.text = (count > 1) ? ("+" + std::to_string(count) + " " + displayName + " [x" + std::to_string(count) + "]")
+                             : ("+1 " + displayName);
+    toast.label = toast.text;
     m_loot_toasts.push_front(toast);
-    while (m_loot_toasts.size() > 5) {
-        m_loot_toasts.pop_back();
-    }
+}
+
+void HUD::add_loot_toast(const std::string& resource_name, const glm::vec4& color, int count, int unit_points) {
+    (void)unit_points;
+    PushLootToast(resource_name, resource_name, count, color);
 }
 
 void HUD::add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color) {
@@ -582,8 +626,12 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
     if (player.active_tool() == ToolSlot::CombatWeapon) {
         // Combat Tactical Reticle tailored to weapon archetype
         WeaponArchetype arch = player.weapon_archetype();
+        float zoom_prog = player.zoom_progress();
         float reticle_rad = (arch == WeaponArchetype::MagmaScattergun) ? (18.0f * ui_scale) :
                             (arch == WeaponArchetype::NeedlerRailgun)  ? (16.0f * ui_scale) : (12.0f * ui_scale);
+
+        // Dynamically tighten reticle brackets during ADS zoom to visually reflect tighter spread
+        reticle_rad = glm::mix(reticle_rad, reticle_rad * 0.60f, zoom_prog);
 
         glm::vec4 theme_col = (arch == WeaponArchetype::MagmaScattergun) ? Typography::COLOR_AMBER :
                               (arch == WeaponArchetype::NeedlerRailgun)  ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
@@ -597,10 +645,18 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
             draw_rect(cx - 4.0f * ui_scale, cy + reticle_rad - 2.0f, 8.0f * ui_scale, 2.0f, ret_col);
         } else if (arch == WeaponArchetype::NeedlerRailgun) {
             // Precision sniper crosshairs with mil-dots
-            draw_rect(cx - reticle_rad, cy - 0.5f, reticle_rad * 2.0f, 1.0f, ret_col);
-            draw_rect(cx - 0.5f, cy - reticle_rad, 1.0f, reticle_rad * 2.0f, ret_col);
+            float line_len = glm::mix(reticle_rad, reticle_rad * 3.0f, zoom_prog);
+            draw_rect(cx - line_len, cy - 0.5f, line_len * 2.0f, 1.0f, ret_col);
+            draw_rect(cx - 0.5f, cy - line_len, 1.0f, line_len * 2.0f, ret_col);
             draw_rect(cx - 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
             draw_rect(cx + 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
+            if (zoom_prog > 0.3f) {
+                // Secondary optical mil-dots when scoped
+                draw_rect(cx - 16.0f * ui_scale, cy - 2.0f * ui_scale, 1.0f, 4.0f * ui_scale, ret_col);
+                draw_rect(cx + 16.0f * ui_scale, cy - 2.0f * ui_scale, 1.0f, 4.0f * ui_scale, ret_col);
+                draw_rect(cx - 2.0f * ui_scale, cy - 16.0f * ui_scale, 4.0f * ui_scale, 1.0f, ret_col);
+                draw_rect(cx - 2.0f * ui_scale, cy + 16.0f * ui_scale, 4.0f * ui_scale, 1.0f, ret_col);
+            }
         } else {
             // Tactical box brackets for Plasma Carbine
             draw_rect(cx - reticle_rad, cy - 1.0f, 6.0f * ui_scale, 2.0f, ret_col);
@@ -624,6 +680,12 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
         } else {
             ClearReloadStatus();
             ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+            if (player.zoom_progress() > 0.3f) {
+                float mag = 1.0f / std::max(0.01f, player.weapon_stats().zoom_fov_multiplier);
+                char mag_buf[16];
+                std::snprintf(mag_buf, sizeof(mag_buf), " [%.1fX]", mag);
+                ammo_str += mag_buf;
+            }
             if (player.weapon_ammo() <= 2) {
                 ammo_col = Typography::COLOR_CRIMSON;
             }
@@ -795,7 +857,7 @@ void HUD::render_loot_toasts() {
     float toast_w = std::clamp(300.0f * ui_scale, 230.0f, 360.0f);
     float toast_x = static_cast<float>(m_width) - toast_w - 20.0f * ui_scale;
     float row_h = std::clamp(28.0f * ui_scale, 24.0f, 34.0f);
-    float base_y = 110.0f * ui_scale;
+    float base_y = (m_briefingTimer > 0.0f && !m_show_help_briefing) ? (208.0f * ui_scale) : (110.0f * ui_scale);
 
     for (size_t i = 0; i < m_loot_toasts.size(); ++i) {
         const auto& toast = m_loot_toasts[i];
@@ -1207,11 +1269,20 @@ void HUD::render(
 
         float pad_x = s_x + 12.0f * ui_scale;
         float crouch_badge_w = player.is_crouching() ? (FontRenderer::get_rendered_width("[CROUCH]", 0.78f * ui_scale) + 6.0f * ui_scale) : 0.0f;
-        float max_title_w = std::max(60.0f, s_w - 24.0f * ui_scale - crouch_badge_w);
+        std::string hl_str = player.is_headlamp_on() ? "[* F: LIGHT ON]" : "[ F: LIGHT OFF ]";
+        glm::vec4 hl_col = player.is_headlamp_on() ? Typography::COLOR_CYAN : Typography::COLOR_MUTED;
+        float hl_badge_w = FontRenderer::get_rendered_width(hl_str, 0.78f * ui_scale) + 6.0f * ui_scale;
+
+        float max_title_w = std::max(50.0f, s_w - 24.0f * ui_scale - crouch_badge_w - hl_badge_w);
         draw_text_fitted("// EXOSUIT VITALS", pad_x, s_y + 8.0f * ui_scale, max_title_w, 0.82f * ui_scale, Typography::COLOR_MUTED);
+
+        float right_badges_x = s_x + s_w - 12.0f * ui_scale;
         if (player.is_crouching()) {
-            draw_text("[CROUCH]", s_x + s_w - 12.0f * ui_scale - crouch_badge_w + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, Typography::COLOR_CYAN);
+            right_badges_x -= crouch_badge_w;
+            draw_text("[CROUCH]", right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, Typography::COLOR_CYAN);
         }
+        right_badges_x -= hl_badge_w;
+        draw_text(hl_str, right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, hl_col);
 
         float bar_w = s_w - 24.0f * ui_scale;
         float bar_h = 6.0f * ui_scale;
@@ -1349,7 +1420,7 @@ void HUD::render(
         bool t_ready = player.is_tactical_ready();
         CharacterClass cls = player.character_class();
         std::string skill_short = (cls == CharacterClass::Demolitionist) ? "SHOCKWAVE" :
-                                  (cls == CharacterClass::Vanguard) ? "BARRICADE" : "DASH";
+                                  (cls == CharacterClass::Vanguard) ? "REPULSOR" : "DASH";
         std::string c_str;
         glm::vec4 c_col;
         if (t_ready) {
@@ -1365,11 +1436,11 @@ void HUD::render(
         }
         draw_text_centered_fitted(c_str, mid_x, ab_y, half_w, ab_h, 0.92f * ui_scale, c_col);
 
-        // 6a. Throwable Chemical Flare Status: [G] FLARE: X/3
+        // 6a. Throwable Chemical Flare Status: [T] FLARE: X/3
         float flare_y = ab_y - 20.0f * ui_scale;
         float flare_w = ab_w;
         float flare_h = 16.0f * ui_scale;
-        std::string fl_str = "[G] CHEMICAL FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
+        std::string fl_str = "[T] CHEMICAL FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
         if (player.flare_count() < player.max_flares()) {
             char fl_buf[32];
             std::snprintf(fl_buf, sizeof(fl_buf), " (%.0fs)", player.flare_recharge_timer());
@@ -1821,32 +1892,146 @@ void HUD::render(
         draw_text(control_guide, gx, gy, guide_scale, glm::vec4(0.35f, 0.50f, 0.65f, 0.70f * alpha));
     }
 
-    // 12. CONTRACTOR FIELD BRIEFING OVERLAY (Toggleable via H / F1)
+    // 12. CONTRACTOR FIELD BRIEFING OVERLAY (Auto-fades linearly to 0.0 over 8s, toggleable via H / F1)
     if (m_show_help_briefing) {
-        float card_w = std::clamp(sw * 0.38f, 380.0f, 520.0f);
-        float card_h = 182.0f * ui_scale;
-        float card_x = sw - card_w - 24.0f * ui_scale;
-        float card_y = 70.0f * ui_scale;
+        // ── 12A. FULL OPERATIONS MANUAL & CONTRACTOR FIELD BRIEFING (Centered Responsive Tactical Modal) ──
+        float menu_w = std::clamp(sw * 0.78f, 620.0f * ui_scale, std::min(sw - 32.0f, 920.0f * ui_scale));
+        float menu_h = std::clamp(sh * 0.76f, 440.0f * ui_scale, std::min(sh - 32.0f, 600.0f * ui_scale));
+        float menu_x = (sw - menu_w) * 0.5f;
+        float menu_y = (sh - menu_h) * 0.5f;
 
-        draw_pill(card_x, card_y, card_w, card_h, glm::vec4(0.0f, 0.94f, 1.0f, 0.7f));
-        draw_rect(card_x, card_y, card_w, 20.0f * ui_scale, glm::vec4(0.04f, 0.12f, 0.18f, 0.95f));
-        draw_text("// CONTRACTOR FIELD BRIEFING // DIRECTIVE", card_x + 10.0f * ui_scale, card_y + 4.0f * ui_scale, 1.05f * ui_scale, Typography::COLOR_CYAN);
+        // Dimmed cinematic backdrop wash to isolate manual text over 3D cavern
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.015f, 0.025f, 0.045f, 0.82f));
 
-        float line_x = card_x + 10.0f * ui_scale;
-        float by = card_y + 26.0f * ui_scale;
-        float b_step = 15.5f * ui_scale;
-        float line_scale = 0.95f * ui_scale;
-        draw_text("1. QUOTA: Mine Voidite crystals using [LMB] Drill.", line_x, by, line_scale, glm::vec4(0.85f, 0.95f, 1.0f, 0.95f));
-        by += b_step;
-        draw_text("2. STEALTH: [L-CTRL] to crouch; decays acoustic noise.", line_x, by, line_scale, glm::vec4(0.2f, 0.95f, 0.5f, 0.95f));
-        by += b_step;
-        draw_text("3. HAZARD: >50% radiation drains suit HP. Move fast!", line_x, by, line_scale, glm::vec4(1.0f, 0.4f, 0.3f, 0.95f));
-        by += b_step;
-        draw_text("4. BURROWERS: Wyrms tunnel in Phase 3/4 & holdouts.", line_x, by, line_scale, glm::vec4(1.0f, 0.7f, 0.1f, 0.95f));
-        by += b_step;
-        draw_text("5. EXTRACTION: [B] at quota deploys beacon. Survive 40s.", line_x, by, line_scale, glm::vec4(0.0f, 0.94f, 1.0f, 0.95f));
-        by += b_step + 5.0f * ui_scale;
-        draw_text(">> [H] / [F1] TO DISMISS FIELD MANUAL <<", line_x, by, 0.88f * ui_scale, glm::vec4(0.6f, 0.65f, 0.75f, 0.75f));
+        // Outer cybernetic modal shell
+        draw_pill(menu_x, menu_y, menu_w, menu_h, Typography::COLOR_CYAN);
+        draw_rect(menu_x + 1.0f, menu_y + 1.0f, menu_w - 2.0f, menu_h - 2.0f, glm::vec4(0.025f, 0.040f, 0.065f, 0.96f));
+        // Subtle inner high-tech border lines
+        draw_rect(menu_x + 3.0f, menu_y + 3.0f, menu_w - 6.0f, 1.0f, glm::vec4(0.0f, 0.85f, 1.0f, 0.25f));
+        draw_rect(menu_x + 3.0f, menu_y + menu_h - 4.0f, menu_w - 6.0f, 1.0f, glm::vec4(0.0f, 0.85f, 1.0f, 0.25f));
+        draw_rect(menu_x + 3.0f, menu_y + 3.0f, 1.0f, menu_h - 6.0f, glm::vec4(0.0f, 0.85f, 1.0f, 0.25f));
+        draw_rect(menu_x + menu_w - 4.0f, menu_y + 3.0f, 1.0f, menu_h - 6.0f, glm::vec4(0.0f, 0.85f, 1.0f, 0.25f));
+
+        // Header bar
+        float hdr_h = 32.0f * ui_scale;
+        draw_rect(menu_x, menu_y, menu_w, hdr_h, glm::vec4(0.04f, 0.10f, 0.17f, 0.98f));
+        draw_rect(menu_x, menu_y + hdr_h, menu_w, 1.5f * ui_scale, Typography::COLOR_CYAN);
+        float title_w = menu_w - 180.0f * ui_scale;
+        draw_text_fitted("// CONTRACTOR FIELD BRIEFING & OPERATIONS MANUAL", menu_x + 14.0f * ui_scale, menu_y + 7.0f * ui_scale, title_w, 1.08f * ui_scale, Typography::COLOR_CYAN);
+        draw_text_fitted("[ H / ESC: CLOSE ]", menu_x + menu_w - 150.0f * ui_scale, menu_y + 7.0f * ui_scale, 140.0f * ui_scale, 0.92f * ui_scale, Typography::COLOR_AMBER);
+
+        // Footer prompt bar
+        float ftr_h = 28.0f * ui_scale;
+        float ftr_y = menu_y + menu_h - ftr_h - 6.0f * ui_scale;
+        float ftr_w = menu_w - 24.0f * ui_scale;
+        float ftr_x = menu_x + 12.0f * ui_scale;
+        draw_pill(ftr_x, ftr_y, ftr_w, ftr_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.40f));
+        draw_text_centered_fitted(">> PRESS [H] OR [ESC] TO CLOSE BRIEFING & RESUME EXPEDITION <<", ftr_x, ftr_y, ftr_w, ftr_h, 0.95f * ui_scale, Typography::COLOR_CYAN);
+
+        // Two-Column Responsive Content
+        float pad_x = 16.0f * ui_scale;
+        float col_gap = 18.0f * ui_scale;
+        float col_w = (menu_w - pad_x * 2.0f - col_gap) * 0.5f;
+        float col1_x = menu_x + pad_x;
+        float col2_x = col1_x + col_w + col_gap;
+        float cur_y = menu_y + hdr_h + 10.0f * ui_scale;
+        float body_h = ftr_y - cur_y - 8.0f * ui_scale;
+
+        // Column 1: Field Directives & Expedition Protocols
+        draw_text("FIELD DIRECTIVES & OBJECTIVES", col1_x, cur_y, 1.04f * ui_scale, Typography::COLOR_AMBER);
+        draw_rect(col1_x, cur_y + 17.0f * ui_scale, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.5f, 0.4f));
+
+        struct DirectiveEntry {
+            std::string tag;
+            std::string desc;
+            glm::vec4 color;
+        };
+        DirectiveEntry directives[] = {
+            {"1. QUOTA & EXTRACTION:", "Mine Voidite crystals with [LMB] Mining Drill until quota is achieved.", Typography::COLOR_GREEN},
+            {"2. ACOUSTIC STEALTH:", "Hold [L-CTRL] to crouch; dampens decibels to evade stalking swarms.", Typography::COLOR_CYAN},
+            {"3. SEISMIC HAZARDS:", "Radiation >50% corrodes suit HP. Watch ceiling during tremor cave-ins.", Typography::COLOR_CRIMSON},
+            {"4. BURROWER WYRMS:", "Armored wyrms tunnel during Phase 3/4. Weak to satchel charges (2.5x).", Typography::COLOR_AMBER},
+            {"5. EVAC POD DEFENSE:", "Press [B] at quota to deploy beacon. Defend LZ for 40s to extract.", Typography::COLOR_GREEN}
+        };
+
+        float d_step = (body_h - 22.0f * ui_scale) / 5.0f;
+        float dy = cur_y + 24.0f * ui_scale;
+        for (const auto& d : directives) {
+            draw_text_fitted(d.tag, col1_x + 4.0f * ui_scale, dy, col_w - 8.0f * ui_scale, 0.95f * ui_scale, d.color);
+            float desc_y = dy + 14.0f * ui_scale;
+            auto wrapped = FontRenderer::wrap_text(d.desc, col_w - 12.0f * ui_scale, 0.84f * ui_scale);
+            for (size_t wi = 0; wi < wrapped.size() && wi < 2; ++wi) {
+                draw_text_fitted(wrapped[wi], col1_x + 8.0f * ui_scale, desc_y + wi * 12.0f * ui_scale, col_w - 16.0f * ui_scale, 0.84f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.92f));
+            }
+            dy += d_step;
+        }
+
+        // Column 2: Delver Controls & Avionics
+        draw_text("DELVER CONTROLS & AVIONICS", col2_x, cur_y, 1.04f * ui_scale, Typography::COLOR_CYAN);
+        draw_rect(col2_x, cur_y + 17.0f * ui_scale, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.5f, 0.4f));
+
+        struct BindingEntry {
+            std::string key;
+            std::string action;
+            glm::vec4 color;
+        };
+        BindingEntry bindings[] = {
+            {"[WASD]",         "Locomotion & Strafing",       Typography::COLOR_PRIMARY},
+            {"[SPACE]",        "Jump / Jetpack Thruster",     Typography::COLOR_PRIMARY},
+            {"[L-CTRL]",       "Crouch (Acoustic Stealth)",   Typography::COLOR_GREEN},
+            {"[1-3 / MWHEEL]", "Drill / Weapon / Satchel",    Typography::COLOR_CYAN},
+            {"[LMB]",          "Mine Voxel / Attack Fire",    Typography::COLOR_AMBER},
+            {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
+            {"[F]",            "Grappling Hook Tether",       Typography::COLOR_CYAN},
+            {"[Q]",            "Seismic Sonar Pulse Scan",    Typography::COLOR_CYAN},
+            {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},
+            {"[G]",            "Chemical Flare Illumination", Typography::COLOR_CYAN},
+            {"[B]",            "Deploy Evac Beacon (At Quota)", Typography::COLOR_GREEN},
+            {"[H / F1]",       "Toggle This Field Manual",    Typography::COLOR_PRIMARY}
+        };
+
+        float b_step = (body_h - 22.0f * ui_scale) / 12.0f;
+        float key_w = std::clamp(112.0f * ui_scale, 96.0f, 132.0f);
+        float by_bind = cur_y + 24.0f * ui_scale;
+        for (const auto& b : bindings) {
+            draw_text_fitted(b.key, col2_x + 4.0f * ui_scale, by_bind, key_w - 4.0f * ui_scale, 0.88f * ui_scale, Typography::COLOR_CYAN);
+            draw_text_fitted(b.action, col2_x + key_w + 8.0f * ui_scale, by_bind, col_w - key_w - 12.0f * ui_scale, 0.88f * ui_scale, b.color);
+            by_bind += b_step;
+        }
+    } else if (m_briefingTimer > 0.0f) {
+        // ── 12B. CORNER EXPEDITION DIRECTIVE BANNER (Auto-fades over 8s at expedition start) ──
+        float briefing_alpha = glm::clamp(m_briefingTimer / 2.0f, 0.0f, 1.0f);
+        if (briefing_alpha > 0.001f) {
+            float card_w = std::clamp(sw * 0.36f, 380.0f * ui_scale, 500.0f * ui_scale);
+            card_w = std::min(card_w, sw - 32.0f);
+            float card_h = 136.0f * ui_scale;
+            float card_x = sw - card_w - 20.0f * ui_scale;
+            float card_y = 65.0f * ui_scale;
+
+            draw_pill(card_x, card_y, card_w, card_h, glm::vec4(0.0f, 0.94f, 1.0f, 0.7f * briefing_alpha));
+            draw_rect(card_x, card_y, card_w, 20.0f * ui_scale, glm::vec4(0.04f, 0.12f, 0.18f, 0.95f * briefing_alpha));
+            glm::vec4 cyan_hdr = Typography::COLOR_CYAN;
+            cyan_hdr.a *= briefing_alpha;
+            float max_text_w = card_w - 20.0f * ui_scale;
+            float line_x = card_x + 10.0f * ui_scale;
+            draw_text_fitted("// CONTRACTOR FIELD BRIEFING // DIRECTIVE", line_x, card_y + 4.0f * ui_scale, max_text_w, 1.00f * ui_scale, cyan_hdr);
+
+            float by = card_y + 24.0f * ui_scale;
+            float b_step = 16.0f * ui_scale;
+            float line_scale = 0.88f * ui_scale;
+
+            draw_text_fitted("1. QUOTA: Mine Voidite crystals using [LMB] Drill.", line_x, by, max_text_w, line_scale, glm::vec4(0.85f, 0.95f, 1.0f, 0.95f * briefing_alpha));
+            by += b_step;
+            draw_text_fitted("2. STEALTH: [L-CTRL] to crouch; decays acoustic noise.", line_x, by, max_text_w, line_scale, glm::vec4(0.2f, 0.95f, 0.5f, 0.95f * briefing_alpha));
+            by += b_step;
+            draw_text_fitted("3. HAZARD: >50% radiation drains suit HP. Move fast!", line_x, by, max_text_w, line_scale, glm::vec4(1.0f, 0.4f, 0.3f, 0.95f * briefing_alpha));
+            by += b_step;
+            draw_text_fitted("4. BURROWERS: Wyrms tunnel in Phase 3/4 & holdouts.", line_x, by, max_text_w, line_scale, glm::vec4(1.0f, 0.7f, 0.1f, 0.95f * briefing_alpha));
+            by += b_step;
+            draw_text_fitted("5. EXTRACTION: [B] at quota deploys beacon. Survive 40s.", line_x, by, max_text_w, line_scale, glm::vec4(0.0f, 0.94f, 1.0f, 0.95f * briefing_alpha));
+            by += b_step + 4.0f * ui_scale;
+            draw_text_fitted(">> PRESS [H] FOR FULL FIELD MANUAL & CONTROLS <<", line_x, by, max_text_w, 0.82f * ui_scale, glm::vec4(0.6f, 0.75f, 0.9f, 0.85f * briefing_alpha));
+        }
     }
 
     // 13. FULL-SCREEN CINEMATIC DEATH FAILURE SEQUENCE
@@ -2062,6 +2247,35 @@ void HUD::render_enemy_awareness_markers(
             draw_text_centered("!", bx, by - 1.0f * ui_scale, badge_w, badge_h, text_scale, glm::vec4(1.0f, 0.90f, 0.15f, alpha));
         }
     }
+}
+
+void HUD::SetContractorBriefing(bool active, float duration) {
+    if (active) {
+        m_briefingTimer = duration;
+        m_briefing_auto_timer = duration;
+    } else {
+        m_briefingTimer = 0.0f;
+        m_briefing_auto_timer = 0.0f;
+        m_show_help_briefing = false;
+    }
+}
+
+void HUD::toggle_help_briefing() {
+    if (m_show_help_briefing) {
+        m_show_help_briefing = false;
+        m_briefingTimer = 0.0f;
+        m_briefing_auto_timer = 0.0f;
+    } else {
+        m_show_help_briefing = true;
+        m_briefingTimer = 0.0f;
+        m_briefing_auto_timer = 0.0f;
+    }
+}
+
+void HUD::dismiss_help_briefing() {
+    m_show_help_briefing = false;
+    m_briefingTimer = 0.0f;
+    m_briefing_auto_timer = 0.0f;
 }
 
 } // namespace Voidfall

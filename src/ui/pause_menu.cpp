@@ -2,7 +2,7 @@
 #include "font_renderer.hpp"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include "../include/font8x8.h"
+#include <font8x8.h>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -161,8 +161,9 @@ void PauseMenu::draw_panel_with_border(float x, float y, float w, float h, const
 PauseMenuAction PauseMenu::render(
     int sector,
     float time_elapsed,
-    const PlayerInventory& inventory,
+    PlayerInventory& inventory,
     GameSettings& settings,
+    int class_id,
     float mouse_x,
     float mouse_y,
     bool mouse_clicked
@@ -206,46 +207,57 @@ PauseMenuAction PauseMenu::render(
     draw_rect(panel_x + pad, cur_y, content_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.55f, 0.6f));
     cur_y += 10.0f * ui_scale;
 
-    // Sub-Navigation Tabs: [ 1. TELEMETRY ] | [ 2. AUDIO & RIG ] | [ 3. CONTROLS ]
+    // Sub-Navigation Tabs: [ 1. TELEMETRY ] | [ 2. INVENTORY ] | [ 3. AUDIO & RIG ] | [ 4. CONTROLS ]
     float tab_h = std::clamp(30.0f * ui_scale, 26.0f, 36.0f);
-    float tab_gap = 8.0f * ui_scale;
-    float tab_w = (content_w - 2.0f * tab_gap) / 3.0f;
+    float tab_gap = 6.0f * ui_scale;
+    float tab_w = (content_w - 3.0f * tab_gap) / 4.0f;
     float tab1_x = panel_x + pad;
     float tab2_x = tab1_x + tab_w + tab_gap;
     float tab3_x = tab2_x + tab_w + tab_gap;
+    float tab4_x = tab3_x + tab_w + tab_gap;
 
     bool t1_hover = (mouse_x >= tab1_x && mouse_x <= tab1_x + tab_w && mouse_y >= cur_y && mouse_y <= cur_y + tab_h);
     bool t2_hover = (mouse_x >= tab2_x && mouse_x <= tab2_x + tab_w && mouse_y >= cur_y && mouse_y <= cur_y + tab_h);
     bool t3_hover = (mouse_x >= tab3_x && mouse_x <= tab3_x + tab_w && mouse_y >= cur_y && mouse_y <= cur_y + tab_h);
+    bool t4_hover = (mouse_x >= tab4_x && mouse_x <= tab4_x + tab_w && mouse_y >= cur_y && mouse_y <= cur_y + tab_h);
 
     if (mouse_clicked && t1_hover) m_active_tab = PauseTab::Mission;
-    if (mouse_clicked && t2_hover) m_active_tab = PauseTab::AudioSettings;
-    if (mouse_clicked && t3_hover) m_active_tab = PauseTab::ControlsBriefing;
+    if (mouse_clicked && t2_hover) m_active_tab = PauseTab::Inventory;
+    if (mouse_clicked && t3_hover) m_active_tab = PauseTab::AudioSettings;
+    if (mouse_clicked && t4_hover) m_active_tab = PauseTab::ControlsBriefing;
 
     bool t1_active = (m_active_tab == PauseTab::Mission);
-    bool t2_active = (m_active_tab == PauseTab::AudioSettings);
-    bool t3_active = (m_active_tab == PauseTab::ControlsBriefing);
+    bool t2_active = (m_active_tab == PauseTab::Inventory);
+    bool t3_active = (m_active_tab == PauseTab::AudioSettings);
+    bool t4_active = (m_active_tab == PauseTab::ControlsBriefing);
 
     draw_panel_with_border(tab1_x, cur_y, tab_w, tab_h,
                            t1_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t1_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t1_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t1_active ? 2.0f : 1.0f);
-    draw_text_centered_fitted("[ 1. TELEMETRY ]", tab1_x, cur_y, tab_w, tab_h, 1.05f * ui_scale,
+    draw_text_centered_fitted("[ 1. TELEMETRY ]", tab1_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
                               t1_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
     draw_panel_with_border(tab2_x, cur_y, tab_w, tab_h,
                            t2_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t2_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t2_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t2_active ? 2.0f : 1.0f);
-    draw_text_centered_fitted("[ 2. AUDIO & RIG ]", tab2_x, cur_y, tab_w, tab_h, 1.05f * ui_scale,
+    draw_text_centered_fitted("[ 2. INVENTORY ]", tab2_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
                               t2_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
     draw_panel_with_border(tab3_x, cur_y, tab_w, tab_h,
                            t3_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t3_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t3_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t3_active ? 2.0f : 1.0f);
-    draw_text_centered_fitted("[ 3. CONTROLS ]", tab3_x, cur_y, tab_w, tab_h, 1.05f * ui_scale,
+    draw_text_centered_fitted("[ 3. AUDIO/RIG ]", tab3_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
                               t3_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+
+    draw_panel_with_border(tab4_x, cur_y, tab_w, tab_h,
+                           t4_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t4_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
+                           t4_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
+                           t4_active ? 2.0f : 1.0f);
+    draw_text_centered_fitted("[ 4. CONTROLS ]", tab4_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
+                              t4_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
 
     cur_y += tab_h + 10.0f * ui_scale;
 
@@ -330,6 +342,122 @@ PauseMenuAction PauseMenu::render(
                                   mix_hov ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
         if (mouse_clicked && mix_hov) {
             m_active_tab = PauseTab::AudioSettings;
+        }
+
+    } else if (m_active_tab == PauseTab::Inventory) {
+        // ── 3B. Cargo Inventory & Jettison View ──
+        draw_panel_with_border(panel_x + pad, cur_y, content_w, content_box_h, glm::vec4(0.02f, 0.035f, 0.06f, 0.92f), glm::vec4(0.15f, 0.35f, 0.5f, 0.6f));
+
+        float inner_pad = 16.0f * ui_scale;
+        float rx = panel_x + pad + inner_pad;
+        float row_w = content_w - 2.0f * inner_pad;
+        float in_y = cur_y + 12.0f * ui_scale;
+
+        // Carry weight telemetry
+        float cur_w = inventory.carry_weight();
+        float max_w = inventory.max_carry_weight(class_id);
+        bool over = inventory.is_overburdened(class_id);
+        float penalty = inventory.overburden_penalty(class_id);
+
+        char weight_header[64];
+        std::snprintf(weight_header, sizeof(weight_header), "DELVER CARGO RIG // LOAD: %.1f / %.1f KG", cur_w, max_w);
+        glm::vec4 w_col = over ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN;
+        draw_text(weight_header, rx, in_y, 1.15f * ui_scale, w_col);
+        in_y += 18.0f * ui_scale;
+
+        // Weight bar
+        float wbar_w = row_w;
+        float wbar_h = 7.0f * ui_scale;
+        draw_rect(rx, in_y, wbar_w, wbar_h, glm::vec4(0.08f, 0.14f, 0.20f, 0.9f));
+        float w_ratio = std::clamp(cur_w / max_w, 0.0f, 1.0f);
+        draw_rect(rx, in_y, wbar_w * w_ratio, wbar_h, over ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN);
+        in_y += wbar_h + 10.0f * ui_scale;
+
+        if (over) {
+            int slow_pct = static_cast<int>(std::round((1.0f - penalty) * 100.0f));
+            std::string status_msg = "! OVERBURDEN WARNING: -" + std::to_string(slow_pct) + "% SPEED | +67% THRUSTER BURN ! JETTISON CARGO TO RESTORE MOBILITY";
+            draw_text_fitted(status_msg, rx, in_y, row_w, 0.92f * ui_scale, Typography::COLOR_AMBER);
+        } else {
+            draw_text("MOBILITY STATUS: OPTIMAL (100% SPRINT & JETPACK POWER)", rx, in_y, 0.92f * ui_scale, Typography::COLOR_GREEN);
+        }
+        in_y += 18.0f * ui_scale;
+        draw_rect(rx, in_y, row_w, 1.0f, glm::vec4(0.15f, 0.35f, 0.5f, 0.4f));
+        in_y += 10.0f * ui_scale;
+
+        // Item List with Drop Buttons
+        struct InventoryRow {
+            std::string name;
+            int count;
+            float unit_weight;
+            DropItemType item_type;
+            glm::vec4 color;
+        };
+        InventoryRow items[] = {
+            {"Voidite Ore",         inventory.voidite,            1.0f, DropItemType::Voidite,          Typography::COLOR_CYAN},
+            {"Titanium Cores",      inventory.titanium,           2.5f, DropItemType::Titanium,         Typography::COLOR_AMBER},
+            {"Mineral Salvage",     inventory.salvage_parts,      0.4f, DropItemType::Salvage,          glm::vec4(0.85f, 0.85f, 0.95f, 1.0f)},
+            {"Bulkhead Barricades", inventory.bulkheads,          2.0f, DropItemType::Bulkhead,         Typography::COLOR_PRIMARY},
+            {"Demolition Charges",  inventory.demolition_charges, 1.5f, DropItemType::DemolitionCharge, Typography::COLOR_CRIMSON}
+        };
+
+        float item_row_h = std::clamp((content_box_h - (in_y - cur_y) - 12.0f * ui_scale) / 5.0f, 26.0f * ui_scale, 38.0f * ui_scale);
+        float drop_btn_w = std::clamp(78.0f * ui_scale, 65.0f, 95.0f);
+        float drop_btn_h = std::clamp(item_row_h - 4.0f * ui_scale, 20.0f, 28.0f);
+
+        for (const auto& item : items) {
+            float row_bg_y = in_y;
+            draw_panel_with_border(rx, row_bg_y, row_w, item_row_h - 2.0f * ui_scale,
+                                   glm::vec4(0.04f, 0.08f, 0.12f, 0.80f),
+                                   glm::vec4(0.12f, 0.25f, 0.35f, 0.50f), 1.0f);
+
+            float total_item_w = item.count * item.unit_weight;
+            char info_buf[64];
+            std::snprintf(info_buf, sizeof(info_buf), "%s: %d  (%.1f kg ea | %.1f kg tot)",
+                          item.name.c_str(), item.count, item.unit_weight, total_item_w);
+
+            float text_y = row_bg_y + (item_row_h - 2.0f * ui_scale - FontRenderer::get_rendered_height(0.98f * ui_scale)) * 0.5f;
+            draw_text_fitted(info_buf, rx + 10.0f * ui_scale, text_y, row_w - (drop_btn_w * 2.0f + 30.0f * ui_scale), 0.98f * ui_scale, item.color);
+
+            // [DROP 1] and [DROP 5] buttons
+            float b1_x = rx + row_w - drop_btn_w * 2.0f - 8.0f * ui_scale;
+            float b5_x = rx + row_w - drop_btn_w;
+            float btn_y = row_bg_y + (item_row_h - 2.0f * ui_scale - drop_btn_h) * 0.5f;
+
+            bool can_drop_1 = (item.count >= 1);
+            bool can_drop_5 = (item.count >= 5);
+
+            bool hov1 = (mouse_x >= b1_x && mouse_x <= b1_x + drop_btn_w && mouse_y >= btn_y && mouse_y <= btn_y + drop_btn_h);
+            bool hov5 = (mouse_x >= b5_x && mouse_x <= b5_x + drop_btn_w && mouse_y >= btn_y && mouse_y <= btn_y + drop_btn_h);
+
+            // Render DROP 1 button
+            glm::vec4 b1_bg = !can_drop_1 ? glm::vec4(0.06f, 0.08f, 0.10f, 0.5f) :
+                              (hov1 ? glm::vec4(0.40f, 0.15f, 0.15f, 0.95f) : glm::vec4(0.20f, 0.08f, 0.08f, 0.85f));
+            glm::vec4 b1_border = !can_drop_1 ? glm::vec4(0.2f, 0.2f, 0.2f, 0.3f) :
+                                  (hov1 ? glm::vec4(1.0f, 0.3f, 0.3f, 1.0f) : glm::vec4(0.7f, 0.2f, 0.2f, 0.6f));
+            draw_panel_with_border(b1_x, btn_y, drop_btn_w, drop_btn_h, b1_bg, b1_border, 1.0f);
+            draw_text_centered_fitted("[DROP 1]", b1_x, btn_y, drop_btn_w, drop_btn_h, 0.92f * ui_scale,
+                                      can_drop_1 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f));
+
+            if (can_drop_1 && hov1 && mouse_clicked) {
+                m_requested_drop_item = item.item_type;
+                m_requested_drop_amount = 1;
+            }
+
+            // Render DROP 5 button
+            glm::vec4 b5_bg = !can_drop_5 ? glm::vec4(0.06f, 0.08f, 0.10f, 0.5f) :
+                              (hov5 ? glm::vec4(0.45f, 0.12f, 0.12f, 0.95f) : glm::vec4(0.22f, 0.06f, 0.06f, 0.85f));
+            glm::vec4 b5_border = !can_drop_5 ? glm::vec4(0.2f, 0.2f, 0.2f, 0.3f) :
+                                  (hov5 ? glm::vec4(1.0f, 0.2f, 0.2f, 1.0f) : glm::vec4(0.8f, 0.2f, 0.2f, 0.6f));
+            draw_panel_with_border(b5_x, btn_y, drop_btn_w, drop_btn_h, b5_bg, b5_border, 1.0f);
+            draw_text_centered_fitted("[DROP 5]", b5_x, btn_y, drop_btn_w, drop_btn_h, 0.92f * ui_scale,
+                                      can_drop_5 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f));
+
+            if (can_drop_5 && hov5 && mouse_clicked) {
+                m_requested_drop_item = item.item_type;
+                m_requested_drop_amount = 5;
+            }
+
+            in_y += item_row_h;
         }
 
     } else if (m_active_tab == PauseTab::AudioSettings) {
@@ -519,14 +647,18 @@ PauseMenuAction PauseMenu::render(
             {"[1-3 / MWHEEL]", "Equip Drill / Weapon / Demo", Typography::COLOR_CYAN},
             {"[LMB]",          "Mining Drill / Attack",       Typography::COLOR_AMBER},
             {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
-            {"[F]",            "Grappling Hook Tether",       Typography::COLOR_CYAN},
+            {"[F]",            "Toggle Flashlight / Headlamp",Typography::COLOR_CYAN},
+            {"[G]",            "Grappling Hook Tether",       Typography::COLOR_GREEN},
+            {"[E]",            "Reel Grapple Cable",          Typography::COLOR_GREEN},
+            {"[T]",            "Deploy Chemical Flare",       Typography::COLOR_CYAN},
             {"[Q]",            "Seismic Sonar Pulse",         Typography::COLOR_CYAN},
             {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},
+            {"[I]",            "Cargo Inventory & Jettison",  Typography::COLOR_CYAN},
             {"[B]",            "Deploy Evacuation Beacon",    Typography::COLOR_GREEN},
             {"[H / F1]",       "Toggle Contractor Guide",     Typography::COLOR_PRIMARY}
         };
 
-        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 11.0f, 16.0f * ui_scale, 22.0f * ui_scale);
+        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 15.0f, 14.0f * ui_scale, 19.0f * ui_scale);
         float key_col_w = std::clamp(92.0f * ui_scale, 75.0f, 105.0f);
         for (const auto& b : bindings) {
             draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.92f * ui_scale, Typography::COLOR_CYAN);

@@ -19,6 +19,7 @@ struct GrappleHook {
     float max_length{45.0f};
     float stiffness{120.0f};
     float reel_speed{14.0f};
+    bool just_fired{false};
 };
 
 struct ExoStatus {
@@ -117,6 +118,8 @@ public:
         m_active_tool = tool;
         if (m_active_tool != ToolSlot::CombatWeapon) {
             m_reload_timer = 0.0f;
+            m_is_aiming = false;
+            m_zoom_progress = 0.0f;
         }
     }
     void cycle_tool_forward();
@@ -138,6 +141,12 @@ public:
     // Weapon methods
     bool is_weapon_equipped() const { return m_active_tool == ToolSlot::CombatWeapon; }
     bool is_firing_weapon() const { return (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::CombatWeapon); }
+    bool is_aiming() const { return m_is_aiming && is_weapon_equipped(); }
+    void set_aiming(bool aiming) { m_is_aiming = aiming; }
+    float zoom_progress() const { return m_zoom_progress; }
+    void set_zoom_progress(float progress) { m_zoom_progress = glm::clamp(progress, 0.0f, 1.0f); }
+    float zoom_fov_multiplier() const { return m_weapon_stats.zoom_fov_multiplier; }
+    float current_fov(float base_fov = 75.0f) const;
     int weapon_ammo() const { return m_weapon_ammo; }
     int weapon_max_ammo() const { return m_weapon_stats.max_ammo; }
     int carbine_ammo() const { return m_weapon_ammo; }
@@ -154,6 +163,23 @@ public:
     void reload_weapon();
     bool try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts, float dt);
     bool try_fire_weapon(glm::vec3& out_origin, glm::vec3& out_dir, float dt);
+
+    // Headlamp state
+    bool is_headlamp_on() const { return m_headlamp_on; }
+    void set_headlamp_on(bool on) { m_headlamp_on = on; }
+    void toggle_headlamp() { m_headlamp_on = !m_headlamp_on; }
+
+    // Defensive Quick Melee Shove mechanics (Key: V or Middle Click)
+    bool is_melee_shoving() const { return m_melee_shove_timer > 0.0f; }
+    float melee_shove_timer() const { return m_melee_shove_timer; }
+    float melee_shove_cooldown() const { return m_melee_shove_cooldown; }
+    float melee_shove_progress() const {
+        return m_melee_shove_timer > 0.0f ? std::clamp(1.0f - (m_melee_shove_timer / 0.35f), 0.0f, 1.0f) : 0.0f;
+    }
+    void execute_melee_shove();
+
+    using MeleeShoveCallback = std::function<void(const glm::vec3& cam_pos, const glm::vec3& cam_dir)>;
+    void set_on_melee_shove(MeleeShoveCallback cb) { m_on_melee_shove = std::move(cb); }
 
     RaycastHit get_look_target(const World& world, float max_dist = 5.0f) const;
 
@@ -299,7 +325,7 @@ public:
     void reset_tactical_cooldown() { m_tactical_cooldown = 0.0f; }
     float tactical_recharge_progress() const { return m_tactical_max_cooldown > 0.0f ? std::clamp(1.0f - (m_tactical_cooldown / m_tactical_max_cooldown), 0.0f, 1.0f) : 1.0f; }
 
-    // Chemical Flares (Key: G or Middle Mouse)
+    // Chemical Flares (Key: T or Z)
     static constexpr int MAX_FLARES = 3;
     static constexpr float FLARE_RECHARGE_TIME = 15.0f;
 
@@ -386,6 +412,8 @@ private:
     float m_recharge_delay{0.0f};
     bool m_thruster_air_braking{false};
     float m_vault_timer{0.0f};
+    bool m_is_aiming{false};
+    float m_zoom_progress{0.0f};
 
     // Sonar pulse cooldown (seconds)
     float m_sonar_cooldown{0.0f};
@@ -433,6 +461,12 @@ private:
     bool m_is_in_lava{false};
     bool m_is_in_spikes{false};
     float m_spike_damage_timer{0.0f};
+
+    // Headlamp & Defensive Melee Shove state
+    bool m_headlamp_on{true};
+    float m_melee_shove_cooldown{0.0f};
+    float m_melee_shove_timer{0.0f};
+    MeleeShoveCallback m_on_melee_shove;
 
     // Insertion Pod Breach Shielding & Combat Pause
     float m_insertionShieldTimer{0.0f};

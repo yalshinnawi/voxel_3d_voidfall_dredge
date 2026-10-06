@@ -36,7 +36,9 @@ struct WeaponStats {
     glm::vec4 tracer_color{0.08f, 0.90f, 1.0f, 1.0f}; // Glow tracer color
     float noise_generation{0.12f};   // Noise added to seismic meter
     float trauma_kick{0.04f};        // Camera recoil trauma
-    bool auto_recharge{true};        // True for Vanguard capacitor trickle
+    bool auto_recharge{false};       // Strictly false for all weapons: ammo never trickles, player must reload
+    float zoom_fov_multiplier{0.65f}; // Target FOV multiplier when zooming / aiming down sights (e.g. 0.65 -> 65% of base FOV, 1.54x zoom)
+    float ads_time{0.18f};            // Time to smoothly transition into full zoom (seconds)
 };
 
 struct PlayerPlasmaBolt {
@@ -70,6 +72,8 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.noise_generation = 0.22f;
             w.trauma_kick = 0.08f;
             w.auto_recharge = false;
+            w.zoom_fov_multiplier = 0.78f; // ~1.28x magnification for close-quarters buckshot focus
+            w.ads_time = 0.20f;
             break;
 
         case WeaponArchetype::PlasmaCarbine:
@@ -88,7 +92,9 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.tracer_color = glm::vec4(0.08f, 0.90f, 1.0f, 1.0f);
             w.noise_generation = 0.12f;
             w.trauma_kick = 0.04f;
-            w.auto_recharge = true;
+            w.auto_recharge = false;
+            w.zoom_fov_multiplier = 0.65f; // ~1.54x magnification for tactical carbine fire
+            w.ads_time = 0.18f;
             break;
 
         case WeaponArchetype::NeedlerRailgun:
@@ -108,6 +114,8 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.noise_generation = 0.09f;
             w.trauma_kick = 0.05f;
             w.auto_recharge = false;
+            w.zoom_fov_multiplier = 0.40f; // ~2.50x sniper marksman scope magnification
+            w.ads_time = 0.22f;
             break;
     }
     return w;
@@ -256,6 +264,49 @@ struct PlayerInventory {
     bool refund_bulkhead() {
         if (bulkheads < get_max_bulkheads()) {
             bulkheads++;
+            return true;
+        }
+        return false;
+    }
+
+    bool drop_voidite(int amount = 1) {
+        if (voidite >= amount && amount > 0) {
+            voidite -= amount;
+            total_run_score = std::max(0, total_run_score - amount * 5);
+            return true;
+        }
+        return false;
+    }
+
+    bool drop_titanium(int amount = 1) {
+        if (titanium >= amount && amount > 0) {
+            titanium -= amount;
+            total_run_score = std::max(0, total_run_score - amount * 6);
+            return true;
+        }
+        return false;
+    }
+
+    bool drop_salvage(int amount = 1) {
+        if (salvage_parts >= amount && amount > 0) {
+            salvage_parts -= amount;
+            total_run_score = std::max(0, total_run_score - amount * 2);
+            return true;
+        }
+        return false;
+    }
+
+    bool drop_bulkhead(int amount = 1) {
+        if (bulkheads >= amount && amount > 0) {
+            bulkheads -= amount;
+            return true;
+        }
+        return false;
+    }
+
+    bool drop_demolition_charge(int amount = 1) {
+        if (demolition_charges >= amount && amount > 0) {
+            demolition_charges -= amount;
             return true;
         }
         return false;

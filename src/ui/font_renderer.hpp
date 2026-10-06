@@ -80,6 +80,10 @@ public:
                     out += "[!]";
                     i += 3;
                     continue;
+                } else if (c1 == 0x98 && c2 == 0xBC) { // White sun with rays / spotlight: '☼'
+                    out += "*";
+                    i += 3;
+                    continue;
                 }
             }
             // Check for 2-byte UTF-8 degree sign 0xC2 0xB0 '°'

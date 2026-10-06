@@ -506,14 +506,16 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
     if (glm::length(n_dir) < 0.1f) n_dir = glm::vec3(0.0f, 1.0f, 0.0f);
     else n_dir = glm::normalize(n_dir);
 
+    bool is_bulkhead = (mat_id == MAT_INDUSTRIAL_BULKHEAD || mat_id == MAT_REINFORCED_VAULT_DOOR);
+
     // Color palette based on material
     glm::vec4 base_color(0.6f, 0.6f, 0.6f, 1.0f);
     if (mat_id == MAT_VOIDITE_CRYSTAL) {
         base_color = glm::vec4(0.85f, 0.3f, 1.0f, 1.0f);
     } else if (mat_id == MAT_INDUSTRIAL_BULKHEAD) {
-        base_color = glm::vec4(0.4f, 0.85f, 1.0f, 1.0f);
+        base_color = glm::vec4(0.29f, 0.33f, 0.41f, 0.90f); // #4A5568 dark charcoal / industrial gunmetal
     } else if (mat_id == MAT_REINFORCED_VAULT_DOOR) {
-        base_color = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
+        base_color = glm::vec4(0.29f, 0.33f, 0.41f, 0.90f);
     } else if (mat_id == MAT_RADIOACTIVE_ORE) {
         base_color = glm::vec4(0.25f, 1.0f, 0.4f, 1.0f);
     } else if (mat_id == MAT_VOLCANIC_BASALT) {
@@ -530,20 +532,38 @@ void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec
         base_color = glm::vec4(0.35f, 0.88f, 0.20f, 0.70f);
     }
 
-    // Spawn 12 dynamic billboard debris quads with reduced size (0.12m) and 0.6s lifetime
-    for (int i = 0; i < 12; ++i) {
+    // Tame Bulkhead Particles: max 14 particles, 0.08m-0.12m, #4A5568 & #FFB300, 0.45s life, high downward gravity (28.0m/s^2)
+    int count = is_bulkhead ? 14 : 12;
+    for (int i = 0; i < count; ++i) {
         BreakParticle p;
         float rx = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
         float ry = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
         float rz = static_cast<float>(rand() % 100) / 100.0f - 0.5f;
         glm::vec3 jitter(rx, ry, rz);
 
-        p.pos = center + n_dir * 0.25f + jitter * 0.15f;
-        p.vel = n_dir * (2.8f + static_cast<float>(rand() % 100) / 40.0f) + jitter * 3.5f;
-        p.color = base_color;
-        p.size = 0.10f + static_cast<float>(rand() % 100) / 2500.0f; // ~0.10m - 0.14m (average 0.12m)
-        p.max_life = 0.5f + static_cast<float>(rand() % 100) / 500.0f; // ~0.5s - 0.7s (average 0.6s)
-        p.life = p.max_life;
+        if (is_bulkhead) {
+            bool is_spark = (i % 3 == 0);
+            if (is_spark) {
+                p.color = glm::vec4(1.0f, 0.70f, 0.0f, 1.0f); // #FFB300 subtle spark point
+                p.size = 0.04f + static_cast<float>(rand() % 100) / 2500.0f; // tiny spark
+            } else {
+                p.color = glm::vec4(0.29f, 0.33f, 0.41f, 0.90f); // #4A5568 dark charcoal / industrial gunmetal
+                p.size = 0.08f + static_cast<float>(rand() % 100) / 2500.0f; // 0.08m - 0.12m
+            }
+            p.pos = center + n_dir * 0.15f + jitter * 0.10f;
+            p.vel = n_dir * (5.0f + static_cast<float>(rand() % 100) / 25.0f) + jitter * 6.0f;
+            p.gravity = 28.0f; // high downward gravity so debris clears camera immediately
+            p.drag = 2.0f;
+            p.max_life = 0.35f + static_cast<float>(rand() % 100) / 1000.0f; // <= 0.45s
+            p.life = p.max_life;
+        } else {
+            p.pos = center + n_dir * 0.25f + jitter * 0.15f;
+            p.vel = n_dir * (2.8f + static_cast<float>(rand() % 100) / 40.0f) + jitter * 3.5f;
+            p.color = base_color;
+            p.size = 0.10f + static_cast<float>(rand() % 100) / 2500.0f; // ~0.10m - 0.14m (average 0.12m)
+            p.max_life = 0.5f + static_cast<float>(rand() % 100) / 500.0f; // ~0.5s - 0.7s (average 0.6s)
+            p.life = p.max_life;
+        }
         m_particles.push_back(p);
     }
 }
@@ -1483,37 +1503,30 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
         // Material palettes based on dedicated combat archetype
         bool is_shooter = (s.role == StalkerRole::Shooter);
-        bool is_drifter = (s.role == StalkerRole::VoidDrifter);
         bool is_goliath = (s.role == StalkerRole::ChitinGoliath);
 
         // 1. Armored Chitin Carapace
-        glm::vec4 chitin_color = is_drifter
-            ? glm::vec4(0.08f, 0.35f, 0.45f, 0.85f)   // Bioluminescent translucent cyan mantle
-            : (is_goliath
-               ? glm::vec4(0.18f, 0.16f, 0.14f, 1.0f) // Heavy reinforced dark obsidian-iron
-               : (is_shooter
-                  ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
-                  : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f))); // Deep blood obsidian chitin
-        glm::vec4 chitin_mat(is_goliath ? 0.70f : 0.40f, 0.25f, is_drifter ? 1.5f : 0.0f, 1.0f); // metallic, roughness, emissive, ao
+        glm::vec4 chitin_color = is_goliath
+            ? glm::vec4(0.18f, 0.16f, 0.14f, 1.0f) // Heavy reinforced dark obsidian-iron
+            : (is_shooter
+               ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
+               : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f)); // Deep blood obsidian chitin
+        glm::vec4 chitin_mat(is_goliath ? 0.70f : 0.40f, 0.25f, 0.0f, 1.0f); // metallic, roughness, emissive, ao
 
         // 2. Secondary Chitin / Ribs / Spines
-        glm::vec4 spine_color = is_drifter
-            ? glm::vec4(0.15f, 0.85f, 1.0f, 0.90f)   // Glowing cyan bioluminescent tendrils
-            : (is_goliath
-               ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f) // Bronze armor reinforcing plates
-               : (is_shooter
-                  ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)   // Acid emerald quills
-                  : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f))); // Jagged crimson spines
-        glm::vec4 spine_mat(0.50f, 0.20f, is_drifter ? 2.5f : 0.0f, 0.9f);
+        glm::vec4 spine_color = is_goliath
+            ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f) // Bronze armor reinforcing plates
+            : (is_shooter
+               ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)   // Acid emerald quills
+               : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f)); // Jagged crimson spines
+        glm::vec4 spine_mat(0.50f, 0.20f, 0.0f, 0.9f);
 
         // 3. Serrated Fangs / Claws
-        glm::vec4 claw_color = is_drifter
-            ? glm::vec4(0.20f, 0.90f, 1.0f, 1.0f)
-            : (is_goliath
-               ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f) // Heavy iron ram horn
-               : (is_shooter
-                  ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)   // Toxic jade bone
-                  : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f))); // Razor blood bone
+        glm::vec4 claw_color = is_goliath
+            ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f) // Heavy iron ram horn
+            : (is_shooter
+               ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)   // Toxic jade bone
+               : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f)); // Razor blood bone
         glm::vec4 claw_mat(0.75f, 0.18f, 0.0f, 1.0f);
 
         // 4. Bioluminescent Eye Color
@@ -1593,17 +1606,6 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
                 add_stalker_box(s_stalker_verts, shield_m, glm::vec3(0.38f, 0.32f, 0.08f), glm::vec4(0.24f, 0.22f, 0.20f, 1.0f), shield_mat);
             }
 
-            // Void Drifter: Translucent bioluminescent bell & trailing fringes
-            if (is_drifter) {
-                for (int t_idx = 0; t_idx < 4; ++t_idx) {
-                    float angle = static_cast<float>(t_idx) * 1.57f + s.glow_phase * 0.8f;
-                    float tx = std::cos(angle) * 0.18f;
-                    float tz = std::sin(angle) * 0.18f;
-                    float sway = std::sin(s.glow_phase * 2.5f + t_idx) * 0.06f;
-                    glm::mat4 tendril_m = glm::translate(base_model, glm::vec3(tx + sway, 0.06f, tz));
-                    add_stalker_box(s_stalker_verts, tendril_m, glm::vec3(0.025f, 0.24f, 0.025f), eye_color, eye_mat);
-                }
-            }
         }
 
         // F. Piercing Bioluminescent Compound Eyes

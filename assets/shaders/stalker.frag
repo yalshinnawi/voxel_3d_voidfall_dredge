@@ -56,8 +56,8 @@ void main() {
     float baseEmissive = vMaterial.z;
     float ao = clamp(vMaterial.w, 0.15, 1.0);
 
-    // Cavern subterranean ambient light
-    vec3 ambient = vec3(0.06, 0.07, 0.10) * vColor.rgb * ao;
+    // Cavern subterranean ambient light (pitch-black shadow until lit by headlamp/flares)
+    vec3 ambient = vec3(0.014, 0.017, 0.024) * vColor.rgb * ao;
 
     // Headlamp spotlight calculation
     vec3 headlampLight = vec3(0.0);

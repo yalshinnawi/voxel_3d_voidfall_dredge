@@ -32,7 +32,7 @@ struct Headlamp {
     glm::vec3 color{0.95f, 0.98f, 1.0f}; // Crisp high-intensity halogen LED
     float inner_cutoff{glm::cos(glm::radians(18.0f))};
     float outer_cutoff{glm::cos(glm::radians(32.0f))};
-    float intensity{3.5f};
+    float intensity{4.5f};
     bool enabled{true};
 };
 

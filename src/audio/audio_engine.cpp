@@ -143,6 +143,9 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::EnemyFleshHit:         return "enemy_flesh_hit.wav";
         case SoundCue::DebrisArmorImpact:     return "debris_armor_impact.wav";
         case SoundCue::CritHit:               return "crit_hit.wav";
+        case SoundCue::JetpackLoop:           return "jetpack_loop.wav";
+        case SoundCue::GrappleFire:           return "grapple_fire.wav";
+        case SoundCue::GrappleReel:           return "grapple_reel.wav";
 
         default: return nullptr;
     }
@@ -848,6 +851,8 @@ void AudioEngine::stop_all(bool instant) {
     m_hazard_timer = 0.0f;
     m_micro_ambience_timer = 0.0f;
     m_drill_active = false;
+    m_thruster_active = false;
+    m_grapple_reeling = false;
     m_ducking_attenuation = 1.0f;
     m_ducking_timer = 0.0f;
     m_void_hazard_cooldown = 0.0f;
@@ -1217,6 +1222,94 @@ void AudioEngine::set_drill_active(bool active, float progress, const glm::vec3&
                 v.duration = 9999.0f;
                 v.volume = 0.70f;
                 v.pitch = 0.90f + m_drill_progress * 0.35f;
+                v.is_3d = true;
+                v.world_pos = pos;
+                v.current_gain = 0.0f;
+                v.sample_cursor = 0.0f;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
+                update_spatial_pan(v);
+                break;
+            }
+        }
+    }
+}
+
+void AudioEngine::set_thruster_active(bool active, const glm::vec3& pos) {
+    std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+    m_thruster_active = active;
+    m_thruster_pos = pos;
+
+    bool found = false;
+    for (auto& v : m_voices) {
+        if (v.active && v.cue == SoundCue::JetpackLoop) {
+            found = true;
+            if (!active) {
+                v.active = false;
+            } else {
+                v.world_pos = pos;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
+                update_spatial_pan(v);
+            }
+            break;
+        }
+    }
+
+    if (active && !found) {
+        for (auto& v : m_voices) {
+            if (!v.active) {
+                v.cue = SoundCue::JetpackLoop;
+                v.active = true;
+                v.loop = true;
+                v.time = 0.0f;
+                v.duration = 9999.0f;
+                v.volume = 0.72f;
+                v.pitch = 1.0f;
+                v.is_3d = true;
+                v.world_pos = pos;
+                v.current_gain = 0.0f;
+                v.sample_cursor = 0.0f;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
+                update_spatial_pan(v);
+                break;
+            }
+        }
+    }
+}
+
+void AudioEngine::set_grapple_active(bool active, bool reeling, const glm::vec3& pos) {
+    std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+    m_grapple_reeling = active && reeling;
+    m_grapple_pos = pos;
+
+    bool found = false;
+    for (auto& v : m_voices) {
+        if (v.active && v.cue == SoundCue::GrappleReel) {
+            found = true;
+            if (!m_grapple_reeling) {
+                v.active = false;
+            } else {
+                v.world_pos = pos;
+                v.fading_out = false;
+                v.fade_out_remaining = 0.0f;
+                update_spatial_pan(v);
+            }
+            break;
+        }
+    }
+
+    if (m_grapple_reeling && !found) {
+        for (auto& v : m_voices) {
+            if (!v.active) {
+                v.cue = SoundCue::GrappleReel;
+                v.active = true;
+                v.loop = true;
+                v.time = 0.0f;
+                v.duration = 9999.0f;
+                v.volume = 0.42f; // Noticeably quieter than jetpack!
+                v.pitch = 1.0f;
                 v.is_3d = true;
                 v.world_pos = pos;
                 v.current_gain = 0.0f;
@@ -2242,14 +2335,17 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             break;
         }
 
-        case SoundCue::TacticalBarricade: {
-            // Vanguard deployable fortress hiss and hydraulic anchor lock
-            voice.phase[0] += 140.0f * dt;
-            float punch = std::sin(TWO_PI * voice.phase[0]) * std::exp(-t * 10.0f);
+        case SoundCue::TacticalRepulsor: {
+            // Vanguard kinetic repulsor pulse: deep resonant magnetic thump + sweeping sonic shockwave
+            voice.phase[0] += 110.0f * dt;
+            float sub_thump = std::sin(TWO_PI * voice.phase[0]) * std::exp(-t * 8.0f);
+            float sweep = 380.0f * std::exp(-t * 6.0f);
+            voice.phase[1] += sweep * dt;
+            float pulse = std::sin(TWO_PI * voice.phase[1]) * std::exp(-t * 11.0f);
             float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
-            float alpha = calc_lp_alpha(1100.0f, static_cast<float>(SAMPLE_RATE));
+            float alpha = calc_lp_alpha(950.0f, static_cast<float>(SAMPLE_RATE));
             voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
-            sample = punch * 0.6f + voice.filter_state[0] * std::exp(-t * 12.0f) * 0.4f;
+            sample = std::tanh(sub_thump * 0.70f + pulse * 0.50f + voice.filter_state[0] * std::exp(-t * 9.0f) * 0.35f);
             break;
         }
 
@@ -2696,6 +2792,75 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             float crunch_env = (t < 0.15f) ? std::exp(-t * 22.0f) : 0.0f;
 
             sample = (snap * 0.55f + punch * 0.65f + chime * 0.50f + bp * crunch_env * 0.60f) * 0.95f;
+            break;
+        }
+
+        case SoundCue::JetpackLoop: {
+            // Jetpack Rocket Thruster: Deep combustion sub-bass + exhaust hiss + thrust flutter
+            voice.phase[0] += (58.0f * voice.pitch) * dt; // Sub-bass core
+            voice.phase[1] += (116.0f * voice.pitch) * dt; // 1st harmonic
+            if (voice.phase[0] > 1.0f) voice.phase[0] -= 1.0f;
+            if (voice.phase[1] > 1.0f) voice.phase[1] -= 1.0f;
+
+            // 24Hz flame flutter modulation
+            float flutter = 1.0f + 0.12f * fast_sin(TWO_PI * 24.0f * t);
+
+            float combustion = (0.55f * fast_sin_phase(voice.phase[0]) +
+                                0.30f * fast_sin_phase(voice.phase[1])) * flutter;
+
+            // Pressurized nozzle exhaust gas hiss (bandpassed around 1450 Hz)
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(1450.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+
+            // Air turbulence rumble
+            float alpha_rumble = calc_lp_alpha(220.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[1] += alpha_rumble * (noise - voice.filter_state[1]);
+
+            sample = combustion * 0.45f + voice.filter_state[0] * 0.38f + voice.filter_state[1] * 0.25f;
+            break;
+        }
+
+        case SoundCue::GrappleFire: {
+            // Pneumatic grapple launch: sharp 0.07s downward sweep + metallic anchor clamp click
+            float sweep = 650.0f * voice.pitch * std::exp(-t * 28.0f) + 180.0f;
+            voice.phase[0] += sweep * dt;
+            float body = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 32.0f);
+
+            // High metallic latch transient
+            voice.phase[1] += 1850.0f * voice.pitch * dt;
+            float click = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 70.0f);
+
+            // Cable whir / puff noise
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(2100.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+            float puff = voice.filter_state[0] * std::exp(-t * 25.0f);
+
+            sample = body * 0.50f + click * 0.35f + puff * 0.25f;
+            break;
+        }
+
+        case SoundCue::GrappleReel: {
+            // Electric tension winch: smooth 380 Hz motor whine + 760 Hz harmonic + subtle cable ratchet
+            voice.phase[0] += (380.0f * voice.pitch) * dt;
+            voice.phase[1] += (760.0f * voice.pitch) * dt;
+            if (voice.phase[0] > 1.0f) voice.phase[0] -= 1.0f;
+            if (voice.phase[1] > 1.0f) voice.phase[1] -= 1.0f;
+
+            float motor = 0.55f * fast_sin_phase(voice.phase[0]) + 0.30f * fast_sin_phase(voice.phase[1]);
+
+            // Cable wire friction hiss (filtered around 1800 Hz)
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(1800.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+
+            // 18 Hz mechanical ratchet ticks
+            voice.phase[2] += 18.0f * dt;
+            if (voice.phase[2] > 1.0f) voice.phase[2] -= 1.0f;
+            float ratchet = (voice.phase[2] < 0.15f) ? (fast_rand(voice.seed) * 2.0f - 1.0f) * 0.25f : 0.0f;
+
+            sample = motor * 0.40f + voice.filter_state[0] * 0.25f + ratchet;
             break;
         }
 

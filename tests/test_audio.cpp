@@ -1287,6 +1287,87 @@ int main(int argc, char** argv) {
         std::cout << " -> Anti-repetition, hazard refractory cooldowns, and non-pumping ducking verified." << std::endl;
     }
 
+    // ── Test 24: Jetpack Thruster & Grapple Hook Audio Synthesis & Noise Balancing ──
+    {
+        std::cout << "[Test 24] Testing Jetpack & Grapple SFX Synthesis and Noise Profiles..." << std::endl;
+
+        audio.stop_all(true);
+
+        // 24.1 Jetpack Thruster Loop
+        audio.set_thruster_active(true, glm::vec3(0.0f));
+        CHECK(audio.active_voice_count() >= 1, "Jetpack thruster loop voice must be active");
+        auto thruster_samples = audio.render_offline_samples(0.35f);
+        float thruster_energy = 0.0f;
+        float thruster_peak = 0.0f;
+        for (float s : thruster_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Jetpack thruster samples must be valid finite numbers");
+            thruster_energy += s * s;
+            thruster_peak = std::max(thruster_peak, std::abs(s));
+        }
+        CHECK(thruster_energy > 0.01f, "Jetpack thruster must synthesize rumble and exhaust flame flutter");
+        CHECK(thruster_peak <= 1.0f, "Jetpack thruster peak must respect ear-safety ceiling");
+        audio.set_thruster_active(false);
+
+        // 24.2 Grapple Fire One-Shot
+        audio.stop_all(true);
+        audio.play_sound_2d(SoundCue::GrappleFire, 0.8f);
+        CHECK(audio.active_voice_count() >= 1, "Grapple fire voice must be active");
+        auto fire_samples = audio.render_offline_samples(0.2f);
+        float fire_energy = 0.0f;
+        float fire_peak = 0.0f;
+        for (float s : fire_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Grapple fire samples must be valid finite numbers");
+            fire_energy += s * s;
+            fire_peak = std::max(fire_peak, std::abs(s));
+        }
+        CHECK(fire_energy > 0.005f, "Grapple fire must synthesize pneumatic cable launch snap");
+        CHECK(fire_peak <= 1.0f, "Grapple fire peak must respect ear-safety ceiling");
+
+        // 24.3 Grapple Reel Winch Loop
+        audio.stop_all(true);
+        audio.set_grapple_active(true, true, glm::vec3(0.0f));
+        CHECK(audio.active_voice_count() >= 1, "Grapple reel loop voice must be active");
+        auto reel_samples = audio.render_offline_samples(0.3f);
+        float reel_energy = 0.0f;
+        float reel_peak = 0.0f;
+        for (float s : reel_samples) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "Grapple reel samples must be valid finite numbers");
+            reel_energy += s * s;
+            reel_peak = std::max(reel_peak, std::abs(s));
+        }
+        CHECK(reel_energy > 0.005f, "Grapple reel must synthesize high-torque electric motor whine and ratchet ticks");
+        CHECK(reel_peak <= 1.0f, "Grapple reel peak must respect ear-safety ceiling");
+        audio.set_grapple_active(false);
+
+        // 24.4 Noise Balancing Verification
+        NoiseMeter noise_jetpack;
+        NoiseMeter noise_grapple;
+
+        // Jetpack thruster noise accumulation vs Grapple reel noise accumulation over 1 second
+        float dt = 0.016f;
+        glm::vec3 player_pos(16.0f, 20.0f, 16.0f);
+        for (int frame = 0; frame < 60; ++frame) {
+            noise_jetpack.add_jetpack_sound(player_pos, dt);
+            noise_grapple.add_grapple_reel_sound(player_pos, dt);
+        }
+        CHECK(noise_grapple.noise() < noise_jetpack.noise(),
+              "Grapple reel must be significantly quieter than jetpack thrusters");
+        CHECK(noise_grapple.noise() * 3.0f < noise_jetpack.noise(),
+              "Grapple noise rate must be at least 3x quieter than jetpack thrusters");
+
+        // Spatial sound event radii and intensities
+        const auto& jetpack_events = noise_jetpack.recent_sounds();
+        const auto& grapple_events = noise_grapple.recent_sounds();
+        CHECK(!jetpack_events.empty(), "Jetpack thrusting must emit spatial sound events for enemy detection");
+        CHECK(!grapple_events.empty(), "Grapple reeling must emit spatial sound events for enemy detection");
+        CHECK(grapple_events.front().audible_radius < jetpack_events.front().audible_radius,
+              "Grapple acoustic alert radius must be much smaller than jetpack alert radius");
+        CHECK(grapple_events.front().intensity < jetpack_events.front().intensity,
+              "Grapple sound intensity must be much lower than jetpack thruster intensity");
+
+        std::cout << " -> Jetpack & Grapple SFX synthesis and noise balancing verified." << std::endl;
+    }
+
     if (export_wav) {
         std::cout << "[*] Exporting diagnostic audio sample WAV files to screenshots/audio_samples/..." << std::endl;
 
@@ -1396,7 +1477,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL 23 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
+    std::cout << "ALL 24 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     audio.shutdown();

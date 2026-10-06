@@ -53,6 +53,8 @@ public:
     size_t vertex_count() const { return m_vertex_count; }
     size_t block_count() const { return m_block_count; }
 
+    void apply_impulse(const glm::vec3& impulse) { m_velocity += impulse; m_sleeping = false; }
+
     bool has_dealt_damage{false};
 
 private:

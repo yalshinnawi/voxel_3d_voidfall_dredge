@@ -33,6 +33,8 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
     };
 
     std::unordered_set<glm::ivec3, Vec3Hash> globally_visited;
+    size_t expected_cap = std::min(max_search_nodes, size_t(512));
+    globally_visited.reserve(expected_cap * 2);
 
     // Check all 6 immediate neighbors of the destroyed voxel
     for (const auto& dir : neighbor_dirs) {
@@ -47,6 +49,8 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
         std::queue<glm::ivec3> queue;
         std::unordered_set<glm::ivec3, Vec3Hash> island_visited;
         std::vector<glm::ivec3> island_blocks;
+        island_visited.reserve(expected_cap);
+        island_blocks.reserve(expected_cap);
 
         queue.push(start);
         island_visited.insert(start);

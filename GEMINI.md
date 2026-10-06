@@ -38,11 +38,13 @@
     ./build/Release/VoidfallDredge.exe
     ```
 - **Run Test Suites (Fastest TDD Commands)**:
-  - **Single Command High-Speed Parallel Runner (Recommended)**:
+  - **Single Command High-Speed Parallel Runner (MANDATORY FOR AGENTS)**:
     ```bash
     python scripts/tdd.py
     ```
-    *(Builds incrementally and executes all 3 suites in parallel in < 0.1s)*
+    *(Builds incrementally and executes ALL 10 test suites in parallel in ~1s)*
+    > [!IMPORTANT]
+    > **Agent Test Policy**: Agents must always run `python scripts/tdd.py` (with no flags) when validating feature changes. Flags like `--fast` and `--no-build` are strictly developer conveniences. Even if `--no-build` is passed, `tdd.py` contains an automated **Mtime Staleness Guard** that automatically forces a fresh incremental build if any source file is newer than the binaries.
   - **Parallel CTest**:
     ```bash
     ctest --test-dir build -C Release -j 3 --output-on-failure
@@ -56,6 +58,14 @@
     ./build/Release/test_unit_all.exe
     ./build/Release/test_e2e_expeditions.exe
     ./build/Release/test_progression.exe
+    ./build/Release/test_level_collision.exe
+    ./build/Release/test_enemy_stalker.exe
+    ./build/Release/test_enemy_burrower.exe
+    ./build/Release/test_audio.exe
+    ./build/Release/test_audio_system.exe
+    ./build/Release/test_combat_omni_ai.exe
+    ./build/Release/test_gameplay_mechanics.exe
+    ./build/Release/test_spawn_safety.exe
     ```
 - **Asset Synchronization**:
   - CMake copies [assets/](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/) to `<TARGET_FILE_DIR>/assets` as a post-build step. When editing shaders or textures, rebuild the target or update the build output directory so changes reflect in the running executable.
@@ -124,6 +134,40 @@ All automated tests and visual playthroughs run **strictly non-audible (silent h
 - **Global Environment Override**:
   - Setting `export VOIDFALL_MUTE_AUDIO=1` unconditionally forces the audio engine into silent headless mode for all game and test executables.
 
+### 2.3 Screenshot & 3D Model Showcase Cataloging Standards
+All visual outputs, test screenshots, and 3D reference catalogs follow strict repository integrity rules:
+
+- **Canonical File Inventory for `screenshots/`**:
+  - **10 Gameplay Phase Masters**: `01_main_menu.png` through `10_mission_debrief.png` (1600x900 full-res).
+  - **6 Void Stalker FSM Test Frames**: `enemy_01_floor_crawl.png` through `enemy_06_sonar_stun.png`.
+  - **Master Contact Sheet Montages**: `00_all_phases_montage.jpg` / `.png` (4x3 gameplay grid) and `enemy_visual_montage.jpg` / `.png` (3x2 combat grid).
+  - **Reports & Samples**: `visual_report.*`, `enemy_visual_report.*`, `audio_safety_report.json`, and `audio_samples/*.wav`.
+  - **No Stale or Duplicate Files**: Do not commit legacy naming variants (e.g., `02_sector_select.png`, `03_upgrades_menu.png`, `06_loot_toasts.png`, `enemy_01_shadow_stalk.png`).
+- **Dedicated 3D Model Catalog (`docs/models/`)**:
+  - Stores **ONLY the 6 canonical 3D reference showcase models**, plus their contact sheets, reports, and documentation:
+    1. `enemy_void_stalker.png` (Hostile Entity: Void Stalker)
+    2. `enemy_seismic_burrower.png` (Hostile Entity: Seismic Burrower)
+    3. `system_viewmodel_drill.png` (Primary Equipment: Mining Drill Rig)
+    4. `character_demolitionist_kaelen.png` (Delver Contractor: Demolitionist)
+    5. `character_vanguard_rhodes.png` (Delver Contractor: Vanguard)
+    6. `character_scout_vesper.png` (Delver Contractor: Scout)
+    7. `models_roster_showcase.jpg` / `.png` (Master 3x2 showcase montage)
+    8. `models_visual_report.json` / `.txt` and `README.md`
+  - Under **NO circumstance** should ad-hoc animation frames, combat action shots, or temporary test frames be placed in `docs/models/`.
+  - Regenerate and auto-prune anytime via:
+    ```bash
+    python scripts/capture_models.py
+    ```
+- **Automated Test Previews & Workspace Artifact Cleanup**:
+  - Test previews in `screenshots/previews/` are temporary lightweight inspection cards. They must be cleaned automatically by visual test scripts.
+  - To purge temporary previews and stale test captures at any time:
+    ```bash
+    python scripts/analyze_screenshots.py --clean-stale
+    # Or full workspace artifact cleaner:
+    python scripts/cleanup_test_artifacts.py
+    ```
+  - `screenshots/previews/` and test dump JSONs are strictly ignored in `.gitignore`.
+
 ---
 
 ## 3. Game Development Conventions & Constraints
@@ -146,9 +190,47 @@ All automated tests and visual playthroughs run **strictly non-audible (silent h
 - Avoid platform-specific Windows APIs directly unless isolated in platform wrappers (`#ifdef _WIN32`).
 - Check null pointers and enforce invariants with asserts or `LOG_ERROR` in [src/core/logger.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/logger.hpp).
 
+### 3.4 File Structure, Code Hygiene & High-Efficiency Voxel Standards
+- **Subsystem Separation & Directory Placement**:
+  - Core engine lifecycle & windowing in `src/core/`.
+  - Rendering passes, shaders & viewmodels in `src/graphics/`.
+  - Voxel data structures, chunks, greedy meshing & world grid in `src/voxel/`.
+  - Player controller, loadouts & upgrades in `src/player/`.
+  - Specialized skills & sonar pulse in `src/skills/`.
+  - Entities, debris & enemy implementations in `src/entities/` and `src/entities/enemies/`.
+  - AI perception, spawning & swarms in `src/ai/`.
+  - Procedural sound synthesis & audio engine in `src/audio/`.
+  - Game systems (hazard clock, extraction, stealth) in `src/systems/`.
+  - UI panels, HUD gauges, font atlas & debrief modal in `src/ui/`.
+- **Include Path Discipline**:
+  - Common external headers located in `include/` (e.g. `<font8x8.h>`, `<glad/glad.h>`) must be included using angle brackets `<...>` without hacky relative parent traversal like `../include/...`.
+- **Zero Dead Code Policy**:
+  - Never retain unused mockup headers, uncompiled experimental files, or obsolete forwarding units in `src/`. All files present in `src/` must be compiled targets in `CMakeLists.txt` or actively included.
+- **High-Performance Voxel Math Conventions**:
+  - **Zero-Branch Bounds Checking**: For `CHUNK_SIZE = 32`, enforce chunk bounds via branchless bitwise masks:
+    ```cpp
+    inline bool in_bounds(int x, int y, int z) {
+        return ((x | y | z) & ~(CHUNK_SIZE - 1)) == 0;
+    }
+    ```
+  - **Bit-Shifted Spatial Indexing**:
+    ```cpp
+    inline size_t to_index(int x, int y, int z) {
+        return (x & 31u) | ((y & 31u) << 5) | ((z & 31u) << 10);
+    }
+    ```
+  - **Branchless Coordinate Floor Division**:
+    Use `x >> 5` and `x & 31` for power-of-two chunk spatial transformations.
+  - **Inlined Voxel Accessors**: Hot-loop accessors (`get_voxel`, `get_voxel_idx`) must remain inlined in `chunk.hpp` to eliminate function-call overhead.
+  - **Greedy Meshing Optimization**: Check local chunk voxels directly for interior slice faces; avoid neighbor function-pointer dispatch on non-boundary slices.
+  - **Preallocated Graph Algorithms**: Flood-fill and BFS routines (such as `StructuralCheck::solve_cavein`) must reserve initial capacity for `std::unordered_set` and node queues to prevent repeated allocations during cave-ins.
+- **Compiler Optimization Flags**:
+  - MSVC Release builds enforce `/O2 /Oi /Ot /Gy` and linker options `/OPT:REF /OPT:ICF` in `CMakeLists.txt` for aggressive dead-code elimination and speed-preferred code generation.
+
 ---
 
 ## 4. Game Design Wiki & Systems Balancing
 - **Living Game Design Wiki**: Game mechanics, lore, enemies, and voxel tables reside in [wiki/](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/) (`wiki/index.md`). Maintain traceability whenever changing balance.
 - **Progression Math**: Upgrade costs scale exponentially via $100 \times 1.6^{\text{tier}-1}$. Run [simulate_economy.py](file:///d:/Projects/voxel_3d_voidfall_dredge/scripts/simulate_economy.py) (`python scripts/simulate_economy.py`) to verify progression math.
 - **Hazard Clock**: 15-minute 4-phase escalation curve and 40s beacon holdouts are documented in [wiki/mechanics/hazard_clock.md](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/hazard_clock.md).
+

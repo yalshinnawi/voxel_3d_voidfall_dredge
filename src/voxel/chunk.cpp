@@ -23,13 +23,6 @@ Chunk::~Chunk() {
     }
 }
 
-Voxel Chunk::get_voxel(int x, int y, int z) const {
-    if (!in_bounds(x, y, z)) {
-        return Voxel{MAT_AIR, 0};
-    }
-    return m_voxels[to_index(x, y, z)];
-}
-
 void Chunk::set_voxel(int x, int y, int z, Voxel v) {
     if (!in_bounds(x, y, z)) return;
     size_t idx = to_index(x, y, z);
@@ -45,13 +38,6 @@ void Chunk::set_voxel(int x, int y, int z, Voxel v) {
     m_voxels[idx] = v;
     mark_mesh_dirty();
     mark_structural_dirty();
-}
-
-Voxel Chunk::get_voxel_idx(size_t idx) const {
-    if (idx < m_voxels.size()) {
-        return m_voxels[idx];
-    }
-    return Voxel{MAT_AIR, 0};
 }
 
 void Chunk::set_voxel_idx(size_t idx, Voxel v) {

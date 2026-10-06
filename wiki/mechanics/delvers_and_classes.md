@@ -49,10 +49,10 @@ This document catalogs the 3 specialized subterranean contractor archetypes in *
   - **Movement Speed**: 0.88x (Heavy armor trade-off)
   - **Max Placed Bulkheads**: 12 (Industry standard support brackets)
   - **Primary Combat Firearm**: **Plasma Carbine** (`[2]` or `[X]`)
-    - *Capacity*: 16-round capacitor battery (passive trickle recharge + manual reload)
+    - *Capacity*: 16-round capacitor battery (manual reload required; zero passive trickle)
     - *Fire Mode*: Rapid-pulse coherent plasma bolt (22 dmg, 52 m/s, electric-cyan tracer)
     - *Tactical Role*: Sustained mid-range suppression against charging Stalkers and Burrowers.
-  - **Tactical Ability**: Kinetic Repulsor Field (25.0s recharge; repels loose debris and pushes enemies back)
+  - **Tactical Ability**: Kinetic Repulsor Field (20.0s recharge; omni-directional pulse repelling enemies with knockback and stun, deflecting falling debris, and restoring 25 HP suit integrity)
   - **Passive Trait**: *Tectonic Bulkhead Plating* (50% passive damage reduction from falling roof collapse debris; placed industrial bulkheads deflect ceiling cave-in boulders).
 
 ---
@@ -78,6 +78,18 @@ This document catalogs the 3 specialized subterranean contractor archetypes in *
     - *Tactical Role*: Long-distance cavern sniper; neutralizes ceiling ambush predators before they descend.
   - **Tactical Ability**: Seismic Sonar Overdrive (12.0s recharge; emits 360-degree sonic shockwave that stuns Stalkers for 3.0s and reveals all mineral veins through solid rock)
   - **Passive Trait**: *Acoustic Resonance & High-Tension Winch* (Extended scan outline linger, rapid grapple ascension to escape ambushes).
+
+---
+
+## 4. Defensive Quick Melee & Viewmodel Weapon Animations (`[V]` or `[Middle Click]`)
+
+All delver classes possess a defensive close-quarters melee shove ($0.8\,\text{s}$ cooldown, $2.5\,\text{m}$ conical reach, $15$ damage, interrupt knockback, and $0.6\,\text{s}$ stalker stun). Each weapon slot features a bespoke 4-phase kinetic first-person viewmodel animation:
+
+| Weapon Category | Animation Style | Kinematics & Mechanics | Visual Feedback |
+| :--- | :--- | :--- | :--- |
+| **Gun (`CombatWeapon`)** | Tactical Butt-Stroke & Horizontal Slash | - Phase 1 ($0.0-0.22$): Coils back to shoulder ($Z+0.07\,\text{m}$, roll $+15^\circ$, yaw $+20^\circ$)<br>- Phase 2 ($0.22-0.45$): Explosive forward butt smash ($Z-0.25\,\text{m}$, horizontal sweep $X-0.09\,\text{m}$, roll $-22^\circ$, pitch down $-16^\circ$)<br>- Phase 3 ($0.45-0.58$): $38\,\text{Hz}$ metal-on-chitin impact vibration<br>- Phase 4 ($0.58-1.0$): Fluid quadratic recovery to ready stance | - Demolitionist Scattergun: Wider horizontal bludgeon ($X-0.12\,\text{m}$, roll $-28^\circ$)<br>- Scout Railgun: Long bayonet lunge ($Z-0.29\,\text{m}$)<br>- Vanguard Carbine: High-speed tactical rifle strike<br>- Capacitor emissive pulse on contact |
+| **Demo (`DemolitionCharge`)** | Gauntlet Clacker Hammer-Fist Punch | - Phase 1 ($0.0-0.20$): Braced coil tight to chest like a brass-knuckle fist ($Z+0.08\,\text{m}$, pitch $+16^\circ$)<br>- Phase 2 ($0.20-0.42$): Forward piston punch straight into crosshair ($Z-0.26\,\text{m}$, $X-0.12\,\text{m}$, roll $+22^\circ$)<br>- Phase 3 ($0.42-0.58$): Elastic rebound ($+0.055\,\text{m}$) and settling shake<br>- Phase 4 ($0.58-1.0$): Settle back to handheld inspection stance | - Tactile detonator plunger depresses inward under force ($-0.022\,\text{m}$)<br>- Safety beacon flares with a high-intensity shock flash ($+0.70$ emissive) on impact |
+| **Mining Drill (`MiningDrill`)** | Two-Handed Hydraulic Battering Ram | - Phase 1 ($0.0-0.24$): Low hip-braced wind-up ($Z+0.11\,\text{m}$, $Y-0.06\,\text{m}$, pitch $-14^\circ$), pistons retract ($-0.04\,\text{m}$), auger motor RPM spools up ($+4200\,\text{deg/s}$)<br>- Phase 2 ($0.24-0.48$): Devastating hydraulic battering ram ($Z-0.30\,\text{m}$, $Y+0.075\,\text{m}$ uppercut heave, pitch $+18^\circ$ down-plunge), dual pistons slam forward to full extension ($+0.08\,\text{m}$), auger RPM peaks ($+6500\,\text{deg/s}$)<br>- Phase 3 ($0.48-0.68$): $42\,\text{Hz}$ heavy machinery shudder and pneumatic exhaust vent<br>- Phase 4 ($0.68-1.0$): Heavy mechanical settle back to waist hold | - Superheated diamond auger emissive flare ($+0.75$ glow)<br>- Pneumatic dual pistons visibly surge and extend<br>- Directional impact spark discharge at peak extension |
 
 ---
 

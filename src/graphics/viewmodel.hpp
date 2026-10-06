@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <functional>
+#include <algorithm>
 
 namespace Voidfall {
 
@@ -42,11 +43,21 @@ public:
         bool is_crouching = false,
         bool is_reloading = false,
         float reload_progress = 0.0f,
-        bool has_placed_charge = false
+        bool has_placed_charge = false,
+        bool is_melee_shoving = false,
+        float movement_speed = 0.0f,
+        bool is_grounded = true,
+        float melee_progress = 0.0f,
+        bool is_aiming = false,
+        float zoom_progress = 0.0f
     );
 
     bool is_reloading() const { return m_is_reloading; }
     float reload_progress() const { return m_reload_progress; }
+    bool is_melee_shoving() const { return m_shove_timer > 0.0f; }
+    float melee_shove_progress() const {
+        return m_shove_timer > 0.0f ? glm::clamp(1.0f - (m_shove_timer / 0.35f), 0.0f, 1.0f) : 0.0f;
+    }
     const glm::vec3& recoil_offset() const { return m_recoil_offset; }
     float recoil_pitch() const { return m_recoil_pitch; }
 
@@ -161,6 +172,10 @@ private:
     float m_reload_progress{0.0f};
     glm::vec3 m_recoil_offset{0.0f};
     float m_recoil_pitch{0.0f};
+    float m_shove_timer{0.0f};
+    bool m_was_melee_shoving{false};
+    float m_walk_bob_phase{0.0f};
+    float m_walk_bob_weight{0.0f};
 
     std::function<void(const glm::vec3&, const glm::vec3&)> m_on_spark;
 };

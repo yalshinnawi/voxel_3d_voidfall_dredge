@@ -37,6 +37,9 @@ struct FloatingLootText {
 };
 
 struct LootToast {
+    std::string itemId;
+    std::string displayName;
+    std::string text;
     std::string label;
     std::string resource_name;
     int count{1};
@@ -80,6 +83,9 @@ public:
 
     void add_floating_loot(const glm::vec3& world_pos, const std::string& text, const glm::vec4& color);
     void add_loot_toast(const std::string& resource_name, const glm::vec4& color, int count = 1, int unit_points = 0);
+    void PushLootToast(const std::string& itemId, const std::string& displayName, int count, const glm::vec4& color);
+    size_t loot_toast_count() const { return m_loot_toasts.size(); }
+    const std::deque<LootToast>& loot_toasts() const { return m_loot_toasts; }
     void show_warning(const std::string& msg, float duration = 2.0f);
     void trigger_damage_flash(float intensity = 0.5f) { m_damage_flash_timer = intensity; }
     float damage_flash_timer() const { return m_damage_flash_timer; }
@@ -93,8 +99,15 @@ public:
     void set_toxic_gas_exposure(float exposure, float dt);
     float toxic_gas_exposure() const { return m_toxic_gas_exposure; }
     void clear_target_info();
-    void toggle_help_briefing() { m_show_help_briefing = !m_show_help_briefing; }
-    bool is_help_briefing_visible() const { return m_show_help_briefing; }
+
+    void SetContractorBriefing(bool active = true, float duration = 8.0f);
+    void set_contractor_briefing(bool active = true, float duration = 8.0f) { SetContractorBriefing(active, duration); }
+    void toggle_help_briefing();
+    void dismiss_help_briefing();
+    bool is_manual_briefing_open() const { return m_show_help_briefing; }
+    bool is_help_briefing_visible() const { return m_show_help_briefing || m_briefingTimer > 0.0f; }
+    float briefing_timer() const { return m_briefingTimer; }
+
     void set_death_sequence(bool active, float timer = 0.0f, float max_duration = 3.5f) {
         m_death_active = active;
         m_death_timer = timer;
@@ -224,7 +237,10 @@ private:
     std::vector<OnScreenBloodSplatter> m_blood_splatters;
     float m_total_time{0.0f};
     bool m_show_help_briefing{false};
-    float m_briefing_auto_timer{0.0f};
+    float m_briefingTimer{0.0f};
+    float m_briefing_auto_timer{0.0f}; // Backward-compatible alias
+    std::string m_last_warning_text{""};
+    float m_warning_debounce_timer{0.0f};
     bool m_death_active{false};
     float m_death_timer{0.0f};
     float m_death_duration{3.5f};

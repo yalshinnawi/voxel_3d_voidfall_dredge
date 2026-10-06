@@ -2,6 +2,103 @@
 
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
+## 2026-10-06
+- **Weapon Reload Enforcement & Elimination of Passive Ammo Regeneration**:
+  - Disabled passive trickle recharge across all weapons (`WeaponStats::auto_recharge = false` strictly enforced for Demolitionist Magma Scattergun, Vanguard Plasma Carbine, and Scout Needler Railgun).
+  - Removed capacitor passive recharge tick loop from `PlayerController::update_physics`.
+  - Enforced that ammo only replenishes upon completing a full reload cycle (`reload_weapon()`, [R] key or empty-chamber trigger).
+  - Strengthened assertions in `test_combat_omni_ai.cpp` and added comprehensive zero-trickle assertions in `test_unit_all.cpp` across all 3 delver classes.
+- **Codebase Optimization, File Structure Standardization & Screenshot Catalog Integrity**:
+  - **Screenshot & 3D Model Catalog Integrity**:
+    - Purged 17+ MB of stale/legacy screenshots from `screenshots/` and 6 orphaned combat action frames from `docs/models/`.
+    - Enforced that `docs/models/` contains strictly the canonical 6 models (Void Stalker, Seismic Burrower, Drill Rig, Demolitionist, Vanguard, Scout) plus showcase montages and telemetry reports.
+    - Updated `scripts/capture_models.py` with automatic pruning (`prune_stale_model_artifacts()`).
+    - Enhanced `scripts/analyze_screenshots.py` with automated preview and stale screenshot cleanup.
+    - Added dedicated workspace artifact cleanup tool: `scripts/cleanup_test_artifacts.py`.
+    - Added `screenshots/previews/` and test dump JSONs to `.gitignore`.
+  - **Dead Code & File Structure Cleanup**:
+    - Removed 5 obsolete mockup/forwarding files in `src/entities/` (`void_stalker.hpp`, `void_stalker.cpp`, `enemy.hpp`, `enemy_movement.cpp`, `animation_state.hpp`).
+    - Standardized external header includes (e.g. `<font8x8.h>`) across all UI modules.
+    - Fixed missing `selected_class_id` in `PauseMenu::render` in `src/core/application.cpp`.
+  - **High-Performance Voxel Math & Compiler Optimizations**:
+    - Branchless bounds checking: `((x | y | z) & ~(CHUNK_SIZE - 1)) == 0`.
+    - Bit-shifted coordinate indexing: `(x & 31) | ((y & 31) << 5) | ((z & 31) << 10)`.
+    - Inlined `Chunk::get_voxel` and `Chunk::get_voxel_idx` in `chunk.hpp`.
+    - Branchless `>> 5` and `& 31` chunk coordinates in `world.cpp`.
+    - Fast interior slice face testing in `GreedyMesher::generate_mesh`.
+    - Preallocated BFS graph sets in `StructuralCheck::solve_cavein`.
+    - Added MSVC Release optimizations `/O2 /Oi /Ot /Gy` and `/OPT:REF /OPT:ICF` in `CMakeLists.txt`.
+    - Full 10 test suites passing with reduced unit test execution time (~280ms down from ~750ms).
+  - **TDD Test & Build Acceleration Pipeline**:
+    - **Header Precompilation Expansion**: Added `<chrono>`, `<filesystem>`, `<functional>`, `<sstream>`, `<fstream>`, `<array>`, `<queue>`, `<unordered_set>`, `<thread>`, `<mutex>`, `<atomic>`, `<cstdint>`, `<cstddef>` to `src/core/pch.hpp`.
+    - **PCH Reuse for All Test Targets**: Configured `target_precompile_headers(${tgt} REUSE_FROM voidfall_engine_core)` across all 11 test executables in `CMakeLists.txt`, slashing test compilation times.
+    - **Collision Test Meshing Bypass**: Added `enable_background_meshing = true` parameter to `World` (and `VOIDFALL_HEADLESS_TEST=1` env guard), preventing background worker threads and greedy mesher loops from running during headless collision tests. Dropped `test_level_collision` runtime from 8.3s down to <1.0s.
+    - **Automated Mtime Staleness Guard in `scripts/tdd.py`**: Added file modification timestamp comparisons between sources (`src/`, `include/`, `tests/`) and target test binaries. If `--no-build` is passed but code has been modified, `tdd.py` automatically overrides `--no-build` and executes a fresh build, ensuring agents never test stale binaries.
+    - **Total Test Suite Speed**: All 10 parallel test suites now execute in **< 1.0 second** (down from 8.3s).
+
+## 2026-10-04
+- **Cavern Darkness Overhaul, Flashlight Crucial Mechanics & Controls Remap ([F] Light, [G] Grapple, [T] Flare)**:
+  - **Subterranean Illumination & Darkness Tuning**:
+    - Darkened base cavern subterranean ambient light across all sectors in `voxel_pbr.frag` from `vec3(0.07, 0.09, 0.12)` down to `vec3(0.012, 0.016, 0.022)` (Sector 1), `vec3(0.022, 0.012, 0.007)` (Sector 2), and `vec3(0.007, 0.020, 0.011)` (Sector 3).
+    - Deepened vertical depth attenuation falloff down to `0.12` min clamp in bedrock fissures.
+    - Reduced ambient volumetric mist inscatter in `volumetric_fog.comp` from `0.15` to `0.035` and viewmodel ambient in `viewmodel.frag` to prevent washed-out fog in unlit chambers.
+    - Deep unlit caverns plunge into pitch-black darkness, transforming the player's flashlight and chemical flares into indispensable tools for survival and orientation.
+  - **Flashlight Spotlight & Controls Remapping**:
+    - Key **`[F]`** is now the primary toggle for the Exosuit Flashlight / Headlamp (with `[L]` retained as secondary).
+    - Aligned headlamp spotlight emission in `Application` to `player.eye_position()` and tuned intensity to $4.5$ with a focused 18°-32° beam.
+    - Key **`[G]`** is now dedicated to launching the Grappling Hook tether (`BTN_GRAPPLE_FIRE`), with `[E]` strictly reeling the winch cable.
+    - Key **`[T]`** (with `[Z]` secondary) deploys Throwable Chemical Flares.
+    - Increased flare point light radius from $16.0\,\text{m}$ / $18.0\,\text{m}$ to $22.0\,\text{m}$ and intensity to $5.2$ so throwing a flare illuminates vast 360-degree chambers in vibrant class-colored light.
+    - Updated HUD badges (`[* F: LIGHT ON]`, `[T] CHEMICAL FLARE: X/3`) and pause menu keybindings table.
+
+- **Removal of Clunky Fortress Barricade Action & Addition of Kinetic Repulsor Field**:
+  - Removed the Vanguard's physical barricade placement action (`[C]` ability that previously spawned a 3x2 barrier of bulkheads in front of the player, obstructing movement in narrow mine shafts).
+  - Replaced it with the **Kinetic Repulsor Field**:
+    - Emits a high-energy radial repulsor pulse ($8.5\,\text{m}$ radius) that blasts away approaching Void Stalkers with strong knockback impulse, applies a $2.0\,\text{s}$ stun, and inflicts $40\,\text{HP}$ damage.
+    - Disrupts and stuns burrowing hostiles (Seismic Burrowers) within the epicenter radius.
+    - Deflects all active falling `DynamicDebris` within $10.0\,\text{m}$ outward and upward away from the squad.
+    - Clears player trauma and provides immediate Armored Stabilizer suit integrity restoration ($+25\,\text{HP}$).
+    - Updated HUD tactical ability label from `[C] BARRICADE` to `[C] REPULSOR`.
+    - Added dedicated `SoundCue::TacticalRepulsor` with deep resonant magnetic thump and sweeping sonic shockwave.
+
+- **First-Person Viewmodel Melee Animations Overhaul (Gun, Demo, Mining Drill)**:
+  - Designed and implemented bespoke, multi-phase kinetic melee strike animations for each weapon category (`ToolSlot::CombatWeapon`, `ToolSlot::DemolitionCharge`, `ToolSlot::MiningDrill`):
+    - **Gun**: Tactical rifle butt-stroke and diagonal slash with archetype variations (Demolitionist Scattergun horizontal wide bludgeon sweep, Scout Railgun long bayonet spear thrust, Vanguard Carbine fast rifle strike). Includes $38\,\text{Hz}$ impact deceleration vibration and capacitor pulse.
+    - **Demo**: Heavy brass-knuckle hammer-fist punch using the reinforced handheld detonator clacker, with physical plunger compression ($-0.022\,\text{m}$) and tactical safety beacon shock flash ($+0.70$ emissive) on contact.
+    - **Mining Drill**: Heavy two-handed hydraulic auger battering ram with rapid auger motor spool-up ($+4200-6500\,\text{deg/s}$), forward piston extension ($+0.08\,\text{m}$), superheated diamond auger glow ($+0.75$ emissive), impact sparks, and $42\,\text{Hz}$ mechanical chatter.
+  - Added `player.melee_shove_progress()` contract and plumbing to `PlayerController` and `ViewModel::render`.
+  - Added regression test 10 to `test_combat_omni_ai.cpp` and unit test assertions to `test_unit_all.cpp`.
+  - Updated wiki documentation in `wiki/mechanics/delvers_and_classes.md`.
+
+- **Decommissioning and Removal of Void Drifter (Aerial Harasser)**:
+  - Completely decommissioned the aerial Void Drifter archetype (`StalkerRole::VoidDrifter`) from the engine, game loop, and level generators due to flight, collision, and player attachment issues.
+  - Removed drifter roosting and ambient spawn hooks in `World::PopulateCavernFauna` and `Application::InitWorld`.
+  - Stripped drifter 3D boid flight, dive-bombing, voxel penetration mitigations, and tendril rendering from `VoidStalkerManager`, `VoidStalker`, and `Renderer`.
+  - Re-anchored enemy encounter balance around the core trio: Wall/Ceiling Stalkers (Melee & Shooter archetypes), Chitin Goliaths, and Seismic Burrowers.
+
+- **Enemy Perception Overhaul, Flying Enemy (VoidDrifter) Wall Collision & Traversal Audio Balancing**:
+  - **Acoustic Traversal Balancing (Grapple Hook vs Jetpack Thrusters)**:
+    - Fixed critical bug where grapple hook emitted continuous $4.5\,\text{intensity}$ sound events per frame without $dt$ (generating $270\,\text{noise/sec}$ and immediately alarming all cavern hostiles).
+    - Rebalanced Grapple Hook to be an agile stealth mobility tool:
+      - Launch: Quiet pneumatic one-shot (`SoundCue::GrappleFire`, $1.2\,\text{intensity}$, $5.0\,\text{m}$ radius).
+      - Reel: Subtle high-torque electric winch whine (`SoundCue::GrappleReel`, $2.2\,\text{noise/sec}$, $5.5\,\text{m}$ alert radius, 0.35s period).
+    - Synthesized dedicated Jetpack thruster audio (`SoundCue::JetpackLoop`, 55Hz sub-bass combustion burn + pink noise exhaust hiss + 24Hz flame flutter).
+    - Jetpack thruster emits $14.0\,\text{noise/sec}$ with a prominent $20.0\,\text{m}$ alert radius (over $6\times$ louder and $3.6\times$ larger acoustic signature than the grapple reel).
+    - Both tools now have distinct procedural audio synthesis and fully decoupled volume/noise scaling.
+  - **Flying Enemy (VoidDrifter) Solid Voxel Collision & Anti-Tunneling**:
+    - Resolved bug where flying enemies bypassed world collision during dive-bombs and clipped through solid rock walls.
+    - Implemented full 3D per-axis AABB voxel collision against `world.is_solid()`, allowing drifters to deflect smoothly along cavern walls, ceilings, and columns.
+    - Added line-of-sight checks to dive-bombing: drifters abort dives if the player breaks line of sight behind solid geometry or if the dive exceeds 3.5s.
+  - **Anti-Attachment Constraint & Disengagement Recoil**:
+    - Enforced a minimum $1.35\,\text{m}$ spherical clearance zone preventing drifters from clipping or attaching permanently to the player's model.
+    - Added an explosive $12.0\,\text{m/s}$ upward/backward recoil bounce post-hit with a $2.2\,\text{s}$ attack refractory cooldown, returning the creature to ceiling hover altitude.
+  - **Distant Enemy Perception & Stealth Gating**:
+    - VoidDrifters now require high noise ($> 60\%$) within proximity ($<24\,\text{m}$ with LOS, $<14\,\text{m}$ through strata), direct headlamp illumination, close tactile contact ($<3\,\text{m}$), or damage retaliation to dive.
+    - Distant enemies no longer alert or dive blindly across the level when players maneuver quietly.
+  - **Verification**:
+    - Added Test 24 to `test_audio.cpp` and Test 19 to `test_enemy_stalker.cpp`.
+    - All 10 test suites pass cleanly via `python scripts/tdd.py` in silent headless mode.
+
 ## 2026-10-03
 - **Subterranean Audio Expansion, Sector-Specific Soundscapes & Subtle Enemy Sound Design**:
   - **Subterranean Acoustic Expansion & Multi-Biome Audio Variety**:

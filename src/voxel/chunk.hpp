@@ -50,26 +50,37 @@ public:
     }
 
     static inline size_t to_index(int x, int y, int z) {
-        return static_cast<size_t>(x) +
-               static_cast<size_t>(y) * CHUNK_SIZE +
-               static_cast<size_t>(z) * CHUNK_SIZE_SQ;
+        return (static_cast<size_t>(x) & 31u) |
+               ((static_cast<size_t>(y) & 31u) << 5) |
+               ((static_cast<size_t>(z) & 31u) << 10);
     }
 
     static inline void from_index(size_t idx, int& x, int& y, int& z) {
-        x = static_cast<int>(idx % CHUNK_SIZE);
-        y = static_cast<int>((idx / CHUNK_SIZE) % CHUNK_SIZE);
-        z = static_cast<int>(idx / CHUNK_SIZE_SQ);
+        x = static_cast<int>(idx & 31u);
+        y = static_cast<int>((idx >> 5) & 31u);
+        z = static_cast<int>((idx >> 10) & 31u);
     }
 
     static inline bool in_bounds(int x, int y, int z) {
-        return x >= 0 && x < CHUNK_SIZE &&
-               y >= 0 && y < CHUNK_SIZE &&
-               z >= 0 && z < CHUNK_SIZE;
+        return ((x | y | z) & ~(CHUNK_SIZE - 1)) == 0;
     }
 
-    Voxel get_voxel(int x, int y, int z) const;
+    inline Voxel get_voxel(int x, int y, int z) const {
+        if (!in_bounds(x, y, z)) {
+            return Voxel{MAT_AIR, 0};
+        }
+        return m_voxels[to_index(x, y, z)];
+    }
+
     void set_voxel(int x, int y, int z, Voxel v);
-    Voxel get_voxel_idx(size_t idx) const;
+
+    inline Voxel get_voxel_idx(size_t idx) const {
+        if (idx < m_voxels.size()) {
+            return m_voxels[idx];
+        }
+        return Voxel{MAT_AIR, 0};
+    }
+
     void set_voxel_idx(size_t idx, Voxel v);
 
     const Voxel* raw_voxels() const { return m_voxels.data(); }
