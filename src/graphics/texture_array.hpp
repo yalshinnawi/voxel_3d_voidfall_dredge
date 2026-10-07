@@ -6,7 +6,7 @@ namespace Voidfall {
 
 class TextureArray {
 public:
-    TextureArray(int width = 64, int height = 64, int layers = 14);
+    TextureArray(int width = 128, int height = 128, int layers = 16);
     ~TextureArray();
 
     TextureArray(const TextureArray&) = delete;
@@ -25,9 +25,9 @@ public:
     unsigned int emissive_id() const { return m_emissive_tex; }
 
 private:
-    int m_width{64};
-    int m_height{64};
-    int m_layers{14};
+    int m_width{128};
+    int m_height{128};
+    int m_layers{16};
 
     unsigned int m_albedo_tex{0};
     unsigned int m_normal_tex{0};

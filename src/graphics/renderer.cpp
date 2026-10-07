@@ -39,7 +39,7 @@ Renderer::Renderer(int width, int height)
     m_stalker_shader.load_graphics("assets/shaders/stalker.vert", "assets/shaders/stalker.frag");
 
     // 2. Initialize Texture Array
-    m_texture_array = std::make_unique<TextureArray>(64, 64, 14);
+    m_texture_array = std::make_unique<TextureArray>(128, 128, 16);
 
     // 3. Initialize Framebuffers and Quad
     init_framebuffers();

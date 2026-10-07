@@ -15,6 +15,8 @@ uniform int uSonarActive;
 
 out vec3 vWorldPos;
 out vec3 vNormal;
+out vec3 vTangent;
+out vec3 vBitangent;
 out vec2 vUV;
 flat out uint vTexLayer;
 out float vAO;
@@ -29,6 +31,24 @@ const vec3 NORMALS[6] = vec3[6](
     vec3( 0.0, -1.0,  0.0), // -Y
     vec3( 0.0,  0.0,  1.0), // +Z
     vec3( 0.0,  0.0, -1.0)  // -Z
+);
+
+const vec3 TANGENTS[6] = vec3[6](
+    vec3( 0.0,  0.0, -1.0), // +X
+    vec3( 0.0,  0.0,  1.0), // -X
+    vec3( 1.0,  0.0,  0.0), // +Y
+    vec3( 1.0,  0.0,  0.0), // -Y
+    vec3( 1.0,  0.0,  0.0), // +Z
+    vec3(-1.0,  0.0,  0.0)  // -Z
+);
+
+const vec3 BITANGENTS[6] = vec3[6](
+    vec3( 0.0,  1.0,  0.0), // +X
+    vec3( 0.0,  1.0,  0.0), // -X
+    vec3( 0.0,  0.0, -1.0), // +Y
+    vec3( 0.0,  0.0,  1.0), // -Y
+    vec3( 0.0,  1.0,  0.0), // +Z
+    vec3( 0.0,  1.0,  0.0)  // -Z
 );
 
 void main() {
@@ -58,7 +78,10 @@ void main() {
     vec3 localPos = vec3(localX, localY, localZ);
     vec4 worldPos4 = uModel * vec4(localPos + uChunkWorldPos, 1.0);
     vWorldPos = worldPos4.xyz;
-    vNormal = normalize(mat3(uModel) * NORMALS[normIdx]);
+    mat3 normalMat = mat3(uModel);
+    vNormal = normalize(normalMat * NORMALS[normIdx]);
+    vTangent = normalize(normalMat * TANGENTS[normIdx]);
+    vBitangent = normalize(normalMat * BITANGENTS[normIdx]);
 
     // Texture UVs repeating across greedy meshed quad
     vec2 cornerUV = vec2(0.0);
