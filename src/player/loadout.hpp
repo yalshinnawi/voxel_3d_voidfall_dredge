@@ -72,8 +72,8 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.noise_generation = 0.22f;
             w.trauma_kick = 0.08f;
             w.auto_recharge = false;
-            w.zoom_fov_multiplier = 0.78f; // ~1.28x magnification for close-quarters buckshot focus
-            w.ads_time = 0.20f;
+            w.zoom_fov_multiplier = 0.65f; // ~1.54x magnification for focused buckshot spread
+            w.ads_time = 0.18f;
             break;
 
         case WeaponArchetype::PlasmaCarbine:
@@ -93,8 +93,8 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.noise_generation = 0.12f;
             w.trauma_kick = 0.04f;
             w.auto_recharge = false;
-            w.zoom_fov_multiplier = 0.65f; // ~1.54x magnification for tactical carbine fire
-            w.ads_time = 0.18f;
+            w.zoom_fov_multiplier = 0.50f; // ~2.00x tactical holographic magnification
+            w.ads_time = 0.16f;
             break;
 
         case WeaponArchetype::NeedlerRailgun:
@@ -114,8 +114,8 @@ inline WeaponStats get_weapon_stats_for_archetype(WeaponArchetype arch) {
             w.noise_generation = 0.09f;
             w.trauma_kick = 0.05f;
             w.auto_recharge = false;
-            w.zoom_fov_multiplier = 0.40f; // ~2.50x sniper marksman scope magnification
-            w.ads_time = 0.22f;
+            w.zoom_fov_multiplier = 0.25f; // ~4.00x high-precision marksman sniper scope magnification
+            w.ads_time = 0.20f;
             break;
     }
     return w;

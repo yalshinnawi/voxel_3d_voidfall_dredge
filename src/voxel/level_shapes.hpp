@@ -37,7 +37,13 @@ enum class RoomShapeType {
     PrismaticCrystalCathedral,    // Towering vaulted mega-hall of colossal hexagonal crystal monoliths & crystal bridges (Level 1+)
     AncientTitanNecropolis,       // Deep fossil excavation site spanned by giant prehistoric skeletal ribcage arches (Level 2+)
     BioluminescentGlowwormGrotto, // Starry-sky cavern with hundreds of bioluminescent points & reflecting pool (Level 1+)
-    PrecursorCoolantReservoir     // Precursor industrial vault with ruptured subterranean coolant pipelines & strobes (Level 2+)
+    PrecursorCoolantReservoir,    // Precursor industrial vault with ruptured subterranean coolant pipelines & strobes (Level 2+)
+
+    // ── VAST VERTICAL EXPANSE & COLOSSAL MEGA-SHAPES ──
+    ColossalVaultedDredgeCathedral, // Towering vaulted mega-hall, soaring ribbed arches, high gantry catwalk, vast verticality (All levels)
+    TectonicAbyssalSinkhole,        // Staggering tectonic sinkhole drop, high rim overlook, spiral terraces, glowing fissure bed (Level 2+)
+    CyclopeanExcavationSilo,        // Titanic precursor excavation shaft, double-tiered maintenance rings, crane gantry (Level 1+)
+    BioluminescentFirmamentAbyss    // Vast underground celestial cavern, starry crystal canopy at y=25, soaring stone arch bridge (All levels)
 };
 
 enum class CorridorType {
@@ -99,7 +105,10 @@ enum class LuminaryType {
     AquiferOasisGlow,        // Serene turquoise bioluminescent glow
     PrismaticCrystalRadiance,// Brilliant refractive prismatic glow
     ToxicMiasmaGreen,        // Murky sickly-green spore luminescence
-    TitanFossilAura          // Deep ancient amber fossil luminescence
+    TitanFossilAura,         // Deep ancient amber fossil luminescence
+    GrandVaultRadiance,      // Celestial radiant violet/gold high-vault glow
+    FirmamentStarlight,      // Deep cosmic starlight cyan/violet
+    CyclopeanFloodlight      // Industrial sodium amber beam
 };
 
 struct CavernLuminary {
@@ -198,6 +207,12 @@ private:
     void sample_ancient_titan_necropolis(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_bioluminescent_glowworm_grotto(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_precursor_coolant_reservoir(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+
+    // Vast vertical expanse & colossal mega-shapes
+    void sample_vaulted_dredge_cathedral(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_tectonic_sinkhole(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_cyclopean_silo(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_firmament_abyss(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
 
     void generate_luminaries();
 

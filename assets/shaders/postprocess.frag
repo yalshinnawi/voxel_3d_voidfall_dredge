@@ -26,13 +26,8 @@ vec3 aces_filmic(vec3 x) {
 void main() {
     vec2 uv = vUV;
 
-    // Radiation glitch distortion on high radiation tick
-    if (uRadiationGlitch > 0.05) {
-        float glitchNoise = sin(uv.y * 120.0 + uTime * 40.0) * cos(uTime * 25.0);
-        if (abs(glitchNoise) > 0.8) {
-            uv.x += glitchNoise * 0.008 * uRadiationGlitch;
-        }
-    }
+    // Wavy screen UV distortion removed to ensure a pleasant, motion-stable display.
+    // Radiation is represented cleanly through the HUD's ionizing vignette and audio cues.
 
     vec3 scene = texture(uSceneColor, uv).rgb;
     vec3 bloom = texture(uBloomColor, uv).rgb;

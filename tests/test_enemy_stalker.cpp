@@ -849,7 +849,138 @@ int main() {
         std::cout << " -> Monster chattering noises, wall drilling/digging, and animated burrow escape verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 18 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 19: Acoustic Hearing Range (Gunshots, Sprinting Footsteps) & Immediate Roosting Awakening
+    {
+        std::cout << "[Test 19] Testing Extended Acoustic Perception & Roosting Awakening..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 roost_pos(16.0f, 24.0f, 16.0f);
+        manager.spawn_roosting(roost_pos);
+
+        CHECK(manager.stalkers().size() == 1, "Expected 1 roosting stalker");
+        auto& s_mut = manager.stalkers_mut()[0];
+        s_mut.surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+        s_mut.target_surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+        const auto& s = manager.stalkers()[0];
+        CHECK(s.state == StalkerState::Roosting, "Initial state should be Roosting");
+        CHECK(s.is_ceiling_crawling(), "Expected ceiling surface attachment");
+
+        // Player is 35m away and fires a gunshot
+        glm::vec3 player_pos(16.0f, 20.0f, 51.0f);
+        std::vector<SoundEvent> sounds;
+        SoundEvent gunshot;
+        gunshot.type = SoundEventType::Gunshot;
+        gunshot.position = player_pos;
+        gunshot.intensity = 28.0f;
+        gunshot.audible_radius = 50.0f; // Gunshots audible up to 50m
+        gunshot.lifetime = 0.5f;
+        sounds.push_back(gunshot);
+
+        auto res = manager.update(0.1f, player_pos, glm::vec3(0, 0, -1), glm::vec3(0, 0, -1),
+                                  false, 10.0f, false, world, sounds);
+
+        CHECK(res.any_heard_sound, "Roosting stalker must detect gunshot sound at 35m");
+        const auto& awakened = manager.stalkers()[0];
+        CHECK(awakened.state == StalkerState::Investigating || awakened.state == StalkerState::Stalking,
+              "Roosting stalker must awaken immediately upon hearing gunfire without delay");
+        CHECK(awakened.surface_state == StalkerSurfaceState::FLOOR, "Awakened stalker must detach to floor");
+
+        std::cout << " -> Extended acoustic perception and immediate roosting awakening verified." << std::endl;
+    }
+
+    // Test 20: Immediate Retaliation When Shot, Knockback Direction & Pack Alert
+    {
+        std::cout << "[Test 20] Testing Reaction When Shot, Knockback Vector & Pack Alert..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 target_pos(16.0f, 20.0f, 25.0f);
+        glm::vec3 pack_mate_pos(18.0f, 20.0f, 28.0f); // Within 20m pack radius
+        manager.spawn_melee(target_pos);
+        manager.spawn_shooter(pack_mate_pos);
+
+        // Player shoots target stalker from (16, 20, 15) along +Z direction
+        glm::vec3 player_pos(16.0f, 20.0f, 15.0f);
+        glm::vec3 shot_dir(0.0f, 0.0f, 1.0f);
+        float damage = 15.0f;
+
+        bool hit = manager.damage_nearest(target_pos, 2.0f, damage, false, nullptr, nullptr, &player_pos, &shot_dir);
+        CHECK(hit, "damage_nearest must hit targeted stalker");
+
+        const auto& hit_stalker = manager.stalkers()[0];
+        CHECK(hit_stalker.is_pursuing_attacker, "Stalker when shot must immediately engage pursuit of attacker");
+        CHECK(hit_stalker.target_pos == player_pos, "Stalker target position must be shooter coords");
+        // Check knockback: velocity should have positive Z component (matching shot_dir)
+        CHECK(hit_stalker.velocity.z > 0.5f, "Stalker must take kinetic knockback along bullet trajectory");
+
+        // Check pack mate alert
+        const auto& pack_mate = manager.stalkers()[1];
+        CHECK(pack_mate.state == StalkerState::Stalking || pack_mate.state == StalkerState::Investigating,
+              "Nearby pack member within 20m must be alerted when teammate is shot");
+
+        std::cout << " -> Immediate retaliation when shot, knockback trajectory, and pack alert verified." << std::endl;
+    }
+
+    // Test 21: Anti-Jitter Surface Debounce, Hit Recovery & 1-Block Voxel Step Clambering
+    {
+        std::cout << "[Test 21] Testing Anti-Jitter Surface Debounce, Hit Recovery & Step Clambering..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 stalker_pos(16.0f, 18.05f, 20.0f);
+        manager.spawn_melee(stalker_pos);
+
+        // 21a: Shoot stalker - verify firm surface lock and zero orientation flipping
+        glm::vec3 player_pos(16.0f, 18.05f, 14.0f);
+        glm::vec3 shot_dir(0.0f, 0.0f, 1.0f);
+        bool hit = manager.damage_nearest(stalker_pos, 2.0f, 12.0f, false, nullptr, nullptr, &player_pos, &shot_dir);
+        CHECK(hit, "damage_nearest must hit stalker");
+
+        const auto& hit_s = manager.stalkers()[0];
+        CHECK(hit_s.hit_surface_lock_timer > 0.0f, "Hit surface lock timer must be active after being shot");
+        CHECK(hit_s.surface_state == StalkerSurfaceState::FLOOR, "Surface state must lock to FLOOR after being shot");
+
+        // Update several ticks during hit recovery - confirm it doesn't switch to wall/ceiling
+        for (int i = 0; i < 5; ++i) {
+            manager.update(0.05f, player_pos, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world);
+            const auto& s = manager.stalkers()[0];
+            CHECK(s.surface_state == StalkerSurfaceState::FLOOR, "Stalker must not jitter or change surface while recovering from shot");
+            CHECK(s.state == StalkerState::Lunging || s.state == StalkerState::Stalking, "Stalker must decisively continue attacking rather than spazzing");
+        }
+
+        // 21b: Test 1-Block Step Clambering over voxel obstacles
+        // Ensure floor is solid at y=17 along testing runway
+        for (int z = 20; z <= 26; ++z) {
+            world.set_voxel(16, 17, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        }
+        // Place a 1-block raised terrace at z=22..24 at y=18 with air above at y=19
+        world.set_voxel(16, 18, 22, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        world.set_voxel(16, 18, 23, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        world.set_voxel(16, 18, 24, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        world.set_voxel(16, 19, 22, Voxel{MAT_AIR, 0}, false);
+        world.set_voxel(16, 19, 23, Voxel{MAT_AIR, 0}, false);
+        world.set_voxel(16, 19, 24, Voxel{MAT_AIR, 0}, false);
+
+        VoidStalkerManager nav_manager;
+        glm::vec3 nav_stalker_pos(16.0f, 18.05f, 21.5f);
+        nav_manager.spawn_melee(nav_stalker_pos);
+        nav_manager.stalkers_mut()[0].state = StalkerState::Investigating;
+        nav_manager.stalkers_mut()[0].investigation_target = glm::vec3(16.0f, 18.05f, 26.0f);
+        nav_manager.stalkers_mut()[0].investigation_timer = 5.0f;
+
+        // Update several ticks to walk onto the raised step toward investigation target
+        glm::vec3 far_player(60.0f, 20.0f, 60.0f);
+        for (int step = 0; step < 8; ++step) {
+            nav_manager.update(0.05f, far_player, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world);
+        }
+
+        const auto& stepped_s = nav_manager.stalkers()[0];
+        CHECK(stepped_s.position.y >= 19.0f, "Stalker must clamber up onto 1-block step rather than getting stuck");
+
+        // Clean up test voxels
+        world.set_voxel(16, 18, 22, Voxel{MAT_AIR, 0}, false);
+        world.set_voxel(16, 18, 23, Voxel{MAT_AIR, 0}, false);
+        world.set_voxel(16, 18, 24, Voxel{MAT_AIR, 0}, false);
+
+        std::cout << " -> Anti-jitter surface lock and 1-block step clambering verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 21 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

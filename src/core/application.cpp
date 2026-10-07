@@ -72,6 +72,11 @@ void Application::TransitionState(GameState newState) {
         AudioSystem::StopAllGameplayVoices();
     }
 
+    if (newState != GameState::Gameplay) {
+        m_map_open = false;
+        m_map_dragging_last = false;
+    }
+
     // Reset single-trigger death guard when entering active gameplay
     if (newState == GameState::Gameplay && m_state != GameState::Paused) {
         AudioSystem::instance().reset_death_sound();
@@ -212,6 +217,10 @@ void Application::init_systems() {
         }
     });
 
+    m_player->set_on_interact([this]() {
+        try_interact();
+    });
+
     m_mission.set_on_notification([this](const std::string& msg, float dur) {
         if (m_hud) m_hud->show_warning(msg, dur);
     });
@@ -300,27 +309,33 @@ void Application::init_systems() {
         if (!m_player || !m_world) return;
         if (!m_spawn_mgr.can_spawn(m_stalkers.active_count(), m_player->position())) return;
 
+        int allowed = m_spawn_mgr.max_allowed_enemies() - m_stalkers.active_count();
+        if (allowed <= 0) return;
+
         int count = 1;
         if (level == NoiseMeter::AlertLevel::Alerted) {
-            count = 1 + (m_selected_level >= 2 ? 1 : 0);
+            count = 1;
             if (m_audio) {
                 m_audio->play_sound_3d(SoundCue::StalkerChitter, m_player->position() + glm::vec3(6.0f, 0.0f, 6.0f), 0.95f);
             }
         } else if (level == NoiseMeter::AlertLevel::Agitated) {
-            count = 2 + (m_selected_level >= 2 ? 1 : 0);
+            count = (m_selected_level >= 3) ? 2 : ((m_selected_level == 2) ? 2 : 1);
             if (m_audio) {
                 m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 0.85f);
             }
             m_player->add_trauma(0.2f);
         } else if (level == NoiseMeter::AlertLevel::Swarming) {
-            count = 3 + (m_selected_level >= 2 ? 2 : 0);
+            count = (m_selected_level >= 3) ? 3 : ((m_selected_level == 2) ? 2 : 2);
             SwarmManager::instance().set_active_wave_hostiles(count);
             if (m_audio) {
                 m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 1.0f);
             }
-            m_player->add_trauma(0.4f);
+            m_player->add_trauma(0.35f);
         }
-        m_stalkers.spawn_wave(m_player->position(), count, *m_world);
+        count = std::min(count, allowed);
+        if (count > 0) {
+            m_stalkers.spawn_wave(m_player->position(), count, *m_world);
+        }
     });
 
     m_extraction = std::make_unique<ExtractionSystem>();
@@ -430,6 +445,47 @@ void Application::sync_audio_settings() {
     }
 }
 
+bool Application::try_interact() {
+    if (m_state != GameState::Gameplay || !m_player || !m_world) return false;
+
+    // Check Precursor Vault Relic retrieval
+    if (m_mission.is_vault_breached() && !m_mission.is_relic_retrieved()) {
+        glm::vec3 relic_pos = glm::vec3(m_mission.vault().relic_pos) + glm::vec3(0.5f);
+        float dist = glm::distance(m_player->position(), relic_pos);
+
+        RaycastHit hit = m_player->get_look_target(*m_world, 5.0f);
+        bool aiming_at_relic = hit.hit && (hit.block_pos == m_mission.vault().relic_pos ||
+                                           (hit.voxel.is_solid() && hit.voxel.material_id == MAT_PRISMATIC_CRYSTAL && dist < 6.0f));
+
+        if (dist <= 3.8f || aiming_at_relic) {
+            if (m_mission.interact_relic(*m_world, m_player->position(), 6.0f)) {
+                m_inventory.add_relic();
+                m_inventory.total_run_score += 250;
+                m_skills.add_demolitions_xp(50);
+
+                int dummy_exp = 0, dummy_ti = 0;
+                m_world->vault_door_mut().interact_relic(dummy_exp, dummy_ti);
+
+                if (m_hud) {
+                    m_hud->add_floating_loot(relic_pos + glm::vec3(0.0f, 0.6f, 0.0f),
+                                             "+1 RELIC HYPER-CORE (+250 PTS)",
+                                             glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+                    m_hud->show_warning("PRECURSOR RELIC SECURED (+350 EXP, +5 TITANIUM CORES)", 4.0f);
+                }
+                if (m_audio) {
+                    m_audio->play_sound_2d(SoundCue::BulkheadDeploy, 1.0f);
+                }
+                if (m_renderer) {
+                    m_renderer->spawn_break_particles(relic_pos, glm::ivec3(0, 1, 0), MAT_PRISMATIC_CRYSTAL);
+                }
+                VF_LOG_INFO("Application", "Player successfully retrieved Precursor Relic via interactive pickup [E]!");
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void Application::sync_profile_with_player() {
     CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
     if (m_player) {
@@ -449,11 +505,11 @@ void Application::start_expedition(int level) {
         m_renderer->set_sector(level);
     }
 
-    // Voidite target scales: Sector 1 = 25, Sector 2 = 35, Sector 3 = 50, then +15 per sector beyond 3, capped at 200
+    // Voidite target scales: Sector 1 = 25, Sector 2 = 30, Sector 3 = 45, then +10 per sector beyond 3, capped at 150
     int voidite_target = (level <= 1) ? 25 :
-                         (level == 2) ? 35 :
-                         (level == 3) ? 50 :
-                         std::min(50 + (level - 3) * 15, 200);
+                         (level == 2) ? 30 :
+                         (level == 3) ? 45 :
+                         std::min(45 + (level - 3) * 10, 150);
     m_inventory.reset(voidite_target);
     m_expedition_time = 0.0f;
 
@@ -486,7 +542,7 @@ void Application::start_expedition(int level) {
     CarcassManager::instance().clear();
     FlareManager::instance().reset();
     m_player->clear_breadcrumbs();
-    m_player->reset_insertion_shield(4.0f);
+    m_player->reset_insertion_shield(6.0f);
     m_terrain_scanner.reset();
     m_mission.reset(level);
     m_mission.embed_precursor_vault(*m_world, level);
@@ -504,51 +560,16 @@ void Application::start_expedition(int level) {
     setup_hazard_system();
     m_hazard->set_sector_parameters(level);
 
-    // Pre-populate ambient subterranean predators roaming in distant cavern chambers (Smart Spawning)
-    if (m_world->level_generator()) {
-        const auto& rooms = m_world->level_generator()->rooms();
-        for (size_t i = 1; i < rooms.size(); ++i) { // Skip room 0 (spawn arrival bay)
-            // SMART SPAWNING: Enforce a generous safety buffer around the player's initial entry bay.
-            // Do not spawn any ambient stalkers in rooms or corridors within 28 meters of the player's arrival point.
-            float dist_from_spawn = glm::length(glm::vec2(
-                static_cast<float>(rooms[i].center.x) - m_player->position().x,
-                static_cast<float>(rooms[i].center.z) - m_player->position().z
-            ));
-            if (dist_from_spawn < 28.0f) {
-                continue; // Protected initial deployment zone
-            }
-
-            glm::vec3 rpos(static_cast<float>(rooms[i].center.x),
-                           static_cast<float>(rooms[i].floor_y) + 1.2f,
-                           static_cast<float>(rooms[i].center.z));
-            m_stalkers.spawn_ambient_stalker(rpos, *m_world);
-            if (level >= 2 && (i % 2 == 0)) {
-                // Secondary prowling predator in larger hazard chambers
-                m_stalkers.spawn_ambient_stalker(rpos + glm::vec3(3.5f, 0.0f, -3.5f), *m_world);
-            }
-            // Add a third stalker in deep sectors (5+)
-            if (level >= 5 && (i % 3 == 0)) {
-                m_stalkers.spawn_ambient_stalker(rpos + glm::vec3(-2.5f, 0.0f, 4.0f), *m_world);
-            }
-
-            if (level >= 2 && (i % 3 == 2)) {
-                // Spawn Heavy Carapace Breacher Chitin Goliath
-                m_stalkers.spawn_goliath(rpos);
-            }
-
-            // High-threat tactical ambush spawns based on room archetype — scale shooter accuracy with sector
-            float aggression = 1.0f + (level - 1) * 0.08f; // +8% per sector
-            if (rooms[i].type == RoomShapeType::SpikeTrenchArena) {
-                glm::vec3 perch(rpos.x + 3.0f, static_cast<float>(rooms[i].floor_y + 6.0f), rpos.z);
-                m_stalkers.spawn_shooter(perch, aggression);
-            } else if (rooms[i].type == RoomShapeType::RadioactiveCoreSanctuary) {
-                m_stalkers.spawn_shooter(rpos + glm::vec3(4.0f, 1.0f, 4.0f), aggression);
-                m_stalkers.spawn_melee(rpos + glm::vec3(-4.0f, 1.0f, -4.0f), aggression);
-            } else if (rooms[i].type == RoomShapeType::VoidSingularityRift && level >= 3) {
-                m_stalkers.spawn_shooter(rpos + glm::vec3(0.0f, 2.0f, 5.0f), aggression);
-            }
+    // Populate active fauna placed by world generation (Smart Spawning with quarantine zone)
+    if (m_world) {
+        for (const auto& fauna : m_world->GetActiveEntities()) {
+            m_stalkers.spawn_roosting(fauna.pos, fauna.role);
         }
-        // Burrowers spawn from Sector 3 onward; add one extra per 3 sectors beyond that
+    }
+
+    // Pre-populate Burrowers for Sector 3+ (Endgame Abyssal Mantle)
+    if (m_world && m_world->level_generator()) {
+        const auto& rooms = m_world->level_generator()->rooms();
         int burrower_count = (level >= 3 && rooms.size() > 4) ? 1 + (level - 3) / 3 : 0;
         for (int b = 0; b < burrower_count && (4 + b) < static_cast<int>(rooms.size()); ++b) {
             int room_idx = 4 + b;
@@ -556,13 +577,6 @@ void Application::start_expedition(int level) {
                            static_cast<float>(rooms[room_idx].floor_y) + 2.0f,
                            static_cast<float>(rooms[room_idx].center.z));
             m_burrowers.spawn_burrower(bpos, 1.2f + b * 0.1f);
-        }
-    }
-
-    // Populate active fauna placed by world generation
-    if (m_world) {
-        for (const auto& fauna : m_world->GetActiveEntities()) {
-            m_stalkers.spawn_roosting(fauna.pos, fauna.role);
         }
     }
 
@@ -608,6 +622,8 @@ void Application::start_expedition(int level) {
         m_hud->SetContractorBriefing(true, 8.0f);
     }
 
+    m_map_open = false;
+    m_map_dragging_last = false;
     m_window->set_cursor_locked(true);
     TransitionState(GameState::Gameplay);
 }
@@ -774,8 +790,7 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_hud->add_floating_loot(popup_pos, popup, glm::vec4(0.2f, 1.0f, 0.35f, 1.0f));
     } else if (mat == MAT_REINFORCED_VAULT_DOOR) {
         m_inventory.vault_breached = true;
-        m_inventory.add_relic();
-        m_hud->add_floating_loot(popup_pos, "+1 RELIC HYPER-CORE (+250 PTS)", glm::vec4(1.0f, 0.82f, 0.2f, 1.0f));
+        m_hud->add_floating_loot(popup_pos, "+1 VAULT BULKHEAD BREACHED (+50 PTS)", glm::vec4(1.0f, 0.82f, 0.2f, 1.0f));
         m_skills.add_demolitions_xp(50);
         m_trauma = std::min(m_trauma + 0.35f, 1.0f);
     } else if (mat == MAT_PRISMATIC_CRYSTAL) {
@@ -1078,6 +1093,9 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
                 s.hp = std::max(0.0f, s.hp - 40.0f);
                 if (s.hp <= 0.0f) {
                     s.state = StalkerState::Dying;
+                    s.just_died = true;
+                    s.hit_flash_timer = 0.0f;
+                    s.death_timer = 0.0f;
                     s.state_timer = 0.0f;
                 }
             }
@@ -1281,9 +1299,9 @@ void Application::setup_hazard_system() {
         // Primary Cave-in Wave: detach 18 to 36 physical ceiling blocks in the active zone
         spawn_ceiling_cavein_wave(epicenter, radius, 18, 36);
 
-        // Hazard Phase 3 & 4 (radiation >= 45% in Sector >= 2): chance to awaken Seismic Burrower around epicenter!
-        // Sector 1 is introductory and does NOT spawn deep subterranean burrowers.
-        if (m_selected_level >= 2 && m_hazard->radiation_level() >= 45.0f && m_burrowers.active_count() == 0) {
+        // Hazard Phase 3 & 4 (radiation >= 45% in Sector >= 3): chance to awaken Seismic Burrower around epicenter!
+        // Sectors 1 and 2 are early/mid tier and do NOT spawn deep subterranean burrowers during routine mining.
+        if (m_selected_level >= 3 && m_hazard->radiation_level() >= 45.0f && m_burrowers.active_count() == 0) {
             m_burrowers.spawn_hazard_wave(epicenter, *m_world);
             if (m_hud) {
                 m_hud->show_warning("! SUBTERRANEAN SENSOR: SEISMIC BURROWER DETECTED !", 3.5f);
@@ -1297,6 +1315,12 @@ void Application::process_input(int key, int action) {
 
     if (key == GLFW_KEY_ESCAPE) {
         if (m_state == GameState::Gameplay) {
+            if (m_map_open) {
+                m_map_open = false;
+                m_map_dragging_last = false;
+                m_window->set_cursor_locked(true);
+                return;
+            }
             if (m_hud && m_hud->is_manual_briefing_open()) {
                 m_hud->dismiss_help_briefing();
                 return;
@@ -1318,6 +1342,14 @@ void Application::process_input(int key, int action) {
             }
             // In main menu: ESC does NOT exit the game.
             // Player quits intentionally via [ EXIT ] button on the title screen.
+        }
+    } else if (key == GLFW_KEY_TAB || key == GLFW_KEY_M) {
+        if (m_state == GameState::Gameplay) {
+            m_map_open = !m_map_open;
+            m_map_dragging_last = false;
+            m_window->set_cursor_locked(!m_map_open);
+            m_last_map_mouse = m_window->get_cursor_pos();
+            return;
         }
     } else if (key == GLFW_KEY_F11 || ((key == GLFW_KEY_ENTER) && (m_window && (m_window->is_key_down(GLFW_KEY_LEFT_ALT) || m_window->is_key_down(GLFW_KEY_RIGHT_ALT))))) {
         if (m_window) {
@@ -1344,6 +1376,10 @@ void Application::process_input(int key, int action) {
     } else if (key == GLFW_KEY_H || key == GLFW_KEY_F1) {
         if (m_hud) {
             m_hud->toggle_help_briefing();
+        }
+    } else if (key == GLFW_KEY_E) {
+        if (m_state == GameState::Gameplay) {
+            try_interact();
         }
     }
 }
@@ -1484,7 +1520,7 @@ void Application::fixed_tick(float dt) {
         if (res.hit_player) {
             float dmg = res.damage;
             if (m_extraction && m_extraction->is_player_in_perimeter(player_pos)) {
-                float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+                float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
                 dmg *= resist;
             }
             float applied_dmg = m_player->take_damage(dmg, PlayerController::DamageSource::FallingDebris);
@@ -1644,13 +1680,15 @@ void Application::fixed_tick(float dt) {
             // Sustained drill contact generates continuous seismic micro-fracture stress in this excavation zone.
             m_hazard->add_seismic_stress(drill_tip, 3.8f * dt);
         }
+        glm::vec3 player_pos = m_player->position();
+        glm::vec3 drill_dir = m_player->forward();
         bool is_crit_stalker = false;
         float dmg_dealt_stalker = 0.0f;
-        bool hit_stalker = m_stalkers.damage_nearest(drill_tip, 2.2f, 35.0f * dt, true, &is_crit_stalker, &dmg_dealt_stalker);
+        bool hit_stalker = m_stalkers.damage_nearest(drill_tip, 2.2f, 35.0f * dt, true, &is_crit_stalker, &dmg_dealt_stalker, &player_pos, &drill_dir);
 
         bool is_crit_burrower = false;
         float dmg_dealt_burrower = 0.0f;
-        bool hit_burrower = m_burrowers.damage_nearest(drill_tip, 2.6f, 40.0f * dt, false, true, &is_crit_burrower, &dmg_dealt_burrower);
+        bool hit_burrower = m_burrowers.damage_nearest(drill_tip, 2.6f, 40.0f * dt, false, true, &is_crit_burrower, &dmg_dealt_burrower, &player_pos, &drill_dir);
 
         if (is_crit_stalker || is_crit_burrower) {
             float total_crit_dmg = is_crit_stalker ? dmg_dealt_stalker : dmg_dealt_burrower;
@@ -1727,7 +1765,7 @@ void Application::fixed_tick(float dt) {
     if (stalker_res.total_damage > 0.0f) {
         float dmg = stalker_res.total_damage;
         if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
-            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
             dmg *= resist;
         }
         float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
@@ -1831,7 +1869,7 @@ void Application::fixed_tick(float dt) {
     if (burrower_res.total_damage > 0.0f) {
         float dmg = burrower_res.total_damage;
         if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
-            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.75f : 0.85f);
+            float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
             dmg *= resist;
         }
         float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
@@ -1853,9 +1891,6 @@ void Application::fixed_tick(float dt) {
     }
     if (burrower_res.any_cavein_triggered) {
         m_hazard->force_tremor(1.4f);
-    }
-    if (burrower_res.max_rumble > 0.1f) {
-        m_trauma = std::max(m_trauma, burrower_res.max_rumble * 0.18f);
     }
     if (burrower_res.burrowers_killed > 0) {
         m_inventory.total_run_score += 250 * burrower_res.burrowers_killed;
@@ -1976,13 +2011,6 @@ void Application::fixed_tick(float dt) {
 
                     // Localized seismic tremor event in the area where the bullet hit
                     m_noise_meter.add_seismic_sound(next_pos, 0.75f);
-                    float micro_trauma = 0.08f;
-                    float impact_dist = glm::distance(m_player->position(), next_pos);
-                    if (impact_dist < 6.0f) {
-                        float impact_prox = 1.0f - (impact_dist / 6.0f);
-                        m_player->add_trauma(micro_trauma * impact_prox);
-                        m_trauma = std::min(m_trauma + micro_trauma * impact_prox, 1.0f);
-                    }
 
                     if (m_renderer) {
                         m_renderer->trigger_dust_kickup(1.2f);
@@ -2019,7 +2047,9 @@ void Application::fixed_tick(float dt) {
         // 2. Enemy hit detection: Void Stalkers
         bool is_crit = false;
         float damage_dealt = 0.0f;
-        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage, true, &is_crit, &damage_dealt)) {
+        glm::vec3 player_pos = m_player ? m_player->position() : (next_pos - bolt.velocity * 0.1f);
+        glm::vec3 shot_dir = glm::length(bolt.velocity) > 0.001f ? glm::normalize(bolt.velocity) : (m_player ? m_player->forward() : glm::vec3(0, 0, -1));
+        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage, true, &is_crit, &damage_dealt, &player_pos, &shot_dir)) {
             bolt.active = false;
             if (m_renderer) {
                 m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.8f, MAT_VOIDITE_CRYSTAL);
@@ -2057,7 +2087,7 @@ void Application::fixed_tick(float dt) {
         // 3. Enemy hit detection: Seismic Burrowers
         bool is_b_crit = false;
         float b_damage_dealt = 0.0f;
-        if (m_burrowers.damage_nearest(next_pos, 2.4f, bolt.damage, false, true, &is_b_crit, &b_damage_dealt)) {
+        if (m_burrowers.damage_nearest(next_pos, 2.4f, bolt.damage, false, true, &is_b_crit, &b_damage_dealt, &player_pos, &shot_dir)) {
             bolt.active = false;
             if (m_renderer) {
                 m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.9f, MAT_TITANIUM);
@@ -2331,6 +2361,14 @@ void Application::fixed_tick(float dt) {
                     m_hud->show_warning("BIOME ADVISORY: BIOLUMINESCENT GLOWWORM GROTTO // REFLECTING CANOPY", 3.0f);
                 } else if (room_shape == static_cast<int>(RoomShapeType::PrecursorCoolantReservoir)) {
                     m_hud->show_warning("HAZARD ADVISORY: PRECURSOR COOLANT RESERVOIR // PRESSURE PIPELINES", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::ColossalVaultedDredgeCathedral)) {
+                    m_hud->show_warning("SECTOR DISCOVERY: GRAND VAULTED DREDGE CATHEDRAL // SOARING ROTUNDA & ARCHES", 3.2f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::TectonicAbyssalSinkhole)) {
+                    m_hud->show_warning("CRITICAL HAZARD: TECTONIC ABYSSAL SINKHOLE // SHEER VERTICAL VOID & FISSURE", 3.2f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::CyclopeanExcavationSilo)) {
+                    m_hud->show_warning("INDUSTRIAL ADVISORY: CYCLOPEAN EXCAVATION SILO // MULTI-TIER MEZZANINE SHAFT", 3.0f);
+                } else if (room_shape == static_cast<int>(RoomShapeType::BioluminescentFirmamentAbyss)) {
+                    m_hud->show_warning("SECTOR DISCOVERY: BIOLUMINESCENT FIRMAMENT ABYSS // CELESTIAL CANOPY", 3.2f);
                 }
             }
         }
@@ -2343,7 +2381,7 @@ void Application::fixed_tick(float dt) {
         if (current_room) {
             if (current_room->type == RoomShapeType::MagmaCalderaLake || current_room->type == RoomShapeType::MoltenMagmaFoundry) {
                 lava_dist = glm::distance(m_player->position(), glm::vec3(current_room->center.x, static_cast<float>(current_room->floor_y), current_room->center.z));
-            } else if (current_room->type == RoomShapeType::FaultLineCrevasse) {
+            } else if (current_room->type == RoomShapeType::FaultLineCrevasse || current_room->type == RoomShapeType::TectonicAbyssalSinkhole) {
                 lava_dist = std::abs(m_player->position().x - static_cast<float>(current_room->center.x));
             } else if (current_room->type == RoomShapeType::SpikeTrenchArena || current_room->type == RoomShapeType::ColossalAbyssalChasm) {
                 spike_dist = std::max(0.0f, m_player->position().y - (static_cast<float>(current_room->floor_y) + 1.0f));
@@ -2498,7 +2536,7 @@ void Application::fixed_tick(float dt) {
         float rad_val = std::max(amb_rad_val, prox_rad_val);
         m_audio->update_hazard_proximity_audio(dt, lava_dist, rad_val, spike_dist, void_dist, gas_dist);
 
-        // Update player biometrics (cardiac & respiration vitals)
+        // Update player biometrics (cardiac heartbeat vitals)
         float health_pct = (m_player->max_health() > 0.0f) ? (m_player->health() / m_player->max_health()) : 0.0f;
         float threat_prox = 0.0f;
         for (const auto& s : m_stalkers.stalkers()) {
@@ -2548,7 +2586,7 @@ void Application::fixed_tick(float dt) {
 
         if (rad_damage > 0.0f) {
             if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
-                float resist = (m_selected_level <= 1) ? 0.50f : (m_selected_level == 2 ? 0.70f : 0.85f);
+                float resist = (m_selected_level <= 1) ? 0.50f : (m_selected_level == 2 ? 0.60f : 0.75f);
                 rad_damage *= resist;
             }
             // Apply radiation damage with ZERO screen shake trauma!
@@ -2641,30 +2679,24 @@ void Application::fixed_tick(float dt) {
             }
         } else if (m_selected_level == 2) {
             // Level 2 (Sector 2: Volatile Fault) - Moderate Holdout (30s)
-            // Stage 1 (progress >= 0.35, ~10.5s elapsed): 2 flanking stalkers
+            // Stage 1 (progress >= 0.35, ~10.5s elapsed): 1 flanking stalker scout
             if (m_holdout_stage == 0 && progress >= 0.35f) {
                 m_holdout_stage = 1;
-                m_stalkers.spawn_wave(m_player->position(), 2, *m_world);
-                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE REINFORCEMENTS !", 2.5f);
-                m_player->add_trauma(0.20f);
+                m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
+                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE SCOUT INBOUND !", 2.5f);
+                m_player->add_trauma(0.15f);
             }
-            // Stage 2 (progress >= 0.70, ~21s elapsed): 2 stalkers + 1 burrower
+            // Stage 2 (progress >= 0.70, ~21s elapsed): 2 stalker reinforcements (fair combat, no burrower)
             else if (m_holdout_stage == 1 && progress >= 0.70f) {
                 m_holdout_stage = 2;
                 m_stalkers.spawn_wave(m_player->position(), 2, *m_world);
-                if (m_burrowers.active_count() == 0) {
-                    m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
-                }
-                m_hud->show_warning("!! CRITICAL REINFORCEMENTS & BURROWER INCOMING !!", 3.0f);
-                m_player->add_trauma(0.35f);
-                if (m_audio) {
-                    m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.60f);
-                }
+                m_hud->show_warning("! FINAL DEFENSE: HOSTILE PACK APPROACHING !", 2.5f);
+                m_player->add_trauma(0.20f);
             }
             // Stage 3 (progress >= 0.90, ~27s elapsed): Mild tremor (LZ is shielded from rocks)
             else if (m_holdout_stage == 2 && progress >= 0.90f) {
                 m_holdout_stage = 3;
-                m_hazard->force_tremor(0.7f);
+                m_hazard->force_tremor(0.5f);
                 m_hud->show_warning("!!! EVAC POD ON FINAL DESCENT !!!", 2.5f);
             }
         } else {
@@ -2770,19 +2802,22 @@ void Application::render(float dt) {
         view = m_player->get_view_matrix();
         cam_pos = m_player->position();
 
-        // Camera view setup with non-linear impulse trauma screen shake (clamped to prevent wall clipping)
+        // Camera view setup with non-linear impulse trauma screen shake (scaled by comfort setting)
         float active_trauma = std::max(m_trauma, m_player ? m_player->trauma() : 0.0f);
+        active_trauma *= m_settings.screen_shake;
         if (active_trauma > 0.001f) {
-            float shake_amount = std::min(active_trauma * active_trauma * 0.35f, 0.18f);
-            float shake_x = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
-            float shake_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * shake_amount;
-            float shake_roll = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * (shake_amount * 5.0f);
+            // Toned down amplitude with smooth harmonic oscillation rather than 60Hz white-noise jitter
+            float shake_amount = std::min(active_trauma * active_trauma * 0.12f, 0.045f);
+            float wave_time = static_cast<float>(glfwGetTime()) * 16.0f;
+            float shake_x = (std::sin(wave_time) * 0.7f + std::cos(wave_time * 1.6f) * 0.3f) * shake_amount;
+            float shake_y = (std::cos(wave_time * 1.3f) * 0.7f + std::sin(wave_time * 2.1f) * 0.3f) * shake_amount;
+            // Roll is eliminated to prevent horizon tilt and motion sickness
             view = glm::translate(view, glm::vec3(shake_x, shake_y, 0.0f));
-            view = glm::rotate(view, glm::radians(shake_roll), glm::vec3(0.0f, 0.0f, 1.0f));
             if (m_state == GameState::Gameplay) {
-                m_trauma = (std::max)(0.0f, m_trauma - dt * 0.8f);
+                // Crisp impulse decay (2.8f/s) so heavy impacts settle quickly without prolonged vibration
+                m_trauma = (std::max)(0.0f, m_trauma - dt * 2.8f);
                 if (m_player) {
-                    m_player->set_trauma((std::max)(0.0f, m_player->trauma() - dt * 0.8f));
+                    m_player->set_trauma((std::max)(0.0f, m_player->trauma() - dt * 2.8f));
                 }
             }
         }
@@ -3058,10 +3093,8 @@ void Application::render(float dt) {
     // Render Throwable Chemical Flares
     m_renderer->render_flares(FlareManager::instance().flares(), static_cast<float>(glfwGetTime()));
 
-    // Render Navigation Breadcrumb Trail Markers
-    if (m_player) {
-        m_renderer->render_breadcrumbs(m_player->breadcrumbs(), static_cast<float>(glfwGetTime()));
-    }
+    // Note: Navigation breadcrumbs are rendered exclusively on the 2D Hologram Terrain Scanner ([TAB] overlay)
+    // to prevent in-world 3D markers from floating in mid-air or littering caverns.
 
     // Render 3D World Break, Burrow, and Dust Particles with scene depth testing
     m_renderer->render_particles();
@@ -3431,9 +3464,8 @@ void Application::run() {
             static bool b_down_last = false;
             bool b_now = m_window->is_key_down(GLFW_KEY_B);
             if (b_now && !b_down_last) {
-                bool quota_met = (m_selected_level == 2)
-                    ? (m_inventory.vault_breached && m_inventory.relic_extracted)
-                    : (m_inventory.voidite >= m_inventory.target_voidite);
+                bool quota_met = (m_inventory.voidite >= m_inventory.target_voidite) ||
+                                 (m_inventory.vault_breached && m_inventory.relic_extracted);
                 if (quota_met) {
                     float holdout_duration = (m_selected_level <= 1) ? 20.0f :
                                              (m_selected_level == 2)  ? 30.0f : 40.0f;
@@ -3446,7 +3478,9 @@ void Application::run() {
                             std::to_string(m_inventory.target_voidite) + " VOIDITE (" +
                             std::to_string(m_inventory.voidite) + "/" + std::to_string(m_inventory.target_voidite) + ")";
                         if (m_selected_level == 2) {
-                            warn = "BEACON LOCKED: BREACH VAULT & EXTRACT RELIC FIRST";
+                            warn = "BEACON LOCKED: REQUIRE " + std::to_string(m_inventory.target_voidite) +
+                                   " VOIDITE OR PRECURSOR RELIC (" + std::to_string(m_inventory.voidite) + "/" +
+                                   std::to_string(m_inventory.target_voidite) + ")";
                         }
                         m_hud->show_warning(warn, 2.5f);
                     }
@@ -3456,6 +3490,13 @@ void Application::run() {
                 }
             }
             b_down_last = b_now;
+
+            static bool e_down_last = false;
+            bool e_now = m_window->is_key_down(GLFW_KEY_E);
+            if (e_now && !e_down_last) {
+                try_interact();
+            }
+            e_down_last = e_now;
 
             // Synchronize headlamp with player suit controller state (compact icon rendered in suit vitals)
             m_renderer->headlamp().enabled = m_player->is_headlamp_on();
@@ -3480,19 +3521,43 @@ void Application::run() {
             }
             rbrk_down_last = rbrk_now;
 
-            static bool tab_down_last = false;
-            bool tab_now = m_window->is_key_down(GLFW_KEY_TAB);
-            m_player->set_combat_inputs_paused(tab_now);
-            if (tab_now) {
-                glm::dvec2 m_delta = m_window->get_cursor_delta();
+            if (m_map_open) {
+                m_player->set_combat_inputs_paused(true);
+
+                // Mouse click-and-drag interaction for tactical map
+                glm::dvec2 cur_mouse = m_window->get_cursor_pos();
+                bool lmb_down = m_window->is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+                float mouse_dx = 0.0f;
+                float mouse_dy = 0.0f;
+                bool is_dragging = false;
+
+                if (lmb_down) {
+                    if (m_map_dragging_last) {
+                        mouse_dx = static_cast<float>(cur_mouse.x - m_last_map_mouse.x);
+                        mouse_dy = static_cast<float>(cur_mouse.y - m_last_map_mouse.y);
+                        is_dragging = true;
+                    }
+                    m_map_dragging_last = true;
+                } else {
+                    m_map_dragging_last = false;
+                }
+                m_last_map_mouse = cur_mouse;
+
+                // Zoom control via mouse scroll wheel
+                double scroll_y = m_window->get_scroll_delta_y();
+                if (std::abs(scroll_y) > 0.01) {
+                    m_terrain_scanner.zoom(static_cast<float>(scroll_y));
+                }
+
                 m_terrain_scanner.update(static_cast<float>(frame_time), true, m_player->position(),
-                                         static_cast<float>(m_delta.x), static_cast<float>(m_delta.y), true);
+                                         mouse_dx, mouse_dy, is_dragging);
             } else {
+                m_map_dragging_last = false;
+                m_player->set_combat_inputs_paused(false);
                 m_terrain_scanner.update(static_cast<float>(frame_time), false, m_player->position(), 0.0f, 0.0f, false);
+                m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
+                m_player->handle_input(*m_window, static_cast<float>(frame_time));
             }
-            tab_down_last = tab_now;
-            m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
-            m_player->handle_input(*m_window, static_cast<float>(frame_time));
         }
 
         while (accumulator >= fixed_dt) {
@@ -3925,33 +3990,27 @@ void Application::run() {
             // Capture frames
             if (m_auto_test_frame == 13) {
                 VisualTestHarness::instance().record_enemy_phase(0, "FLOOR CRAWL", "screenshots/enemy_01_floor_crawl.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_floor_crawl.png", m_window->width(), m_window->height());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 0: FLOOR CRAWL.");
             }
             else if (m_auto_test_frame == 27) {
                 VisualTestHarness::instance().record_enemy_phase(1, "WALL CLIMB", "screenshots/enemy_02_wall_climb.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_wall_climb.png", m_window->width(), m_window->height());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 1: WALL CLIMB.");
             }
             else if (m_auto_test_frame == 41) {
                 VisualTestHarness::instance().record_enemy_phase(2, "CEILING CRAWL", "screenshots/enemy_03_ceiling_crawl.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_ceiling_crawl.png", m_window->width(), m_window->height());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 2: CEILING CRAWL.");
             }
             else if (m_auto_test_frame == 55) {
                 VisualTestHarness::instance().record_enemy_phase(3, "SURFACE TRANSITION", "screenshots/enemy_04_surface_transition.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_surface_transition.png", m_window->width(), m_window->height());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 3: SURFACE TRANSITION.");
             }
             else if (m_auto_test_frame == 69) {
                 VisualTestHarness::instance().record_enemy_phase(4, "AGGRESSIVE LUNGE", "screenshots/enemy_05_aggressive_lunge.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_aggressive_lunge.png", m_window->width(), m_window->height());
                 on_sonar_cast(m_player->position());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 4: AGGRESSIVE LUNGE.");
             }
             else if (m_auto_test_frame == 83) {
                 VisualTestHarness::instance().record_enemy_phase(5, "SONAR STUN", "screenshots/enemy_06_sonar_stun.png", m_window->width(), m_window->height());
-                capture_screenshot_png("docs/models/stalker_sonar_stun.png", m_window->width(), m_window->height());
                 VF_LOG_INFO("EnemyTest", "Captured Slot 5: SONAR STUN.");
             }
             else if (m_auto_test_frame >= 88) {

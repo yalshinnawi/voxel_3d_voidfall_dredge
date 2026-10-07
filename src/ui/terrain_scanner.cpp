@@ -69,6 +69,17 @@ inline void add_quad(std::vector<Shape2DVertex>& tris, float x, float y, float w
     tris.push_back({{x, y + h}, col});
 }
 
+inline void add_clipped_quad(std::vector<Shape2DVertex>& tris, float x, float y, float w, float h, const glm::vec4& col,
+                             float min_x, float min_y, float max_x, float max_y) {
+    float x1 = std::max(x, min_x);
+    float y1 = std::max(y, min_y);
+    float x2 = std::min(x + w, max_x);
+    float y2 = std::min(y + h, max_y);
+    if (x2 > x1 && y2 > y1) {
+        add_quad(tris, x1, y1, x2 - x1, y2 - y1, col);
+    }
+}
+
 inline void add_line(std::vector<Shape2DVertex>& lines, const glm::vec2& p1, const glm::vec2& p2, const glm::vec4& col) {
     lines.push_back({p1, col});
     lines.push_back({p2, col});
@@ -327,13 +338,24 @@ void TerrainScanner::update(float dt, bool tab_held, const glm::vec3& player_pos
         }
     }
 
-    // Pan map with mouse dragging while TAB held
+    // Pan map with click-and-drag mouse interaction while map is active
     if (m_active && mouse_dragging) {
         m_pan_x -= mouse_dx * (1.0f / m_zoom);
         m_pan_y -= mouse_dy * (1.0f / m_zoom);
+        float max_pan = static_cast<float>(MAP_SPAN) * 0.85f;
+        m_pan_x = glm::clamp(m_pan_x, -max_pan, max_pan);
+        m_pan_y = glm::clamp(m_pan_y, -max_pan, max_pan);
         m_orbit_yaw += mouse_dx * 0.35f;
         m_orbit_pitch = glm::clamp(m_orbit_pitch - mouse_dy * 0.35f, -80.0f, 80.0f);
     }
+}
+
+void TerrainScanner::zoom(float delta) {
+    m_zoom = glm::clamp(m_zoom + delta * 0.75f, 3.5f, 22.0f);
+}
+
+void TerrainScanner::set_zoom(float z) {
+    m_zoom = glm::clamp(z, 3.5f, 22.0f);
 }
 
 float TerrainScanner::discovery_percentage() const {
@@ -406,7 +428,7 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
                 if (v.material_id == MAT_AIR) {
                     has_air = true;
                     Voxel below = world.get_voxel(wx, y - 1, wz);
-                    if (below.is_solid()) {
+                    if (below.is_solid() || below.is_liquid()) {
                         is_floor = true;
                         floor_y = y;
                         if (below.material_id == MAT_THERMITE_SLAG || below.material_id == MAT_RADIOACTIVE_ORE || below.material_id == MAT_OBSIDIAN_SPIKES) {
@@ -439,15 +461,19 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     // ─────────────────────────────────────────────────────────────
     // 1. TACTICAL OVERLAY BACKGROUND & BEZEL
     // ─────────────────────────────────────────────────────────────
-    glm::vec4 frame_bg(0.035f, 0.045f, 0.060f, 0.94f);
-    glm::vec4 cyan_accent(0.00f, 0.90f, 1.00f, 0.90f);
-    glm::vec4 amber_accent(1.00f, 0.70f, 0.00f, 0.95f);
-    glm::vec4 green_accent(0.18f, 0.85f, 0.44f, 0.95f);
-    glm::vec4 muted_slate(0.45f, 0.52f, 0.60f, 0.85f);
+    // Fullscreen tactical dimming scrim behind the entire map modal
+    add_quad(m_cached_tris, 0.0f, 0.0f, static_cast<float>(m_screen_w), static_cast<float>(m_screen_h),
+             glm::vec4(0.012f, 0.016f, 0.024f, 0.92f));
 
-    // Main frame backdrop
+    glm::vec4 frame_bg(0.024f, 0.030f, 0.040f, 1.0f);
+    glm::vec4 cyan_accent(0.00f, 0.90f, 1.00f, 1.0f);
+    glm::vec4 amber_accent(1.00f, 0.70f, 0.00f, 1.0f);
+    glm::vec4 green_accent(0.18f, 0.85f, 0.44f, 1.0f);
+    glm::vec4 muted_slate(0.48f, 0.55f, 0.64f, 1.0f);
+
+    // Main frame backdrop (completely opaque)
     add_quad(m_cached_tris, panel_x, panel_y, panel_w, panel_h, frame_bg);
-    add_rect_outline(m_cached_lines, panel_x, panel_y, panel_w, panel_h, glm::vec4(0.0f, 0.75f, 0.95f, 0.45f));
+    add_rect_outline(m_cached_lines, panel_x, panel_y, panel_w, panel_h, glm::vec4(0.0f, 0.75f, 0.95f, 0.75f));
 
     // Corner decorative brackets
     float corner_len = 18.0f;
@@ -460,9 +486,9 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     add_line(m_cached_lines, {panel_x + panel_w - corner_len, panel_y + panel_h}, {panel_x + panel_w, panel_y + panel_h}, cyan_accent);
     add_line(m_cached_lines, {panel_x + panel_w, panel_y + panel_h}, {panel_x + panel_w, panel_y + panel_h - corner_len}, cyan_accent);
 
-    // Header bar
-    add_quad(m_cached_tris, panel_x + 1.0f, panel_y + 1.0f, panel_w - 2.0f, 34.0f, glm::vec4(0.06f, 0.08f, 0.11f, 0.95f));
-    add_line(m_cached_lines, {panel_x, panel_y + 35.0f}, {panel_x + panel_w, panel_y + 35.0f}, glm::vec4(0.0f, 0.85f, 1.0f, 0.65f));
+    // Header bar (solid)
+    add_quad(m_cached_tris, panel_x + 1.0f, panel_y + 1.0f, panel_w - 2.0f, 34.0f, glm::vec4(0.05f, 0.07f, 0.10f, 1.0f));
+    add_line(m_cached_lines, {panel_x, panel_y + 35.0f}, {panel_x + panel_w, panel_y + 35.0f}, glm::vec4(0.0f, 0.85f, 1.0f, 0.85f));
 
     m_cached_texts.push_back({
         "// DELVER TACTICAL CARTOGRAPHY // 2D CAVERN TOPOGRAPHY",
@@ -479,8 +505,8 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     // ─────────────────────────────────────────────────────────────
     // 2. 2D MAP VIEWPORT CANVAS & TOPOGRAPHY
     // ─────────────────────────────────────────────────────────────
-    // Canvas background (dark excavated cavern stone)
-    add_quad(m_cached_tris, vp_x, vp_y, vp_w, vp_h, glm::vec4(0.055f, 0.048f, 0.040f, 0.98f));
+    // Canvas background (solid dark cavern stone)
+    add_quad(m_cached_tris, vp_x, vp_y, vp_w, vp_h, glm::vec4(0.032f, 0.030f, 0.028f, 1.0f));
 
     // Subtle tactical radar coordinate grid
     glm::vec4 grid_col(0.12f, 0.16f, 0.22f, 0.35f);
@@ -491,51 +517,48 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
         if (gy > vp_y) add_line(m_cached_lines, {vp_x, gy}, {vp_x + vp_w, gy}, grid_col);
     }
 
-    // Render discovered cavern tiles
-    // CONCEPT COLOR PALETTE MATCHING USER IMAGE:
-    // - Cave Floor: slate stone brown-gray #34302B
-    // - Cave Wall Rim: warm golden-amber carved cliff contour #BA8A42 / #D4A359
-    // - Solid Rock: dark bedrock perimeter #1B1815
+    // Render discovered cavern tiles with solid opacities, strictly clipped to viewport
     for (int wz = min_wz; wz <= max_wz; ++wz) {
         for (int wx = min_wx; wx <= max_wx; ++wx) {
             int idx = (wz - MAP_MIN) * MAP_SPAN + (wx - MAP_MIN);
+            float sx = map_center.x + (static_cast<float>(wx) - center_wx) * m_zoom;
+            float sy = map_center.y + (static_cast<float>(wz) - center_wz) * m_zoom;
+
             if (m_discovered[idx] == 0) {
-                // Undiscovered / Fog of War cell (pitch black)
-                float sx = map_center.x + (static_cast<float>(wx) - center_wx) * m_zoom;
-                float sy = map_center.y + (static_cast<float>(wz) - center_wz) * m_zoom;
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, glm::vec4(0.025f, 0.025f, 0.025f, 0.98f));
+                // Undiscovered / Fog of War cell (pitch solid black)
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, glm::vec4(0.016f, 0.016f, 0.020f, 1.0f),
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
                 continue;
             }
 
             CavernCellType ctype = static_cast<CavernCellType>(m_cell_types[idx]);
-            float sx = map_center.x + (static_cast<float>(wx) - center_wx) * m_zoom;
-            float sy = map_center.y + (static_cast<float>(wz) - center_wz) * m_zoom;
-
-            // Subtle organic stone variation
             float var = static_cast<float>((wx * 7 + wz * 13) % 7) * 0.012f;
 
             if (ctype == CavernCellType::CaveFloor) {
                 // Carved walkable cave floor
-                glm::vec4 floor_col(0.24f + var, 0.22f + var, 0.20f + var, 0.96f);
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, floor_col);
+                glm::vec4 floor_col(0.24f + var, 0.22f + var, 0.20f + var, 1.0f);
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, floor_col,
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
             } else if (ctype == CavernCellType::CaveWallRim) {
-                // Warm golden-amber rock cliff contour (directly matching concept image)
-                glm::vec4 rim_col(0.70f + var * 0.5f, 0.50f + var * 0.5f, 0.22f, 0.98f);
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, rim_col);
-                // Golden edge highlight line
-                add_rect_outline(m_cached_lines, sx, sy, m_zoom, m_zoom, glm::vec4(0.85f, 0.65f, 0.28f, 0.85f));
+                // Warm golden-amber rock cliff contour
+                glm::vec4 rim_col(0.70f + var * 0.5f, 0.50f + var * 0.5f, 0.22f, 1.0f);
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, rim_col,
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
             } else if (ctype == CavernCellType::HazardFloor) {
                 // Molten or toxic hot zone
-                glm::vec4 hazard_col(0.85f, 0.32f, 0.12f, 0.95f);
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, hazard_col);
+                glm::vec4 hazard_col(0.85f, 0.32f, 0.12f, 1.0f);
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, hazard_col,
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
             } else if (ctype == CavernCellType::ChasmDrop) {
                 // Abyssal vertical drop pit
-                glm::vec4 pit_col(0.09f, 0.08f, 0.07f, 0.98f);
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, pit_col);
+                glm::vec4 pit_col(0.08f, 0.07f, 0.06f, 1.0f);
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, pit_col,
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
             } else if (ctype == CavernCellType::SolidRock) {
                 // Dark bedrock adjacent to cave boundary
-                glm::vec4 rock_col(0.11f, 0.09f, 0.08f, 0.92f);
-                add_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, rock_col);
+                glm::vec4 rock_col(0.10f, 0.09f, 0.08f, 1.0f);
+                add_clipped_quad(m_cached_tris, sx, sy, m_zoom, m_zoom, rock_col,
+                                 vp_x, vp_y, vp_x + vp_w, vp_y + vp_h);
             }
         }
     }
@@ -548,11 +571,15 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     for (size_t i = 0; i < crumbs.size(); ++i) {
         float csx = map_center.x + (crumbs[i].x - center_wx) * m_zoom;
         float csy = map_center.y + (crumbs[i].z - center_wz) * m_zoom;
-        add_diamond(m_cached_tris, {csx, csy}, 2.0f, crumb_col);
+        if (csx >= vp_x && csx <= vp_x + vp_w && csy >= vp_y && csy <= vp_y + vp_h) {
+            add_diamond(m_cached_tris, {csx, csy}, 2.0f, crumb_col);
+        }
         if (i + 1 < crumbs.size()) {
             float next_sx = map_center.x + (crumbs[i + 1].x - center_wx) * m_zoom;
             float next_sy = map_center.y + (crumbs[i + 1].z - center_wz) * m_zoom;
-            add_line(m_cached_lines, {csx, csy}, {next_sx, next_sy}, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
+            if (csx >= vp_x && csx <= vp_x + vp_w && csy >= vp_y && csy <= vp_y + vp_h) {
+                add_line(m_cached_lines, {csx, csy}, {next_sx, next_sy}, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
+            }
         }
     }
 
@@ -561,71 +588,76 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     // ─────────────────────────────────────────────────────────────
     // Primary vs Secondary objective determination
     bool need_vault = mission.vault().exists && !mission.is_relic_retrieved();
+    bool extraction_active = (extraction.phase() == ExtractionPhase::BeaconDeployed || extraction.phase() == ExtractionPhase::PodLanded);
+    bool has_primary_waypoint = need_vault || extraction_active;
     glm::vec3 primary_target = need_vault ? glm::vec3(mission.vault().door_pos) : extraction.beacon_position();
-    std::string primary_name = need_vault ? "PRECURSOR VAULT" : "EXTRACTION BEACON";
-    glm::vec4 primary_col = need_vault ? cyan_accent : green_accent;
+    std::string primary_name = need_vault ? "PRECURSOR VAULT" : (extraction_active ? "EXTRACTION BEACON" : "EXPLORE & MINE");
+    glm::vec4 primary_col = need_vault ? cyan_accent : (extraction_active ? green_accent : amber_accent);
 
     // Player screen position on map canvas
     float psx = map_center.x + (player_pos.x - center_wx) * m_zoom;
     float psy = map_center.y + (player_pos.z - center_wz) * m_zoom;
 
-    // Dynamic Waypoint Navigation Route Line (from player to active objective)
-    float tsx = map_center.x + (primary_target.x - center_wx) * m_zoom;
-    float tsy = map_center.y + (primary_target.z - center_wz) * m_zoom;
-    glm::vec2 route_vec(tsx - psx, tsy - psy);
-    float route_len = glm::length(route_vec);
-    if (route_len > 12.0f) {
-        glm::vec2 route_dir = route_vec / route_len;
-        float dash_len = 10.0f;
-        float gap_len = 7.0f;
-        float step = dash_len + gap_len;
-        float phase = std::fmod(total_time * 28.0f, step);
+    // Dynamic Waypoint Navigation Route Line (ONLY when an active objective waypoint exists)
+    if (has_primary_waypoint) {
+        float tsx = map_center.x + (primary_target.x - center_wx) * m_zoom;
+        float tsy = map_center.y + (primary_target.z - center_wz) * m_zoom;
+        glm::vec2 route_vec(tsx - psx, tsy - psy);
+        float route_len = glm::length(route_vec);
+        if (route_len > 12.0f) {
+            glm::vec2 route_dir = route_vec / route_len;
+            float dash_len = 10.0f;
+            float gap_len = 7.0f;
+            float step = dash_len + gap_len;
+            float phase = std::fmod(total_time * 28.0f, step);
 
-        for (float d = phase; d < route_len - 14.0f; d += step) {
-            float s1 = std::max(0.0f, d);
-            float s2 = std::min(route_len, d + dash_len);
-            if (s2 > s1) {
-                add_line(m_cached_lines, {psx + route_dir.x * s1, psy + route_dir.y * s1},
-                                         {psx + route_dir.x * s2, psy + route_dir.y * s2},
-                                         primary_col);
+            for (float d = phase; d < route_len - 14.0f; d += step) {
+                float s1 = std::max(0.0f, d);
+                float s2 = std::min(route_len, d + dash_len);
+                if (s2 > s1) {
+                    add_line(m_cached_lines, {psx + route_dir.x * s1, psy + route_dir.y * s1},
+                                             {psx + route_dir.x * s2, psy + route_dir.y * s2},
+                                             primary_col);
+                }
             }
         }
     }
 
-    // ── Extraction Beacon Marker ──
-    glm::vec3 bpos = extraction.beacon_position();
-    float bsx = map_center.x + (bpos.x - center_wx) * m_zoom;
-    float bsy = map_center.y + (bpos.z - center_wz) * m_zoom;
-    float b_dist = glm::distance(glm::vec2(player_pos.x, player_pos.z), glm::vec2(bpos.x, bpos.z));
-    std::string b_bearing = get_bearing_str(player_pos, bpos);
+    // ── Extraction Beacon Marker (ONLY displayed when extraction has actually been started!) ──
+    if (extraction_active) {
+        glm::vec3 bpos = extraction.beacon_position();
+        float bsx = map_center.x + (bpos.x - center_wx) * m_zoom;
+        float bsy = map_center.y + (bpos.z - center_wz) * m_zoom;
+        float b_dist = glm::distance(glm::vec2(player_pos.x, player_pos.z), glm::vec2(bpos.x, bpos.z));
 
-    bool b_in_view = (bsx >= vp_x + 18.0f && bsx <= vp_x + vp_w - 18.0f &&
-                      bsy >= vp_y + 18.0f && bsy <= vp_y + vp_h - 18.0f);
+        bool b_in_view = (bsx >= vp_x + 18.0f && bsx <= vp_x + vp_w - 18.0f &&
+                          bsy >= vp_y + 18.0f && bsy <= vp_y + vp_h - 18.0f);
 
-    float b_pulse = std::fmod(total_time * 2.5f, 1.0f);
-    float radar_r = 6.0f + b_pulse * 24.0f;
+        float b_pulse = std::fmod(total_time * 2.5f, 1.0f);
+        float radar_r = 6.0f + b_pulse * 24.0f;
 
-    if (b_in_view) {
-        // Expanding radar beacon wave
-        add_circle_outline(m_cached_lines, {bsx, bsy}, radar_r, 16, glm::vec4(0.18f, 0.95f, 0.44f, 1.0f - b_pulse));
-        // Solid beacon diamond + inner core
-        add_diamond(m_cached_tris, {bsx, bsy}, 8.0f, green_accent);
-        add_diamond(m_cached_tris, {bsx, bsy}, 4.0f, glm::vec4(1.0f));
+        if (b_in_view) {
+            // Expanding radar beacon wave
+            add_circle_outline(m_cached_lines, {bsx, bsy}, radar_r, 16, glm::vec4(0.18f, 0.95f, 0.44f, 1.0f - b_pulse));
+            // Solid beacon diamond + inner core
+            add_diamond(m_cached_tris, {bsx, bsy}, 8.0f, green_accent);
+            add_diamond(m_cached_tris, {bsx, bsy}, 4.0f, glm::vec4(1.0f));
 
-        // In-map text badge
-        std::string badge = "EXTRACTION [" + std::to_string(static_cast<int>(std::round(b_dist))) + "m]";
-        float badge_w = FontRenderer::get_rendered_width(badge, 0.75f);
-        add_quad(m_cached_tris, bsx - badge_w * 0.5f - 4.0f, bsy - 22.0f, badge_w + 8.0f, 14.0f, glm::vec4(0.06f, 0.12f, 0.08f, 0.90f));
-        add_rect_outline(m_cached_lines, bsx - badge_w * 0.5f - 4.0f, bsy - 22.0f, badge_w + 8.0f, 14.0f, green_accent);
-        m_cached_texts.push_back({badge, bsx - badge_w * 0.5f, bsy - 21.0f, 0.75f, green_accent});
-    } else {
-        // Off-screen edge guidance arrow
-        float edge_pad = 22.0f;
-        float ex = glm::clamp(bsx, vp_x + edge_pad, vp_x + vp_w - edge_pad);
-        float ey = glm::clamp(bsy, vp_y + edge_pad, vp_y + vp_h - edge_pad);
-        add_diamond(m_cached_tris, {ex, ey}, 6.0f, green_accent);
-        std::string edge_txt = ">> EXTRACT " + std::to_string(static_cast<int>(std::round(b_dist))) + "m";
-        m_cached_texts.push_back({edge_txt, ex - 35.0f, ey - 18.0f, 0.72f, green_accent});
+            // In-map text badge
+            std::string badge = "EXTRACTION [" + std::to_string(static_cast<int>(std::round(b_dist))) + "m]";
+            float badge_w = FontRenderer::get_rendered_width(badge, 0.75f);
+            add_quad(m_cached_tris, bsx - badge_w * 0.5f - 4.0f, bsy - 22.0f, badge_w + 8.0f, 14.0f, glm::vec4(0.06f, 0.12f, 0.08f, 0.95f));
+            add_rect_outline(m_cached_lines, bsx - badge_w * 0.5f - 4.0f, bsy - 22.0f, badge_w + 8.0f, 14.0f, green_accent);
+            m_cached_texts.push_back({badge, bsx - badge_w * 0.5f, bsy - 21.0f, 0.75f, green_accent});
+        } else {
+            // Off-screen edge guidance arrow
+            float edge_pad = 22.0f;
+            float ex = glm::clamp(bsx, vp_x + edge_pad, vp_x + vp_w - edge_pad);
+            float ey = glm::clamp(bsy, vp_y + edge_pad, vp_y + vp_h - edge_pad);
+            add_diamond(m_cached_tris, {ex, ey}, 6.0f, green_accent);
+            std::string edge_txt = ">> EXTRACT " + std::to_string(static_cast<int>(std::round(b_dist))) + "m";
+            m_cached_texts.push_back({edge_txt, ex - 35.0f, ey - 18.0f, 0.72f, green_accent});
+        }
     }
 
     // ── Precursor Vault Marker ──
@@ -708,48 +740,63 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
 
     // Card 1: Active Waypoint / Primary Directive
     float card1_h = 76.0f;
-    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card1_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.90f));
+    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card1_h, glm::vec4(0.045f, 0.060f, 0.085f, 1.0f));
     add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card1_h, primary_col);
 
-    m_cached_texts.push_back({">> PRIMARY WAYPOINT <<", sb_col_x + 10.0f, cur_y + 8.0f, 0.78f, primary_col});
-    m_cached_texts.push_back({primary_name, sb_col_x + 10.0f, cur_y + 24.0f, 1.05f, Typography::COLOR_PRIMARY});
+    if (has_primary_waypoint) {
+        m_cached_texts.push_back({">> PRIMARY WAYPOINT <<", sb_col_x + 10.0f, cur_y + 8.0f, 0.78f, primary_col});
+        m_cached_texts.push_back({primary_name, sb_col_x + 10.0f, cur_y + 24.0f, 1.05f, Typography::COLOR_PRIMARY});
 
-    std::stringstream p_dist_ss;
-    float p_dist = glm::distance(glm::vec2(player_pos.x, player_pos.z), glm::vec2(primary_target.x, primary_target.z));
-    p_dist_ss << "Distance: " << std::fixed << std::setprecision(1) << p_dist << "m  [" << get_bearing_str(player_pos, primary_target) << "]";
-    m_cached_texts.push_back({p_dist_ss.str(), sb_col_x + 10.0f, cur_y + 44.0f, 0.85f, amber_accent});
-    m_cached_texts.push_back({"Route Guidance: ACTIVE (Dotted Vector)", sb_col_x + 10.0f, cur_y + 58.0f, 0.72f, muted_slate});
+        std::stringstream p_dist_ss;
+        float p_dist = glm::distance(glm::vec2(player_pos.x, player_pos.z), glm::vec2(primary_target.x, primary_target.z));
+        p_dist_ss << "Distance: " << std::fixed << std::setprecision(1) << p_dist << "m  [" << get_bearing_str(player_pos, primary_target) << "]";
+        m_cached_texts.push_back({p_dist_ss.str(), sb_col_x + 10.0f, cur_y + 44.0f, 0.85f, amber_accent});
+        m_cached_texts.push_back({"Route Guidance: ACTIVE (Dotted Vector)", sb_col_x + 10.0f, cur_y + 58.0f, 0.72f, muted_slate});
+    } else {
+        m_cached_texts.push_back({">> MISSION DIRECTIVE <<", sb_col_x + 10.0f, cur_y + 8.0f, 0.78f, cyan_accent});
+        m_cached_texts.push_back({"SURVEY & MINE CAVERN", sb_col_x + 10.0f, cur_y + 24.0f, 1.05f, Typography::COLOR_PRIMARY});
+        m_cached_texts.push_back({"Mine Voidite & deploy evac beacon when ready", sb_col_x + 10.0f, cur_y + 44.0f, 0.75f, amber_accent});
+        m_cached_texts.push_back({"Route Guidance: STANDBY (Free Roam)", sb_col_x + 10.0f, cur_y + 58.0f, 0.72f, muted_slate});
+    }
     cur_y += card1_h + 12.0f;
 
     // Card 2: Evacuation Status
     float card2_h = 80.0f;
-    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card2_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.90f));
-    add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card2_h, green_accent);
+    glm::vec4 card2_outline = extraction_active ? green_accent : glm::vec4(0.30f, 0.38f, 0.46f, 0.70f);
+    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card2_h, glm::vec4(0.045f, 0.060f, 0.085f, 1.0f));
+    add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card2_h, card2_outline);
 
-    m_cached_texts.push_back({"EXTRACTION BEACON", sb_col_x + 10.0f, cur_y + 8.0f, 0.92f, green_accent});
+    if (extraction_active) {
+        m_cached_texts.push_back({"EXTRACTION BEACON", sb_col_x + 10.0f, cur_y + 8.0f, 0.92f, green_accent});
 
-    std::string evac_status;
-    if (extraction.phase() == ExtractionPhase::PodLanded) {
-        evac_status = "POD GROUNDED // BOARD TO ESCAPE";
-    } else if (extraction.phase() == ExtractionPhase::BeaconDeployed) {
-        evac_status = "TOUCHDOWN COUNTDOWN: " + std::to_string(static_cast<int>(std::round(extraction.countdown()))) + "s";
+        std::string evac_status;
+        if (extraction.phase() == ExtractionPhase::PodLanded) {
+            evac_status = "POD GROUNDED // BOARD TO ESCAPE";
+        } else {
+            evac_status = "TOUCHDOWN COUNTDOWN: " + std::to_string(static_cast<int>(std::round(extraction.countdown()))) + "s";
+        }
+        m_cached_texts.push_back({evac_status, sb_col_x + 10.0f, cur_y + 26.0f, 0.82f, Typography::COLOR_PRIMARY});
+
+        glm::vec3 bpos = extraction.beacon_position();
+        float b_dist = glm::distance(glm::vec2(player_pos.x, player_pos.z), glm::vec2(bpos.x, bpos.z));
+        std::stringstream b_dist_ss;
+        b_dist_ss << "Beacon Dist: " << std::fixed << std::setprecision(1) << b_dist << "m  [" << get_bearing_str(player_pos, bpos) << "]";
+        m_cached_texts.push_back({b_dist_ss.str(), sb_col_x + 10.0f, cur_y + 44.0f, 0.82f, muted_slate});
+
+        std::string zone_txt = extraction.is_player_in_perimeter(player_pos) ? "Delver Status: INSIDE LZ PERIMETER" : "Delver Status: OUTSIDE LZ PERIMETER";
+        m_cached_texts.push_back({zone_txt, sb_col_x + 10.0f, cur_y + 60.0f, 0.75f, extraction.is_player_in_perimeter(player_pos) ? green_accent : amber_accent});
     } else {
-        evac_status = "BEACON READY AT LANDING BAY";
+        m_cached_texts.push_back({"EVACUATION STATUS", sb_col_x + 10.0f, cur_y + 8.0f, 0.92f, muted_slate});
+        m_cached_texts.push_back({"STATUS: STANDBY (NOT DEPLOYED)", sb_col_x + 10.0f, cur_y + 26.0f, 0.82f, Typography::COLOR_PRIMARY});
+        m_cached_texts.push_back({"Deploy extraction beacon [B] to begin evac", sb_col_x + 10.0f, cur_y + 44.0f, 0.75f, muted_slate});
+        m_cached_texts.push_back({"LZ Perimeter: AWAITING DEPLOYMENT", sb_col_x + 10.0f, cur_y + 60.0f, 0.75f, amber_accent});
     }
-    m_cached_texts.push_back({evac_status, sb_col_x + 10.0f, cur_y + 26.0f, 0.82f, Typography::COLOR_PRIMARY});
-
-    std::stringstream b_dist_ss;
-    b_dist_ss << "Beacon Dist: " << std::fixed << std::setprecision(1) << b_dist << "m  [" << b_bearing << "]";
-    m_cached_texts.push_back({b_dist_ss.str(), sb_col_x + 10.0f, cur_y + 44.0f, 0.82f, muted_slate});
-
-    std::string zone_txt = extraction.is_player_in_perimeter(player_pos) ? "Delver Status: INSIDE LZ PERIMETER" : "Delver Status: OUTSIDE LZ PERIMETER";
-    m_cached_texts.push_back({zone_txt, sb_col_x + 10.0f, cur_y + 60.0f, 0.75f, extraction.is_player_in_perimeter(player_pos) ? green_accent : amber_accent});
     cur_y += card2_h + 12.0f;
 
     // Card 3: Precursor Vault Objective
     if (mission.vault().exists) {
         float card3_h = 68.0f;
-        add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card3_h, glm::vec4(0.06f, 0.08f, 0.12f, 0.90f));
+        add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card3_h, glm::vec4(0.045f, 0.060f, 0.085f, 1.0f));
         add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card3_h, cyan_accent);
 
         m_cached_texts.push_back({"PRECURSOR RELIC VAULT", sb_col_x + 10.0f, cur_y + 8.0f, 0.92f, cyan_accent});
@@ -773,7 +820,7 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
 
     // Card 4: Delver Positional Telemetry
     float card4_h = 74.0f;
-    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card4_h, glm::vec4(0.05f, 0.07f, 0.10f, 0.85f));
+    add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card4_h, glm::vec4(0.045f, 0.060f, 0.085f, 1.0f));
     add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card4_h, glm::vec4(0.35f, 0.45f, 0.55f, 0.60f));
 
     m_cached_texts.push_back({"DELVER AVIONICS TELEMETRY", sb_col_x + 10.0f, cur_y + 8.0f, 0.80f, amber_accent});
@@ -794,7 +841,7 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
     // Card 5: Map Legend & Controls
     float card5_h = panel_y + panel_h - cur_y - 12.0f;
     if (card5_h > 40.0f) {
-        add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card5_h, glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+        add_quad(m_cached_tris, sb_col_x, cur_y, sb_col_w, card5_h, glm::vec4(0.045f, 0.060f, 0.085f, 1.0f));
         add_rect_outline(m_cached_lines, sb_col_x, cur_y, sb_col_w, card5_h, glm::vec4(0.25f, 0.35f, 0.45f, 0.50f));
 
         m_cached_texts.push_back({"MAP LEGEND & CONTROLS", sb_col_x + 10.0f, cur_y + 8.0f, 0.78f, cyan_accent});
@@ -812,7 +859,7 @@ void TerrainScanner::refresh_geometry(const World& world, const glm::vec3& playe
         add_diamond(m_cached_tris, {sb_col_x + 15.0f, cur_y + 72.0f}, 5.0f, green_accent);
         m_cached_texts.push_back({"Extraction Beacon / Pod", sb_col_x + 26.0f, cur_y + 68.0f, 0.72f, green_accent});
 
-        m_cached_texts.push_back({"[TAB] Close Map  |  [DRAG] Pan Cavern", sb_col_x + 10.0f, cur_y + card5_h - 16.0f, 0.75f, amber_accent});
+        m_cached_texts.push_back({"[TAB] Close Map  |  [LMB DRAG] Pan Map  |  [SCROLL] Zoom", sb_col_x + 10.0f, cur_y + card5_h - 16.0f, 0.75f, amber_accent});
     }
 }
 

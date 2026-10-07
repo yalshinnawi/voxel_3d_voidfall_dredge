@@ -47,8 +47,17 @@ RaycastHit PlayerController::get_look_target(const World& world, float max_dist)
 void PlayerController::handle_input(const Window& window, float dt) {
     m_current_buttons = 0;
 
-    // 1. Mouse Look (Paused while orbiting 3D holographic terrain scanner)
-    if (!m_combat_inputs_paused) {
+    // Paused while inspecting tactical map overlay or interacting with focused UI
+    if (m_combat_inputs_paused) {
+        if (m_on_ground) {
+            m_velocity.x = 0.0f;
+            m_velocity.z = 0.0f;
+        }
+        return;
+    }
+
+    // 1. Mouse Look
+    {
         glm::dvec2 mouse_delta = const_cast<Window&>(window).get_cursor_delta();
         float sens = m_mouse_sensitivity;
         if (m_zoom_progress > 0.0f && is_weapon_equipped()) {
@@ -121,6 +130,12 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (m_is_crouching) {
         move_speed *= 0.55f;
     }
+    if (m_is_in_lava) {
+        move_speed *= 0.40f; // Trudging through viscous molten slag
+    } else if (m_is_in_water) {
+        move_speed *= 0.70f; // Wading through water pool
+    }
+
     if (m_on_ground) {
         m_velocity.x = wish_dir.x * move_speed;
         m_velocity.z = wish_dir.z * move_speed;
@@ -136,11 +151,27 @@ void PlayerController::handle_input(const Window& window, float dt) {
     m_thruster_air_braking = false;
     if (window.is_key_down(GLFW_KEY_SPACE)) {
         if (m_on_ground) {
-            m_velocity.y = 8.5f;
+            m_velocity.y = m_is_in_lava ? 4.5f : (m_is_in_water ? 6.5f : 8.5f);
             m_on_ground = false;
             m_current_buttons |= BTN_JUMP;
             if (m_on_jump) {
                 m_on_jump(m_position);
+            }
+        } else if (m_is_in_liquid) {
+            // Swimming / struggling upward in fluid when holding SPACE
+            m_current_buttons |= BTN_JUMP;
+            if (m_is_in_lava) {
+                // Struggling upward against dense molten slag
+                m_velocity.y = std::min(2.0f, m_velocity.y + 14.0f * dt);
+            } else {
+                // Swimming upward in clear water/coolant
+                m_velocity.y = std::min(3.8f, m_velocity.y + 20.0f * dt);
+            }
+            if (!m_exo.overheated && m_exo.power > 3.0f) {
+                // Thruster boost assistance in liquid
+                m_velocity.y += 10.0f * dt;
+                m_exo.power = std::max(0.0f, m_exo.power - 15.0f * dt);
+                m_current_buttons |= BTN_THRUSTER;
             }
         } else if (!m_exo.overheated && m_exo.power > 3.0f) {
             // Thruster Air-Brake: Holding SPACE while falling at high downward velocity (vy < -12.0 m/s)
@@ -151,7 +182,6 @@ void PlayerController::handle_input(const Window& window, float dt) {
                 if (m_velocity.y > -5.0f) m_velocity.y = -5.0f;
                 m_exo.power = std::max(0.0f, m_exo.power - 25.0f * dt);
                 m_current_buttons |= BTN_THRUSTER;
-                add_trauma(0.02f * dt);
             } else {
                 // Jetpack vertical hover thrusters
                 m_velocity.y += 18.0f * dt;
@@ -199,8 +229,16 @@ void PlayerController::handle_input(const Window& window, float dt) {
         m_current_buttons |= BTN_GRAPPLE_FIRE;
     }
 
-    // Reel Grapple (E key strictly reels grapple cable when active)
-    if (window.is_key_down(GLFW_KEY_E)) {
+    // Interact & Reel Grapple (E key: interacts with world objects, reels cable when grapple active)
+    bool e_down = window.is_key_down(GLFW_KEY_E);
+    if (e_down && !m_e_pressed_last) {
+        if (m_on_interact) {
+            m_on_interact();
+        }
+    }
+    m_e_pressed_last = e_down;
+
+    if (e_down) {
         if (m_grapple.active) {
             m_current_buttons |= BTN_GRAPPLE_REEL;
             float effective_reel = m_grapple.reel_speed * m_reel_speed_multiplier * m_char_attr.grapplePullSpeed;
@@ -425,45 +463,118 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
-    // 2. Gravity
-    if (!m_on_ground) {
-        m_velocity.y -= 19.6f * dt;
+    // 2a. Liquid & Environmental Hazard Spatial Query (AABB vs World Voxels)
+    glm::vec3 box_min = m_position - half_extents();
+    glm::vec3 box_max = m_position + half_extents();
+
+    int min_bx = static_cast<int>(std::floor(box_min.x + 0.05f));
+    int max_bx = static_cast<int>(std::floor(box_max.x - 0.05f));
+    int min_by = static_cast<int>(std::floor(box_min.y));
+    int max_by = static_cast<int>(std::floor(box_max.y));
+    int min_bz = static_cast<int>(std::floor(box_min.z + 0.05f));
+    int max_bz = static_cast<int>(std::floor(box_max.z - 0.05f));
+
+    bool in_lava = false;
+    bool in_water = false;
+    float max_liquid_surface = box_min.y;
+
+    for (int y = min_by; y <= max_by; ++y) {
+        for (int x = min_bx; x <= max_bx; ++x) {
+            for (int z = min_bz; z <= max_bz; ++z) {
+                Voxel v = world.get_voxel(x, y, z);
+                if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
+                    in_lava = true;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y + 1));
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                    in_water = true;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y + 1));
+                }
+            }
+        }
+    }
+
+    // Also check immediate underfoot for wading contact
+    if (!in_lava && !in_water) {
+        int foot_y = static_cast<int>(std::floor(box_min.y - 0.05f));
+        for (int x = min_bx; x <= max_bx; ++x) {
+            for (int z = min_bz; z <= max_bz; ++z) {
+                Voxel v = world.get_voxel(x, foot_y, z);
+                if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
+                    in_lava = true;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y + 1));
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                    in_water = true;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y + 1));
+                }
+            }
+        }
+    }
+
+    m_is_in_lava = in_lava;
+    m_is_in_water = in_water;
+    m_is_in_liquid = in_lava || in_water;
+    if (m_is_in_liquid) {
+        float player_height = 2.0f * half_extents().y;
+        m_liquid_submersion = std::clamp((max_liquid_surface - box_min.y) / player_height, 0.0f, 1.0f);
+        m_current_liquid_material = in_lava ? MAT_THERMITE_SLAG : MAT_CRYSTAL_AQUIFER;
+    } else {
+        m_liquid_submersion = 0.0f;
+        m_current_liquid_material = MAT_AIR;
+    }
+
+    // 2b. Gravity & Fluid Dynamics
+    if (m_is_in_lava) {
+        // High density molten thermite / magma
+        // Plunge braking: rapidly decelerate high fall velocities towards slow terminal sinking speed (-1.5 m/s)
+        if (m_velocity.y < -1.5f) {
+            m_velocity.y = glm::mix(m_velocity.y, -1.5f, std::min(1.0f, 12.0f * dt));
+        } else if (!m_on_ground) {
+            // Gentle buoyant sinking gravity in thick molten rock
+            m_velocity.y -= 5.0f * dt;
+            if (m_velocity.y < -1.5f) {
+                m_velocity.y = -1.5f;
+            }
+        }
+        // Viscous fluid drag - dampens horizontal movement
+        m_velocity.x *= std::max(0.0f, 1.0f - 8.5f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 8.5f * dt);
+    } else if (m_is_in_water) {
+        // Subterranean crystal aquifer water / coolant
+        // Plunge braking towards buoyant terminal velocity (-3.0 m/s)
+        if (m_velocity.y < -3.0f) {
+            m_velocity.y = glm::mix(m_velocity.y, -3.0f, std::min(1.0f, 8.0f * dt));
+        } else if (!m_on_ground) {
+            m_velocity.y -= 7.5f * dt;
+            if (m_velocity.y < -3.0f) {
+                m_velocity.y = -3.0f;
+            }
+        }
+        // Water fluid drag
+        m_velocity.x *= std::max(0.0f, 1.0f - 2.8f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 2.8f * dt);
+    } else {
+        // Standard in-air gravity
+        if (!m_on_ground) {
+            m_velocity.y -= 19.6f * dt;
+        }
     }
 
     // 3. Subterranean Voxel Collision Resolution (AABB vs Voxel Grid)
     resolve_voxel_collisions(world, m_position, m_velocity, dt);
 
     // 3b. Environmental Hazard Interaction (Lava, Spikes, Void Chasm)
-    m_is_in_lava = false;
     m_is_in_spikes = false;
     if (m_spike_damage_timer > 0.0f) {
         m_spike_damage_timer -= dt;
     }
 
-    int ground_x = static_cast<int>(std::floor(m_position.x));
-    int ground_y = static_cast<int>(std::floor(m_position.y - 0.96f));
-    int ground_z = static_cast<int>(std::floor(m_position.z));
-    int body_y   = static_cast<int>(std::floor(m_position.y - 0.40f));
-    Voxel underfoot = world.get_voxel(ground_x, ground_y, ground_z);
-    Voxel lower_body = world.get_voxel(ground_x, body_y, ground_z);
-
-    if (underfoot.material_id == MAT_THERMITE_SLAG || lower_body.material_id == MAT_THERMITE_SLAG ||
-        underfoot.material_id == MAT_MOLTEN_MAGMA || lower_body.material_id == MAT_MOLTEN_MAGMA) {
-        m_is_in_lava = true;
-        // Viscous fluid drag - severely hampers horizontal movement
-        m_velocity.x *= std::max(0.0f, 1.0f - 8.5f * dt);
-        m_velocity.z *= std::max(0.0f, 1.0f - 8.5f * dt);
-        if (m_velocity.y < -3.0f) {
-            m_velocity.y = -3.0f; // Buoyant terminal velocity in slag
-        }
-
+    if (m_is_in_lava) {
         float lava_dmg = 28.0f * dt;
         take_damage(lava_dmg, DamageSource::ThermalLava);
         m_exo.heat = std::min(100.0f, m_exo.heat + 50.0f * dt);
         if (m_exo.heat >= 100.0f) {
             m_exo.overheated = true;
         }
-        add_trauma(0.08f * dt);
         static float s_lava_warn = 0.0f;
         s_lava_warn += dt;
         if (s_lava_warn >= 0.8f) {
@@ -478,20 +589,21 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
-    if (underfoot.material_id == MAT_CRYSTAL_AQUIFER || lower_body.material_id == MAT_CRYSTAL_AQUIFER) {
+    if (m_is_in_water) {
         // Water immersion: rapid exo cooling and buoyant fluid drag
-        m_velocity.x *= std::max(0.0f, 1.0f - 2.5f * dt);
-        m_velocity.z *= std::max(0.0f, 1.0f - 2.5f * dt);
-        if (m_velocity.y < -4.5f) {
-            m_velocity.y = -4.5f; // Water buoyancy terminal velocity
-        }
         m_exo.heat = std::max(0.0f, m_exo.heat - 75.0f * dt);
         m_exo.overheated = false;
     }
 
+    int center_x = static_cast<int>(std::floor(m_position.x));
+    int under_y  = static_cast<int>(std::floor(box_min.y - 0.05f));
+    int center_z = static_cast<int>(std::floor(m_position.z));
+    int torso_y  = static_cast<int>(std::floor(m_position.y));
+    Voxel underfoot = world.get_voxel(center_x, under_y, center_z);
+    Voxel lower_body = world.get_voxel(center_x, torso_y, center_z);
+
     if (underfoot.material_id == MAT_TOXIC_GAS || lower_body.material_id == MAT_TOXIC_GAS) {
         take_damage(22.0f * dt, DamageSource::ToxicGas);
-        add_trauma(0.06f * dt);
     }
 
     bool is_spikes_underfoot = (underfoot.material_id == MAT_OBSIDIAN_SPIKES || lower_body.material_id == MAT_OBSIDIAN_SPIKES);
@@ -531,6 +643,14 @@ void PlayerController::update_physics(float dt, World& world) {
                 m_on_warning("VITAL SIGNS LOST: DELVER CONSUMED BY VOID SINGULARITY");
             }
         }
+    }
+
+    // 3c. Suit Nanite Field Stabilizer (Out-of-combat triage recuperation up to 75% max health)
+    m_time_since_damage += dt;
+    if (m_time_since_damage >= 12.0f && m_health > 0.0f && m_health < m_max_health * 0.75f) {
+        float heal_amount = 2.5f * dt;
+        m_health = std::min(m_max_health * 0.75f, m_health + heal_amount);
+        m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
     }
 
     // 4. Mining / Drilling Handling (Progressive cumulative damage with 1.0s decay)
@@ -792,12 +912,11 @@ bool PlayerController::is_penetrating_solid(const World& world) const {
 }
 
 void PlayerController::apply_fall_impact(float impact_speed) {
+    if (m_is_in_liquid) {
+        impact_speed *= 0.25f; // Viscous liquid cushions kinetic fall impact
+    }
     if (impact_speed > 2.5f && m_on_land) {
         m_on_land(m_position, impact_speed);
-    }
-    if (impact_speed > 6.0f) {
-        // Medium landing thud camera trauma even without health damage
-        add_trauma(std::clamp((impact_speed - 5.0f) * 0.035f, 0.10f, 0.40f));
     }
     if (impact_speed > 13.0f) {
         float vex = impact_speed - 13.0f;
@@ -877,6 +996,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
     int min_bx = static_cast<int>(std::floor(box_min.x + 0.002f));
     int max_bx = static_cast<int>(std::floor(box_max.x - 0.002f));
     int min_by = static_cast<int>(std::floor(box_min.y + 0.002f));
+    int min_wall_y = static_cast<int>(std::floor(box_min.y + 0.15f));
     int max_by = static_cast<int>(std::floor(box_max.y - 0.002f));
     int min_bz = static_cast<int>(std::floor(box_min.z + 0.002f));
     int max_bz = static_cast<int>(std::floor(box_max.z - 0.002f));
@@ -937,7 +1057,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool has_edge = false;
             for (int z = min_bz; z <= max_bz; ++z) {
                 if (world.is_solid(glm::ivec3(check_x, max_by, z)) ||
-                    world.is_solid(glm::ivec3(check_x, min_by + 1, z))) {
+                    world.is_solid(glm::ivec3(check_x, min_wall_y + 1, z))) {
                     has_edge = true;
                     break;
                 }
@@ -949,11 +1069,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     return false;
                 }
             }
-            // Pull player vertically over the ledge (+1.8m) with camera vault motion
+            // Pull player vertically over the ledge (+1.8m) with smooth vault motion
             m_position.y += 1.8f;
             m_velocity.y = std::max(2.5f, m_velocity.y);
             m_vault_timer = 0.35f;
-            add_trauma(0.08f);
             m_on_ground = true;
             m_isGrounded = true;
             return true;
@@ -963,11 +1082,11 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             int check_x = static_cast<int>(std::floor(box_max.x));
             bool has_collision = false;
             bool only_step = true;
-            for (int y = min_by; y <= max_by; ++y) {
+            for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
                     if (world.is_solid(glm::ivec3(check_x, y, z))) {
                         has_collision = true;
-                        if (y > min_by) {
+                        if (y > min_wall_y) {
                             only_step = false;
                         }
                     }
@@ -977,8 +1096,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 bool can_step = m_on_ground && only_step;
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
-                        if (world.is_solid(glm::ivec3(check_x, min_by + 1, z)) ||
-                            world.is_solid(glm::ivec3(check_x, min_by + 2, z))) {
+                        if (world.is_solid(glm::ivec3(check_x, min_wall_y + 1, z)) ||
+                            world.is_solid(glm::ivec3(check_x, min_wall_y + 2, z))) {
                             can_step = false;
                             break;
                         }
@@ -1011,11 +1130,11 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             int check_x = static_cast<int>(std::floor(box_min.x));
             bool has_collision = false;
             bool only_step = true;
-            for (int y = min_by; y <= max_by; ++y) {
+            for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
                     if (world.is_solid(glm::ivec3(check_x, y, z))) {
                         has_collision = true;
-                        if (y > min_by) {
+                        if (y > min_wall_y) {
                             only_step = false;
                         }
                     }
@@ -1025,8 +1144,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 bool can_step = m_on_ground && only_step;
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
-                        if (world.is_solid(glm::ivec3(check_x, min_by + 1, z)) ||
-                            world.is_solid(glm::ivec3(check_x, min_by + 2, z))) {
+                        if (world.is_solid(glm::ivec3(check_x, min_wall_y + 1, z)) ||
+                            world.is_solid(glm::ivec3(check_x, min_wall_y + 2, z))) {
                             can_step = false;
                             break;
                         }
@@ -1062,7 +1181,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool has_edge = false;
             for (int x = min_bx; x <= max_bx; ++x) {
                 if (world.is_solid(glm::ivec3(x, max_by, check_z)) ||
-                    world.is_solid(glm::ivec3(x, min_by + 1, check_z))) {
+                    world.is_solid(glm::ivec3(x, min_wall_y + 1, check_z))) {
                     has_edge = true;
                     break;
                 }
@@ -1074,11 +1193,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     return false;
                 }
             }
-            // Pull player vertically over the ledge (+1.8m) with camera vault motion
+            // Pull player vertically over the ledge (+1.8m) with smooth vault motion
             m_position.y += 1.8f;
             m_velocity.y = std::max(2.5f, m_velocity.y);
             m_vault_timer = 0.35f;
-            add_trauma(0.08f);
             m_on_ground = true;
             m_isGrounded = true;
             return true;
@@ -1088,11 +1206,11 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             int check_z = static_cast<int>(std::floor(box_max.z));
             bool has_collision = false;
             bool only_step = true;
-            for (int y = min_by; y <= max_by; ++y) {
+            for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
                     if (world.is_solid(glm::ivec3(x, y, check_z))) {
                         has_collision = true;
-                        if (y > min_by) {
+                        if (y > min_wall_y) {
                             only_step = false;
                         }
                     }
@@ -1102,8 +1220,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 bool can_step = m_on_ground && only_step;
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
-                        if (world.is_solid(glm::ivec3(x, min_by + 1, check_z)) ||
-                            world.is_solid(glm::ivec3(x, min_by + 2, check_z))) {
+                        if (world.is_solid(glm::ivec3(x, min_wall_y + 1, check_z)) ||
+                            world.is_solid(glm::ivec3(x, min_wall_y + 2, check_z))) {
                             can_step = false;
                             break;
                         }
@@ -1136,11 +1254,11 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             int check_z = static_cast<int>(std::floor(box_min.z));
             bool has_collision = false;
             bool only_step = true;
-            for (int y = min_by; y <= max_by; ++y) {
+            for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
                     if (world.is_solid(glm::ivec3(x, y, check_z))) {
                         has_collision = true;
-                        if (y > min_by) {
+                        if (y > min_wall_y) {
                             only_step = false;
                         }
                     }
@@ -1150,8 +1268,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 bool can_step = m_on_ground && only_step;
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
-                        if (world.is_solid(glm::ivec3(x, min_by + 1, check_z)) ||
-                            world.is_solid(glm::ivec3(x, min_by + 2, check_z))) {
+                        if (world.is_solid(glm::ivec3(x, min_wall_y + 1, check_z)) ||
+                            world.is_solid(glm::ivec3(x, min_wall_y + 2, check_z))) {
                             can_step = false;
                             break;
                         }
@@ -1290,9 +1408,6 @@ void PlayerController::MineBlock(float dt, World& world) {
             m_mine_timer = m_drillDamageAccumulator;
             m_target_time_to_break = m_block_hardness;
 
-            // Micro-trauma camera vibration while drill bit bites into rock
-            add_trauma(0.015f * dt);
-
             float progress = m_block_hardness > 0.0f ? (m_drillDamageAccumulator / m_block_hardness) : 1.0f;
             if (progress >= 1.0f) {
                 Voxel target_vox = world.get_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
@@ -1304,7 +1419,6 @@ void PlayerController::MineBlock(float dt, World& world) {
                 if (m_on_block_break) {
                     m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
                 }
-                add_trauma(0.035f); // Punchy release impulse upon block shatter
                 m_drillDamageAccumulator = 0.0f;
                 m_target_block_damage = 0.0f;
                 m_mine_timer = 0.0f;
@@ -1383,6 +1497,7 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
     m_health = std::max(0.0f, m_health - dmg);
     m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
     m_last_damage_source = source;
+    m_time_since_damage = 0.0f;
 
     // Apply trauma screen shake based on specific damage scenario:
     // - Radiation causes invisible cellular breakdown -> ZERO screen shaking! (Telegraphed by Geiger counter & groaning)

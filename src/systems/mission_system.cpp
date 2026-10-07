@@ -108,19 +108,27 @@ void MissionSystem::update(float /*dt*/, World& world, const glm::vec3& player_p
         }
     }
 
-    // Check relic retrieval
-    if (m_vault.state == VaultObjectiveState::Breached) {
-        float dist_to_relic = glm::distance(glm::vec3(m_vault.relic_pos) + glm::vec3(0.5f), player_pos);
-        if (dist_to_relic < 2.5f) {
-            // Pick up relic
-            world.set_voxel(m_vault.relic_pos.x, m_vault.relic_pos.y, m_vault.relic_pos.z, Voxel{MAT_AIR, 0}, true);
-            m_vault.state = VaultObjectiveState::RelicRetrieved;
-            if (m_on_notification) {
-                m_on_notification("PRECURSOR RELIC SECURED (+350 EXP, +5 TITANIUM CORES)", 5.0f);
-            }
-            VF_LOG_INFO("MissionSystem", "Precursor Relic secured by player!");
-        }
+    // Note: Relic is now interactively picked up via interact_relic() [E],
+    // rather than auto-retrieved on proximity walk-over.
+}
+
+bool MissionSystem::can_interact_relic(const glm::vec3& player_pos, float max_dist) const {
+    if (!m_vault.exists || m_vault.state != VaultObjectiveState::Breached) return false;
+    float dist_to_relic = glm::distance(glm::vec3(m_vault.relic_pos) + glm::vec3(0.5f), player_pos);
+    return dist_to_relic <= max_dist;
+}
+
+bool MissionSystem::interact_relic(World& world, const glm::vec3& player_pos, float max_dist) {
+    if (!can_interact_relic(player_pos, max_dist)) return false;
+
+    // Pick up relic from pedestal
+    world.set_voxel(m_vault.relic_pos.x, m_vault.relic_pos.y, m_vault.relic_pos.z, Voxel{MAT_AIR, 0}, true);
+    m_vault.state = VaultObjectiveState::RelicRetrieved;
+    if (m_on_notification) {
+        m_on_notification("PRECURSOR RELIC SECURED (+350 EXP, +5 TITANIUM CORES)", 5.0f);
     }
+    VF_LOG_INFO("MissionSystem", "Precursor Relic secured via [E] player interaction!");
+    return true;
 }
 
 int MissionSystem::ignite_gas_pocket(World& world, const glm::vec3& blast_pos, float blast_radius, VoidStalkerManager& stalkers) {
@@ -163,7 +171,8 @@ int MissionSystem::ignite_gas_pocket(World& world, const glm::vec3& blast_pos, f
                 s.hp = 0.0f;
                 s.state = StalkerState::Dying;
                 s.just_died = true;
-                s.hit_flash_timer = 0.15f;
+                s.death_timer = 0.0f;
+                s.hit_flash_timer = 0.0f;
                 s.velocity += glm::normalize(s.position - gas_centroid + glm::vec3(0.0f, 0.5f, 0.0f)) * 8.0f;
             }
         }

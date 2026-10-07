@@ -20,7 +20,8 @@ StalkerSurfaceState AberrantAI::classify_normal(const glm::vec3& normal, const g
 SurfaceContactSample AberrantAI::sample_surface_normal(
     const glm::vec3& position,
     const World& world,
-    float probe_distance)
+    float probe_distance,
+    StalkerSurfaceState current_state)
 {
     SurfaceContactSample result;
     result.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -40,6 +41,8 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
 
     float min_dist = probe_distance + 1.0f;
     glm::vec3 best_normal(0.0f, 1.0f, 0.0f);
+    bool has_down = false;
+    float down_dist = probe_distance + 1.0f;
 
     for (int i = 0; i < 6; ++i) {
         const glm::vec3& dir = directions[i];
@@ -53,6 +56,12 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
             int ix = static_cast<int>(std::floor(p.x));
             int iy = static_cast<int>(std::floor(p.y));
             int iz = static_cast<int>(std::floor(p.z));
+
+            // Upward probe (ceiling) must be strictly above the entity's current voxel level
+            int cur_y = static_cast<int>(std::floor(position.y));
+            if (dir.y > 0.5f && iy <= cur_y) {
+                continue;
+            }
 
             Voxel vox = world.get_voxel(ix, iy, iz);
             if (vox.material_id != MAT_AIR && vox.material_id != MAT_GAS && vox.material_id != MAT_VOLATILE_SMOKE) {
@@ -76,6 +85,11 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
                 }
                 d = std::max(0.0f, d);
 
+                if (i == 0) { // Down
+                    has_down = true;
+                    down_dist = d;
+                }
+
                 if (d < min_dist) {
                     min_dist = d;
                     best_normal = face_normal;
@@ -84,6 +98,20 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
                 break;
             }
         }
+    }
+
+    // Surface hysteresis selection:
+    // If currently on FLOOR (or transitioning from floor) and floor contact is valid within reachable ground distance (<= 1.25m),
+    // prioritize FLOOR over adjacent side walls to prevent rapid 60Hz surface flipping/jitter.
+    if ((current_state == StalkerSurfaceState::FLOOR || current_state == StalkerSurfaceState::TRANSITIONING) && has_down && down_dist <= 1.25f) {
+        best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        min_dist = down_dist;
+        result.has_contact = true;
+    } else if (current_state == StalkerSurfaceState::WALL_CLIMBING && has_down && down_dist <= 0.55f) {
+        // Smoothly step down onto floor when reaching ground level
+        best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        min_dist = down_dist;
+        result.has_contact = true;
     }
 
     if (result.has_contact) {
@@ -109,6 +137,19 @@ glm::quat AberrantAI::calculate_orientation(
         : glm::vec3(0.0f, 1.0f, 0.0f);
 
     glm::vec3 fwd_candidate = velocity;
+
+    // Anti-jitter: If fallback_forward is valid and velocity is moving backward (e.g. knockback/recoil from weapon fire),
+    // keep facing the forward direction instead of flipping 180 degrees.
+    if (glm::length(fallback_forward) > 0.01f) {
+        glm::vec3 fwd_ref = fallback_forward - glm::dot(fallback_forward, n) * n;
+        if (glm::length(fwd_ref) > 0.01f) {
+            glm::vec3 v_tangent = fwd_candidate - glm::dot(fwd_candidate, n) * n;
+            if (glm::length(v_tangent) < 0.01f || glm::dot(glm::normalize(v_tangent), glm::normalize(fwd_ref)) < -0.2f) {
+                fwd_candidate = fallback_forward;
+            }
+        }
+    }
+
     // Project velocity onto tangent plane: fwd = v - (v · n)n
     glm::vec3 fwd_proj = fwd_candidate - glm::dot(fwd_candidate, n) * n;
 

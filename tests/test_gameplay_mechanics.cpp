@@ -217,6 +217,7 @@ TEST(MonsterLifecycleTest, FatalDamageTriggersDeathStateBeforeRemoval) {
 
     // Assert stalker.GetState() == AIState::DYING and enemy capsule collision is disabled
     ASSERT_TRUE(stalker.GetState() == AIState::DYING);
+    ASSERT_EQ(stalker.hit_flash_timer, 0.0f);
     ASSERT_FALSE(stalker.has_collision());
     ASSERT_FALSE(stalker.IsCollisionEnabled());
     ASSERT_FALSE(stalker.has_attack_hitbox());
@@ -228,6 +229,7 @@ TEST(MonsterLifecycleTest, FatalDamageTriggersDeathStateBeforeRemoval) {
 
     ASSERT_EQ(manager.stalkers().size(), 1);
     ASSERT_TRUE(manager.stalkers()[0].GetState() == AIState::DYING);
+    ASSERT_EQ(manager.stalkers()[0].hit_flash_timer, 0.0f);
     ASSERT_FALSE(manager.stalkers()[0].is_dead());
     ASSERT_TRUE(manager.stalkers()[0].is_dying());
 
@@ -1398,7 +1400,7 @@ void WeaponZoomAndFireMechanicsTest() {
 
     PlayerController controller(glm::vec3(0.0f, 10.0f, 0.0f));
 
-    // 1. DEMOLITIONIST: Magma Scattergun (~1.28x zoom, 0.78 FOV multiplier)
+    // 1. DEMOLITIONIST: Magma Scattergun (~1.54x zoom, 0.65 FOV multiplier)
     controller.set_character_class(CharacterClass::Demolitionist);
     controller.set_active_tool(ToolSlot::CombatWeapon);
     ASSERT_TRUE(controller.is_weapon_equipped());
@@ -1410,10 +1412,10 @@ void WeaponZoomAndFireMechanicsTest() {
     // Hold right click to aim / zoom
     controller.set_aiming(true);
     ASSERT_TRUE(controller.is_aiming());
-    // Step forward past ads_time (0.20s)
+    // Step forward past ads_time (0.18s)
     controller.Update(0.25f);
     ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
-    float expected_scatter_fov = 75.0f * 0.78f;
+    float expected_scatter_fov = 75.0f * 0.65f;
     ASSERT_NEAR(controller.current_fov(75.0f), expected_scatter_fov, 0.1f);
 
     // Test weapon firing while zoomed in (Scattergun fires 5 buckshot pellets)
@@ -1431,7 +1433,7 @@ void WeaponZoomAndFireMechanicsTest() {
     ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
     ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
 
-    // 2. VANGUARD: Plasma Carbine (~1.54x zoom, 0.65 FOV multiplier)
+    // 2. VANGUARD: Plasma Carbine (~2.00x tactical holographic zoom, 0.50 FOV multiplier)
     controller.set_character_class(CharacterClass::Vanguard);
     controller.set_active_tool(ToolSlot::CombatWeapon);
     ASSERT_EQ(controller.weapon_archetype(), WeaponArchetype::PlasmaCarbine);
@@ -1439,7 +1441,7 @@ void WeaponZoomAndFireMechanicsTest() {
     ASSERT_TRUE(controller.is_aiming());
     controller.Update(0.22f);
     ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
-    float expected_carbine_fov = 75.0f * 0.65f;
+    float expected_carbine_fov = 75.0f * 0.50f;
     ASSERT_NEAR(controller.current_fov(75.0f), expected_carbine_fov, 0.1f);
 
     // Fire carbine while zoomed
@@ -1453,7 +1455,7 @@ void WeaponZoomAndFireMechanicsTest() {
     controller.Update(0.22f);
     ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
 
-    // 3. SCOUT: Needler Railgun (~2.50x sniper marksman scope, 0.40 FOV multiplier)
+    // 3. SCOUT: Needler Railgun (~4.00x sniper marksman scope, 0.25 FOV multiplier)
     controller.set_character_class(CharacterClass::Scout);
     controller.set_active_tool(ToolSlot::CombatWeapon);
     ASSERT_EQ(controller.weapon_archetype(), WeaponArchetype::NeedlerRailgun);
@@ -1461,7 +1463,7 @@ void WeaponZoomAndFireMechanicsTest() {
     ASSERT_TRUE(controller.is_aiming());
     controller.Update(0.25f);
     ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
-    float expected_railgun_fov = 75.0f * 0.40f; // 30 degrees
+    float expected_railgun_fov = 75.0f * 0.25f; // 18.75 degrees
     ASSERT_NEAR(controller.current_fov(75.0f), expected_railgun_fov, 0.1f);
 
     // Fire railgun while zoomed
@@ -1486,7 +1488,58 @@ void WeaponZoomAndFireMechanicsTest() {
     ASSERT_EQ(controller.zoom_progress(), 0.0f);
     ASSERT_NEAR(controller.current_fov(75.0f), 75.0f, 0.01f);
 
-    std::cout << "[ OK ] WeaponZoomAndFireMechanicsTest (all 3 weapon archetypes zoom and shoot seamlessly)" << std::endl;
+    // 5. OPTICAL SCOPE & LENS HUD RENDER INTEGRITY TEST
+    HUD hud(1600, 900, true);
+    World world;
+    HazardClock hazard;
+    ExtractionSystem extraction;
+    PlayerInventory inv;
+    SkillMatrix skills;
+
+    for (auto arch : {WeaponArchetype::MagmaScattergun, WeaponArchetype::PlasmaCarbine, WeaponArchetype::NeedlerRailgun}) {
+        CharacterClass cls = (arch == WeaponArchetype::MagmaScattergun) ? CharacterClass::Demolitionist :
+                             (arch == WeaponArchetype::NeedlerRailgun)  ? CharacterClass::Scout : CharacterClass::Vanguard;
+        controller.set_character_class(cls);
+        controller.set_active_tool(ToolSlot::CombatWeapon);
+
+        // A. Standing ADS zoom:
+        controller.set_crouching(false);
+        controller.set_aiming(true);
+        controller.Update(0.25f);
+        ASSERT_TRUE(controller.is_aiming());
+        ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+        hud.render(controller, world, hazard, extraction, inv, skills, 1, glm::mat4(1.0f), glm::mat4(1.0f));
+
+        // B. Crouching while already zoomed (stance transition while aiming):
+        controller.set_crouching(true);
+        controller.Update(0.25f);
+        ASSERT_TRUE(controller.is_crouching());
+        ASSERT_TRUE(controller.is_aiming());
+        ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+        hud.render(controller, world, hazard, extraction, inv, skills, 1, glm::mat4(1.0f), glm::mat4(1.0f));
+
+        // C. Fire weapon while simultaneously crouching and zoomed:
+        bolts.clear();
+        fired = controller.try_fire_weapon(bolts, 0.016f);
+        ASSERT_TRUE(fired);
+        ASSERT_GT(bolts.size(), 0);
+        ASSERT_TRUE(controller.is_crouching());
+        ASSERT_TRUE(controller.is_aiming());
+
+        // D. Starting ADS zoom from crouched stance:
+        controller.set_aiming(false);
+        controller.Update(0.25f);
+        ASSERT_NEAR(controller.zoom_progress(), 0.0f, 0.01f);
+        ASSERT_TRUE(controller.is_crouching());
+
+        controller.set_aiming(true);
+        controller.Update(0.25f);
+        ASSERT_NEAR(controller.zoom_progress(), 1.0f, 0.01f);
+        ASSERT_TRUE(controller.is_crouching());
+        hud.render(controller, world, hazard, extraction, inv, skills, 1, glm::mat4(1.0f), glm::mat4(1.0f));
+    }
+
+    std::cout << "[ OK ] WeaponZoomAndFireMechanicsTest (all 3 weapon archetypes zoom, optical scope lens renders, crouching and zooming function seamlessly)" << std::endl;
 }
 
 int main() {

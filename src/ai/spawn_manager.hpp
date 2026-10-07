@@ -25,7 +25,9 @@ struct TelegraphedSpawn {
 /// progressive threat ramping, and pre-spawn environmental telegraphs (dust particles & audio).
 class SpawnManager {
 public:
-    static constexpr float LEVEL_1_GRACE_PERIOD  = 45.0f; // Seconds before combat spawns trigger
+    static constexpr float LEVEL_1_GRACE_PERIOD  = 45.0f; // Seconds before combat spawns trigger in Sector 1
+    static constexpr float LEVEL_2_GRACE_PERIOD  = 35.0f; // Seconds before combat spawns trigger in Sector 2
+    static constexpr float LEVEL_3_GRACE_PERIOD  = 25.0f; // Seconds before combat spawns trigger in Sector 3
     static constexpr float SPAWN_SAFE_RADIUS     = 28.0f; // Minimum meters from insertion point
     static constexpr float SAFE_EXCLUSION_RADIUS = 28.0f; // Minimum Euclidean meters from insertion pod
     static constexpr float EARLY_RAMP_DURATION   = 120.0f; // Minutes 0-2 threat cap window
@@ -67,7 +69,7 @@ public:
     void set_on_audio_cue(AudioCallback cb) { m_on_audio_cue = std::move(cb); }
 
     // State queries
-    bool is_in_grace_period() const { return m_level == 1 && m_grace_timer > 0.0f && !m_high_tier_ore_breached; }
+    bool is_in_grace_period() const { return m_grace_timer > 0.0f && !m_high_tier_ore_breached; }
     float grace_timer() const { return m_grace_timer; }
     float elapsed_time() const { return m_elapsed_time; }
     int max_allowed_enemies() const;

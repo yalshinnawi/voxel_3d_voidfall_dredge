@@ -605,6 +605,24 @@ PauseMenuAction PauseMenu::render(
         if (mouse_clicked && f_hover2) settings.fov = std::min(105.0f, settings.fov + 5.0f);
         r_y += adj_btn_h + 6.0f * ui_scale;
 
+        char shake_buf[32];
+        if (settings.screen_shake <= 0.001f) {
+            std::snprintf(shake_buf, sizeof(shake_buf), "SCREEN SHAKE: OFF (0%%)");
+        } else {
+            std::snprintf(shake_buf, sizeof(shake_buf), "SCREEN SHAKE: %d%%", static_cast<int>(std::round(settings.screen_shake * 100.0f)));
+        }
+        draw_text_fitted(shake_buf, panel_x + pad + 14.0f * ui_scale, r_y + (adj_btn_h - FontRenderer::get_rendered_height(1.00f * ui_scale)) * 0.5f,
+                         btn1_x - (panel_x + pad + 14.0f * ui_scale) - 8.0f, 1.00f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+        bool shk_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= r_y && mouse_y <= r_y + adj_btn_h);
+        bool shk_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= r_y && mouse_y <= r_y + adj_btn_h);
+        draw_panel_with_border(btn1_x, r_y, adj_btn_w, adj_btn_h, shk_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_panel_with_border(btn2_x, r_y, adj_btn_w, adj_btn_h, shk_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_text_centered("-", btn1_x, r_y, adj_btn_w, adj_btn_h, 1.15f * ui_scale, glm::vec4(1.0f));
+        draw_text_centered("+", btn2_x, r_y, adj_btn_w, adj_btn_h, 1.15f * ui_scale, glm::vec4(1.0f));
+        if (mouse_clicked && shk_hover1) settings.screen_shake = std::max(0.0f, settings.screen_shake - 0.10f);
+        if (mouse_clicked && shk_hover2) settings.screen_shake = std::min(1.0f, settings.screen_shake + 0.10f);
+        r_y += adj_btn_h + 6.0f * ui_scale;
+
         // Test Audio Button
         float tst_w = content_w - 28.0f * ui_scale;
         float tst_h = std::clamp(22.0f * ui_scale, 18.0f, 26.0f);
@@ -649,7 +667,7 @@ PauseMenuAction PauseMenu::render(
             {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
             {"[F]",            "Toggle Flashlight / Headlamp",Typography::COLOR_CYAN},
             {"[G]",            "Grappling Hook Tether",       Typography::COLOR_GREEN},
-            {"[E]",            "Reel Grapple Cable",          Typography::COLOR_GREEN},
+            {"[E]",            "Interact / Retrieve Relic / Reel", Typography::COLOR_GREEN},
             {"[T]",            "Deploy Chemical Flare",       Typography::COLOR_CYAN},
             {"[Q]",            "Seismic Sonar Pulse",         Typography::COLOR_CYAN},
             {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},

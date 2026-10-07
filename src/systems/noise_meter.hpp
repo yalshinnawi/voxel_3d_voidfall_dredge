@@ -208,25 +208,25 @@ public:
     void add_movement_sound(const glm::vec3& pos, float dt, bool is_sprinting, bool is_crouching, bool is_grounded) {
         if (!is_grounded || is_crouching) return;
         if (is_sprinting) {
-            // Sprinting footsteps: continuous noise + 14m audible radius
-            emit_sound(SoundEventType::FootstepSprint, pos, 12.0f * dt, 14.0f, 0.35f);
+            // Sprinting footsteps: continuous noise + 20m audible radius
+            emit_sound(SoundEventType::FootstepSprint, pos, 12.0f * dt, 20.0f, 0.40f);
         } else {
-            // Normal walking: low noise + 6m audible radius
-            emit_sound(SoundEventType::FootstepWalk, pos, 3.5f * dt, 6.0f, 0.25f);
+            // Normal walking: low noise + 10m audible radius
+            emit_sound(SoundEventType::FootstepWalk, pos, 3.5f * dt, 10.0f, 0.30f);
         }
     }
 
     /// Jump takeoff acoustic burst
     void add_jump_sound(const glm::vec3& pos) {
-        emit_sound(SoundEventType::JumpTakeoff, pos, 6.5f, 10.0f, 0.4f);
+        emit_sound(SoundEventType::JumpTakeoff, pos, 6.5f, 12.0f, 0.45f);
     }
 
     /// Landing impact on rock floor (proportional to fall impact velocity)
     void add_landing_sound(const glm::vec3& pos, float impact_speed) {
         float norm_speed = std::clamp(impact_speed / 18.0f, 0.2f, 1.5f);
         float intensity = 5.0f + 14.0f * norm_speed;
-        float radius = 8.0f + 12.0f * norm_speed;
-        emit_sound(SoundEventType::JumpLanding, pos, intensity, radius, 0.5f);
+        float radius = 10.0f + 14.0f * norm_speed;
+        emit_sound(SoundEventType::JumpLanding, pos, intensity, radius, 0.55f);
     }
 
     /// Jetpack thruster roaring burn in cavern (continuous noise + wide audible radius)
@@ -241,14 +241,14 @@ public:
         if (m_jetpack_event_timer >= 0.25f) {
             m_jetpack_event_timer = 0.0f;
             float stealth_radius_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_RADIUS_MUL : 1.0f;
-            m_recent_sounds.push_back({SoundEventType::JetpackThruster, pos, 28.0f * stealth_intensity_mul, 20.0f * stealth_radius_mul, 0.0f, 0.35f});
+            m_recent_sounds.push_back({SoundEventType::JetpackThruster, pos, 28.0f * stealth_intensity_mul, 24.0f * stealth_radius_mul, 0.0f, 0.40f});
         }
     }
 
     /// Grapple hook pneumatic launch / anchor strike (quiet one-shot sound)
     void add_grapple_fire_sound(const glm::vec3& pos) {
-        // Grapple firing is quiet: 1.2 noise, 5.0m radius
-        emit_sound(SoundEventType::GrappleAction, pos, 1.2f, 5.0f, 0.30f);
+        // Grapple firing is quiet: 1.2 noise, 6.5m radius
+        emit_sound(SoundEventType::GrappleAction, pos, 1.2f, 6.5f, 0.35f);
     }
 
     /// Grapple electric winch cable reel (very quiet continuous tension hum, ~6x quieter than jetpack)
@@ -263,7 +263,7 @@ public:
         if (m_grapple_event_timer >= 0.35f) {
             m_grapple_event_timer = 0.0f;
             float stealth_radius_mul = m_is_crouching ? StealthSystem::STEALTH_SOUND_RADIUS_MUL : 1.0f;
-            m_recent_sounds.push_back({SoundEventType::GrappleAction, pos, 5.0f * stealth_intensity_mul, 5.5f * stealth_radius_mul, 0.0f, 0.30f});
+            m_recent_sounds.push_back({SoundEventType::GrappleAction, pos, 5.0f * stealth_intensity_mul, 7.0f * stealth_radius_mul, 0.0f, 0.35f});
         }
     }
 
@@ -276,39 +276,39 @@ public:
 
     /// Continuous drill grinding contact vibration
     void add_drill_sound(const glm::vec3& pos, float dt, float intensity = 14.0f) {
-        emit_sound(SoundEventType::DrillVibration, pos, intensity * dt, 18.0f, 0.4f);
+        emit_sound(SoundEventType::DrillVibration, pos, intensity * dt, 24.0f, 0.45f);
     }
 
     /// Voxel rock fracture / break noise
     void add_voxel_break_sound(const glm::vec3& pos, uint8_t mat) {
         float intensity = 6.0f;
-        float radius = 16.0f;
-        if (mat == 2) { intensity = 12.0f; radius = 22.0f; } // MAT_VOIDITE_CRYSTAL
-        else if (mat == 3) { intensity = 9.0f; radius = 18.0f; } // MAT_VOLCANIC_BASALT
-        else if (mat == 4) { intensity = 10.0f; radius = 19.0f; } // MAT_TITANIUM
-        else if (mat == 8) { intensity = 24.0f; radius = 28.0f; } // MAT_REINFORCED_VAULT_DOOR
-        emit_sound(SoundEventType::VoxelFracture, pos, intensity, radius, 0.6f);
+        float radius = 20.0f;
+        if (mat == 2) { intensity = 12.0f; radius = 26.0f; } // MAT_VOIDITE_CRYSTAL
+        else if (mat == 3) { intensity = 9.0f; radius = 22.0f; } // MAT_VOLCANIC_BASALT
+        else if (mat == 4) { intensity = 10.0f; radius = 24.0f; } // MAT_TITANIUM
+        else if (mat == 8) { intensity = 24.0f; radius = 32.0f; } // MAT_REINFORCED_VAULT_DOOR
+        emit_sound(SoundEventType::VoxelFracture, pos, intensity, radius, 0.65f);
     }
 
     /// Gunshot muzzle blast
     void add_gunshot_sound(const glm::vec3& muzzle_pos, int weapon_archetype = 0) {
-        float intensity = 18.0f;
-        float radius = 32.0f;
-        if (weapon_archetype == 0) { intensity = 25.0f; radius = 38.0f; } // Magma Scattergun
-        else if (weapon_archetype == 2) { intensity = 32.0f; radius = 45.0f; } // Needler Railgun
-        emit_sound(SoundEventType::Gunshot, muzzle_pos, intensity, radius, 0.75f);
+        float intensity = 20.0f;
+        float radius = 42.0f;
+        if (weapon_archetype == 0) { intensity = 28.0f; radius = 50.0f; } // Magma Scattergun
+        else if (weapon_archetype == 2) { intensity = 35.0f; radius = 58.0f; } // Needler Railgun
+        emit_sound(SoundEventType::Gunshot, muzzle_pos, intensity, radius, 0.85f);
     }
 
     /// Weapon reload mechanical clack (quiet, short-range)
     void add_reload_sound(const glm::vec3& pos) {
-        emit_sound(SoundEventType::BulkheadClang, pos, 4.0f, 9.0f, 0.4f);
+        emit_sound(SoundEventType::BulkheadClang, pos, 4.0f, 12.0f, 0.45f);
     }
 
     /// Bullet / plasma impact on solid voxel wall (creates acoustic distraction point!)
     void add_bullet_impact_sound(const glm::vec3& hit_pos, float stress = 2.0f) {
-        float intensity = 4.0f * stress;
-        float radius = 12.0f * std::clamp(stress, 0.5f, 2.0f);
-        emit_sound(SoundEventType::BulletImpact, hit_pos, intensity, radius, 0.5f);
+        float intensity = 5.0f * stress;
+        float radius = 16.0f * std::clamp(stress, 0.6f, 2.2f);
+        emit_sound(SoundEventType::BulletImpact, hit_pos, intensity, radius, 0.55f);
     }
 
     /// Demolition / Shaped charge detonation (massive concussive blastwave)

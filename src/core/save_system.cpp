@@ -66,7 +66,9 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"ui_volume\": " << profile.settings.ui_volume << ",\n";
     out << "  \"mute_all\": " << (profile.settings.mute_all ? "true" : "false") << ",\n";
     out << "  \"mouse_sensitivity\": " << profile.settings.mouse_sensitivity << ",\n";
-    out << "  \"fov\": " << profile.settings.fov << "\n";
+    out << "  \"fov\": " << profile.settings.fov << ",\n";
+    out << "  \"brightness\": " << profile.settings.brightness << ",\n";
+    out << "  \"screen_shake\": " << profile.settings.screen_shake << "\n";
     out << "}\n";
 
     out.close();
@@ -169,6 +171,8 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_bool("mute_all", profile.settings.mute_all);
         parse_float("mouse_sensitivity", profile.settings.mouse_sensitivity);
         parse_float("fov", profile.settings.fov);
+        parse_float("brightness", profile.settings.brightness);
+        parse_float("screen_shake", profile.settings.screen_shake);
     }
 
     profile.settings.sanitize();

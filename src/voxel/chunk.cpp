@@ -26,12 +26,12 @@ Chunk::~Chunk() {
 void Chunk::set_voxel(int x, int y, int z, Voxel v) {
     if (!in_bounds(x, y, z)) return;
     size_t idx = to_index(x, y, z);
-    bool was_solid = m_voxels[idx].is_solid();
-    bool now_solid = v.is_solid();
+    bool was_renderable = m_voxels[idx].is_renderable();
+    bool now_renderable = v.is_renderable();
 
-    if (!was_solid && now_solid) {
+    if (!was_renderable && now_renderable) {
         m_solid_count++;
-    } else if (was_solid && !now_solid && m_solid_count > 0) {
+    } else if (was_renderable && !now_renderable && m_solid_count > 0) {
         m_solid_count--;
     }
 
@@ -42,12 +42,12 @@ void Chunk::set_voxel(int x, int y, int z, Voxel v) {
 
 void Chunk::set_voxel_idx(size_t idx, Voxel v) {
     if (idx >= m_voxels.size()) return;
-    bool was_solid = m_voxels[idx].is_solid();
-    bool now_solid = v.is_solid();
+    bool was_renderable = m_voxels[idx].is_renderable();
+    bool now_renderable = v.is_renderable();
 
-    if (!was_solid && now_solid) {
+    if (!was_renderable && now_renderable) {
         m_solid_count++;
-    } else if (was_solid && !now_solid && m_solid_count > 0) {
+    } else if (was_renderable && !now_renderable && m_solid_count > 0) {
         m_solid_count--;
     }
 

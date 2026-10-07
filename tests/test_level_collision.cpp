@@ -435,7 +435,11 @@ void test_isolated_base_shapes_stress() {
         {RoomShapeType::PrismaticCrystalCathedral,    "PrismaticCrystalCathedral"},
         {RoomShapeType::AncientTitanNecropolis,       "AncientTitanNecropolis"},
         {RoomShapeType::BioluminescentGlowwormGrotto, "BioluminescentGlowwormGrotto"},
-        {RoomShapeType::PrecursorCoolantReservoir,    "PrecursorCoolantReservoir"}
+        {RoomShapeType::PrecursorCoolantReservoir,    "PrecursorCoolantReservoir"},
+        {RoomShapeType::ColossalVaultedDredgeCathedral, "ColossalVaultedDredgeCathedral"},
+        {RoomShapeType::TectonicAbyssalSinkhole,        "TectonicAbyssalSinkhole"},
+        {RoomShapeType::CyclopeanExcavationSilo,        "CyclopeanExcavationSilo"},
+        {RoomShapeType::BioluminescentFirmamentAbyss,   "BioluminescentFirmamentAbyss"}
     };
 
     for (const auto& [shape_type, shape_name] : all_shapes) {
@@ -537,7 +541,7 @@ void test_isolated_base_shapes_stress() {
         TEST_CHECK(player.position().y >= 4.0f, "Shape " + shape_name + " player fell through bedrock floor");
     }
 
-    log_pass("All 15 base room shapes thoroughly stress tested individually with 0 clipping/tunneling errors");
+    log_pass("All 27 base room shapes thoroughly stress tested individually with 0 clipping/tunneling errors");
 }
 
 // ─────────────────────────────────────────────────────────────

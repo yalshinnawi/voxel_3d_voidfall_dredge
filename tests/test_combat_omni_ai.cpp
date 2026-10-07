@@ -225,9 +225,16 @@ void test_aberrant_ai_surface_attachment_and_normal_alignment() {
     }
 
     // Sub-case B: Entity on Ceiling with outward normal n = (0, -1, 0)
-    // Place solid voxel at (16, 25, 16). Air at (16, 24, 16).
+    // Place solid voxel at (16, 25, 16). Air at (16, 24, 16) and surrounding neighborhood.
+    for (int dx = -2; dx <= 2; ++dx) {
+        for (int dz = -2; dz <= 2; ++dz) {
+            world.set_voxel(16 + dx, 24, 16 + dz, Voxel{MAT_AIR, 0}, false);
+            if (dx != 0 || dz != 0) {
+                world.set_voxel(16 + dx, 25, 16 + dz, Voxel{MAT_AIR, 0}, false);
+            }
+        }
+    }
     world.set_voxel(16, 25, 16, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
-    world.set_voxel(16, 24, 16, Voxel{MAT_AIR, 0}, false);
 
     glm::vec3 ceiling_pos(16.0f, 24.2f, 16.0f);
     glm::vec3 ceiling_normal(0.0f, -1.0f, 0.0f);

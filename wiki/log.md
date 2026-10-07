@@ -3,6 +3,208 @@
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
 ## 2026-10-06
+- **3D Weapon Scope Optical Lenses & Crouch-Zoom Alignment Integration**:
+  - **Identified Immersion & ADS Visibility Bottleneck**:
+    - Firearms lacked see-through optical scopes on the 3D viewmodels: solid meshes and unblended render passes blocked the center of the screen when zooming in.
+    - When crouching, viewmodel hipfire posture offsets (-0.08m Y, -0.05m Z) remained active during ADS zoom, pulling the sight line down and misaligning the optic from the player's eye level.
+  - **Hollow Tubular Scopes & Multi-Coated Optical Glass Lenses**:
+    - Added `ViewModel::add_tube` and `ViewModel::add_lens_disc` procedural geometry generators to construct true hollow bores and two-sided optical glass discs.
+    - **Vanguard Plasma Carbine**: Replaced solid reflex sight with an open, hollow protective hood, rubberized lens gasket, transparent polarized cyan anti-glare glass pane (28% alpha), and floating illuminated holographic reticle dot/gate brackets.
+    - **Scout Needler Railgun**: Built elevated high-precision marksman sniper scope with hollow bore tube, knurled diopter focus ring on ocular bell, objective bell hood, elevation/windage turrets, dual emerald optical glass lenses, and etched illuminated hairline mil-dot reticle. Removed viewmodel disappearance on full zoom.
+    - **Demolitionist Magma Scattergun**: Integrated heavy ruggedized tubular combat thermal scope with cast-iron cantilever clamp, knurled heat rim, transparent amber thermal quartz lens (28% alpha), and glowing thermite ghost-ring reticle.
+  - **True Optical Transparency & Blending**:
+    - Enabled `GL_BLEND` (`GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`) within `ViewModel::render` so transparent lens elements render seamlessly over the 3D cavern scene without clipping or occluding background geometry.
+  - **Seamless Crouch-Zoom Alignment**:
+    - Dynamically blended crouch offsets (`effective_crouch_y = glm::mix(crouch_offset_y, 0.0f, zoom_progress)`) so the weapon optic smoothly rises directly to eye level ($y=\text{target\_gun\_y}, x=0$) whether the delver is standing or crouching.
+    - Updated HUD laser rangefinder raycasting in `src/ui/hud.cpp` to use `player.eye_position()`, guaranteeing 100% elevation accuracy in both stances.
+  - **Automated Verification & Testing**:
+    - All 10 parallel test suites pass cleanly in ~1.1s via `python scripts/tdd.py`.
+    - Extended `WeaponZoomAndFireMechanicsTest` in `tests/test_gameplay_mechanics.cpp` to validate simultaneous crouched zooming and firing across all 3 weapon archetypes.
+    - Executed `./build/Release/VoidfallDredge.exe --auto-play-test` and confirmed all 10 visual phases pass with 100% subsystem health.
+
+- **Colossal Vertical Chambers & Procedural Level Diversity Overhaul**:
+  - **Player Experience & Spatial Scale Objectives**:
+    - Addressed feedback requesting dramatic vertical scale where ceiling and ground are vastly separated, giving delvers the sensation of traversing titanic, atmospheric cavern expanses.
+    - Expanded procedural shape repertoire from 23 to 27 chamber archetypes with soaring vertical clearances (up to 21 meters, $y=4 \to 25$).
+  - **4 Colossal Vertical Archetypes Implemented**:
+    1. **Colossal Vaulted Dredge Cathedral** (`RoomShapeType::ColossalVaultedDredgeCathedral`):
+       - Towering cathedral cavern with ribbed gothic arches soaring 21m above delvers.
+       - Elevated observation gantry and titanium suspension catwalk at $y=19$ spanning East-West with safe $3\text{m}$ clear deck and perimeter safety railings.
+       - Central ceremonial Voidite dais altar and hanging stalactite chandeliers.
+    2. **Tectonic Abyssal Sinkhole** (`RoomShapeType::TectonicAbyssalSinkhole`):
+       - Multi-tiered subterranean sinkhole plunging directly to bedrock ($y=4$).
+       - Glowing molten magma fissure trough running along the central trough bed.
+       - Descending stepped spiral terraces at $y=18, 12, 8$, central stepping spire monolith lookout at $y=14$, and high-tension suspension cable bridge at $y=18$.
+    3. **Cyclopean Excavation Silo** (`RoomShapeType::CyclopeanExcavationSilo`):
+       - Titanic circular industrial precursor excavation shaft.
+       - Heavy titanium dredging hopper basin at $y=4$, double-tiered maintenance ring catwalks at $y=12$ and $y=20$, vertical guide conduit columns, and overhead heavy crane girder at $y=23$.
+    4. **Bioluminescent Firmament Abyss** (`RoomShapeType::BioluminescentFirmamentAbyss`):
+       - Vast subterranean celestial vault with reflecting crystal aquifer pools at $y=4$.
+       - Vault ceiling canopy at $y=23..25$ embedded with hundreds of emissive starlight crystals (`MAT_PRISMATIC_CRYSTAL`, `MAT_VOIDITE_CRYSTAL`).
+       - Diagonal soaring natural stone arch bridge at $y=19$ for aerial panoramic traversal.
+  - **Procedural Level Variety & Verticality**:
+    - **High-Vault Atrium System**: Regular Floor 0 chambers roll a 40% chance of a high-vault ceiling ($y=20..24$) expanding verticality even across ordinary exploratory routes.
+    - **Non-Square Organic Dimensions**: Chamber widths and depths randomly vary across non-square aspect ratios ($15\times 17$, $17\times 19$, $19\times 17$).
+    - **Doorway Clearance Guarantees**: Enforced strict `is_doorway_floor` and `is_doorway_air` checks across all chamber geometries, guaranteeing 100% unobstructed transitions through inter-chamber corridors.
+    - **Thematic Luminaries**: Added `GrandVaultRadiance`, `FirmamentStarlight`, and `CyclopeanFloodlight` cavern light beacons.
+  - **Verification & Testing**:
+    - All 10 parallel test suites pass cleanly via `python scripts/tdd.py`.
+    - Executed 10-phase visual test harness (`./build/Release/VoidfallDredge.exe --auto-play-test --mute`) and verified 10/10 phase pass rate via `python scripts/analyze_screenshots.py`.
+
+- **Sector 2 Difficulty & Encounter Pacing Rebalance**:
+  - **Identified Pacing & Difficulty Bottlenecks**:
+    - Players faced sudden overwhelming hostile difficulty upon reaching Sector 2 (Volatile Fault). Root causes identified:
+      1. Uncapped initial fauna: Expeditions spawned ambient stalkers in every room on start without taking player progress or sector limits into account, leading to 28–30+ active hostiles in the dungeon.
+      2. Cascade aggro: Stalker alert screams propagated up to 20m through solid rock, instantly alerting adjacent packs across multiple chambers.
+      3. Zero grace period: Noise meter bursts instantly triggered hostile swarm waves in Sector 2 even during the first 30 seconds of an expedition.
+      4. Impossible holdouts: Sector 2 extraction holdout immediately spawned 120 HP Seismic Burrowers while swarming players with multiple stalkers, making evacuation near impossible.
+      5. Softlocked extraction quotas: Sector 2 extraction required securing the Precursor Relic, forcing players to play Demolitionist to breach vault bulkheads or fail extraction.
+  - **Balance Overhaul & Pacing Tuning**:
+    - **Initial Fauna & Active Monster Caps**:
+      - Removed redundant room-by-room fauna spawner at expedition launch. Initial fauna is now cleanly managed by `SpawnManager` with safe spawn distances ($\ge 18\text{m}$ away from drop pod).
+      - Enforced strict active enemy caps per sector in [src/ai/spawn_manager.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ai/spawn_manager.cpp): Sector 1 capped at 1–2 hostiles; Sector 2 clamped to 2 (early) and 4 (late); Sector 3 clamped to 3 (early) and 6 (late).
+      - Added guaranteed opening grace periods (35s in Sector 2, 25s in Sector 3) during which random wave spawns are suppressed so delvers can scout and orient themselves.
+      - Noise meter swarm waves are clamped against maximum allowed enemy limits.
+    - **Pack Alert Propagation**:
+      - Reduced Stalker alert shout radius from 20m down to 10m in [src/entities/enemies/void_stalker.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/entities/enemies/void_stalker.cpp), preventing cascading whole-dungeon chain pulls through cavern walls.
+    - **Player Survivability — Suit Nanite Field Stabilizer**:
+      - Added an out-of-combat health regeneration mechanic to [src/player/controller.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/controller.cpp): when out of combat for $\ge 12\,\text{s}$, suit nanites slowly restore health up to $75\%$ max HP ($+3.5\,\text{HP/s}$), providing delvers a recovery window between intense engagements.
+    - **Sector 2 Extraction Quota & Holdout Balancing**:
+      - Rebalanced Sector 2 extraction quota: players can extract by gathering 30 Voidite OR securing the Precursor Relic, removing the vault softlock for non-Demolitionist classes.
+      - Tuned Sector 2 beacon holdout: delayed 120 HP Seismic Burrower spawns during extraction holdouts to Sector 3. Sector 2 holdout now features manageable waves of 1–2 stalkers with defensive perimeter warnings.
+    - **Level Generation Doorway Fixes**:
+      - Fixed `SubterraneanAquiferOasis` in [src/voxel/level_shapes.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/level_shapes.cpp) to prevent prismatic crystals from generating within doorway boundaries (`is_doorway_air`), eliminating doorway obstruction issues.
+  - **Verification**:
+    - All 10 parallel test suites pass with 100% success rate via `python scripts/tdd.py`.
+    - Executed 10-phase automated visual test harness (`./build/Release/VoidfallDredge.exe --auto-play-test --mute`) and verified clean execution in `voidfall.log` and `screenshots/00_all_phases_montage.png`.
+
+- **Low-Health Biometric Audio Comfort (Constant Wash Noise Elimination)**:
+  - **Identified Root Cause**:
+    - Under low health ($< 35\%$), `AudioEngine::update_biometrics()` scaled `m_biometric_stress`. In [src/audio/audio_engine.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/audio/audio_engine.cpp), the real-time biometric synthesis loop generated continuous white noise via `fast_rand(m_breath_seed)` filtered at $650\,\text{Hz}$ with a raised cosine respiration envelope (`0.5 * (1.0 - cos(...))`).
+    - Because the envelope was non-zero throughout the entire breathing cycle and fed directly into the stereo output channels without rest, it produced a constant, undulating ocean/static "wash noise" in the player's headset. This caused auditory fatigue and masked crucial environmental cues such as enemy footsteps and stalker chitters.
+  - **Fixes & Acoustic Polish**:
+    - Removed the synthetic white-noise respiration wash generator from [src/audio/audio_engine.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/audio/audio_engine.cpp).
+    - Preserved the clean, visceral, sub-bass cardiac "lub-dub" heartbeat pulse ($46\,\text{Hz} / 92\,\text{Hz}$ systolic, $58\,\text{Hz} / 116\,\text{Hz}$ diastolic) that scales dynamically from $68$ to $150\,\text{BPM}$ with stress.
+    - Preserved complete acoustic transparency and silence during the inter-beat rest interval ($\sim 64\%$ of each cardiac cycle), restoring clear situational awareness while maintaining dramatic low-health tension.
+    - Removed unused breath synthesis fields from [src/audio/audio_engine.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/audio/audio_engine.hpp).
+    - Added automated verification in [tests/test_audio.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_audio.cpp) (Test 25) validating that low-health biometrics produce clean rhythmic cardiac pulses with $> 300\,\text{ms}$ of clean inter-beat silence and zero continuous noise wash floor.
+- **Enemy Death Visual Artifact Elimination (White Wash-Out Fix)**:
+  - **Identified Root Causes**:
+    - When taking fatal damage, hostile entities were assigned `hit_flash_timer = 0.08f` and transitioned into `StalkerState::Dying`. However, because the main enemy update loop skipped general timer decays when in `Dying` state, `hit_flash_timer` remained frozen $\ge 0.08\,\text{s}$ for the entire collapse animation ($0.75\,\text{s}$).
+    - The PBR stalker renderer mixed 92% pure white into all carapace, spine, and claw vertices and added $+8.5$ to emissive whenever `hit_flash_timer > 0.0f`.
+    - In [assets/shaders/stalker.frag](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/shaders/stalker.frag), `emissiveMultiplier` was scaling linearly with elapsed total game time (`1.0 + uStateGlow * 1.5`), magnifying the non-decaying emissive boost into an extreme blown-out white silhouette.
+  - **Fixes & Visual Polish**:
+    - Fatal damage across firearms, melee shove, explosive biogas ignition, and repulsor pulses now clears `hit_flash_timer = 0.0f` immediately on transition to `Dying`.
+    - `Renderer::render_stalkers()` explicitly gates hit-flash rendering to active combatants (`s.hit_flash_timer > 0.0f && s.state != StalkerState::Dying`).
+    - Added graceful death visual decay: as a dying stalker collapses, its compound eyes and void core smoothly fade out to dark (`life_fade`), and its chitinous carapace settles into dead carcass tones.
+    - Updated [assets/shaders/stalker.frag](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/shaders/stalker.frag) to extinguish predatory rim light and emissive in `Dying` and `Dead` states (`uState == 8 || uState == 9`), and bounded emissive multiplier.
+    - Added regression tests in [tests/test_unit_all.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_unit_all.cpp) and [tests/test_gameplay_mechanics.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_gameplay_mechanics.cpp) enforcing `hit_flash_timer == 0.0f` on lethal blow and during dying collapse.
+- **Interactive Precursor Vault Relic Pickup ("[E] To Retrieve")**:
+  - **Eliminated Auto-Pickup on Walkover**: Walking near the pedestal inside a breached precursor vault no longer vacuums or automatically collects the relic. The player must actively interact with the relic on the pedestal.
+  - **Proximity & Crosshair Interaction Query**:
+    - Added `MissionSystem::can_interact_relic(player_pos, max_dist)` and `MissionSystem::interact_relic(world, player_pos, max_dist)`.
+    - Added `PlayerController::set_on_interact()` callback with key press edge detection on `GLFW_KEY_E`.
+    - Implemented `Application::try_interact()` which verifies proximity ($\le 3.8\,\text{m}$) or direct crosshair raycast targeting of the relic block before retrieving it, awarding inventory relic status, $+250$ run points, $+50$ Demolitions XP, synchronized audio cues, and visual spark particles.
+    - Updated `Application::on_block_broken()` so destroying the entrance door column awards bulkhead breach score rather than pre-emptively granting the relic.
+  - **HUD Interactive Prompts & Compass Waypoint Labeling**:
+    - Added dynamic center crosshair prompt `"[E] RETRIEVE PRECURSOR RELIC"` in `Typography::COLOR_CYAN` when aiming at or standing within interaction reach of the relic pedestal (active across both mining drills and combat firearms).
+    - Updated 3D-to-2D waypoint diamond HUD label from `[INTERACT TO SECURE]` to `[PRESS E TO RETRIEVE]`.
+    - Updated controls binding references in both the in-game Pause Menu and Contractor Field Manual ([H] briefing) to document `[E] Interact / Retrieve Relic / Reel Grapple`.
+- **Jetpack Audio Ear-Safety & Harshness Reduction**:
+  - **Further Playback Gain Toning**:
+    - Reduced `SoundCue::JetpackLoop` voice playback volume from $0.45$ down to $0.28$ in [src/audio/audio_engine.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/audio/audio_engine.cpp), preventing acoustic fatigue during prolonged hovering.
+  - **Gentle Acoustic Frequency Shaping**:
+    - Retuned low-pass filter cutoff on exhaust hiss from $1050\,\text{Hz}$ down to $800\,\text{Hz}$ to eliminate sizzling high-frequency noise.
+    - Softened combustion sub-bass harmonics ($54\,\text{Hz} / 108\,\text{Hz}$), smoothed flutter modulation to $22\,\text{Hz}$, and trimmed mix weights to provide a warm, comfortable, non-intrusive rocket rumble.
+- **Screen Motion Stabilization & Vibration Comfort Tuning**:
+  - **Wavy Screen Movements & Post-Process Distortion Elimination**:
+    - Removed high-frequency horizontal UV sine wave distortion (`sin(uv.y * 120.0 + uTime * 40.0)`) from [assets/shaders/postprocess.frag](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/shaders/postprocess.frag). Radiation is now represented cleanly and comfortably via the suit HUD's ionizing vignette and geiger audio cues without nausea-inducing screen warping.
+    - Stabilized dynamic subterranean ambient lighting in [assets/shaders/voxel_pbr.frag](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/shaders/voxel_pbr.frag), removing undulating spatial coordinate waves (`sin(uTime * 0.45 + vWorldPos.x * 0.08 + vWorldPos.z * 0.08)`) and high-frequency sector shimmers that washed moving light/dark ripples across cavern voxels.
+  - **Camera Trauma & Vibration Overhaul**:
+    - Replaced harsh 60 Hz white-noise `rand() % 100` camera jitter and disorienting camera roll (previously rotating the horizon by up to $5\times$ shake amount) with smooth harmonic oscillation and zero roll in [src/core/application.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/application.cpp).
+    - Reduced peak shake translation amplitude from $0.18\,\text{m}$ to $0.045\,\text{m}$, and increased impulse decay from $0.8\,\text{s}^{-1}$ to $2.8\,\text{s}^{-1}$ so impacts settle cleanly and crisply without buzzing.
+    - Scaled camera shake by a dedicated user comfort setting `m_settings.screen_shake`.
+  - **Continuous Routine Micro-Trauma Elimination**:
+    - Removed continuous camera trauma vibration during routine gameplay:
+      - Mining drill contact: removed continuous `add_trauma(0.015f * dt)` and shatter trauma in [src/player/controller.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/controller.cpp).
+      - Normal jumping & landing: eliminated camera trauma on non-damaging drops ($< 13\,\text{m/s}$); heavy fall damage impacts ($\ge 13\,\text{m/s}$) retain punchy physical feedback.
+      - Ledge mantling & vaulting: eliminated camera trauma when pulling up onto ledges.
+      - Jetpack air-braking, toxic gas traversal, and close-quarters bullet impacts on cavern walls no longer vibrate the camera.
+      - Ambient burrower subterranean rumble no longer clamps continuous camera trauma.
+  - **Viewmodel Motion Smoothing**:
+    - Reduced locomotion walk bobbing amplitude by $50\%$ in [src/graphics/viewmodel.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/viewmodel.cpp).
+    - Replaced aggressive $45\,\text{Hz}$ drill vibration oscillation and random vertex jitter with a subtle, smooth $24\,\text{Hz}$ mechanical hum.
+  - **Configurable Comfort Settings & Persistence**:
+    - Added `screen_shake` ($0.0\times$ to $1.0\times$, defaulting to comfortable $0.20\times$) in [src/core/settings.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/settings.hpp) and saved/loaded in [src/core/save_system.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/save_system.cpp).
+    - Added an interactive `SCREEN SHAKE` stepper in both the in-game Pause Menu ([src/ui/pause_menu.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/pause_menu.cpp)) and Orbital Hub ([src/ui/orbital_hub.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/orbital_hub.cpp)), allowing players to freely tone down or completely turn off ($0\%$) screen shake.
+- **Jetpack Thruster Audio Ear-Comfort Balancing**:
+  - **Playback Gain Toning**:
+    - Reduced `SoundCue::JetpackLoop` voice playback volume from $0.72$ down to $0.45$ (~$38\%$ reduction in amplitude, $-4.1\,\text{dB}$) in [src/audio/audio_engine.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/audio/audio_engine.cpp). This prevents continuous hovering from overpowering environmental acoustics or causing listening fatigue during long ascents.
+  - **Procedural Synthesis Softening**:
+    - Retuned high-frequency exhaust hiss filter: lowered low-pass cutoff frequency from $1450\,\text{Hz}$ to $1050\,\text{Hz}$ to eliminate abrasive white noise sizzle in the ear's most sensitive frequency range.
+    - Reduced exhaust hiss component mix weight from $0.38$ to $0.26$, and air turbulence rumble to $0.20$ (with $200\,\text{Hz}$ LP filter), re-centering the sound profile around deep, warm $58\,\text{Hz}$ combustion rumble and $24\,\text{Hz}$ flame flutter without harsh ear-fatiguing artifacts.
+- **Subterranean Liquid Dynamics: True Fluid Permeability, Buoyant Viscous Drag & Slow Sinking Physics**:
+  - **Voxel Permeability & Mesher Occlusion**:
+    - `Voxel::is_solid()` updated to treat liquids (`MAT_THERMITE_SLAG` / `MAT_MOLTEN_MAGMA` / `MAT_LAVA` and `MAT_CRYSTAL_AQUIFER` / `MAT_WATER`) as non-solid permeable volumes that entities and delvers can enter and sink through.
+    - Added `Voxel::is_liquid()` and `Voxel::is_renderable()` helpers.
+    - Updated `GreedyMesher` face occlusion rules: liquid blocks occlude neighboring liquid faces of the identical fluid type as well as solid terrain, while retaining visible boundaries at air-liquid and liquid-solid interfaces. Chunk meshing and empty-chunk early-outs now check `is_renderable()` so liquid pools remain fully meshed and visible.
+  - **Fluid Dynamics & Slow Sinking Physics**:
+    - Delver AABB spatial query checks intersecting voxels and immediate underfoot fluid contact, tracking `m_is_in_liquid`, `m_is_in_lava`, `m_is_in_water`, and fractional immersion ratio `m_liquid_submersion`.
+    - **Dense Molten Slag / Lava**: Plunge braking rapidly decelerates high fall velocities; buoyant fluid resistance reduces downward sinking acceleration to a slow, viscous terminal crawl (capped at $-1.5\,\text{m/s}$). Severe horizontal drag ($8.5\times$) dampens lateral movement. Heat accumulation and thermal burning apply continuously while submerged.
+    - **Subterranean Crystal Aquifer / Coolant Water**: Buoyant fluid drag reduces sinking velocity to $-3.0\,\text{m/s}$ with moderate lateral drag ($2.8\times$), rapidly dissipates exo-suit heat, and clears overheat lockouts.
+    - **Swimming / Upward Paddling**: Holding [Space] / `BTN_JUMP` while submerged allows delvers to struggle upward through fluid ($+14.0\,\text{m/s}^2$ in molten rock up to $2.0\,\text{m/s}$; $+20.0\,\text{m/s}^2$ in clear water up to $3.8\,\text{m/s}$), assisted by thruster power bursts if fuel is available.
+    - **Kinetic Impact Cushioning**: Entering fluid cushions kinetic fall impacts by $75\%$ (`impact_speed *= 0.25f`), preventing catastrophic blunt trauma on deep pool dives.
+- **Tactical Hologram Map Overhaul: Focused Controls, Click-to-Drag Panning, Opacity Overhaul & Extraction Gating**:
+  - **Focused Map Controls & Click-to-Drag Panning**:
+    - When the delver opens the holographic tactical map via [Tab] or [M], player camera look, movement, and combat tool actions are completely paused (`m_player->set_combat_inputs_paused(true)`).
+    - Player ground velocity is zeroed (`m_velocity.x = 0; m_velocity.z = 0`) to immediately prevent drift or sliding during map inspection.
+    - System cursor unlocks (`m_window->set_cursor_locked(false)`) allowing free pointer movement across UI elements.
+    - Replaced disorienting free-mouse map movement with smooth **Click-to-Drag panning**: map panning (`m_pan_x`, `m_pan_y`) only activates while holding the Left Mouse Button (LMB), clamped to the cavern boundary (`MAP_SPAN * 0.85f`).
+    - Added mouse scroll wheel zoom support (`m_terrain_scanner.zoom()`) with smooth zoom clamping between `[3.5f, 22.0f]`.
+    - Pressing [Tab], [M], or [Escape] closes the map modal, restores combat controls, and re-locks the mouse cursor.
+  - **Map Legibility & Opacity Overhaul**:
+    - Introduced a full-screen dark atmospheric scrim `glm::vec4(0.012f, 0.016f, 0.024f, 0.92f)` behind the map modal to mute distracting background 3D cavern rendering.
+    - Converted map frame backdrops, canvas viewports, header bars, and sidebar cards from semi-transparent layers to solid 100% opacities (`1.0f`) with high-contrast borders (`BORDER_CYAN` and `BORDER_DARK`), completely eliminating see-through bleed.
+    - Implemented strict 2D geometry clipping (`add_clipped_quad`) to keep cavern floors and fog-of-war quads firmly inside the map canvas viewport.
+  - **Extraction Map & Compass Label Gating**:
+    - Extraction beacon diamond markers, distance badge (`EXTRACTION [X m]`), pulsating radar ring waves, and off-screen directional arrows (`>> EXTRACT`) are now gated strictly behind active extraction phases (`ExtractionPhase::BeaconDeployed` or `ExtractionPhase::PodLanded`).
+    - The player-to-extraction waypoint route line is hidden while extraction is dormant (preventing erroneous routes to `(0, 0, 0)`).
+    - Sidebar cards dynamically display `MISSION DIRECTIVE // SURVEY & MINE CAVERN` and `EVACUATION STATUS [STANDBY] - STATUS: STANDBY (NOT DEPLOYED)` until the extraction drill beacon is planted.
+    - HUD compass ribbon extraction blip is similarly gated to active extraction phases.
+- **Enhanced Enemy Acoustic Perception, Immediate Awakenings & Retaliation When Shot**:
+  - **Acoustic Perception Tuning**:
+    - Expanded audible ranges across player actions: sprinting footsteps (20m, was 14m), walking footsteps (10m, was 6m), jump landings (10-24m), industrial drill grinding (24m, was 18m), voxel rock fractures (20-32m), gunshot blasts (42m Scattergun / 50m Carbine / 58m Railgun), bullet impacts (16m), and reload clacks (12m).
+    - Subterranean rock acoustic vibration transmission factor improved from 0.65x to 0.80x.
+    - Added priority salience multipliers: Gunshots (3.5x), Drilling (2.5x), Bullet Impacts (2.2x), and Footsteps (1.5x-2.0x).
+  - **Sluggish Delay Elimination & Immediate Awakenings**:
+    - Removed 8.0s dormancy delay in `StalkerState::Roosting`: roosting stalkers now awaken immediately upon hearing gunfire or taking damage, detaching from ceilings/walls to the floor.
+    - Dormant `SeismicBurrower` instances now wake up immediately upon acoustic sound events (`b.has_sound_target`) or weapon impacts.
+  - **Immediate Retaliation When Shot**:
+    - Updated `damage_nearest` across Void Stalkers and Seismic Burrowers to receive true `attacker_pos` and `shot_direction`.
+    - Applied bullet travel knockback along the shot vector.
+    - Target enemy immediately snaps orientation toward shooter and triggers relentless retaliation pursuit.
+    - Melee stalkers within 9m trigger an enraged counter-lunge; distant stalkers sprint charge; shooter stalkers return spine volley fire; seismic burrowers lock yaw/pitch toward the shooter and tunnel aggressively.
+    - Pack alert: damaging an enemy alerts all nearby squad members within a 20m radius.
+  - **Testing & Verification**:
+    - Added Test 19 and Test 20 to [test_enemy_stalker.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_enemy_stalker.cpp).
+    - Added Test 10 to [test_enemy_burrower.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_enemy_burrower.cpp).
+    - Verified all 10 engine test suites pass in parallel via `python scripts/tdd.py`.
+- **Fix Floating White Droplets / In-World 3D Breadcrumb Box Elimination**:
+  - Identified the root cause of floating white/cyan droplets/slabs: [Renderer::render_breadcrumbs](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp#L1114) was rendering 3D physical box meshes (`0.12 x 0.02 x 0.12`) into the first-person game world at every recorded player breadcrumb position.
+  - Whenever the player jumped, used vertical thrusters, grappled, or traversed varied terrain elevations, recorded breadcrumbs suspended in mid-air and rendered as floating emissive white/cyan boxes/droplets.
+  - Removed in-world 3D breadcrumb rendering completely while preserving visited trail path visualization on the 2D Hologram Terrain Scanner ([TAB] map overlay via [TerrainScanner](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/terrain_scanner.cpp#L544)).
+  - Verified through automated playthrough, unit test suites, and screenshot contact sheet inspection.
+- **Firearm Aim-Down-Sights (ADS) Zoom Mechanics with Right-Click**:
+  - Implemented hold-to-zoom Aim-Down-Sights (ADS) on right-click for all delver combat firearms ([ToolSlot::CombatWeapon](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/loadout.hpp#L11)).
+  - Parameterized archetype-specific zoom magnification and transition rates in [WeaponStats](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/loadout.hpp#L23):
+    - **Demolitionist Magma Scattergun**: 0.78x FOV multiplier (~1.28x zoom), 0.20s ADS time.
+    - **Vanguard Plasma Carbine**: 0.65x FOV multiplier (~1.54x zoom), 0.18s ADS time.
+    - **Scout Needler Railgun**: 0.40x FOV multiplier (~2.50x sniper marksman scope), 0.22s ADS time.
+  - Enabled continuous shooting while zooming: firing works seamlessly during ADS, providing 50% tighter spread cone accuracy and centered muzzle raycast convergence.
+  - Scaled mouse look sensitivity proportionally with FOV zoom ratio for smooth, precise aiming.
+  - Aligned viewmodel procedural transforms in ADS: weapon models shift from hipfire `(0.15, -0.14, -0.34)` to centered sightline `(0.0, -0.10, -0.30)`, with reduced weapon sway and stabilized bobbing.
+  - Enhanced tactical HUD reticle: reticle brackets tighten dynamically with zoom progress, the Needler Railgun displays precision sniper scope lines with optical mil-dots when scoped, and the ammo indicator renders real-time magnification badges (`[1.5X]`, `[2.5X]`).
+  - Added comprehensive automated test suite `WeaponZoomAndFireMechanicsTest` in [test_gameplay_mechanics.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_gameplay_mechanics.cpp) validating all 3 weapon archetypes, zoom transitions, tool switching isolation, and firing while zoomed.
 - **Weapon Reload Enforcement & Elimination of Passive Ammo Regeneration**:
   - Disabled passive trickle recharge across all weapons (`WeaponStats::auto_recharge = false` strictly enforced for Demolitionist Magma Scattergun, Vanguard Plasma Carbine, and Scout Needler Railgun).
   - Removed capacitor passive recharge tick loop from `PlayerController::update_physics`.

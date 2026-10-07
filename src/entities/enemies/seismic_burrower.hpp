@@ -82,6 +82,7 @@ struct SeismicBurrower {
     bool just_died{false};
 
     bool is_dead() const { return state == BurrowerState::Dead; }
+    bool is_dormant() const { return state == BurrowerState::Dormant; }
 
     /// Forward direction vector based on velocity heading or pitch/yaw orientation
     glm::vec3 forward() const {
@@ -168,7 +169,9 @@ public:
     /// Apply damage to nearest burrower (with optional explosive multiplier and sneak attack crit)
     bool damage_nearest(const glm::vec3& origin, float radius, float damage,
                         bool is_explosive = false, bool allow_crit = false,
-                        bool* out_is_crit = nullptr, float* out_damage_dealt = nullptr);
+                        bool* out_is_crit = nullptr, float* out_damage_dealt = nullptr,
+                        const glm::vec3* attacker_pos = nullptr,
+                        const glm::vec3* shot_direction = nullptr);
 
     /// Apply stun to burrowers near an origin (e.g. bulkhead collision or concussion blast)
     void apply_stun(const glm::vec3& origin, float radius, float duration = 2.5f);

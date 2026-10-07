@@ -289,8 +289,50 @@ int main() {
         std::cout << " -> Localized burrowing wall occlusion & line-of-sight verified." << std::endl;
     }
 
+    // Test 10: Acoustic Awakening of Dormant Burrowers & Retaliation When Shot
+    {
+        std::cout << "[Test 10] Testing Acoustic Awakening of Dormant Burrowers & Retaliation When Shot..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 burrower_pos(20.0f, 20.0f, 20.0f);
+        manager.spawn_burrower(burrower_pos);
+
+        auto& b = manager.burrowers_mut()[0];
+        b.state = BurrowerState::Dormant;
+        CHECK(b.is_dormant(), "Burrower should be in Dormant state");
+
+        // 10.1: Acoustic awakening via distant gunshot sound (30m away)
+        glm::vec3 gunshot_pos(20.0f, 20.0f, 50.0f);
+        std::vector<SoundEvent> sounds;
+        SoundEvent gunshot;
+        gunshot.type = SoundEventType::Gunshot;
+        gunshot.position = gunshot_pos;
+        gunshot.intensity = 28.0f;
+        gunshot.audible_radius = 50.0f;
+        gunshot.lifetime = 0.5f;
+        sounds.push_back(gunshot);
+
+        glm::vec3 player_idle_pos(20.0f, 20.0f, 50.0f);
+        manager.update(0.1f, player_idle_pos, world, sounds);
+
+        CHECK(!b.is_dormant(), "Dormant burrower must awaken immediately upon hearing gunfire disturbance");
+        CHECK(b.state == BurrowerState::Burrowing || b.state == BurrowerState::Charging,
+              "Awakened burrower must enter active tunneling pursuit");
+
+        // 10.2: Reaction when shot: immediate lock-on and shooter reorientation
+        b.state = BurrowerState::Dormant; // Reset to dormant
+        glm::vec3 shooter_pos(20.0f, 20.0f, 10.0f); // Shooter is at -Z
+        glm::vec3 shot_dir(0.0f, 0.0f, 1.0f);       // Shot travels in +Z
+        bool hit = manager.damage_nearest(burrower_pos, 3.0f, 35.0f, false, false,
+                                          nullptr, nullptr, &shooter_pos, &shot_dir);
+        CHECK(hit, "damage_nearest must hit burrower");
+        CHECK(!b.is_dormant(), "Burrower must awaken immediately when shot");
+        CHECK(b.target_pos == shooter_pos, "Burrower must target the shooter's coordinates");
+
+        std::cout << " -> Acoustic awakening and shooter retaliation verified." << std::endl;
+    }
+
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (9/9)" << std::endl;
+    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (10/10)" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }

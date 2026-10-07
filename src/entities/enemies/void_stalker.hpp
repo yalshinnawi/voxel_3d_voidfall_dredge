@@ -132,6 +132,10 @@ struct VoidStalker {
     glm::vec3 surface_offset{0.0f};
     float m_climbSpeedScalar{3.2f};
     float surface_transition_timer{0.2f};
+    float surface_cooldown{0.0f};           // Debounce cooldown preventing rapid surface flipping/jitter
+    float hit_surface_lock_timer{0.0f};     // Locks surface to FLOOR during hit flinch/stagger
+    float stuck_timer{0.0f};                // Obstacle obstruction timer for anti-stuck steering
+    glm::vec3 last_progress_pos{0.0f};      // Position checkpoint for movement progress verification
     StalkerAnimationController anim_controller;
 
     // Helper references & accessors
@@ -308,10 +312,12 @@ public:
     int apply_melee_shove(const glm::vec3& camera_pos, const glm::vec3& camera_dir,
                           float range = 2.5f, float min_cos = 0.65f, float damage = 15.0f);
 
-    /// Apply damage to nearest stalker from player attack (drill hit, explosion, sneak attack)
+    /// Apply damage to nearest stalker from player attack (drill hit, explosion, sneak attack, gunshot)
     bool damage_nearest(const glm::vec3& origin, float radius, float damage,
                          bool allow_crit = false, bool* out_is_crit = nullptr,
-                         float* out_damage_dealt = nullptr);
+                         float* out_damage_dealt = nullptr,
+                         const glm::vec3* attacker_pos = nullptr,
+                         const glm::vec3* shot_direction = nullptr);
 
     /// Get all active stalkers (for rendering)
     const std::vector<VoidStalker>& stalkers() const { return m_stalkers; }

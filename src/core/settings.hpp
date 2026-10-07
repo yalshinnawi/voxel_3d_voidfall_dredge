@@ -12,6 +12,7 @@ struct GameSettings {
     float mouse_sensitivity{0.12f};
     float fov{75.0f};
     float brightness{1.0f};       // 0.40x to 2.00x cavern brightness/exposure modifier
+    float screen_shake{0.20f};    // 0.00x to 1.00x screen shake trauma multiplier (comfort setting)
 
     // ── Granular Audio Channel Options [0.0 .. 1.0] ──
     float master_volume{1.0f};    // Overall output gain
@@ -25,6 +26,7 @@ struct GameSettings {
         mouse_sensitivity = std::clamp(mouse_sensitivity, 0.02f, 0.50f);
         fov = std::clamp(fov, 60.0f, 110.0f);
         brightness = std::clamp(brightness, 0.40f, 2.00f);
+        screen_shake = std::clamp(screen_shake, 0.0f, 1.0f);
         master_volume = std::clamp(master_volume, 0.0f, 1.0f);
         sfx_volume = std::clamp(sfx_volume, 0.0f, 1.0f);
         enemy_volume = std::clamp(enemy_volume, 0.0f, 1.0f);

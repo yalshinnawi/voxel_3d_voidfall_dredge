@@ -13,7 +13,8 @@ SpawnManager::SpawnManager() {
 
 void SpawnManager::reset(int selected_level, const glm::vec3& insertion_pod_pos) {
     m_level = selected_level;
-    m_grace_timer = (m_level == 1) ? LEVEL_1_GRACE_PERIOD : 0.0f;
+    m_grace_timer = (m_level <= 1) ? LEVEL_1_GRACE_PERIOD :
+                    (m_level == 2) ? LEVEL_2_GRACE_PERIOD : LEVEL_3_GRACE_PERIOD;
     m_elapsed_time = 0.0f;
     m_high_tier_ore_breached = false;
     m_insertion_pod_pos = insertion_pod_pos;
@@ -35,11 +36,11 @@ int SpawnManager::max_allowed_enemies() const {
         return 0;
     }
     if (m_elapsed_time < EARLY_RAMP_DURATION) {
-        // Minutes 0-2: Max 1-2 scout enemies active
-        return (m_level >= 2) ? 2 : 2;
+        // Minutes 0-2: Early scouting phase, strictly capped hostiles
+        return (m_level <= 1) ? 1 : ((m_level == 2) ? 2 : 3);
     }
     // Mid/Late Phase: Scaled dynamic encounter capacity
-    return 4 + (m_level >= 2 ? 2 : 0) + (m_level >= 3 ? 2 : 0);
+    return (m_level <= 1) ? 2 : ((m_level == 2) ? 4 : 6);
 }
 
 bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candidate_pos) const {

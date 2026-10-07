@@ -70,6 +70,11 @@ public:
     // Map discovery query
     float discovery_percentage() const;
 
+    // Zoom controls
+    void zoom(float delta);
+    float zoom_level() const { return m_zoom; }
+    void set_zoom(float z);
+
 private:
     void init_buffers();
     void init_font();

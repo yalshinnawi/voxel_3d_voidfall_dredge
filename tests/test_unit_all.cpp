@@ -713,6 +713,7 @@ void test_noise_meter_and_void_stalkers() {
     bool lethal_hit = mgr.damage_nearest(glm::vec3(16.0f, 22.0f, 16.0f), 3.0f, 20.0f);
     TEST_CHECK(lethal_hit, "Lethal blow must register");
     TEST_CHECK(mgr.stalkers()[0].is_dying() || mgr.stalkers()[0].is_dead(), "Stalker with <= 0 HP must enter Dying or Dead state");
+    TEST_CHECK(mgr.stalkers()[0].hit_flash_timer == 0.0f, "Dying stalker must have hit_flash_timer == 0 to prevent turning white");
     TEST_CHECK(mgr.active_count() == 0, "Dying stalker must not count toward active_count");
 
     // Step collapse animation sequence into static carcass
@@ -931,7 +932,11 @@ void test_cavern_luminaries_and_lighting() {
         RoomShapeType::PrismaticCrystalCathedral,
         RoomShapeType::AncientTitanNecropolis,
         RoomShapeType::BioluminescentGlowwormGrotto,
-        RoomShapeType::PrecursorCoolantReservoir
+        RoomShapeType::PrecursorCoolantReservoir,
+        RoomShapeType::ColossalVaultedDredgeCathedral,
+        RoomShapeType::TectonicAbyssalSinkhole,
+        RoomShapeType::CyclopeanExcavationSilo,
+        RoomShapeType::BioluminescentFirmamentAbyss
     };
 
     for (RoomShapeType t : types) {
@@ -947,7 +952,7 @@ void test_cavern_luminaries_and_lighting() {
             TEST_CHECK(l.base_color.b >= 0.0f && l.base_color.b <= 1.0f, "Luminary blue channel must be in [0, 1]");
         }
     }
-    log_pass("Cavern Luminary Generation Across All 23 Room Archetypes");
+    log_pass("Cavern Luminary Generation Across All 27 Room Archetypes");
 
     // 2. Specific Thematic Luminary Spectral Verification
     // Geode: Vibrant pulsing violet
@@ -1355,13 +1360,18 @@ void test_flares_aberrants_and_mission_objectives() {
     TEST_CHECK(mission.is_vault_breached(), "Vault state must be breached");
     TEST_CHECK(world.get_voxel(mission.vault().door_pos.x, mission.vault().door_pos.y, mission.vault().door_pos.z).material_id == MAT_AIR, "Breached door voxel must be removed from world");
 
-    // Retrieve Relic Hyper-Core (player stands near relic)
+    // Retrieve Relic Hyper-Core (player stands near relic and interacts via [E])
     glm::vec3 relic_world = glm::vec3(mission.vault().relic_pos) + glm::vec3(0.5f);
     mission.update(0.1f, world, relic_world);
-    TEST_CHECK(mission.is_relic_retrieved(), "Relic state must be retrieved when approaching");
+    TEST_CHECK(!mission.is_relic_retrieved(), "Relic must require player interaction and NOT auto-pickup on approach");
+    TEST_CHECK(mission.can_interact_relic(relic_world), "Relic must be interactable when player is nearby");
+    bool relic_interacted = mission.interact_relic(world, relic_world);
+    TEST_CHECK(relic_interacted, "Interacting with relic must retrieve it");
+    TEST_CHECK(mission.is_relic_retrieved(), "Relic state must be retrieved after [E] interaction");
+    TEST_CHECK(world.get_voxel(mission.vault().relic_pos.x, mission.vault().relic_pos.y, mission.vault().relic_pos.z).material_id == MAT_AIR, "Retrieved relic voxel must be removed from pedestal");
     TEST_CHECK(mission.total_bonus_xp() == 350, "Relic extraction bonus must award +350 EXP");
     TEST_CHECK(mission.total_bonus_titanium() == 5, "Relic extraction bonus must award +5 Titanium Cores");
-    log_pass("Precursor Vault Bulkhead Satchel breach and Relic Hyper-Core extraction reward (+350 EXP, +5 Titanium)");
+    log_pass("Precursor Vault Bulkhead Satchel breach and Relic Hyper-Core interactive pickup [E] reward (+350 EXP, +5 Titanium)");
 
     // Reactive Gas Pockets: create gas voxels
     for (int x = 14; x <= 16; ++x) {

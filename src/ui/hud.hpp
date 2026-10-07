@@ -174,7 +174,8 @@ private:
     void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
     void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
     void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
-    void render_crosshair(const PlayerController& player, const World& world);
+    void render_crosshair(const PlayerController& player, const World& world, const class MissionSystem* mission = nullptr, const std::vector<VoidStalker>* stalkers = nullptr, const std::vector<SeismicBurrower>* burrowers = nullptr);
+    void render_optical_scope_lens(const PlayerController& player, const World& world, const std::vector<VoidStalker>* stalkers = nullptr, const std::vector<SeismicBurrower>* burrowers = nullptr);
     void render_floating_loot(const glm::mat4& view, const glm::mat4& proj);
     void render_loot_toasts();
     void render_enemy_awareness_markers(

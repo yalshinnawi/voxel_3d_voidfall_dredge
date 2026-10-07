@@ -20,10 +20,11 @@ void HazardClock::set_sector_parameters(int sector) {
         m_geological_creep = 0.35f;
         m_stress_decay_rate = 1.4f;
     } else {
-        m_tremor_interval = 90.0f;
-        m_radiation_rate = 0.35f;
-        m_geological_creep = 0.16f;
-        m_stress_decay_rate = 2.0f;
+        // Sector 2 (Volatile Fault): Moderate escalation
+        m_tremor_interval = 105.0f;
+        m_radiation_rate = 0.25f;
+        m_geological_creep = 0.12f;
+        m_stress_decay_rate = 2.1f;
     }
     m_tremor_timer = m_tremor_interval;
 }

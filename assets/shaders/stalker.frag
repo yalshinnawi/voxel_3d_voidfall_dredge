@@ -99,11 +99,13 @@ void main() {
         rimColor = vec3(1.0, 0.65, 0.1);    // Amber warning rim when fleeing
     } else if (uState == 1) {
         rimColor = vec3(0.85, 0.15, 0.95);  // Deep void purple rim when stalking in shadows
+    } else if (uState == 8 || uState == 9) {
+        rimColor = vec3(0.0);               // Extinguished in death
     }
     vec3 rimLight = rimColor * fresnel * 0.95;
 
     // Emissive component (piercing glowing compound eyes & pulsating void core!)
-    float emissiveMultiplier = 1.0 + uStateGlow * 1.5;
+    float emissiveMultiplier = (uState == 8 || uState == 9) ? 0.0 : 1.0;
     vec3 emissive = vColor.rgb * baseEmissive * emissiveMultiplier;
 
     // If stunned, add electrical spark flicker

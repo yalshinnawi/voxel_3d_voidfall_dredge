@@ -80,6 +80,11 @@ public:
     bool IsSolid(const glm::ivec3& pos) const { return is_solid(pos); }
     bool IsSolid(int world_x, int world_y, int world_z) const { return is_solid(world_x, world_y, world_z); }
 
+    bool is_liquid(const glm::ivec3& pos) const;
+    bool is_liquid(int world_x, int world_y, int world_z) const;
+    bool IsLiquid(const glm::ivec3& pos) const { return is_liquid(pos); }
+    bool IsLiquid(int world_x, int world_y, int world_z) const { return is_liquid(world_x, world_y, world_z); }
+
     float get_highest_solid_surface(int x, int z) const;
 
     // Raycast through voxel grid (DDA algorithm)

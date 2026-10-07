@@ -1368,6 +1368,65 @@ int main(int argc, char** argv) {
         std::cout << " -> Jetpack & Grapple SFX synthesis and noise balancing verified." << std::endl;
     }
 
+    // ── Test 25: Low-Health Biometric Audio: Clean Cardiac Pulse & Zero Continuous Wash Noise Floor ──
+    {
+        std::cout << "[Test 25] Testing Low-Health Biometric Audio: Clean Cardiac Pulse & Zero Constant Wash Noise..." << std::endl;
+        audio.stop_all(true);
+
+        // 25.1 Full Health (100%): Zero biometric stress and absolute acoustic silence
+        audio.update_biometrics(1.0f, 0.0f);
+        CHECK(audio.biometric_stress() == 0.0f, "Full health must produce zero biometric stress");
+        auto silent_samples = audio.render_offline_samples(0.40f);
+        float silent_energy = 0.0f;
+        for (float s : silent_samples) silent_energy += s * s;
+        CHECK(silent_energy == 0.0f, "At full health without active voices, audio mix must be completely silent");
+
+        // 25.2 Low Health (15%): Visceral cardiac pulse with rhythmic beats and zero continuous wash noise
+        audio.update_biometrics(0.15f, 0.0f);
+        CHECK(audio.biometric_stress() > 0.50f, "Critical health (15%) must activate elevated biometric cardiac stress");
+
+        // Render 1.5s of biometrics (at ~115 BPM, 1.5s contains ~2 to 3 distinct heartbeat pulses)
+        auto bio_samples = audio.render_offline_samples(1.50f);
+        float bio_energy = 0.0f;
+        float bio_peak = 0.0f;
+        size_t silent_frames_run = 0;
+        size_t max_silent_run = 0;
+
+        for (size_t i = 0; i < bio_samples.size(); i += 2) {
+            float s_left = bio_samples[i];
+            float s_right = bio_samples[i + 1];
+            CHECK(!std::isnan(s_left) && !std::isinf(s_left), "Biometric samples must be finite");
+            CHECK(!std::isnan(s_right) && !std::isinf(s_right), "Biometric samples must be finite");
+
+            float mag = std::max(std::abs(s_left), std::abs(s_right));
+            bio_energy += mag * mag;
+            bio_peak = std::max(bio_peak, mag);
+
+            // Check for silence during the inter-beat rest interval [phase 0.36 to 1.0]
+            if (mag < 0.001f) {
+                silent_frames_run++;
+                max_silent_run = std::max(max_silent_run, silent_frames_run);
+            } else {
+                silent_frames_run = 0;
+            }
+        }
+
+        CHECK(bio_energy > 0.01f, "Low health must produce audible cardiac heartbeat energy");
+        CHECK(bio_peak > 0.08f, "Cardiac pulse must have clear perceptible tactile thumps");
+        CHECK(bio_peak <= 0.85f, "Cardiac pulse must respect ear-safety thresholds");
+
+        // Verify that the inter-beat interval contains an unbroken window of silence (> 150ms = 6615 frames)
+        // In the old implementation, continuous random respiration noise prevented ANY silence window.
+        // In the fixed implementation, the rest interval between heartbeats is completely clean.
+        CHECK(max_silent_run >= 6000,
+              "Cardiac cycle must contain a clean silent inter-beat rest interval without constant noise wash");
+
+        // Reset biometrics back to normal
+        audio.update_biometrics(1.0f, 0.0f);
+        std::cout << " -> Low-health biometric audio verified: clean cardiac pulse with zero continuous noise wash (max silent interval: "
+                  << (max_silent_run / 44.1f) << " ms)." << std::endl;
+    }
+
     if (export_wav) {
         std::cout << "[*] Exporting diagnostic audio sample WAV files to screenshots/audio_samples/..." << std::endl;
 
@@ -1477,7 +1536,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL 24 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
+    std::cout << "ALL 25 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     audio.shutdown();

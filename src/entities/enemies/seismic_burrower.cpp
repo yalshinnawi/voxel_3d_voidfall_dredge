@@ -102,8 +102,12 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 float salience = snd.intensity / std::max(1.0f, snd_dist);
                 if (snd.type == SoundEventType::DemolitionBlast || snd.type == SoundEventType::SeismicTremor) {
                     salience *= 3.5f; // Heavy tectonic shocks heavily attract subterranean burrowers
+                } else if (snd.type == SoundEventType::Gunshot) {
+                    salience *= 3.0f; // Gunfire shocks command immediate seismic attention
+                } else if (snd.type == SoundEventType::DrillVibration) {
+                    salience *= 3.0f; // Mining drill vibrations strongly attract burrowers
                 } else if (snd.type == SoundEventType::BulletImpact) {
-                    salience *= 1.8f;
+                    salience *= 2.2f;
                 }
                 if (salience > best_salience) {
                     best_salience = salience;
@@ -147,12 +151,13 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         float target_yaw = std::atan2(dir_to_target.x, dir_to_target.z);
         float target_pitch = -std::asin(std::clamp(dir_to_target.y, -1.0f, 1.0f));
 
-        // Smooth angle tracking
+        // Smooth angle tracking (amplified when aggressively pursuing attacker)
+        float eff_turn_rate = b.is_pursuing_attacker ? 3.6f : b.turn_rate;
         float yaw_diff = target_yaw - b.yaw;
         while (yaw_diff > glm::pi<float>()) yaw_diff -= 2.0f * glm::pi<float>();
         while (yaw_diff < -glm::pi<float>()) yaw_diff += 2.0f * glm::pi<float>();
-        b.yaw += std::clamp(yaw_diff, -b.turn_rate * dt, b.turn_rate * dt);
-        b.pitch += std::clamp(target_pitch - b.pitch, -b.turn_rate * dt, b.turn_rate * dt);
+        b.yaw += std::clamp(yaw_diff, -eff_turn_rate * dt, eff_turn_rate * dt);
+        b.pitch += std::clamp(target_pitch - b.pitch, -eff_turn_rate * dt, eff_turn_rate * dt);
 
         glm::vec3 facing(
             std::sin(b.yaw) * std::cos(-b.pitch),
@@ -171,9 +176,11 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         // State Machine
         switch (b.state) {
             case BurrowerState::Dormant: {
-                if (dist_to_player < 22.0f) {
+                if (b.has_sound_target || dist_to_player < 26.0f) {
                     b.state = BurrowerState::Burrowing;
                     b.state_timer = 0.0f;
+                    b.just_roared = true;
+                    VF_LOG_INFO("SeismicBurrower", "Dormant Burrower " << b.id << " AWAKENED by acoustic disturbance!");
                 }
                 break;
             }
@@ -198,8 +205,9 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                     result.any_chatter = true;
                 }
 
-                // Move forward through ground
-                b.velocity = facing * b.burrow_speed;
+                // Move forward through ground (surging speed when pursuing attacker)
+                float eff_burrow_speed = b.is_pursuing_attacker ? 4.5f : b.burrow_speed;
+                b.velocity = facing * eff_burrow_speed;
                 b.position += b.velocity * dt;
 
                 // Excavate soft terrain in front of cutter head
@@ -332,7 +340,9 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
 
 bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radius, float damage,
                                             bool is_explosive, bool allow_crit,
-                                            bool* out_is_crit, float* out_damage_dealt) {
+                                            bool* out_is_crit, float* out_damage_dealt,
+                                            const glm::vec3* attacker_pos,
+                                            const glm::vec3* shot_direction) {
     SeismicBurrower* nearest = nullptr;
     float min_dist = radius;
 
@@ -371,10 +381,35 @@ bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radiu
         nearest->is_pursuing_attacker = false;
         VF_LOG_INFO("SeismicBurrower", "Burrower " << nearest->id << " DESTROYED!");
     } else {
+        // Resolve actual position of attacker
+        glm::vec3 actual_attacker_pos = (attacker_pos != nullptr) ? *attacker_pos : origin;
+        if (attacker_pos == nullptr && glm::distance(origin, nearest->position) < 0.5f) {
+            glm::vec3 facing(std::sin(nearest->yaw), 0.0f, std::cos(nearest->yaw));
+            actual_attacker_pos = nearest->position - facing * 5.0f;
+        }
+
         // Retaliation pursuit: Awaken and lock onto attacker
         nearest->is_pursuing_attacker = true;
         nearest->pursuit_lost_timer = 0.0f;
-        if (nearest->state == BurrowerState::Dormant) {
+        nearest->target_pos = actual_attacker_pos;
+
+        // Immediately orient toward attacker
+        glm::vec3 to_attacker = actual_attacker_pos - nearest->position;
+        if (glm::length(glm::vec2(to_attacker.x, to_attacker.z)) > 0.1f) {
+            nearest->yaw = std::atan2(to_attacker.x, to_attacker.z);
+        }
+        float horiz_d = std::hypot(to_attacker.x, to_attacker.z);
+        if (horiz_d > 0.1f) {
+            nearest->pitch = -std::asin(std::clamp(to_attacker.y / std::max(0.1f, glm::length(to_attacker)), -1.0f, 1.0f));
+        }
+
+        if (nearest->hp <= 35.0f && nearest->state != BurrowerState::Burrowing) {
+            // Critically damaged in open cavern -> decisively burrow into bedrock to retreat
+            nearest->state = BurrowerState::Burrowing;
+            nearest->state_timer = 0.0f;
+            nearest->just_roared = true;
+            VF_LOG_INFO("SeismicBurrower", "Wounded Burrower " << nearest->id << " (HP=" << nearest->hp << ") DECISIVELY BURROWS into rock to retreat!");
+        } else if (nearest->state == BurrowerState::Dormant) {
             nearest->state = BurrowerState::Burrowing;
             nearest->state_timer = 0.0f;
             nearest->just_roared = true;

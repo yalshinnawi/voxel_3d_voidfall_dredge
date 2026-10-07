@@ -61,6 +61,18 @@ Voxel GreedyMesher::sample_voxel(
     return Voxel{MAT_FRACTURED_GRANITE, 0};
 }
 
+inline bool is_face_occluded(Voxel current, Voxel neighbor) {
+    if (!neighbor.is_renderable()) {
+        return false;
+    }
+    if (current.is_liquid()) {
+        // Liquid faces are occluded by the same liquid, or by solid voxels
+        return neighbor.material_id == current.material_id || neighbor.is_solid();
+    }
+    // Solid voxels are occluded by other solid voxels
+    return neighbor.is_solid();
+}
+
 bool GreedyMesher::is_face_visible(
     const Chunk& chunk,
     const NeighborChunkGetter& get_neighbor,
@@ -68,11 +80,11 @@ bool GreedyMesher::is_face_visible(
     int nx, int ny, int nz
 ) {
     Voxel current = sample_voxel(chunk, get_neighbor, x, y, z);
-    if (!current.is_solid()) {
+    if (!current.is_renderable()) {
         return false;
     }
     Voxel neighbor = sample_voxel(chunk, get_neighbor, nx, ny, nz);
-    return !neighbor.is_solid();
+    return !is_face_occluded(current, neighbor);
 }
 
 std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
@@ -131,21 +143,19 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         mask[mask_idx].visible = false;
 
                         Voxel current = chunk.get_voxel(x[0], x[1], x[2]);
-                        if (!current.is_solid()) {
+                        if (!current.is_renderable()) {
                             continue;
                         }
 
                         int nx = x[0] + q[0];
                         int ny = x[1] + q[1];
                         int nz = x[2] + q[2];
-                        if (Chunk::in_bounds(nx, ny, nz)) {
-                            if (chunk.get_voxel(nx, ny, nz).is_solid()) {
-                                continue;
-                            }
-                        } else {
-                            if (sample_voxel(chunk, get_neighbor, nx, ny, nz).is_solid()) {
-                                continue;
-                            }
+                        Voxel neighbor = Chunk::in_bounds(nx, ny, nz)
+                            ? chunk.get_voxel(nx, ny, nz)
+                            : sample_voxel(chunk, get_neighbor, nx, ny, nz);
+
+                        if (is_face_occluded(current, neighbor)) {
+                            continue;
                         }
 
                         mask[mask_idx].visible = true;

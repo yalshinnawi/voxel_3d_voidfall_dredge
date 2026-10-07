@@ -371,7 +371,7 @@ bool World::is_solid(const glm::ivec3& pos) const {
         int lz = floor_mod(pos.z, CHUNK_SIZE);
 
         Voxel v = chunk->get_voxel(lx, ly, lz);
-        return v.material_id != MAT_AIR && v.material_id != MAT_GAS && v.material_id != MAT_VOLATILE_SMOKE;
+        return v.is_solid();
     }
 
     int world_w = m_level_gen ? m_level_gen->world_width() : LevelGenerator::WORLD_WIDTH;
@@ -393,6 +393,15 @@ bool World::is_solid(const glm::ivec3& pos) const {
 
 bool World::is_solid(int world_x, int world_y, int world_z) const {
     return is_solid(glm::ivec3(world_x, world_y, world_z));
+}
+
+bool World::is_liquid(const glm::ivec3& pos) const {
+    if (pos.y < 0 || pos.y >= 26) return false;
+    return get_voxel(pos.x, pos.y, pos.z).is_liquid();
+}
+
+bool World::is_liquid(int world_x, int world_y, int world_z) const {
+    return is_liquid(glm::ivec3(world_x, world_y, world_z));
 }
 
 float World::get_highest_solid_surface(int x, int z) const {

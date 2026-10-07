@@ -1182,7 +1182,7 @@ void AudioEngine::trigger_debris_impact(float volume) {
 }
 
 void AudioEngine::update_biometrics(float health_pct, float threat_proximity) {
-    // Health below 35% triggers escalating biometric stress (heartbeat and ragged breathing)
+    // Health below 35% triggers escalating biometric stress (visceral cardiac heartbeat)
     float hp_stress = (health_pct < 0.35f) ? (0.35f - health_pct) / 0.35f : 0.0f;
     float threat_stress = std::clamp(threat_proximity, 0.0f, 1.0f) * 0.4f;
     m_biometric_stress = std::clamp(hp_stress + threat_stress, 0.0f, 1.0f);
@@ -1248,6 +1248,7 @@ void AudioEngine::set_thruster_active(bool active, const glm::vec3& pos) {
                 v.active = false;
             } else {
                 v.world_pos = pos;
+                v.volume = 0.28f;
                 v.fading_out = false;
                 v.fade_out_remaining = 0.0f;
                 update_spatial_pan(v);
@@ -1264,7 +1265,7 @@ void AudioEngine::set_thruster_active(bool active, const glm::vec3& pos) {
                 v.loop = true;
                 v.time = 0.0f;
                 v.duration = 9999.0f;
-                v.volume = 0.72f;
+                v.volume = 0.28f;
                 v.pitch = 1.0f;
                 v.is_3d = true;
                 v.world_pos = pos;
@@ -2796,28 +2797,28 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
         }
 
         case SoundCue::JetpackLoop: {
-            // Jetpack Rocket Thruster: Deep combustion sub-bass + exhaust hiss + thrust flutter
-            voice.phase[0] += (58.0f * voice.pitch) * dt; // Sub-bass core
-            voice.phase[1] += (116.0f * voice.pitch) * dt; // 1st harmonic
+            // Jetpack Rocket Thruster: Deep warm combustion sub-bass + gentle exhaust hiss + thrust flutter
+            voice.phase[0] += (54.0f * voice.pitch) * dt; // Sub-bass core
+            voice.phase[1] += (108.0f * voice.pitch) * dt; // 1st harmonic
             if (voice.phase[0] > 1.0f) voice.phase[0] -= 1.0f;
             if (voice.phase[1] > 1.0f) voice.phase[1] -= 1.0f;
 
-            // 24Hz flame flutter modulation
-            float flutter = 1.0f + 0.12f * fast_sin(TWO_PI * 24.0f * t);
+            // 22Hz flame flutter modulation
+            float flutter = 1.0f + 0.09f * fast_sin(TWO_PI * 22.0f * t);
 
-            float combustion = (0.55f * fast_sin_phase(voice.phase[0]) +
-                                0.30f * fast_sin_phase(voice.phase[1])) * flutter;
+            float combustion = (0.50f * fast_sin_phase(voice.phase[0]) +
+                                0.25f * fast_sin_phase(voice.phase[1])) * flutter;
 
-            // Pressurized nozzle exhaust gas hiss (bandpassed around 1450 Hz)
+            // Pressurized nozzle exhaust gas hiss (low-passed around 800 Hz for warm, soothing acoustic ear comfort)
             float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
-            float alpha = calc_lp_alpha(1450.0f, static_cast<float>(SAMPLE_RATE));
+            float alpha = calc_lp_alpha(800.0f, static_cast<float>(SAMPLE_RATE));
             voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
 
             // Air turbulence rumble
-            float alpha_rumble = calc_lp_alpha(220.0f, static_cast<float>(SAMPLE_RATE));
+            float alpha_rumble = calc_lp_alpha(180.0f, static_cast<float>(SAMPLE_RATE));
             voice.filter_state[1] += alpha_rumble * (noise - voice.filter_state[1]);
 
-            sample = combustion * 0.45f + voice.filter_state[0] * 0.38f + voice.filter_state[1] * 0.25f;
+            sample = combustion * 0.30f + voice.filter_state[0] * 0.18f + voice.filter_state[1] * 0.16f;
             break;
         }
 
@@ -3080,14 +3081,13 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
         }
     }
 
-    // Real-Time Biometric Audio: Heartbeat & Ragged Helmet Breathing under low health or high stress
+    // Real-Time Biometric Audio: Visceral Heartbeat under low health or high stress
+    // (Constant white-noise respiration wash eliminated for auditory comfort and stealth clarity)
     if (m_biometric_stress > 0.02f && !m_mute_all && m_sfx_volume > 0.01f) {
         float bpm = 68.0f + 82.0f * m_biometric_stress; // 68 BPM to 150 BPM
         float beat_freq = bpm / 60.0f;
-        float breath_freq = 0.28f + 0.24f * m_biometric_stress; // 17 to 31 breaths/min
-        float breath_lp = calc_lp_alpha(650.0f, static_cast<float>(SAMPLE_RATE));
 
-        float bio_gain = m_biometric_stress * m_sfx_volume * 0.28f;
+        float bio_gain = m_biometric_stress * m_sfx_volume * 0.32f;
 
         for (size_t f = 0; f < num_frames; ++f) {
             m_heartbeat_phase += beat_freq * dt;
@@ -3098,6 +3098,7 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
             // Dual-pulse "lub-dub" cardiac envelope:
             // Pulse 1 ("Lub"): phase in [0.0, 0.16] of cycle
             // Pulse 2 ("Dub"): phase in [0.22, 0.36] of cycle
+            // Phase [0.36, 1.0]: clean acoustic rest interval with zero noise floor
             float heart_sample = 0.0f;
             if (m_heartbeat_phase < 0.16f) {
                 float t_pulse = m_heartbeat_phase / 0.16f;
@@ -3113,17 +3114,7 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                 heart_sample += tone * env * 0.65f;
             }
 
-            // Respiration: ragged air turbulence in suit helmet
-            m_breath_phase += breath_freq * dt;
-            if (m_breath_phase >= 1.0f) {
-                m_breath_phase -= 1.0f;
-            }
-            float breath_env = 0.5f * (1.0f - std::cos(TWO_PI * m_breath_phase)); // smooth in-out wave
-            float breath_noise = (fast_rand(m_breath_seed) * 2.0f - 1.0f);
-            m_breath_filter_state += breath_lp * (breath_noise - m_breath_filter_state);
-            float breath_sample = m_breath_filter_state * breath_env * 0.35f;
-
-            float bio_total = (heart_sample + breath_sample) * bio_gain;
+            float bio_total = heart_sample * bio_gain;
             output_interleaved[f * 2 + 0] += bio_total;
             output_interleaved[f * 2 + 1] += bio_total;
         }

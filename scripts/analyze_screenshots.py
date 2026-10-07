@@ -26,7 +26,8 @@ def cleanup_previews_folder():
                 removed += 1
     except OSError as e:
         print(f"[!] Warning cleaning preview directory: {e}")
-        
+    return removed, freed_bytes
+
 CANONICAL_SCREENSHOT_FILES = {
     "README.md", "audio_safety_report.json",
     "00_all_phases_montage.jpg", "00_all_phases_montage.png",

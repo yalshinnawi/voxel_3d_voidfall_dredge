@@ -39,7 +39,8 @@ public:
     static SurfaceContactSample sample_surface_normal(
         const glm::vec3& position,
         const World& world,
-        float probe_distance = 1.4f
+        float probe_distance = 1.4f,
+        StalkerSurfaceState current_state = StalkerSurfaceState::FLOOR
     );
 
     /// Computes target orientation quaternion from velocity v and contact normal n:

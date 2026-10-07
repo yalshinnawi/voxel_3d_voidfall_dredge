@@ -235,6 +235,7 @@ public:
     float take_damage(float dmg, DamageSource source);
     float take_damage(float dmg, bool is_falling_debris = false);
     DamageSource last_damage_source() const { return m_last_damage_source; }
+    float time_since_last_damage() const { return m_time_since_damage; }
 
     bool has_insertion_shield() const { return m_insertionShieldTimer > 0.0f; }
     float insertion_shield_timer() const { return m_insertionShieldTimer; }
@@ -299,6 +300,10 @@ public:
     void set_on_land(LandCallback cb) { m_on_land = std::move(cb); }
     void set_on_damage(DamageCallback cb) { m_on_damage = std::move(cb); }
     void set_on_damage_source(DamageSourceCallback cb) { m_on_damage_source = std::move(cb); }
+
+    // Interact action callback (E key)
+    using InteractCallback = std::function<void()>;
+    void set_on_interact(InteractCallback cb) { m_on_interact = std::move(cb); }
 
     // Weapon reload callback
     using WeaponReloadCallback = std::function<void(CharacterClass cls, float reload_time)>;
@@ -374,6 +379,7 @@ private:
     UpgradeTree m_upgrades;
     float m_health{100.0f};
     float m_max_health{100.0f};
+    float m_time_since_damage{15.0f};
 
     // Suit status & equipment
     ExoStatus m_exo;
@@ -457,8 +463,12 @@ private:
     glm::vec3 m_last_breadcrumb_pos{16.0f, 25.0f, 16.0f};
     float m_dist_since_breadcrumb{0.0f};
 
-    // Environmental room hazard states
+    // Environmental room hazard & liquid states
+    bool m_is_in_liquid{false};
     bool m_is_in_lava{false};
+    bool m_is_in_water{false};
+    float m_liquid_submersion{0.0f}; // 0.0 to 1.0 (submerged ratio)
+    uint8_t m_current_liquid_material{MAT_AIR};
     bool m_is_in_spikes{false};
     float m_spike_damage_timer{0.0f};
 
@@ -467,6 +477,8 @@ private:
     float m_melee_shove_cooldown{0.0f};
     float m_melee_shove_timer{0.0f};
     MeleeShoveCallback m_on_melee_shove;
+    InteractCallback m_on_interact;
+    bool m_e_pressed_last{false};
 
     // Insertion Pod Breach Shielding & Combat Pause
     float m_insertionShieldTimer{0.0f};
@@ -474,7 +486,11 @@ private:
 
 public:
     void apply_fall_impact(float impact_speed);
+    bool is_in_liquid() const { return m_is_in_liquid; }
     bool is_in_lava() const { return m_is_in_lava; }
+    bool is_in_water() const { return m_is_in_water; }
+    float liquid_submersion() const { return m_liquid_submersion; }
+    uint8_t current_liquid_material() const { return m_current_liquid_material; }
     bool is_in_spikes() const { return m_is_in_spikes; }
     float spike_damage_timer() const { return m_spike_damage_timer; }
 };

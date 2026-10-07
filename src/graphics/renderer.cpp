@@ -1112,65 +1112,11 @@ void Renderer::render_flares(const std::vector<ChemicalFlare>& flares, float tim
 }
 
 void Renderer::render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float time) {
-    if (crumbs.empty() || m_stalker_vao == 0) return;
-
-    std::vector<StalkerVertex> verts;
-    verts.reserve(crumbs.size() * 36);
-
-    auto add_box = [&](const glm::vec3& center, const glm::vec3& half_extents,
-                       const glm::vec4& color, const glm::vec4& mat) {
-        glm::vec3 min_p = center - half_extents;
-        glm::vec3 max_p = center + half_extents;
-
-        auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
-            verts.push_back({a, n, color, mat});
-            verts.push_back({b, n, color, mat});
-            verts.push_back({c, n, color, mat});
-            verts.push_back({a, n, color, mat});
-            verts.push_back({c, n, color, mat});
-            verts.push_back({d, n, color, mat});
-        };
-
-        push_quad({min_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {0.0f, 0.0f, 1.0f});
-        push_quad({max_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {0.0f, 0.0f, -1.0f});
-        push_quad({max_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, max_p.y, min_p.z}, {max_p.x, max_p.y, max_p.z}, {1.0f, 0.0f, 0.0f});
-        push_quad({min_p.x, min_p.y, min_p.z}, {min_p.x, min_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, min_p.z}, {-1.0f, 0.0f, 0.0f});
-        push_quad({min_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, max_p.z}, {max_p.x, max_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z}, {0.0f, 1.0f, 0.0f});
-        push_quad({min_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, max_p.z}, {min_p.x, min_p.y, max_p.z}, {0.0f, -1.0f, 0.0f});
-    };
-
-    for (size_t i = 0; i < crumbs.size(); ++i) {
-        float pulse = 0.5f + 0.5f * std::sin(time * 3.0f + static_cast<float>(i) * 0.4f);
-        glm::vec4 crumb_col = glm::vec4(0.05f, 0.85f, 0.95f, 0.8f);
-        glm::vec4 crumb_mat = glm::vec4(0.0f, 0.2f, 1.8f * pulse, 1.0f);
-        add_box(crumbs[i] + glm::vec3(0.0f, 0.03f, 0.0f), glm::vec3(0.12f, 0.02f, 0.12f), crumb_col, crumb_mat);
-    }
-
-    if (verts.empty()) return;
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-
-    m_stalker_shader.use();
-    m_stalker_shader.set_mat4("uProjection", m_proj);
-    m_stalker_shader.set_mat4("uView", m_view);
-    m_stalker_shader.set_mat4("uModel", glm::mat4(1.0f));
-    m_stalker_shader.set_vec3("uCamPos", m_cam_pos);
-    m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
-    m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
-    m_stalker_shader.set_vec3("uHeadlampColor", m_headlamp.color);
-    m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
-    m_stalker_shader.set_float("uStateGlow", time);
-    m_stalker_shader.set_int("uState", 0);
-    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
-    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
-
-    glBindVertexArray(m_stalker_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_stalker_vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(StalkerVertex), verts.data());
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
-    glBindVertexArray(0);
+    (void)crumbs;
+    (void)time;
+    // In-world 3D breadcrumb boxes removed: navigation path tracking is rendered exclusively
+    // on the 2D Holographic Terrain Scanner ([TAB] overlay) to prevent floating glowing
+    // slabs/droplets from littering first-person gameplay when jumping, jetpacking, or grappling.
 }
 
 void Renderer::spawn_fireball(const glm::vec3& center, int count) {
@@ -1475,17 +1421,17 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         } else if (s.state == StalkerState::Stalking) {
             crouch_y -= 0.15f; // Low predatory stalk
         } else if (s.state == StalkerState::Stunned) {
-            // Violent shivering spasm
-            float jitter = std::sin(s.glow_phase * 35.0f) * 0.08f;
-            base_model = glm::rotate(base_model, jitter, glm::vec3(0.0f, 0.0f, 1.0f));
+            // Smooth disoriented stagger posture (subtle head roll, no 35Hz spazzing jitter)
+            float stagger = std::sin(s.glow_phase * 4.0f) * 0.04f;
+            base_model = glm::rotate(base_model, stagger, glm::vec3(0.0f, 1.0f, 0.0f));
             crouch_y -= 0.2f;
         } else if (s.state == StalkerState::Burrowing) {
-            // High-frequency drilling / rock excavation tremor
-            float drill_jitter = std::sin(s.state_timer * 48.0f) * 0.07f;
-            base_model = glm::rotate(base_model, drill_jitter, glm::vec3(0.0f, 0.0f, 1.0f));
+            // Rhythmic excavation drilling surge pulse (forward-back bore thrust, no roll spazzing)
+            float drill_pulse = std::sin(s.state_timer * 18.0f) * 0.025f;
+            base_model = glm::translate(base_model, glm::vec3(0.0f, 0.0f, drill_pulse));
             crouch_y -= 0.20f;
             lunge_forward = 0.25f;
-            mandible_spread = 0.40f + std::abs(std::sin(s.state_timer * 36.0f)) * 0.25f;
+            mandible_spread = 0.40f + std::abs(std::sin(s.state_timer * 24.0f)) * 0.20f;
         }
 
         // Apply scale, surface pose pitch & crouch
@@ -1533,8 +1479,8 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         glm::vec4 eye_color = s.get_eye_color();
         glm::vec4 eye_mat(0.0f, 0.02f, 6.5f, 1.0f); // Massive emissive boost for bloom!
 
-        // White emissive hit-flash shader pulse (0.08s)
-        if (s.hit_flash_timer > 0.0f) {
+        // White emissive hit-flash shader pulse (0.08s) - active combatants only, suppressed on death/dying
+        if (s.hit_flash_timer > 0.0f && s.state != StalkerState::Dying) {
             float flash_k = std::clamp(s.hit_flash_timer / 0.08f, 0.0f, 1.0f);
             chitin_color = glm::mix(chitin_color, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
             spine_color  = glm::mix(spine_color,  glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
@@ -1548,6 +1494,20 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         float core_pulse = 0.85f + 0.35f * std::sin(s.glow_phase * 5.0f);
         glm::vec4 core_color = eye_color;
         glm::vec4 core_mat(0.1f, 0.05f, 5.0f * core_pulse, 1.0f);
+
+        // When dying, extinguish bioluminescent life signs (eyes & core fade out to dark)
+        if (s.state == StalkerState::Dying) {
+            float death_progress = std::clamp(s.death_timer / std::max(0.01f, s.death_duration), 0.0f, 1.0f);
+            float life_fade = 1.0f - death_progress;
+            eye_mat.z *= life_fade;
+            core_mat.z *= life_fade;
+            eye_color = glm::mix(glm::vec4(0.02f, 0.02f, 0.02f, 1.0f), eye_color, life_fade);
+            core_color = glm::mix(glm::vec4(0.02f, 0.02f, 0.02f, 1.0f), core_color, life_fade);
+            // Settle chitin colors naturally into a collapsed carcass tone
+            chitin_color = glm::mix(chitin_color, chitin_color * 0.75f, death_progress);
+            spine_color  = glm::mix(spine_color,  spine_color * 0.75f,  death_progress);
+            claw_color   = glm::mix(claw_color,   claw_color * 0.75f,   death_progress);
+        }
 
         // === BODY ASSEMBLY ===
 
@@ -1820,6 +1780,8 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         m_stalker_shader.set_float("uStateGlow", m_total_time);
         int state_val = !stalkers.empty() ? static_cast<int>(stalkers[0].state) : 1;
         m_stalker_shader.set_int("uState", state_val);
+        m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
+        m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
 
         // Upload to dynamic VBO (capped to buffer capacity)
         size_t vert_count = std::min(s_stalker_verts.size(), static_cast<size_t>(16384));
@@ -1933,6 +1895,8 @@ void Renderer::render_carcasses(const std::vector<EnemyCarcass>& carcasses) {
     m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
     m_stalker_shader.set_float("uStateGlow", 0.0f);
     m_stalker_shader.set_int("uState", 0);
+    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
+    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
 
     size_t vert_count = std::min(s_carcass_verts.size(), static_cast<size_t>(8192));
     glBindVertexArray(m_stalker_vao);

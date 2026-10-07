@@ -49,6 +49,10 @@ Voidfall Dredge features 23 meticulously handcrafted room archetypes categorized
 | **Ancient Titan Necropolis** | Sector 2+ | $26\times 20\times 26$ (Mega) | Deep fossil excavation site spanned by 5 massive prehistoric skeletal ribcage bone arches (`MAT_TITANIUM`) and wall scaffolding. | Excavated mineral seam trench, wall scaffolds ($y=room.floor\_y+4$), and bone arch grapple swinging. |
 | **Bioluminescent Glowworm Grotto** | Sector 1+ | $24\times 18\times 24$ | Starry night cavern ceiling dotted with hundreds of glowing bio-points (`MAT_BIOLUMINESCENT_FLORA`), Voidite clusters, and a pristine reflecting lake. | Winding mossy shoreline trails and soothing subterranean water immersion. |
 | **Precursor Coolant Reservoir** | Sector 2+ | $24\times 18\times 24$ | High-tech precursor vault featuring twin liquid coolant reservoirs, ruptured high-pressure overhead pipelines, and blast catwalks. | Central steel aisle, vault catwalks, and twin coolant immersion pools for instant thermal cooling. |
+| **Colossal Vaulted Dredge Cathedral** | All Sectors (Mega) | $26\times 22\times 26$ | Soaring ribbed gothic arches stretching 21 meters above delvers ($y=4\to 25$). High suspension gantry catwalk at $y=19$, Voidite dais altar, and hanging stalactite chandeliers. | Elevated catwalk bridge at $y=19$, buttress ladder columns, and grapple swing anchors across the nave. |
+| **Tectonic Abyssal Sinkhole** | Sector 2+ (Mega) | $26\times 22\times 26$ | Staggering multi-tiered subterranean sinkhole plunging to bedrock ($y=4$). Glowing magma fissure trough, stepped spiral terraces, central lookout monolith, and suspension cable bridge at $y=18$. | Descending spiral terraces ($y=18, 12, 8$), cable bridge crossing, and monolith parkour spire. |
+| **Cyclopean Excavation Silo** | Sector 1+ (Mega) | $26\times 22\times 26$ | Titanic circular precursor excavation shaft with heavy titanium dredging basin. Double-tiered maintenance ring catwalks ($y=12, 20$) and overhead heavy crane girder at $y=23$. | Dual perimeter ring catwalks, vertical conduit pipe climbs, and high crane hoist grapple lines. |
+| **Bioluminescent Firmament Abyss** | All Sectors (Mega) | $26\times 22\times 26$ | Vast subterranean celestial vault with an undulating floor of glowing crystal aquifer pools. Canopy at $y=23..25$ embedded with hundreds of emissive starlight crystals and high natural stone arch bridge at $y=19$. | Diagonal soaring stone arch bridge at $y=19$, crystal water cushion descents, and panoramic firmament sightlines. |
 
 ---
 
@@ -58,9 +62,9 @@ Voidfall Dredge implements multi-floor level layouts with non-square footprints,
 
 ### 4.1 Multi-Floor Assignments
 Chambers are assigned vertical floor tiers during grid layout generation:
-- **Floor 0 (Lower Caverns)**: Base floor at $y=4$, ceiling at $y=12..14$. Standard subterranean excavation depths.
-- **Floor 1 (Upper Mezzanines)**: Elevated terrace chambers with base floor at $y=12$, ceiling at $y=20..22$.
-- **Floor 2 (Multi-Floor Grand Vaults)**: High-verticality grand chambers starting at $y=4$ and soaring up to $y=24$ with perimeter catwalks, balconies, and climbing terraces.
+- **Floor 0 (Lower Caverns)**: Base floor at $y=4$, standard ceiling at $y=13..16$, with a 40% chance of a **High-Vault Atrium** expanding ceiling to $y=20..24$ for soaring clearance even in regular chambers.
+- **Floor 1 (Upper Mezzanines)**: Elevated terrace chambers with base floor at $y=14$, ceiling at $y=25$.
+- **Floor 2 (Multi-Floor Grand Vaults & Colossal Expanses)**: Vast high-verticality chambers starting at $y=4$ and soaring up to $y=25$ (up to 21 meters of continuous headroom!) with perimeter catwalks, observation galleries, suspension bridges, and climbing terraces.
 
 ### 4.2 Sloping Stepped Ramps & Elevation Transitions
 When connecting chambers on different floor levels ($Floor_A \ne Floor_B$):

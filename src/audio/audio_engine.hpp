@@ -327,7 +327,7 @@ public:
     void trigger_ducking(float target_attenuation = 0.28f, float hold_seconds = 0.8f, float recovery_rate = 1.35f);
     float ducking_factor() const { return m_ducking_attenuation; }
 
-    /// Update player biometric audio (heartbeat & ragged breathing under low health < 35% or extreme stress)
+    /// Update player biometric audio (visceral cardiac heartbeat pulse under low health < 35% or extreme stress)
     void update_biometrics(float health_pct, float threat_proximity = 0.0f);
     float biometric_stress() const { return m_biometric_stress; }
 
@@ -448,9 +448,6 @@ private:
     // Biometric stress & low-health vitals synthesis
     float m_biometric_stress{0.0f};
     float m_heartbeat_phase{0.0f};
-    float m_breath_phase{0.0f};
-    float m_breath_filter_state{0.0f};
-    uint32_t m_breath_seed{44101};
 
     // Ear Safety & Mastering Filters
     float m_dc_block_x1[2]{0.0f, 0.0f};

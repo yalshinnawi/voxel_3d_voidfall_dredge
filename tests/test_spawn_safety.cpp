@@ -8,6 +8,7 @@
 #include "../src/entities/enemies/void_stalker.hpp"
 #include "../src/entities/vault_door.hpp"
 #include "../src/systems/stealth_system.hpp"
+#include "../src/systems/mission_system.hpp"
 #include "../src/ai/spawn_manager.hpp"
 
 using namespace Voidfall;
@@ -180,6 +181,32 @@ TEST(VaultTest, VaultDoorResistsDrillMining) {
     ASSERT_TRUE(vault_door.is_relic_secured());
 
     std::cout << "[PASS] VaultTest.VaultDoorResistsDrillMining (drill resisted, satchel breached, relic secured)" << std::endl;
+
+    // Test MissionSystem interactive relic pickup mechanics
+    MissionSystem mission;
+    mission.embed_precursor_vault(world, 2);
+    glm::vec3 door_world = glm::vec3(mission.vault().door_pos) + glm::vec3(0.5f, 1.5f, 0.0f);
+    mission.check_satchel_vault_breach(world, door_world, 4.0f);
+    ASSERT_TRUE(mission.is_vault_breached());
+
+    // 1. Standing far away (10m away): cannot interact
+    glm::vec3 far_player = glm::vec3(mission.vault().relic_pos) + glm::vec3(10.0f, 0.0f, 0.0f);
+    ASSERT_FALSE(mission.can_interact_relic(far_player));
+    ASSERT_FALSE(mission.interact_relic(world, far_player));
+
+    // 2. Approaching near relic does NOT auto-retrieve on walkover
+    glm::vec3 near_player = glm::vec3(mission.vault().relic_pos) + glm::vec3(1.0f, 0.0f, 0.0f);
+    mission.update(0.1f, world, near_player);
+    ASSERT_FALSE(mission.is_relic_retrieved());
+
+    // 3. Player presses interact [E] in range -> successfully retrieves relic
+    ASSERT_TRUE(mission.can_interact_relic(near_player));
+    bool m_retrieved = mission.interact_relic(world, near_player);
+    ASSERT_TRUE(m_retrieved);
+    ASSERT_TRUE(mission.is_relic_retrieved());
+    uint8_t relic_mat = world.get_voxel(mission.vault().relic_pos.x, mission.vault().relic_pos.y, mission.vault().relic_pos.z).material_id;
+    ASSERT_EQ(relic_mat, MAT_AIR);
+    std::cout << "[PASS] VaultTest.MissionSystemInteractiveRelicPickup (out-of-range rejected, no auto-pickup, [E] interaction secured)" << std::endl;
 }
 
 int main() {

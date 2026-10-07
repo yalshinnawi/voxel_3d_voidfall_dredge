@@ -511,6 +511,7 @@ void HUD::add_floating_loot(const glm::vec3& world_pos, const std::string& text,
 }
 
 void HUD::draw_rect(float x, float y, float w, float h, const glm::vec4& color) {
+    if (m_headless) return;
     glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
     model = glm::scale(model, glm::vec3(w, h, 1.0f));
 
@@ -569,7 +570,7 @@ void HUD::trigger_hit_marker(bool is_critical, float damage) {
 }
 
 void HUD::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color) {
-    if (text.empty()) return;
+    if (m_headless || text.empty()) return;
 
     m_text_shader.use();
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
@@ -618,81 +619,502 @@ void HUD::draw_text_centered_fitted(const std::string& text, float box_x, float 
     draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color);
 }
 
-void HUD::render_crosshair(const PlayerController& player, const World& world) {
+void HUD::render_optical_scope_lens(
+    const PlayerController& player,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    const std::vector<SeismicBurrower>* burrowers
+) {
+    float zoom_prog = player.zoom_progress();
+    if (zoom_prog <= 0.01f || m_headless) return;
+
+    float sw = static_cast<float>(m_width);
+    float sh = static_cast<float>(m_height);
+    float cx = sw * 0.5f;
+    float cy = sh * 0.5f;
+    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
+
+    WeaponArchetype arch = player.weapon_archetype();
+
+    // Smooth ease-in for optical components
+    float lens_alpha = glm::clamp(zoom_prog * 1.25f, 0.0f, 1.0f);
+    float scope_mask_alpha = glm::clamp((zoom_prog - 0.15f) / 0.70f, 0.0f, 1.0f);
+
+    // Laser Rangefinder Calculation: raycast directly forward along delver line of sight
+    glm::vec3 eye = player.eye_position();
+    glm::vec3 dir = player.forward();
+    RaycastHit hit = world.raycast(eye, dir, 140.0f);
+
+    float target_range = hit.hit ? hit.distance : -1.0f;
+    std::string hostile_name = "";
+    float hostile_dist = -1.0f;
+
+    // Check if aiming directly at an active hostile entity
+    if (stalkers) {
+        for (const auto& s : *stalkers) {
+            if (s.is_dead()) continue;
+            glm::vec3 to_enemy = (s.position + glm::vec3(0.0f, 0.5f, 0.0f)) - eye;
+            float d = glm::length(to_enemy);
+            if (d > 0.5f && d < 120.0f) {
+                float dot = glm::dot(dir, to_enemy / d);
+                if (dot > 0.9982f) { // Within tight sight cone
+                    if (hostile_dist < 0.0f || d < hostile_dist) {
+                        hostile_dist = d;
+                        hostile_name = "VOID STALKER";
+                    }
+                }
+            }
+        }
+    }
+    if (burrowers) {
+        for (const auto& b : *burrowers) {
+            if (b.is_dead()) continue;
+            glm::vec3 to_enemy = (b.position + glm::vec3(0.0f, 1.0f, 0.0f)) - eye;
+            float d = glm::length(to_enemy);
+            if (d > 0.5f && d < 140.0f) {
+                float dot = glm::dot(dir, to_enemy / d);
+                if (dot > 0.9975f) {
+                    if (hostile_dist < 0.0f || d < hostile_dist) {
+                        hostile_dist = d;
+                        hostile_name = "SEISMIC BURROWER";
+                    }
+                }
+            }
+        }
+    }
+
+    if (arch == WeaponArchetype::NeedlerRailgun) {
+        // ====================================================================
+        // 1. SCOUT: NEEDLER RAILGUN - HIGH-PRECISION DELVER SNIPER SCOPE LENS
+        // ====================================================================
+        float lens_r = std::min(sw, sh) * 0.38f;
+
+        // 1.1 Scope Peripheral Vignette (Darkens peripheral edges while framing 3D scope and world)
+        if (scope_mask_alpha > 0.01f) {
+            glm::vec4 mask_col(0.01f, 0.015f, 0.02f, 0.65f * scope_mask_alpha);
+
+            // 4 Perimeter screen rectangles extending to display edges
+            draw_rect(0.0f, 0.0f, sw, cy - lens_r, mask_col);
+            draw_rect(0.0f, cy + lens_r, sw, sh - (cy + lens_r), mask_col);
+            draw_rect(0.0f, cy - lens_r, cx - lens_r, lens_r * 2.0f, mask_col);
+            draw_rect(cx + lens_r, cy - lens_r, sw - (cx + lens_r), lens_r * 2.0f, mask_col);
+
+            // Smooth circular aperture edge mask (ring of 48 trapezoids covering outer corners)
+            const int segs = 48;
+            float r_outer = std::sqrt(cx * cx + cy * cy) * 0.85f;
+            for (int i = 0; i < segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / segs));
+                float a2 = glm::radians((i + 1) * (360.0f / segs));
+                float cos1 = std::cos(a1), sin1 = std::sin(a1);
+                float cos2 = std::cos(a2), sin2 = std::sin(a2);
+
+                draw_triangle(cx + lens_r * cos1, cy + lens_r * sin1,
+                              cx + lens_r * cos2, cy + lens_r * sin2,
+                              cx + r_outer * cos2, cy + r_outer * sin2, mask_col);
+                draw_triangle(cx + lens_r * cos1, cy + lens_r * sin1,
+                              cx + r_outer * cos2, cy + r_outer * sin2,
+                              cx + r_outer * cos1, cy + r_outer * sin1, mask_col);
+            }
+        }
+
+        // 1.2 High-Grade Antireflective Optical Glass Coating Tint
+        {
+            glm::vec4 glass_tint(0.02f, 0.14f, 0.07f, 0.14f * lens_alpha);
+            const int fan_segs = 36;
+            for (int i = 0; i < fan_segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / fan_segs));
+                float a2 = glm::radians((i + 1) * (360.0f / fan_segs));
+                draw_triangle(cx, cy,
+                              cx + lens_r * std::cos(a1), cy + lens_r * std::sin(a1),
+                              cx + lens_r * std::cos(a2), cy + lens_r * std::sin(a2),
+                              glass_tint);
+            }
+
+            // Lens Edge Shadow Rim (Internal cylindrical vignette gradient)
+            glm::vec4 shadow_col(0.0f, 0.03f, 0.015f, 0.45f * lens_alpha);
+            for (int i = 0; i < fan_segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / fan_segs));
+                float a2 = glm::radians((i + 1) * (360.0f / fan_segs));
+                float cos1 = std::cos(a1), sin1 = std::sin(a1);
+                float cos2 = std::cos(a2), sin2 = std::sin(a2);
+                float r_in = lens_r - 18.0f * ui_scale;
+                draw_triangle(cx + r_in * cos1, cy + r_in * sin1,
+                              cx + lens_r * cos1, cy + lens_r * sin1,
+                              cx + lens_r * cos2, cy + lens_r * sin2, shadow_col);
+                draw_triangle(cx + r_in * cos1, cy + r_in * sin1,
+                              cx + lens_r * cos2, cy + lens_r * sin2,
+                              cx + r_in * cos2, cy + r_in * sin2, shadow_col);
+            }
+
+            // Diagonal Lens Reflection Arc (Upper right flare arc)
+            glm::vec4 flare_col(0.4f, 1.0f, 0.7f, 0.07f * lens_alpha);
+            float flare_r1 = lens_r * 0.72f;
+            float flare_r2 = lens_r * 0.88f;
+            for (int i = 28; i <= 38; ++i) {
+                float a1 = glm::radians(i * 10.0f - 360.0f);
+                float a2 = glm::radians((i + 1) * 10.0f - 360.0f);
+                draw_triangle(cx + flare_r1 * std::cos(a1), cy + flare_r1 * std::sin(a1),
+                              cx + flare_r2 * std::cos(a1), cy + flare_r2 * std::sin(a1),
+                              cx + flare_r2 * std::cos(a2), cy + flare_r2 * std::sin(a2), flare_col);
+                draw_triangle(cx + flare_r1 * std::cos(a1), cy + flare_r1 * std::sin(a1),
+                              cx + flare_r2 * std::cos(a2), cy + flare_r2 * std::sin(a2),
+                              cx + flare_r1 * std::cos(a2), cy + flare_r1 * std::sin(a2), flare_col);
+            }
+        }
+
+        // 1.3 Machined Metallic Scope Bezel Rings & Graduation Marks
+        {
+            glm::vec4 bezel_col(0.14f, 0.18f, 0.22f, 0.95f * lens_alpha);
+            glm::vec4 rim_highlight(0.35f, 0.45f, 0.52f, 0.85f * lens_alpha);
+            const int bezel_segs = 48;
+            for (int i = 0; i < bezel_segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / bezel_segs));
+                float a2 = glm::radians((i + 1) * (360.0f / bezel_segs));
+                draw_line_segment(cx + std::cos(a1) * lens_r, cy + std::sin(a1) * lens_r,
+                                  cx + std::cos(a2) * lens_r, cy + std::sin(a2) * lens_r,
+                                  3.5f * ui_scale, bezel_col);
+                draw_line_segment(cx + std::cos(a1) * (lens_r - 2.0f * ui_scale), cy + std::sin(a1) * (lens_r - 2.0f * ui_scale),
+                                  cx + std::cos(a2) * (lens_r - 2.0f * ui_scale), cy + std::sin(a2) * (lens_r - 2.0f * ui_scale),
+                                  1.2f * ui_scale, rim_highlight);
+            }
+
+            // Radial Hash Graduation Ticks around Bezel (Every 15°)
+            glm::vec4 hash_col(0.25f, 0.85f, 0.45f, 0.80f * lens_alpha);
+            for (int d = 0; d < 360; d += 15) {
+                float rad = glm::radians(static_cast<float>(d));
+                float c = std::cos(rad), s = std::sin(rad);
+                bool is_cardinal = (d % 90 == 0);
+                float tick_len = (is_cardinal ? 14.0f : 7.0f) * ui_scale;
+                float th = (is_cardinal ? 2.5f : 1.2f) * ui_scale;
+                glm::vec4 col = is_cardinal ? glm::vec4(0.20f, 1.0f, 0.50f, 0.95f * lens_alpha) : hash_col;
+                draw_line_segment(cx + c * (lens_r - tick_len), cy + s * (lens_r - tick_len),
+                                  cx + c * lens_r, cy + s * lens_r, th, col);
+            }
+        }
+
+        // 1.4 Precision Etched Marksman Reticle (Crosshairs, Mil-Dots, Center Needle)
+        {
+            glm::vec4 ret_col(0.15f, 1.0f, 0.45f, 0.90f * lens_alpha);
+            float inner_gap = 10.0f * ui_scale;
+
+            // Spanning Thin Stadia Lines with center aperture gap
+            draw_line_segment(cx - lens_r + 16.0f * ui_scale, cy, cx - inner_gap, cy, 1.0f, ret_col);
+            draw_line_segment(cx + inner_gap, cy, cx + lens_r - 16.0f * ui_scale, cy, 1.0f, ret_col);
+            draw_line_segment(cx, cy - lens_r + 16.0f * ui_scale, cx, cy - inner_gap, 1.0f, ret_col);
+            draw_line_segment(cx, cy + inner_gap, cx, cy + lens_r - 16.0f * ui_scale, 1.0f, ret_col);
+
+            // Center Precision Illuminated Dot & Framing Ring
+            draw_rect(cx - 1.5f * ui_scale, cy - 1.5f * ui_scale, 3.0f * ui_scale, 3.0f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, lens_alpha));
+            const int c_segs = 16;
+            for (int i = 0; i < c_segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / c_segs));
+                float a2 = glm::radians((i + 1) * (360.0f / c_segs));
+                draw_line_segment(cx + std::cos(a1) * inner_gap, cy + std::sin(a1) * inner_gap,
+                                  cx + std::cos(a2) * inner_gap, cy + std::sin(a2) * inner_gap,
+                                  1.0f, ret_col * 0.75f);
+            }
+
+            // Ballistic Mil-Dots & Hash Ticks along axes
+            for (int m = 1; m <= 5; ++m) {
+                float offset = m * 24.0f * ui_scale;
+                if (offset >= lens_r - 20.0f * ui_scale) break;
+                float tick_w = (m % 2 == 0) ? 6.0f * ui_scale : 3.5f * ui_scale;
+
+                // Horizontal ticks
+                draw_line_segment(cx - offset, cy - tick_w, cx - offset, cy + tick_w, 1.0f, ret_col);
+                draw_line_segment(cx + offset, cy - tick_w, cx + offset, cy + tick_w, 1.0f, ret_col);
+
+                // Vertical elevation ticks
+                draw_line_segment(cx - tick_w, cy - offset, cx + tick_w, cy - offset, 1.0f, ret_col);
+                draw_line_segment(cx - tick_w, cy + offset, cx + tick_w, cy + offset, 1.0f, ret_col);
+
+                // Elevation numbers next to major hashes
+                if (m % 2 == 0) {
+                    std::string m_num = std::to_string(m);
+                    draw_text(m_num, cx + tick_w + 3.0f * ui_scale, cy + offset - 4.0f * ui_scale, 0.65f * ui_scale, ret_col * 0.85f);
+                }
+            }
+
+            // Stadiametric Rangefinder Curve in Lower-Right Quadrant
+            float rf_start_x = cx + 35.0f * ui_scale;
+            float rf_start_y = cy + 50.0f * ui_scale;
+            draw_line_segment(rf_start_x, rf_start_y, rf_start_x + 90.0f * ui_scale, rf_start_y, 1.0f, ret_col * 0.65f);
+            for (int step = 0; step < 4; ++step) {
+                float sx = rf_start_x + step * 24.0f * ui_scale;
+                float sy_top = rf_start_y - (20.0f - step * 4.5f) * ui_scale;
+                draw_line_segment(sx, sy_top, sx, rf_start_y, 1.0f, ret_col * 0.65f);
+                std::string dist_lbl = std::to_string((step + 1) * 25);
+                draw_text(dist_lbl, sx - 4.0f * ui_scale, rf_start_y + 4.0f * ui_scale, 0.60f * ui_scale, ret_col * 0.65f);
+            }
+        }
+
+        // 1.5 Digital Delver Tactical Telemetry Overlay on Glass
+        {
+            // Top Left: Scope Optic Spec & Magnification
+            std::string mode_str = "// EM-RAIL MARKSING OPTIC [4.0X]";
+            draw_text(mode_str, cx - lens_r * 0.70f, cy - lens_r * 0.68f, 0.85f * ui_scale, Typography::COLOR_GREEN);
+
+            // Top Right: Laser Rangefinder & Hostile Lock
+            std::string rng_str;
+            glm::vec4 rng_col = Typography::COLOR_GREEN;
+            if (hostile_dist > 0.0f) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "[!] LOCK: %s [%.1fm]", hostile_name.c_str(), hostile_dist);
+                rng_str = buf;
+                rng_col = Typography::COLOR_CRIMSON;
+            } else if (target_range > 0.0f) {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "RNG: %.1fm", target_range);
+                rng_str = buf;
+            } else {
+                rng_str = "RNG: --- m";
+                rng_col = glm::vec4(0.4f, 0.7f, 0.5f, 0.8f);
+            }
+            float rng_w = FontRenderer::get_rendered_width(rng_str, 0.90f * ui_scale);
+            draw_text(rng_str, cx + lens_r * 0.70f - rng_w, cy - lens_r * 0.68f, 0.90f * ui_scale, rng_col);
+
+            // Bottom Center: Segmented Ammo / Capacitor Readout
+            std::string ammo_str = "RAIL BOLTS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+            float a_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
+            draw_pill(cx - a_w * 0.5f - 8.0f * ui_scale, cy + lens_r * 0.62f, a_w + 16.0f * ui_scale, 18.0f * ui_scale, Typography::COLOR_GREEN * 0.6f);
+            draw_text(ammo_str, cx - a_w * 0.5f, cy + lens_r * 0.62f + 2.0f * ui_scale, 0.95f * ui_scale, (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_GREEN));
+        }
+    } else if (arch == WeaponArchetype::PlasmaCarbine) {
+        // ====================================================================
+        // 2. VANGUARD: PLASMA CARBINE - TACTICAL HOLOGRAPHIC REFLEX OPTIC
+        // ====================================================================
+        float win_w = 340.0f * ui_scale;
+        float win_h = 240.0f * ui_scale;
+        float x0 = cx - win_w * 0.5f;
+        float y0 = cy - win_h * 0.5f;
+
+        // 2.1 Polarized Cyan Anti-Glare Glass Pane Fill
+        draw_rect(x0, y0, win_w, win_h, glm::vec4(0.02f, 0.08f, 0.16f, 0.14f * lens_alpha));
+
+        // Diagonal polarized glare sheen across optic
+        glm::vec4 glare_col(0.2f, 0.8f, 1.0f, 0.08f * lens_alpha);
+        draw_line_segment(x0 + 40.0f * ui_scale, y0 + 10.0f * ui_scale,
+                          x0 + win_w - 60.0f * ui_scale, y0 + win_h - 15.0f * ui_scale,
+                          22.0f * ui_scale, glare_col);
+
+        // 2.2 Heavy Composite Reflex Optic Frame
+        glm::vec4 hood_col(0.10f, 0.14f, 0.18f, 0.92f * lens_alpha);
+        glm::vec4 bevel_col(0.0f, 0.85f, 1.0f, 0.55f * lens_alpha);
+        float border_th = 6.0f * ui_scale;
+
+        // Outer beveled frame border
+        draw_rect(x0 - border_th, y0 - border_th, win_w + border_th * 2.0f, border_th, hood_col);
+        draw_rect(x0 - border_th, y0 + win_h, win_w + border_th * 2.0f, border_th, hood_col);
+        draw_rect(x0 - border_th, y0, border_th, win_h, hood_col);
+        draw_rect(x0 + win_w, y0, border_th, win_h, hood_col);
+
+        // Inner glowing glass bezel lines
+        draw_rect(x0, y0, win_w, 1.5f * ui_scale, bevel_col);
+        draw_rect(x0, y0 + win_h - 1.5f * ui_scale, win_w, 1.5f * ui_scale, bevel_col);
+        draw_rect(x0, y0, 1.5f * ui_scale, win_h, bevel_col);
+        draw_rect(x0 + win_w - 1.5f * ui_scale, y0, 1.5f * ui_scale, win_h, bevel_col);
+
+        // Corner chamfers / reinforce pads on the hood
+        float pad_sz = 14.0f * ui_scale;
+        draw_rect(x0 - border_th, y0 - border_th, pad_sz, pad_sz, hood_col * 1.3f);
+        draw_rect(x0 + win_w + border_th - pad_sz, y0 - border_th, pad_sz, pad_sz, hood_col * 1.3f);
+        draw_rect(x0 - border_th, y0 + win_h + border_th - pad_sz, pad_sz, pad_sz, hood_col * 1.3f);
+        draw_rect(x0 + win_w + border_th - pad_sz, y0 + win_h + border_th - pad_sz, pad_sz, pad_sz, hood_col * 1.3f);
+
+        // 2.3 Collimated Holographic Projection Reticle
+        glm::vec4 holo_col(0.08f, 0.95f, 1.0f, 0.95f * lens_alpha);
+        float ring_rad = 28.0f * ui_scale;
+
+        // Outer tactical ring
+        const int r_segs = 24;
+        for (int i = 0; i < r_segs; ++i) {
+            float a1 = glm::radians(i * (360.0f / r_segs));
+            float a2 = glm::radians((i + 1) * (360.0f / r_segs));
+            draw_line_segment(cx + std::cos(a1) * ring_rad, cy + std::sin(a1) * ring_rad,
+                              cx + std::cos(a2) * ring_rad, cy + std::sin(a2) * ring_rad,
+                              1.5f * ui_scale, holo_col * 0.85f);
+        }
+
+        // Center 2-MOA illuminated plasma pip
+        draw_rect(cx - 1.5f * ui_scale, cy - 1.5f * ui_scale, 3.0f * ui_scale, 3.0f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, lens_alpha));
+
+        // 4 Directional gate brackets
+        float b_gap = ring_rad + 4.0f * ui_scale;
+        float b_len = 12.0f * ui_scale;
+        draw_rect(cx - 1.0f, cy - b_gap - b_len, 2.0f, b_len, holo_col);
+        draw_rect(cx - 1.0f, cy + b_gap, 2.0f, b_len, holo_col);
+        draw_rect(cx - b_gap - b_len, cy - 1.0f, b_len, 2.0f, holo_col);
+        draw_rect(cx + b_gap, cy - 1.0f, b_len, 2.0f, holo_col);
+
+        // 2.4 Digital Holographic Telemetry inside Glass
+        std::string tag_str = "[REFLEX 2.0X]";
+        draw_text(tag_str, x0 + 10.0f * ui_scale, y0 + 10.0f * ui_scale, 0.85f * ui_scale, Typography::COLOR_CYAN);
+
+        std::string rng_str;
+        glm::vec4 rng_col = Typography::COLOR_CYAN;
+        if (hostile_dist > 0.0f) {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "[!] %s %.1fm", hostile_name.c_str(), hostile_dist);
+            rng_str = buf;
+            rng_col = Typography::COLOR_CRIMSON;
+        } else if (target_range > 0.0f) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "RNG: %.1fm", target_range);
+            rng_str = buf;
+        } else {
+            rng_str = "RNG: ---";
+        }
+        float r_w = FontRenderer::get_rendered_width(rng_str, 0.85f * ui_scale);
+        draw_text(rng_str, x0 + win_w - r_w - 10.0f * ui_scale, y0 + 10.0f * ui_scale, 0.85f * ui_scale, rng_col);
+
+        std::string ammo_str = "CARBINE: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+        float am_w = FontRenderer::get_rendered_width(ammo_str, 0.88f * ui_scale);
+        draw_text(ammo_str, cx - am_w * 0.5f, y0 + win_h - 20.0f * ui_scale, 0.88f * ui_scale, (player.weapon_ammo() <= 3 ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN));
+    } else {
+        // ====================================================================
+        // 3. DEMOLITIONIST: MAGMA SCATTERGUN - GHOST-RING & THERMAL SPREAD OPTIC
+        // ====================================================================
+        float ring_rad = 80.0f * ui_scale;
+
+        // 3.1 Amber Thermal Glass Tint
+        {
+            glm::vec4 thermal_tint(0.20f, 0.08f, 0.02f, 0.12f * lens_alpha);
+            const int fan_segs = 32;
+            for (int i = 0; i < fan_segs; ++i) {
+                float a1 = glm::radians(i * (360.0f / fan_segs));
+                float a2 = glm::radians((i + 1) * (360.0f / fan_segs));
+                draw_triangle(cx, cy,
+                              cx + ring_rad * std::cos(a1), cy + ring_rad * std::sin(a1),
+                              cx + ring_rad * std::cos(a2), cy + ring_rad * std::sin(a2),
+                              thermal_tint);
+            }
+        }
+
+        // 3.2 Heavy Cast-Iron Ghost-Ring Bezel
+        glm::vec4 iron_col(0.18f, 0.15f, 0.14f, 0.95f * lens_alpha);
+        glm::vec4 heat_rim(1.0f, 0.60f, 0.10f, 0.60f * lens_alpha);
+        const int ring_segs = 36;
+        for (int i = 0; i < ring_segs; ++i) {
+            float a1 = glm::radians(i * (360.0f / ring_segs));
+            float a2 = glm::radians((i + 1) * (360.0f / ring_segs));
+            draw_line_segment(cx + std::cos(a1) * ring_rad, cy + std::sin(a1) * ring_rad,
+                              cx + std::cos(a2) * ring_rad, cy + std::sin(a2) * ring_rad,
+                              4.5f * ui_scale, iron_col);
+            draw_line_segment(cx + std::cos(a1) * (ring_rad - 2.0f * ui_scale), cy + std::sin(a1) * (ring_rad - 2.0f * ui_scale),
+                              cx + std::cos(a2) * (ring_rad - 2.0f * ui_scale), cy + std::sin(a2) * (ring_rad - 2.0f * ui_scale),
+                              1.2f * ui_scale, heat_rim);
+        }
+
+        // Illuminated Tritium Amber Alignment Dots on rear ring wings
+        draw_rect(cx - ring_rad - 2.0f * ui_scale, cy - 2.0f * ui_scale, 5.0f * ui_scale, 5.0f * ui_scale, Typography::COLOR_AMBER);
+        draw_rect(cx + ring_rad - 2.0f * ui_scale, cy - 2.0f * ui_scale, 5.0f * ui_scale, 5.0f * ui_scale, Typography::COLOR_AMBER);
+
+        // Center Front Sight Post & Glowing Molten Thermite Bead
+        draw_rect(cx - 2.0f * ui_scale, cy, 4.0f * ui_scale, 16.0f * ui_scale, iron_col);
+        draw_rect(cx - 2.5f * ui_scale, cy - 2.5f * ui_scale, 5.0f * ui_scale, 5.0f * ui_scale, glm::vec4(1.0f, 0.65f, 0.10f, lens_alpha));
+        draw_rect(cx - 1.0f * ui_scale, cy - 1.0f * ui_scale, 2.0f * ui_scale, 2.0f * ui_scale, glm::vec4(1.0f, 1.0f, 0.9f, lens_alpha));
+
+        // 3.3 Dynamic Buckshot Dispersion Ring (Showing actual pellet cone)
+        float spread_rad = 36.0f * ui_scale;
+        for (int i = 0; i < 16; ++i) {
+            float a1 = glm::radians(i * 22.5f);
+            float a2 = glm::radians(i * 22.5f + 12.0f);
+            draw_line_segment(cx + std::cos(a1) * spread_rad, cy + std::sin(a1) * spread_rad,
+                              cx + std::cos(a2) * spread_rad, cy + std::sin(a2) * spread_rad,
+                              1.5f * ui_scale, Typography::COLOR_AMBER * 0.75f);
+        }
+
+        // 3.4 Telemetry Text
+        std::string mode_str = "[MAGMA SCATTER: 1.5X FOCUS]";
+        draw_text_centered(mode_str, cx - 120.0f * ui_scale, cy - ring_rad - 22.0f * ui_scale, 240.0f * ui_scale, 18.0f * ui_scale, 0.88f * ui_scale, Typography::COLOR_AMBER);
+
+        std::string shell_str = "SHELLS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+        draw_text_centered(shell_str, cx - 100.0f * ui_scale, cy + ring_rad + 8.0f * ui_scale, 200.0f * ui_scale, 18.0f * ui_scale, 0.92f * ui_scale, (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_AMBER));
+    }
+}
+
+void HUD::render_crosshair(
+    const PlayerController& player,
+    const World& world,
+    const MissionSystem* mission,
+    const std::vector<VoidStalker>* stalkers,
+    const std::vector<SeismicBurrower>* burrowers
+) {
     float cx = static_cast<float>(m_width) / 2.0f;
     float cy = static_cast<float>(m_height) / 2.0f;
     float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
     if (player.active_tool() == ToolSlot::CombatWeapon) {
-        // Combat Tactical Reticle tailored to weapon archetype
-        WeaponArchetype arch = player.weapon_archetype();
         float zoom_prog = player.zoom_progress();
-        float reticle_rad = (arch == WeaponArchetype::MagmaScattergun) ? (18.0f * ui_scale) :
-                            (arch == WeaponArchetype::NeedlerRailgun)  ? (16.0f * ui_scale) : (12.0f * ui_scale);
 
-        // Dynamically tighten reticle brackets during ADS zoom to visually reflect tighter spread
-        reticle_rad = glm::mix(reticle_rad, reticle_rad * 0.60f, zoom_prog);
-
-        glm::vec4 theme_col = (arch == WeaponArchetype::MagmaScattergun) ? Typography::COLOR_AMBER :
-                              (arch == WeaponArchetype::NeedlerRailgun)  ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
-        glm::vec4 ret_col = player.is_firing_weapon() ? glm::vec4(1.0f, 0.4f, 0.2f, 1.0f) : theme_col;
-
-        if (arch == WeaponArchetype::MagmaScattergun) {
-            // Wide circular spread brackets
-            draw_rect(cx - reticle_rad, cy - 4.0f * ui_scale, 2.0f, 8.0f * ui_scale, ret_col);
-            draw_rect(cx + reticle_rad - 2.0f, cy - 4.0f * ui_scale, 2.0f, 8.0f * ui_scale, ret_col);
-            draw_rect(cx - 4.0f * ui_scale, cy - reticle_rad, 8.0f * ui_scale, 2.0f, ret_col);
-            draw_rect(cx - 4.0f * ui_scale, cy + reticle_rad - 2.0f, 8.0f * ui_scale, 2.0f, ret_col);
-        } else if (arch == WeaponArchetype::NeedlerRailgun) {
-            // Precision sniper crosshairs with mil-dots
-            float line_len = glm::mix(reticle_rad, reticle_rad * 3.0f, zoom_prog);
-            draw_rect(cx - line_len, cy - 0.5f, line_len * 2.0f, 1.0f, ret_col);
-            draw_rect(cx - 0.5f, cy - line_len, 1.0f, line_len * 2.0f, ret_col);
-            draw_rect(cx - 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
-            draw_rect(cx + 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
-            if (zoom_prog > 0.3f) {
-                // Secondary optical mil-dots when scoped
-                draw_rect(cx - 16.0f * ui_scale, cy - 2.0f * ui_scale, 1.0f, 4.0f * ui_scale, ret_col);
-                draw_rect(cx + 16.0f * ui_scale, cy - 2.0f * ui_scale, 1.0f, 4.0f * ui_scale, ret_col);
-                draw_rect(cx - 2.0f * ui_scale, cy - 16.0f * ui_scale, 4.0f * ui_scale, 1.0f, ret_col);
-                draw_rect(cx - 2.0f * ui_scale, cy + 16.0f * ui_scale, 4.0f * ui_scale, 1.0f, ret_col);
-            }
-        } else {
-            // Tactical box brackets for Plasma Carbine
-            draw_rect(cx - reticle_rad, cy - 1.0f, 6.0f * ui_scale, 2.0f, ret_col);
-            draw_rect(cx + reticle_rad - 6.0f * ui_scale, cy - 1.0f, 6.0f * ui_scale, 2.0f, ret_col);
-            draw_rect(cx - 1.0f, cy - reticle_rad, 2.0f, 6.0f * ui_scale, ret_col);
-            draw_rect(cx - 1.0f, cy + reticle_rad - 6.0f * ui_scale, 2.0f, 6.0f * ui_scale, ret_col);
+        // 1. Dedicated Optical Scope & Lens Overlay (Smooth Aim-Down-Sights transition)
+        if (zoom_prog > 0.01f) {
+            render_optical_scope_lens(player, world, stalkers, burrowers);
         }
 
-        // Center dot
-        draw_rect(cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, Typography::COLOR_PRIMARY);
+        // 2. Hipfire Reticle Elements (Smoothly fades out during ADS zoom to eliminate visual clutter)
+        float hip_alpha = std::clamp(1.0f - zoom_prog * 1.5f, 0.0f, 1.0f);
+        if (hip_alpha > 0.02f) {
+            WeaponArchetype arch = player.weapon_archetype();
+            float reticle_rad = (arch == WeaponArchetype::MagmaScattergun) ? (18.0f * ui_scale) :
+                                (arch == WeaponArchetype::NeedlerRailgun)  ? (16.0f * ui_scale) : (12.0f * ui_scale);
 
-        // Ammo counter pill below crosshair
-        std::string ammo_str;
-        glm::vec4 ammo_col = theme_col;
-        bool is_reloading = (m_show_reload || player.is_reloading()) && (player.weapon_ammo() < player.weapon_max_ammo());
-        if (is_reloading) {
-            float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
-            int sec = static_cast<int>(std::ceil(rem_time));
-            ammo_str = "RELOADING: " + std::to_string(sec) + "s";
-            ammo_col = Typography::COLOR_AMBER;
-        } else {
-            ClearReloadStatus();
-            ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-            if (player.zoom_progress() > 0.3f) {
-                float mag = 1.0f / std::max(0.01f, player.weapon_stats().zoom_fov_multiplier);
-                char mag_buf[16];
-                std::snprintf(mag_buf, sizeof(mag_buf), " [%.1fX]", mag);
-                ammo_str += mag_buf;
+            reticle_rad = glm::mix(reticle_rad, reticle_rad * 0.60f, zoom_prog);
+
+            glm::vec4 theme_col = (arch == WeaponArchetype::MagmaScattergun) ? Typography::COLOR_AMBER :
+                                  (arch == WeaponArchetype::NeedlerRailgun)  ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
+            glm::vec4 ret_col = player.is_firing_weapon() ? glm::vec4(1.0f, 0.4f, 0.2f, 1.0f) : theme_col;
+            ret_col.a *= hip_alpha;
+
+            if (arch == WeaponArchetype::MagmaScattergun) {
+                // Wide circular spread brackets
+                draw_rect(cx - reticle_rad, cy - 4.0f * ui_scale, 2.0f, 8.0f * ui_scale, ret_col);
+                draw_rect(cx + reticle_rad - 2.0f, cy - 4.0f * ui_scale, 2.0f, 8.0f * ui_scale, ret_col);
+                draw_rect(cx - 4.0f * ui_scale, cy - reticle_rad, 8.0f * ui_scale, 2.0f, ret_col);
+                draw_rect(cx - 4.0f * ui_scale, cy + reticle_rad - 2.0f, 8.0f * ui_scale, 2.0f, ret_col);
+            } else if (arch == WeaponArchetype::NeedlerRailgun) {
+                // Precision marksman crosshair
+                float line_len = reticle_rad;
+                draw_rect(cx - line_len, cy - 0.5f, line_len * 2.0f, 1.0f, ret_col);
+                draw_rect(cx - 0.5f, cy - line_len, 1.0f, line_len * 2.0f, ret_col);
+                draw_rect(cx - 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
+                draw_rect(cx + 8.0f * ui_scale, cy - 3.0f * ui_scale, 1.0f, 6.0f * ui_scale, ret_col);
+            } else {
+                // Tactical box brackets for Plasma Carbine
+                draw_rect(cx - reticle_rad, cy - 1.0f, 6.0f * ui_scale, 2.0f, ret_col);
+                draw_rect(cx + reticle_rad - 6.0f * ui_scale, cy - 1.0f, 6.0f * ui_scale, 2.0f, ret_col);
+                draw_rect(cx - 1.0f, cy - reticle_rad, 2.0f, 6.0f * ui_scale, ret_col);
+                draw_rect(cx - 1.0f, cy + reticle_rad - 6.0f * ui_scale, 2.0f, 6.0f * ui_scale, ret_col);
             }
-            if (player.weapon_ammo() <= 2) {
-                ammo_col = Typography::COLOR_CRIMSON;
+
+            // Center dot
+            glm::vec4 dot_col = Typography::COLOR_PRIMARY;
+            dot_col.a *= hip_alpha;
+            draw_rect(cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, dot_col);
+
+            // Ammo counter pill below crosshair
+            std::string ammo_str;
+            glm::vec4 ammo_col = theme_col;
+            ammo_col.a *= hip_alpha;
+            bool is_reloading = (m_show_reload || player.is_reloading()) && (player.weapon_ammo() < player.weapon_max_ammo());
+            if (is_reloading) {
+                float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
+                int sec = static_cast<int>(std::ceil(rem_time));
+                ammo_str = "RELOADING: " + std::to_string(sec) + "s";
+                ammo_col = Typography::COLOR_AMBER;
+                ammo_col.a *= hip_alpha;
+            } else {
+                ClearReloadStatus();
+                ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+                if (player.weapon_ammo() <= 2) {
+                    ammo_col = Typography::COLOR_CRIMSON;
+                    ammo_col.a *= hip_alpha;
+                }
             }
+            float t_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
+            draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f * hip_alpha));
+            draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
         }
-        float t_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
-        draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f));
-        draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
     } else {
         // Clear reload status immediately upon switching to Mining Drill (Slot 1)
         ClearReloadStatus();
@@ -793,8 +1215,26 @@ void HUD::render_crosshair(const PlayerController& player, const World& world) {
         }
     }
 
-    // Interactive target query within 5 units (Mining tools only)
-    if (player.active_tool() != ToolSlot::CombatWeapon) {
+    // Interactive target query
+    bool relic_interact_prompt = false;
+    if (mission && mission->vault().exists && mission->is_vault_breached() && !mission->is_relic_retrieved()) {
+        glm::vec3 relic_world = glm::vec3(mission->vault().relic_pos) + glm::vec3(0.5f);
+        float dist_to_relic = glm::distance(player.position(), relic_world);
+        RaycastHit look_hit = player.get_look_target(world, 5.0f);
+        if (dist_to_relic <= 3.8f || (look_hit.hit && look_hit.block_pos == mission->vault().relic_pos)) {
+            relic_interact_prompt = true;
+        }
+    }
+
+    if (relic_interact_prompt) {
+        std::string prompt = "[E] RETRIEVE PRECURSOR RELIC";
+        glm::vec4 prompt_col = Typography::COLOR_CYAN;
+        float text_w = FontRenderer::get_rendered_width(prompt, 1.15f * ui_scale);
+        float pill_w = text_w + 24.0f * ui_scale;
+        float pill_h = 24.0f * ui_scale;
+        draw_pill(cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, prompt_col * 0.55f);
+        draw_text_centered(prompt, cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, 1.15f * ui_scale, prompt_col);
+    } else if (player.active_tool() != ToolSlot::CombatWeapon) {
         RaycastHit hit = player.get_look_target(world, 5.0f);
         if (hit.hit && hit.voxel.is_solid()) {
             std::string prompt;
@@ -910,6 +1350,7 @@ void HUD::render(
     const std::vector<SeismicBurrower>* burrowers,
     const class MissionSystem* mission
 ) {
+    if (m_headless) return;
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -922,7 +1363,7 @@ void HUD::render(
     float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
 
     // 1. Center Crosshair & Simplified Interactive Prompt
-    render_crosshair(player, world);
+    render_crosshair(player, world, mission, stalkers, burrowers);
 
     // 2. Discrete Toast Queue in Right Margin Above Resources
     render_loot_toasts();
@@ -974,24 +1415,26 @@ void HUD::render(
         // Center reticle notch (active heading indicator)
         draw_rect(cx - 1.0f, comp_y, 2.0f, comp_h, Typography::COLOR_AMBER);
 
-        // Extraction Beacon / Drop Pod Waypoint Blip with Euclidean Distance on Compass Ribbon
-        glm::vec3 to_beacon = extraction.beacon_position() - player.position();
-        float b_dist = glm::length(to_beacon);
-        float b_angle = glm::degrees(std::atan2(to_beacon.x, -to_beacon.z));
-        float b_heading = std::fmod(b_angle + 360.0f, 360.0f);
-        float b_diff = b_heading - current_heading;
-        while (b_diff < -180.0f) b_diff += 360.0f;
-        while (b_diff > 180.0f) b_diff -= 360.0f;
+        // Extraction Beacon / Drop Pod Waypoint Blip with Euclidean Distance on Compass Ribbon (only when active)
+        if (extraction.phase() == ExtractionPhase::BeaconDeployed || extraction.phase() == ExtractionPhase::PodLanded) {
+            glm::vec3 to_beacon = extraction.beacon_position() - player.position();
+            float b_dist = glm::length(to_beacon);
+            float b_angle = glm::degrees(std::atan2(to_beacon.x, -to_beacon.z));
+            float b_heading = std::fmod(b_angle + 360.0f, 360.0f);
+            float b_diff = b_heading - current_heading;
+            while (b_diff < -180.0f) b_diff += 360.0f;
+            while (b_diff > 180.0f) b_diff -= 360.0f;
 
-        float clamped_diff = std::clamp(b_diff, -fov_range, fov_range);
-        float b_x = cx + (clamped_diff / fov_range) * (comp_w * 0.46f);
-        bool is_landed = (extraction.phase() == ExtractionPhase::PodLanded);
-        glm::vec4 b_col = is_landed ? Typography::COLOR_GREEN : Typography::COLOR_AMBER;
-        draw_rect(b_x - 2.0f, comp_y + 1.0f, 4.0f, comp_h - 2.0f, b_col);
+            float clamped_diff = std::clamp(b_diff, -fov_range, fov_range);
+            float b_x = cx + (clamped_diff / fov_range) * (comp_w * 0.46f);
+            bool is_landed = (extraction.phase() == ExtractionPhase::PodLanded);
+            glm::vec4 b_col = is_landed ? Typography::COLOR_GREEN : Typography::COLOR_AMBER;
+            draw_rect(b_x - 2.0f, comp_y + 1.0f, 4.0f, comp_h - 2.0f, b_col);
 
-        if (std::abs(b_diff) <= fov_range) {
-            std::string dist_str = std::to_string(static_cast<int>(b_dist)) + "m";
-            draw_text(dist_str, b_x - 6.0f * ui_scale, comp_y + comp_h + 1.0f, 0.70f * ui_scale, b_col);
+            if (std::abs(b_diff) <= fov_range) {
+                std::string dist_str = std::to_string(static_cast<int>(b_dist)) + "m";
+                draw_text(dist_str, b_x - 6.0f * ui_scale, comp_y + comp_h + 1.0f, 0.70f * ui_scale, b_col);
+            }
         }
 
         // Discovered Voidite clusters and high-value mineral anomalies on Compass Ribbon
@@ -1036,7 +1479,7 @@ void HUD::render(
 
         // Row 1: Voidite Haul & Quota Progress
         float r1_y = mf_y + 22.0f * ui_scale;
-        int target = (current_level == 1) ? inventory.target_voidite : (current_level == 2 ? 35 : 50);
+        int target = inventory.target_voidite > 0 ? inventory.target_voidite : (current_level == 1 ? 25 : (current_level == 2 ? 30 : 45));
         bool quota_met = (inventory.voidite >= target);
 
         std::string v_str = "VOIDITE: " + std::to_string(inventory.voidite) + " / " + std::to_string(target);
@@ -1084,7 +1527,7 @@ void HUD::render(
     // Left: Objective / Extraction State
     std::string obj_str;
     glm::vec4 obj_col = Typography::COLOR_PRIMARY;
-    int target_val = (current_level == 1) ? inventory.target_voidite : (current_level == 2 ? 35 : 50);
+    int target_val = inventory.target_voidite > 0 ? inventory.target_voidite : (current_level == 1 ? 25 : (current_level == 2 ? 30 : 45));
     bool quota_achieved = (inventory.voidite >= target_val);
 
     if (extraction.phase() == ExtractionPhase::BeaconDeployed) {
@@ -1643,7 +2086,7 @@ void HUD::render(
                     glBindVertexArray(0);
 
                     std::string label = (mission->vault().state == VaultObjectiveState::Breached)
-                        ? ("[!] PRECURSOR RELIC [" + std::to_string(static_cast<int>(dist)) + "m] [INTERACT TO SECURE]")
+                        ? (dist <= 3.8f ? "[!] PRECURSOR RELIC [IN RANGE] [PRESS E TO RETRIEVE]" : ("[!] PRECURSOR RELIC [" + std::to_string(static_cast<int>(dist)) + "m] [PRESS E TO RETRIEVE]"))
                         : ("[!] VAULT BULKHEAD [" + std::to_string(static_cast<int>(dist)) + "m] [BREACH WITH SATCHEL CHARGE]");
 
                     float text_w = FontRenderer::get_rendered_width(label, 1.0f * ui_scale);
@@ -1978,6 +2421,7 @@ void HUD::render(
         BindingEntry bindings[] = {
             {"[WASD]",         "Locomotion & Strafing",       Typography::COLOR_PRIMARY},
             {"[SPACE]",        "Jump / Jetpack Thruster",     Typography::COLOR_PRIMARY},
+            {"[E]",            "Interact / Retrieve / Grapple Reel", Typography::COLOR_GREEN},
             {"[L-CTRL]",       "Crouch (Acoustic Stealth)",   Typography::COLOR_GREEN},
             {"[1-3 / MWHEEL]", "Drill / Weapon / Satchel",    Typography::COLOR_CYAN},
             {"[LMB]",          "Mine Voxel / Attack Fire",    Typography::COLOR_AMBER},
@@ -1990,7 +2434,7 @@ void HUD::render(
             {"[H / F1]",       "Toggle This Field Manual",    Typography::COLOR_PRIMARY}
         };
 
-        float b_step = (body_h - 22.0f * ui_scale) / 12.0f;
+        float b_step = (body_h - 22.0f * ui_scale) / 13.0f;
         float key_w = std::clamp(112.0f * ui_scale, 96.0f, 132.0f);
         float by_bind = cur_y + 24.0f * ui_scale;
         for (const auto& b : bindings) {

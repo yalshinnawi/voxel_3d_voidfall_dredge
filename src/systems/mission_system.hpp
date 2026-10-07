@@ -42,8 +42,14 @@ public:
     /// Checks if a satchel charge detonation at (blast_pos, radius) breaches the vault door
     bool check_satchel_vault_breach(World& world, const glm::vec3& blast_pos, float blast_radius);
 
-    /// Checks player proximity to relic or vault door to update objective discovery and pickup
+    /// Checks player proximity to vault door to update objective discovery
     void update(float dt, World& world, const glm::vec3& player_pos);
+
+    /// Checks if player is close enough to interactively retrieve the precursor relic
+    bool can_interact_relic(const glm::vec3& player_pos, float max_dist = 3.8f) const;
+
+    /// Interacts with the relic to retrieve it from the world
+    bool interact_relic(World& world, const glm::vec3& player_pos, float max_dist = 3.8f);
 
     /// Trigger reactive gas ignition: burns away MAT_GAS in blast radius, incinerates nearby stalkers
     int ignite_gas_pocket(World& world, const glm::vec3& blast_pos, float blast_radius, VoidStalkerManager& stalkers);

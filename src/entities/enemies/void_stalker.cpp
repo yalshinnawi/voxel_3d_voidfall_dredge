@@ -255,6 +255,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         if (s.state == StalkerState::Dead) continue;
 
         if (s.state == StalkerState::Dying) {
+            s.hit_flash_timer = 0.0f;
             s.death_timer += dt;
             s.velocity.y -= 18.0f * dt; // Cavern gravity
             s.position += s.velocity * dt;
@@ -308,26 +309,45 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             s.pitch = std::atan2(to_player.y, horiz_dist);
         }
 
-        // Dynamic Surface Sampling & Contact Normal Detection (6 orthogonal directions)
-        SurfaceContactSample sample = AberrantAI::sample_surface_normal(s.position, world, 1.4f);
-        s.contact_normal = sample.contact_normal;
-        s.m_targetUpVector = glm::normalize(s.contact_normal);
+        // Dynamic Surface Sampling & Contact Normal Detection with debounced hysteresis
+        s.surface_cooldown = std::max(0.0f, s.surface_cooldown - dt);
+        s.hit_surface_lock_timer = std::max(0.0f, s.hit_surface_lock_timer - dt);
 
-        // Traversal State Machine Transition with 0.2s crossfade
-        if (sample.surface_state != s.target_surface_state) {
+        SurfaceContactSample sample;
+        if (s.hit_surface_lock_timer > 0.0f) {
+            // When recovering from hit/shot, lock firmly to floor to eliminate rapid surface flipping jitter
+            sample.surface_state = StalkerSurfaceState::FLOOR;
+            sample.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            sample.distance = 0.05f;
+            sample.has_contact = true;
+        } else {
+            sample = AberrantAI::sample_surface_normal(s.position, world, 1.4f, s.surface_state);
+        }
+
+        // Debounce state transitions: only allow shifting if cooldown has elapsed
+        if (sample.surface_state != s.target_surface_state && s.surface_cooldown <= 0.0f) {
             s.prev_surface_state = s.target_surface_state;
             s.target_surface_state = sample.surface_state;
             s.surface_state = StalkerSurfaceState::TRANSITIONING;
             s.surface_transition_timer = 0.0f;
+            s.surface_cooldown = 0.5f; // Minimum 0.5s between surface transitions
         }
 
         if (s.surface_transition_timer < 0.2f) {
             s.surface_transition_timer += dt;
+            // Smoothly blend contact normal across transition window instead of snapping
+            float blend = std::clamp(s.surface_transition_timer / 0.2f, 0.0f, 1.0f);
+            s.contact_normal = glm::normalize(glm::mix(s.contact_normal, sample.contact_normal, blend));
+            s.m_targetUpVector = s.contact_normal;
             if (s.surface_transition_timer >= 0.2f) {
                 s.surface_state = s.target_surface_state;
+                s.contact_normal = sample.contact_normal;
+                s.m_targetUpVector = sample.contact_normal;
             }
         } else {
             s.surface_state = s.target_surface_state;
+            s.contact_normal = glm::normalize(glm::mix(s.contact_normal, sample.contact_normal, std::clamp(dt * 12.0f, 0.0f, 1.0f)));
+            s.m_targetUpVector = s.contact_normal;
         }
 
         // Animation controller updates & velocity-proportional play rate modulation
@@ -337,10 +357,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
         // Smooth Transform & Model Re-Orientation (Quaternion Slerp without snapping)
         glm::vec3 fallback_fwd(std::sin(s.yaw), 0.0f, std::cos(s.yaw));
-        s.m_targetRotation = AberrantAI::calculate_orientation(s.velocity, s.contact_normal, fallback_fwd);
-        s.m_currentRotation = AberrantAI::slerp_rotation(s.m_currentRotation, s.m_targetRotation, dt, 8.0f);
+        // Anti-jitter: When engaged or recovering from shot knockback, keep facing forward toward target
+        glm::vec3 orient_fwd = (s.hit_flash_timer > 0.0f || s.is_engaged_state()) ? fallback_fwd : s.velocity;
+        s.m_targetRotation = AberrantAI::calculate_orientation(orient_fwd, s.contact_normal, fallback_fwd);
+        s.m_currentRotation = AberrantAI::slerp_rotation(s.m_currentRotation, s.m_targetRotation, dt, 10.0f);
 
-        // Surface Snapping Offset
+        // Surface Snapping Offset smoothly interpolated
         glm::vec3 target_offset = AberrantAI::compute_surface_snapping_offset(s.surface_state, s.contact_normal);
         s.surface_offset = glm::mix(s.surface_offset, target_offset, std::clamp(dt * 8.0f, 0.0f, 1.0f));
 
@@ -362,16 +384,24 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
         for (const auto& snd : sound_events) {
             float snd_dist = glm::distance(s.position, snd.position);
-            // Solid rock dampens sound propagation by 35%
+            // Subterranean rock transmits acoustic vibrations effectively (0.80x dampening)
             bool sound_los = has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f), snd.position, world);
-            float effective_radius = snd.audible_radius * (sound_los ? 1.0f : 0.65f);
+            float effective_radius = snd.audible_radius * (sound_los ? 1.0f : 0.80f);
 
             if (snd_dist <= effective_radius) {
-                float salience = (snd.intensity * (sound_los ? 1.0f : 0.65f)) / std::max(1.0f, snd_dist);
-                if (snd.type == SoundEventType::DemolitionBlast || snd.type == SoundEventType::SeismicTremor) {
-                    salience *= 3.0f; // Massive concussive detonation/tremor heavily commands attention
+                float salience = (snd.intensity * (sound_los ? 1.0f : 0.80f)) / std::max(1.0f, snd_dist);
+                if (snd.type == SoundEventType::Gunshot) {
+                    salience *= 3.5f; // Gunfire muzzle blast commands immediate predatory attention!
+                } else if (snd.type == SoundEventType::DemolitionBlast || snd.type == SoundEventType::SeismicTremor) {
+                    salience *= 3.5f; // Massive concussive detonation/tremor heavily commands attention
                 } else if (snd.type == SoundEventType::BulletImpact) {
-                    salience *= 1.8f; // Bullet impact distraction
+                    salience *= 2.2f; // Bullet impact distraction
+                } else if (snd.type == SoundEventType::DrillVibration) {
+                    salience *= 2.5f; // Drilling vibration
+                } else if (snd.type == SoundEventType::FootstepSprint) {
+                    salience *= 2.0f;
+                } else if (snd.type == SoundEventType::FootstepWalk) {
+                    salience *= 1.5f;
                 }
 
                 if (salience > best_salience) {
@@ -381,11 +411,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             }
         }
 
-        // Fallback acoustic detection for continuous drill grinding or high global noise
-        if (!best_sound && (player_is_drilling || noise_level_pct > 35.0f)) {
+        // Fallback acoustic detection for continuous drill grinding or elevated global noise
+        if (!best_sound && (player_is_drilling || noise_level_pct > 25.0f)) {
             bool sound_path_clear = has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f), player_pos + glm::vec3(0.0f, 0.7f, 0.0f), world);
-            float obstruction_factor = sound_path_clear ? 1.0f : 0.50f;
-            float effective_hearing_radius = (player_is_drilling ? 18.0f : (8.0f + (noise_level_pct / 100.0f) * 10.0f)) * obstruction_factor;
+            float obstruction_factor = sound_path_clear ? 1.0f : 0.75f;
+            float effective_hearing_radius = (player_is_drilling ? 24.0f : (12.0f + (noise_level_pct / 100.0f) * 16.0f)) * obstruction_factor;
             if (dist_to_player <= effective_hearing_radius) {
                 // Synthetic continuous sound event centered at player
                 s.investigation_target = player_pos;
@@ -405,23 +435,23 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         // ─── 2. Visual & Line-of-Sight Perception Processing ─────────────
         // Check headlamp cone illumination
         s.is_in_light = headlamp_on &&
-                        dist_to_player < 16.0f &&
-                        is_in_headlamp(s.position, player_pos, headlamp_dir, 28.0f);
+                        dist_to_player < 22.0f &&
+                        is_in_headlamp(s.position, player_pos, headlamp_dir, 32.0f);
 
         // Raycast Line of Sight from stalker eyes to delver torso
         bool los = has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f), player_pos + glm::vec3(0.0f, 0.7f, 0.0f), world);
         s.has_player_los = los;
 
         // Visual detection range (shadow vs light vs stealth crouch)
-        float visual_range = 10.0f;
+        float visual_range = 12.0f;
         if (s.is_pursuing_attacker) {
             visual_range = s.pursuit_break_dist; // High alert predator pursuit tracking
         } else if (s.is_in_light) {
-            visual_range = 18.0f; // Directly lit up by flashlight beam
+            visual_range = 22.0f; // Directly lit up by flashlight beam
         } else if (player_is_crouching) {
             visual_range = 5.2f;  // Delver crouching in dark shadows has high visual concealment
-        } else if (noise_level_pct > 30.0f || player_is_drilling) {
-            visual_range = 14.0f; // Agitated alertness
+        } else if (noise_level_pct > 25.0f || player_is_drilling || s.state == StalkerState::Investigating) {
+            visual_range = 20.0f; // Agitated alertness
         }
 
         // Tactile proximity trigger: physically colliding within 2.2m senses warmth/contact
@@ -461,15 +491,10 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         switch (s.state) {
 
         case StalkerState::Roosting: {
-            // Roosting enemies remain stationary clamped to surfaces
+            // Roosting enemies remain stationary clamped to surfaces until disturbed
             s.velocity = glm::vec3(0.0f);
 
             bool directly_damaged = (s.is_pursuing_attacker || s.hp < s.max_hp || s.hit_flash_timer > 0.0f);
-            bool sound_los = has_line_of_sight(s.position, player_pos, world);
-            bool loud_sound = (best_sound && best_sound->intensity > 60.0f && (dist_to_player <= (sound_los ? 28.0f : 14.0f)));
-            bool loud_drilling = (player_is_drilling && dist_to_player <= 18.0f && sound_los);
-            bool acoustic_spike = loud_sound || loud_drilling || (noise_level_pct >= 75.0f && dist_to_player <= 16.0f);
-
             if (directly_damaged) {
                 // Disturbed by direct player fire -> immediately enter combat
                 s.state = StalkerState::Stalking;
@@ -478,40 +503,44 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 s.is_pursuing_attacker = true;
                 s.just_spotted_player = true;
                 result.any_spotted = true;
+                s.surface_state = StalkerSurfaceState::FLOOR;
+                s.target_surface_state = StalkerSurfaceState::FLOOR;
+                s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
                 VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " DISTURBED by direct weapon damage!");
                 break;
             }
 
-            if (acoustic_spike) {
-                // Disturbed early by loud acoustic spike (> 65 dB, e.g. satchel blast or drilling)
-                s.state = StalkerState::Investigating;
-                s.state_timer = 0.0f;
-                s.investigation_timer = 4.0f;
-                s.target_pos = (best_sound ? best_sound->position : player_pos);
-                VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " DISTURBED by acoustic spike (> 65 dB) -> Investigating!");
-                break;
-            }
-
-            // During the first 8.0 seconds of an expedition, ignore visual detection and subtle noise
-            if (s.state_timer < 8.0f) {
-                break;
-            }
-
-            // After 8.0 seconds: sound > 30 dB or line of sight can wake it up
+            // Disturbed by line-of-sight visual contact
             if (can_see_player) {
                 s.state = StalkerState::Stalking;
                 s.state_timer = 0.0f;
                 s.target_pos = player_pos;
                 s.just_spotted_player = true;
                 result.any_spotted = true;
+                s.surface_state = StalkerSurfaceState::FLOOR;
+                s.target_surface_state = StalkerSurfaceState::FLOOR;
+                s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " SPOTTED delver -> Awakens into Stalking!");
                 break;
             }
 
-            if (s.has_sound_target && s.just_heard_sound && (best_sound && best_sound->intensity > 30.0f)) {
+            // Disturbed by acoustic disturbance (gunshot, footsteps, drilling, explosion)
+            if (s.has_sound_target && s.just_heard_sound) {
                 s.state = StalkerState::Investigating;
                 s.state_timer = 0.0f;
-                s.investigation_timer = 3.5f;
+                s.investigation_timer = 4.5f;
                 s.target_pos = s.investigation_target;
+                s.surface_state = StalkerSurfaceState::FLOOR;
+                s.target_surface_state = StalkerSurfaceState::FLOOR;
+                s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                glm::vec3 to_snd = s.investigation_target - s.position;
+                if (glm::length(glm::vec2(to_snd.x, to_snd.z)) > 0.1f) {
+                    s.yaw = std::atan2(to_snd.x, to_snd.z);
+                }
+                VF_LOG_INFO("VoidStalker", "Roosting Stalker " << s.id << " HEARD sound disturbance -> Awakens into Investigating!");
                 break;
             }
 
@@ -533,6 +562,10 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                     s.target_pos = player_pos;
                     s.just_spotted_player = true;
                     result.any_spotted = true;
+                    glm::vec3 to_pl = player_pos - s.position;
+                    if (glm::length(glm::vec2(to_pl.x, to_pl.z)) > 0.1f) {
+                        s.yaw = std::atan2(to_pl.x, to_pl.z);
+                    }
                     VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " SPOTTED player (dist=" << dist_to_player << "m, in_light=" << s.is_in_light << ")");
                 }
                 break;
@@ -542,8 +575,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             if (s.has_sound_target && s.just_heard_sound) {
                 s.state = StalkerState::Investigating;
                 s.state_timer = 0.0f;
-                s.investigation_timer = 3.5f;
+                s.investigation_timer = 4.5f;
                 s.target_pos = s.investigation_target;
+                glm::vec3 to_snd = s.investigation_target - s.position;
+                if (glm::length(glm::vec2(to_snd.x, to_snd.z)) > 0.1f) {
+                    s.yaw = std::atan2(to_snd.x, to_snd.z);
+                }
                 VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " HEARD sound disturbance -> Investigating (" 
                             << s.investigation_target.x << ", " << s.investigation_target.y << ", " << s.investigation_target.z << ")");
                 break;
@@ -621,8 +658,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
             // Priority 2: Newer sound heard -> Redirect investigation
             if (s.just_heard_sound) {
-                s.investigation_timer = 3.5f;
+                s.investigation_timer = 4.5f;
                 s.target_pos = s.investigation_target;
+                glm::vec3 to_snd_dir = s.investigation_target - s.position;
+                if (glm::length(glm::vec2(to_snd_dir.x, to_snd_dir.z)) > 0.1f) {
+                    s.yaw = std::atan2(to_snd_dir.x, to_snd_dir.z);
+                }
             }
 
             // Move towards sound disturbance location
@@ -638,8 +679,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             if (snd_dist > 1.0f) {
                 glm::vec3 move_dir = glm::normalize(glm::vec3(to_snd.x, 0.0f, to_snd.z));
                 float burst = 0.60f + 0.65f * std::abs(std::sin(s.walk_cycle * 0.8f));
-                s.velocity.x = move_dir.x * effective_move_speed * 0.85f * burst;
-                s.velocity.z = move_dir.z * effective_move_speed * 0.85f * burst;
+                s.velocity.x = move_dir.x * effective_move_speed * 1.15f * burst;
+                s.velocity.z = move_dir.z * effective_move_speed * 1.15f * burst;
                 s.position.x += s.velocity.x * dt;
                 s.position.z += s.velocity.z * dt;
                 s.yaw = std::atan2(move_dir.x, move_dir.z);
@@ -693,14 +734,21 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             // Lost Line-of-Sight for sustained duration without hearing fresh sound
             // In stealth crouch mode, stalkers lose track of the delver much faster (2.0s vs 4.5s)
             float los_break_time = player_is_crouching ? 2.0f : 4.5f;
-            if (!can_see_player && s.lost_los_timer > los_break_time) {
-                s.investigation_target = s.last_seen_player_pos;
-                s.investigation_timer = player_is_crouching ? 1.8f : 3.0f;
-                s.target_pos = s.investigation_target;
-                s.state = StalkerState::Investigating;
-                s.state_timer = 0.0f;
-                VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " lost line-of-sight to sneaking delver -> investigating last known coords");
-                break;
+            if (!can_see_player) {
+                if (s.just_heard_sound && s.has_sound_target) {
+                    // Reacquired through acoustic perception!
+                    s.last_seen_player_pos = s.investigation_target;
+                    s.target_pos = s.investigation_target;
+                    s.lost_los_timer = 0.0f;
+                } else if (s.lost_los_timer > los_break_time) {
+                    s.investigation_target = s.last_seen_player_pos;
+                    s.investigation_timer = player_is_crouching ? 1.8f : 3.0f;
+                    s.target_pos = s.investigation_target;
+                    s.state = StalkerState::Investigating;
+                    s.state_timer = 0.0f;
+                    VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " lost line-of-sight to sneaking delver -> investigating last known coords");
+                    break;
+                }
             }
 
             // Acoustic distraction: if a loud sound (explosion, tremor, bullet impact, rock break) occurred away from player
@@ -769,8 +817,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 }
             }
 
-            // Ranged Attack: Launch crystalline void spine if at mid-range and has LOS (Shooters ONLY!)
-            if (s.role == StalkerRole::Shooter && s.projectile_cooldown <= 0.0f && dist_to_player > 4.5f && dist_to_player < 14.0f &&
+            // Ranged Attack: Launch crystalline void spine if at mid-to-long range and has LOS (Shooters ONLY!)
+            if (s.role == StalkerRole::Shooter && s.projectile_cooldown <= 0.0f && dist_to_player > 4.5f && dist_to_player < 20.0f &&
                 has_line_of_sight(s.position + glm::vec3(0, 0.4f, 0), player_pos, world)) {
                 glm::vec3 spawn_pt = s.position + glm::vec3(0.0f, 0.4f, 0.0f);
                 float flight_time = dist_to_player / 15.0f;
@@ -1154,27 +1202,75 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.position.y = std::clamp(s.position.y, 4.5f, 26.0f);
         s.position.z = std::clamp(s.position.z, 4.5f, 67.5f);
 
-        // Surface-aware gravity & attachment:
-        // Downward gravity only applies when on a floor or transitioning without wall/ceiling hold.
-        if (s.surface_state == StalkerSurfaceState::FLOOR && s.state != StalkerState::Burrowing) {
-            int sx = static_cast<int>(std::floor(s.position.x));
-            int sy = static_cast<int>(std::floor(s.position.y - 0.1f));
-            int sz = static_cast<int>(std::floor(s.position.z));
-            Voxel below = world.get_voxel(sx, sy, sz);
-            if (below.material_id == MAT_AIR) {
-                s.position.y -= 4.0f * dt; // Gravity
-            }
-        }
+        // ─── Kinematic Voxel Navigation, Step-Clambering & Wall Sliding ───
+        if (s.state != StalkerState::Burrowing && s.state != StalkerState::Dead && s.state != StalkerState::Dying) {
+            // Track movement progress to detect obstructions
+            float progress = glm::distance(glm::vec2(s.position.x, s.position.z),
+                                          glm::vec2(s.last_progress_pos.x, s.last_progress_pos.z));
+            s.last_progress_pos = s.position;
+            float planar_speed = glm::length(glm::vec2(s.velocity.x, s.velocity.z));
 
-        // Keep body flush with vertical and inverted voxel geometry without clipping into solid blocks
-        if (s.state != StalkerState::Burrowing) {
+            if (planar_speed > 0.8f && progress < 0.15f * dt) {
+                s.stuck_timer += dt;
+            } else {
+                s.stuck_timer = std::max(0.0f, s.stuck_timer - dt * 2.0f);
+            }
+
+            // Anti-stuck resolution:
+            // If obstructed against cavern geometry for > 0.4s while pursuing/moving:
+            if (s.stuck_timer > 0.4f) {
+                if (s.state == StalkerState::Fleeing || s.hp <= s.flee_hp_threshold) {
+                    // Cornered against wall/rock -> immediately burrow into the rock to escape!
+                    s.state = StalkerState::Burrowing;
+                    s.state_timer = 0.0f;
+                    s.burrow_duration = 2.0f;
+                    s.burrow_entry = s.position;
+                    s.burrow_dir = -s.contact_normal;
+                    if (glm::length(s.burrow_dir) < 0.01f) s.burrow_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+                    s.drill_timer = 0.0f;
+                    s.chitter_timer = 0.25f;
+                    s.velocity = glm::vec3(0.0f);
+                    s.stuck_timer = 0.0f;
+                    VF_LOG_INFO("VoidStalker", "Stalker " << s.id << " cornered against rock face -> DECISIVELY BURROWS into rock to escape!");
+                } else if (s.state == StalkerState::Stalking || s.state == StalkerState::Investigating) {
+                    // Deflect laterally around obstacle to slide around corners
+                    glm::vec2 fwd_v(std::sin(s.yaw), std::cos(s.yaw));
+                    glm::vec2 perp(-fwd_v.y, fwd_v.x);
+                    float sign = ((s.id % 2) == 0) ? 1.0f : -1.0f;
+                    s.position.x += perp.x * sign * 2.5f * dt;
+                    s.position.z += perp.y * sign * 2.5f * dt;
+                }
+            }
+
+            // Surface-aware gravity & attachment:
+            // Downward gravity only applies when on a floor or transitioning without wall/ceiling hold.
+            if (s.surface_state == StalkerSurfaceState::FLOOR && s.state != StalkerState::Burrowing) {
+                int sx = static_cast<int>(std::floor(s.position.x));
+                int sy = static_cast<int>(std::floor(s.position.y - 0.1f));
+                int sz = static_cast<int>(std::floor(s.position.z));
+                Voxel below = world.get_voxel(sx, sy, sz);
+                if (below.material_id == MAT_AIR) {
+                    s.position.y -= 4.0f * dt; // Cavern gravity
+                }
+            }
+
+            // Keep body flush with voxel geometry, with 1-block step clambering for smooth traversal
             int cx = static_cast<int>(std::floor(s.position.x));
             int cy = static_cast<int>(std::floor(s.position.y));
             int cz = static_cast<int>(std::floor(s.position.z));
             Voxel current_v = world.get_voxel(cx, cy, cz);
             if (current_v.material_id != MAT_AIR && current_v.material_id != MAT_GAS &&
                 current_v.material_id != MAT_VOLATILE_SMOKE) {
-                if (s.contact_normal.y > 0.7f) {
+                // If on floor (or navigating terrain) and block above is open air, clamber up 1-block step!
+                Voxel above_v = world.get_voxel(cx, cy + 1, cz);
+                if ((s.surface_state == StalkerSurfaceState::FLOOR || s.target_surface_state == StalkerSurfaceState::FLOOR) &&
+                    !above_v.is_solid()) {
+                    s.position.y = static_cast<float>(cy + 1) + 0.05f;
+                    s.surface_state = StalkerSurfaceState::FLOOR;
+                    s.target_surface_state = StalkerSurfaceState::FLOOR;
+                    s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                    s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                } else if (s.contact_normal.y > 0.7f) {
                     s.position.y = static_cast<float>(cy) + 1.05f;
                 } else if (s.contact_normal.y < -0.7f) {
                     s.position.y = static_cast<float>(cy) - 0.15f;
@@ -1183,6 +1279,16 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 } else if (std::abs(s.contact_normal.z) > 0.5f) {
                     s.position.z = static_cast<float>(cz) + (s.contact_normal.z > 0.0f ? 1.05f : -0.05f);
                 } else {
+                    s.position += s.contact_normal * 0.15f;
+                }
+            } else {
+                // Keep body flush with vertical and inverted voxel geometry
+                int cx = static_cast<int>(std::floor(s.position.x));
+                int cy = static_cast<int>(std::floor(s.position.y));
+                int cz = static_cast<int>(std::floor(s.position.z));
+                Voxel current_v = world.get_voxel(cx, cy, cz);
+                if (current_v.is_solid() && current_v.material_id != MAT_GAS &&
+                    current_v.material_id != MAT_VOLATILE_SMOKE) {
                     s.position += s.contact_normal * 0.15f;
                 }
             }
@@ -1279,6 +1385,9 @@ int VoidStalkerManager::apply_melee_shove(const glm::vec3& camera_pos, const glm
             if (s.hp <= 0.0f) {
                 s.hp = 0.0f;
                 s.state = StalkerState::Dying;
+                s.just_died = true;
+                s.hit_flash_timer = 0.0f;
+                s.death_timer = 0.0f;
                 s.state_timer = 0.0f;
             }
 
@@ -1290,7 +1399,8 @@ int VoidStalkerManager::apply_melee_shove(const glm::vec3& camera_pos, const glm
 }
 
 bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, float damage,
-                                        bool allow_crit, bool* out_is_crit, float* out_damage_dealt) {
+                                        bool allow_crit, bool* out_is_crit, float* out_damage_dealt,
+                                        const glm::vec3* attacker_pos, const glm::vec3* shot_direction) {
     float best_dist = radius;
     VoidStalker* nearest = nullptr;
 
@@ -1307,11 +1417,31 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
         bool is_crit = false;
         float effective_damage = damage;
 
+        // Resolve actual position of attacker and flight vector of shot
+        glm::vec3 actual_attacker_pos = (attacker_pos != nullptr) ? *attacker_pos : origin;
+        if (attacker_pos == nullptr && glm::distance(origin, nearest->position) < 0.5f) {
+            // If origin is right on top of the enemy (e.g. projectile hit point) and no attacker_pos was provided,
+            // construct an offset opposite to facing as fallback
+            glm::vec3 facing(std::cos(nearest->yaw), 0.0f, std::sin(nearest->yaw));
+            actual_attacker_pos = nearest->position - facing * 4.0f;
+        }
+
+        glm::vec3 to_attacker_vec = actual_attacker_pos - nearest->position;
+        glm::vec3 to_attacker = (glm::length(to_attacker_vec) > 0.001f)
+            ? glm::normalize(to_attacker_vec)
+            : glm::vec3(0.0f, 0.0f, 1.0f);
+
+        glm::vec3 shot_dir;
+        if (shot_direction != nullptr && glm::length(*shot_direction) > 0.001f) {
+            shot_dir = glm::normalize(*shot_direction);
+        } else {
+            shot_dir = (glm::length(nearest->position - actual_attacker_pos) > 0.001f)
+                ? glm::normalize(nearest->position - actual_attacker_pos)
+                : glm::vec3(0.0f, 0.0f, 1.0f);
+        }
+
         // Chitin Goliath Front Armor Plate Deflection (85% reduction on front arc)
         if (nearest->role == StalkerRole::ChitinGoliath) {
-            glm::vec3 to_attacker = (glm::length(origin - nearest->position) > 0.001f)
-                ? glm::normalize(origin - nearest->position)
-                : glm::vec3(0.0f, 0.0f, 1.0f);
             glm::vec3 facing(std::cos(nearest->yaw), 0.0f, std::sin(nearest->yaw));
             float front_dot = glm::dot(facing, to_attacker);
             if (front_dot > 0.1f) {
@@ -1334,9 +1464,6 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
 
         // Apply hit-flash pulse (0.08s white emissive pulse) and knockback impulse along shot vector
         nearest->hit_flash_timer = 0.08f;
-        glm::vec3 shot_dir = (glm::length(nearest->position - origin) > 0.001f)
-            ? glm::normalize(nearest->position - origin)
-            : glm::vec3(0.0f, 0.0f, 1.0f);
 
         if (effective_damage > 20.0f) {
             nearest->stun_timer = 0.25f; // 0.25s flinch animation
@@ -1346,16 +1473,20 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
             nearest->velocity += shot_dir * knockback_mag;
         }
 
-        if (nearest->state == StalkerState::Roosting) {
-            nearest->state = StalkerState::Stalking;
-            nearest->is_pursuing_attacker = true;
-        }
+        // Detach wall/ceiling gravity locks immediately and lock surface to FLOOR to prevent jitter
+        nearest->hit_surface_lock_timer = 0.8f;
+        nearest->surface_cooldown = 0.8f;
+        nearest->surface_state = StalkerSurfaceState::FLOOR;
+        nearest->target_surface_state = StalkerSurfaceState::FLOOR;
+        nearest->contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        nearest->m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
 
         nearest->hp -= effective_damage;
         if (nearest->hp <= 0.0f) {
             nearest->state = StalkerState::Dying;
             nearest->just_died = true;
             nearest->death_timer = 0.0f;
+            nearest->hit_flash_timer = 0.0f; // Fatal damage clears hit flash so enemies do not stay white
             VF_LOG_INFO("VoidStalker", "Stalker " << nearest->id << " FATAL DAMAGE -> DYING collapse (damage=" << effective_damage << ")");
 
             glm::vec3 lethal_dir = shot_dir;
@@ -1368,12 +1499,6 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
             if (glm::length(torque_axis) < 0.01f) torque_axis = glm::vec3(1.0f, 0.0f, 0.0f);
             else torque_axis = glm::normalize(torque_axis);
             nearest->death_angular_velocity = torque_axis * 6.0f;
-
-            // Detach wall/ceiling gravity locks and restore cavern gravity
-            nearest->surface_state = StalkerSurfaceState::FLOOR;
-            nearest->target_surface_state = StalkerSurfaceState::FLOOR;
-            nearest->contact_normal = up_vec;
-            nearest->m_targetUpVector = up_vec;
         } else if (nearest->hp <= nearest->flee_hp_threshold) {
             nearest->state = StalkerState::Fleeing;
             nearest->state_timer = 0.0f;
@@ -1382,20 +1507,59 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3& origin, float radius, f
             // Activate persistent retaliation pursuit against the attacking player
             nearest->is_pursuing_attacker = true;
             nearest->pursuit_lost_timer = 0.0f;
-            nearest->target_pos = origin;
+            nearest->target_pos = actual_attacker_pos;
+            nearest->last_seen_player_pos = actual_attacker_pos;
+            nearest->lost_los_timer = 0.0f;
 
+            // Immediately turn to face the attacker
+            if (glm::length(glm::vec2(to_attacker_vec.x, to_attacker_vec.z)) > 0.1f) {
+                nearest->yaw = std::atan2(to_attacker_vec.x, to_attacker_vec.z);
+            }
+
+            float dist_to_att = glm::distance(nearest->position, actual_attacker_pos);
             if (nearest->role == StalkerRole::Melee) {
-                // Healthy Melee -> ENRAGES into counter-attack lunge!
-                nearest->state = StalkerState::Lunging;
-                nearest->state_timer = 0.0f;
-                nearest->just_lunged = true;
-                VF_LOG_INFO("VoidStalker", "Melee Stalker " << nearest->id << " ENRAGED by player damage (HP=" << nearest->hp << ") -> COUNTER-ATTACKING & PURSUING!");
+                // Close range (< 9.0m) -> immediate ENRAGED counter-lunge!
+                // Mid-to-long range -> sprint in Stalking state directly at shooter!
+                if (dist_to_att <= 9.0f) {
+                    nearest->state = StalkerState::Lunging;
+                    nearest->state_timer = 0.0f;
+                    nearest->just_lunged = true;
+                    VF_LOG_INFO("VoidStalker", "Melee Stalker " << nearest->id << " ENRAGED by player damage (HP=" << nearest->hp << ") -> COUNTER-LUNGING!");
+                } else {
+                    nearest->state = StalkerState::Stalking;
+                    nearest->state_timer = 0.0f;
+                    VF_LOG_INFO("VoidStalker", "Melee Stalker " << nearest->id << " ENRAGED by player damage -> CHARGING attacker at " << dist_to_att << "m!");
+                }
             } else {
-                // Healthy Shooter -> Repositions to flanking circle to return fire with void spines!
+                // Shooter -> Repositions to flanking circle and quickly returns fire with void spines!
                 nearest->state = StalkerState::Circling;
                 nearest->state_timer = 0.0f;
-                nearest->projectile_cooldown = 0.2f;
+                nearest->projectile_cooldown = 0.15f;
                 VF_LOG_INFO("VoidStalker", "Shooter Stalker " << nearest->id << " REPOSITIONS after damage to return fire and pursue!");
+            }
+
+            // Pack Alert: Alert nearby packmates within close tactical range (<= 10m) of the wounded stalker
+            for (auto& other : m_stalkers) {
+                if (&other != nearest && other.state != StalkerState::Dead && other.state != StalkerState::Dying && other.state != StalkerState::Fleeing) {
+                    float pack_dist = glm::distance(other.position, nearest->position);
+                    if (pack_dist <= 10.0f && (other.state == StalkerState::Roosting || other.state == StalkerState::Idle)) {
+                        other.state = StalkerState::Stalking;
+                        other.target_pos = actual_attacker_pos;
+                        other.last_seen_player_pos = actual_attacker_pos;
+                        other.lost_los_timer = 0.0f;
+                        other.is_pursuing_attacker = true;
+                        other.pursuit_lost_timer = 0.0f;
+                        other.surface_state = StalkerSurfaceState::FLOOR;
+                        other.target_surface_state = StalkerSurfaceState::FLOOR;
+                        other.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                        other.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                        glm::vec3 to_att = actual_attacker_pos - other.position;
+                        if (glm::length(glm::vec2(to_att.x, to_att.z)) > 0.1f) {
+                            other.yaw = std::atan2(to_att.x, to_att.z);
+                        }
+                        VF_LOG_INFO("VoidStalker", "Pack Stalker " << other.id << " ALERTED by distress of wounded Stalker " << nearest->id << "!");
+                    }
+                }
             }
         }
         return true;

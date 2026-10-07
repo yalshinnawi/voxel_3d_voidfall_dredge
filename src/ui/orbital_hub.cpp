@@ -1432,9 +1432,9 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
             text_y += line_step;
             draw_text("  2. Equip Demolition Charges [3] to blast Reinforced Doors", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
             text_y += line_step;
-            draw_text("  3. Breach the vault chamber and extract the Hyper-Core Relic", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            draw_text("  3. Mine 30 Voidite Crystals OR breach vault for the Hyper-Core Relic", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
             text_y += line_step;
-            draw_text("  4. Call beacon [B] and extract all salvaged minerals", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
+            draw_text("  4. Call beacon [B] once quota met or relic secured; defend evac pod", col1_x + pad, text_y, 1.05f * ui_scale, glm::vec4(0.8f, 0.85f, 0.9f, 0.9f));
         } else {
             draw_text("Target Depth: 600m | Crust Stability: CRITICAL (Collapse Imminent)", col1_x + pad, text_y, 1.10f * ui_scale, glm::vec4(1.0f, 0.3f, 0.3f, 0.9f));
             text_y += line_step;
@@ -1855,7 +1855,7 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
 
     // Centered audio mixer panel
     float panel_w = std::clamp(w * 0.70f, 600.0f, 850.0f);
-    float panel_h = std::clamp(h * 0.78f, 480.0f, 640.0f);
+    float panel_h = std::clamp(h * 0.85f, 520.0f, 720.0f);
     float panel_x = (w - panel_w) * 0.5f;
     float panel_y = (m_subview == MenuSubView::Settings) ? ((h - panel_h) * 0.5f + 16.0f * ui_scale) : (80.0f * ui_scale);
 
@@ -2011,7 +2011,25 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
     draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
     if (mouse_clicked && b_hover1) { s.brightness = std::max(0.40f, s.brightness - 0.10f); m_profile_dirty = true; }
     if (mouse_clicked && b_hover2) { s.brightness = std::min(2.00f, s.brightness + 0.10f); m_profile_dirty = true; }
-    cur_y += row_h + 10.0f * ui_scale;
+    cur_y += row_h;
+
+    // 9. Screen Shake (Comfort Setting)
+    char shake_buf[32];
+    if (s.screen_shake <= 0.001f) {
+        std::snprintf(shake_buf, sizeof(shake_buf), "SCREEN SHAKE:      OFF (0%%)");
+    } else {
+        std::snprintf(shake_buf, sizeof(shake_buf), "SCREEN SHAKE:      %d%%", static_cast<int>(std::round(s.screen_shake * 100.0f)));
+    }
+    draw_text(shake_buf, panel_x + pad + 14.0f * ui_scale, cur_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f, 1.15f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+    bool shk_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    bool shk_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    draw_panel_with_border(btn1_x, cur_y, adj_btn_w, adj_btn_h, shk_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_panel_with_border(btn2_x, cur_y, adj_btn_w, adj_btn_h, shk_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+    draw_text_centered("-", btn1_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
+    if (mouse_clicked && shk_hover1) { s.screen_shake = std::max(0.0f, s.screen_shake - 0.10f); m_profile_dirty = true; }
+    if (mouse_clicked && shk_hover2) { s.screen_shake = std::min(1.0f, s.screen_shake + 0.10f); m_profile_dirty = true; }
+    cur_y += row_h + 8.0f * ui_scale;
 
     // Test Audio Button
     float tst_w = content_w - 28.0f * ui_scale;

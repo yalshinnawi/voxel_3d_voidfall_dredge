@@ -226,17 +226,8 @@ void main() {
     // Vertical depth attenuation: deep bedrock fissures plunge into darkness, while high vaulted arches retain subtle subterranean silhouette
     float depthFactor = clamp((vWorldPos.y - 2.0) / 22.0, 0.12, 0.85);
 
-    // Dynamic subterranean atmospheric breathing: subtle undulating waves that travel across the cavern over time
-    float timePulse = 1.0 + 0.12 * sin(uTime * 0.45 + vWorldPos.x * 0.08 + vWorldPos.z * 0.08);
-
-    // Sector 2 thermal convection shimmer
-    if (uSector == 2) {
-        timePulse += 0.10 * sin(uTime * 2.2 + vWorldPos.y * 0.3);
-    }
-    // Sector 3 radioactive micro-flicker
-    else if (uSector >= 3) {
-        timePulse += 0.08 * sin(uTime * 7.5) * cos(uTime * 12.0 + vWorldPos.x * 0.1);
-    }
+    // Subterranean ambient lighting maintains stable, pleasant illumination without disorienting undulating waves
+    float timePulse = 1.0;
 
     // High-contrast, dark subterranean cavern ambient lighting.
     // Unlit voxels plunge into pitch-black void, making flashlight beam and chemical flares indispensable.

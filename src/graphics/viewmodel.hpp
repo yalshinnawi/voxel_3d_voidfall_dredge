@@ -114,6 +114,28 @@ private:
         const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
     );
 
+    void add_tube(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& base,
+        float radius_inner,
+        float radius_outer,
+        float length,
+        int segments,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f),
+        int axis = 2
+    );
+
+    void add_lens_disc(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& center,
+        float radius,
+        int segments,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.9f, 0.05f, 0.2f, 1.0f),
+        int axis = 2
+    );
+
     void add_forearm_and_gauntlet(
         std::vector<ViewmodelVertex>& verts,
         const glm::vec3& elbow_origin,

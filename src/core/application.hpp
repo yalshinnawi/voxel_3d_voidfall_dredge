@@ -103,6 +103,7 @@ private:
     void spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float radius, int min_blocks, int max_blocks);
     void sync_profile_with_player();
     void sync_audio_settings();
+    bool try_interact();
 
     // Testing & Progression diagnostics
     void grant_testing_resources(int exp = 1000, int voidite = 25, int titanium = 10);
@@ -147,6 +148,9 @@ private:
     SurveyingSystem m_surveying;
     MissionSystem m_mission;
     TerrainScanner m_terrain_scanner;
+    bool m_map_open{false};
+    bool m_map_dragging_last{false};
+    glm::dvec2 m_last_map_mouse{0.0, 0.0};
     float m_muzzle_flash_timer{0.0f};
     int m_holdout_stage{0};
 

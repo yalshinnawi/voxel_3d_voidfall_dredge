@@ -61,7 +61,13 @@ struct Voxel {
     // bit 7:   Player-placed block metadata (0x80)
     uint8_t flags_and_damage{0};
 
+    inline bool is_liquid() const {
+        return material_id == MAT_THERMITE_SLAG || material_id == MAT_CRYSTAL_AQUIFER;
+    }
     inline bool is_solid() const {
+        return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE && !is_liquid();
+    }
+    inline bool is_renderable() const {
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE;
     }
     inline bool is_anchored() const { return (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0 || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }

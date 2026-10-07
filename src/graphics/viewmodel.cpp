@@ -303,6 +303,110 @@ void ViewModel::add_cone(
     }
 }
 
+void ViewModel::add_tube(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& base,
+    float radius_inner,
+    float radius_outer,
+    float length,
+    int segments,
+    const glm::vec4& color,
+    const glm::vec4& material,
+    int axis
+) {
+    float step = 2.0f * 3.14159265f / static_cast<float>(segments);
+    for (int i = 0; i < segments; ++i) {
+        float a1 = i * step;
+        float a2 = (i + 1) * step;
+        float c1 = std::cos(a1), s1 = std::sin(a1);
+        float c2 = std::cos(a2), s2 = std::sin(a2);
+
+        if (axis == 2) {
+            // Outer wall vertices (Normals point outward)
+            glm::vec3 out_p1 = base + glm::vec3(radius_outer * c1, radius_outer * s1, 0.0f);
+            glm::vec3 out_p2 = base + glm::vec3(radius_outer * c2, radius_outer * s2, 0.0f);
+            glm::vec3 out_p3 = base + glm::vec3(radius_outer * c2, radius_outer * s2, -length);
+            glm::vec3 out_p4 = base + glm::vec3(radius_outer * c1, radius_outer * s1, -length);
+            glm::vec3 n_out1 = glm::vec3(c1, s1, 0.0f);
+            glm::vec3 n_out2 = glm::vec3(c2, s2, 0.0f);
+
+            verts.push_back({out_p1, n_out1, color, material});
+            verts.push_back({out_p2, n_out2, color, material});
+            verts.push_back({out_p3, n_out2, color, material});
+            verts.push_back({out_p1, n_out1, color, material});
+            verts.push_back({out_p3, n_out2, color, material});
+            verts.push_back({out_p4, n_out1, color, material});
+
+            // Inner wall vertices (Normals point inward toward optical axis)
+            glm::vec3 in_p1 = base + glm::vec3(radius_inner * c1, radius_inner * s1, 0.0f);
+            glm::vec3 in_p2 = base + glm::vec3(radius_inner * c2, radius_inner * s2, 0.0f);
+            glm::vec3 in_p3 = base + glm::vec3(radius_inner * c2, radius_inner * s2, -length);
+            glm::vec3 in_p4 = base + glm::vec3(radius_inner * c1, radius_inner * s1, -length);
+            glm::vec3 n_in1 = glm::vec3(-c1, -s1, 0.0f);
+            glm::vec3 n_in2 = glm::vec3(-c2, -s2, 0.0f);
+
+            verts.push_back({in_p1, n_in1, color, material});
+            verts.push_back({in_p3, n_in2, color, material});
+            verts.push_back({in_p2, n_in2, color, material});
+            verts.push_back({in_p1, n_in1, color, material});
+            verts.push_back({in_p4, n_in1, color, material});
+            verts.push_back({in_p3, n_in2, color, material});
+
+            // Rear rim connecting outer and inner rings at z = 0 (Facing delver eye: normal {0, 0, 1})
+            glm::vec3 n_rear(0.0f, 0.0f, 1.0f);
+            verts.push_back({out_p1, n_rear, color, material});
+            verts.push_back({in_p2,  n_rear, color, material});
+            verts.push_back({out_p2, n_rear, color, material});
+            verts.push_back({out_p1, n_rear, color, material});
+            verts.push_back({in_p1,  n_rear, color, material});
+            verts.push_back({in_p2,  n_rear, color, material});
+
+            // Front rim connecting outer and inner rings at z = -length (Facing target: normal {0, 0, -1})
+            glm::vec3 n_front(0.0f, 0.0f, -1.0f);
+            verts.push_back({out_p4, n_front, color, material});
+            verts.push_back({out_p3, n_front, color, material});
+            verts.push_back({in_p3,  n_front, color, material});
+            verts.push_back({out_p4, n_front, color, material});
+            verts.push_back({in_p3,  n_front, color, material});
+            verts.push_back({in_p4,  n_front, color, material});
+        }
+    }
+}
+
+void ViewModel::add_lens_disc(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& center,
+    float radius,
+    int segments,
+    const glm::vec4& color,
+    const glm::vec4& material,
+    int axis
+) {
+    float step = 2.0f * 3.14159265f / static_cast<float>(segments);
+    for (int i = 0; i < segments; ++i) {
+        float a1 = i * step;
+        float a2 = (i + 1) * step;
+        float c1 = std::cos(a1), s1 = std::sin(a1);
+        float c2 = std::cos(a2), s2 = std::sin(a2);
+
+        if (axis == 2) {
+            glm::vec3 p1 = center + glm::vec3(radius * c1, radius * s1, 0.0f);
+            glm::vec3 p2 = center + glm::vec3(radius * c2, radius * s2, 0.0f);
+            glm::vec3 n_rear(0.0f, 0.0f, 1.0f);
+            glm::vec3 n_front(0.0f, 0.0f, -1.0f);
+
+            // Double-sided translucent optical glass disc
+            verts.push_back({center, n_rear, color, material});
+            verts.push_back({p1,     n_rear, color, material});
+            verts.push_back({p2,     n_rear, color, material});
+
+            verts.push_back({center, n_front, color, material});
+            verts.push_back({p2,     n_front, color, material});
+            verts.push_back({p1,     n_front, color, material});
+        }
+    }
+}
+
 void ViewModel::add_forearm_and_gauntlet(
     std::vector<ViewmodelVertex>& verts,
     const glm::vec3& elbow_origin,
@@ -735,7 +839,7 @@ void ViewModel::init_geometry() {
     glm::vec4 col_carbine_rails(0.68f, 0.72f, 0.78f, 1.0f);    // Chrome accelerator magnetic rails
     glm::vec4 col_plasma_cyan(0.05f, 0.92f, 1.0f, 1.0f);      // Bright electric-cyan coils & vents
     glm::vec4 col_plasma_white(0.85f, 0.98f, 1.0f, 1.0f);     // White-hot plasma core emitter
-    glm::vec4 col_optic_glass(0.10f, 0.85f, 0.95f, 0.70f);    // Holographic reflex sight lens
+    glm::vec4 col_optic_glass(0.10f, 0.88f, 0.98f, 0.28f);    // Polarized cyan anti-glare optical glass lens (28% alpha)
     glm::vec4 col_carbine_grip(0.09f, 0.09f, 0.11f, 1.0f);    // Non-slip rubber grip
     glm::vec4 col_power_cell(0.12f, 0.40f, 0.50f, 1.0f);      // High-capacity plasma battery pack
 
@@ -743,7 +847,7 @@ void ViewModel::init_geometry() {
     glm::vec4 mat_carbine_chrome(0.95f, 0.12f, 0.10f, 0.95f);
     glm::vec4 mat_carbine_emissive(0.10f, 0.05f, 1.00f, 1.00f);
     glm::vec4 mat_carbine_rubber(0.05f, 0.85f, 0.00f, 0.80f);
-    glm::vec4 mat_carbine_glass(0.90f, 0.05f, 0.80f, 1.00f);
+    glm::vec4 mat_carbine_glass(0.95f, 0.05f, 0.15f, 0.95f);  // High-smoothness optical glass specular reflection
 
     // 4.1 Receiver & Upper Housing
     add_box(carbine_verts, {-0.026f, -0.040f, -0.20f}, {0.026f, 0.045f, 0.06f}, col_carbine_body, mat_carbine_armor);
@@ -778,12 +882,43 @@ void ViewModel::init_geometry() {
     add_box(carbine_verts, {-0.019f, -0.130f, -0.13f}, {-0.017f, -0.060f, -0.11f}, col_plasma_cyan, mat_carbine_emissive);
     add_box(carbine_verts, { 0.017f, -0.130f, -0.13f}, { 0.019f, -0.060f, -0.11f}, col_plasma_cyan, mat_carbine_emissive);
 
-    // 4.4 Reflex Holographic Sight
-    add_box(carbine_verts, {-0.014f, 0.056f, -0.11f}, {0.014f, 0.076f, -0.03f}, col_chassis_dark, mat_carbine_armor);   // Sight base
-    add_box(carbine_verts, {-0.022f, 0.076f, -0.13f}, {0.022f, 0.120f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Sight hood
-    add_box(carbine_verts, {-0.016f, 0.082f, -0.12f}, {0.016f, 0.114f, -0.03f}, col_optic_glass, mat_carbine_glass);    // Glass lens
-    // Floating Holographic Dot
-    add_box(carbine_verts, {-0.002f, 0.096f, -0.078f}, {0.002f, 0.100f, -0.074f}, col_plasma_cyan, mat_carbine_emissive);
+    // 4.4 Tactical Reflex Holographic Sight with Hollow Hood & Polished Optical Glass Lens
+    // A. Picatinny Riser Base & Sight Deck
+    add_box(carbine_verts, {-0.014f, 0.056f, -0.12f}, {0.014f, 0.076f, -0.02f}, col_chassis_dark, mat_carbine_armor);   // Sight base
+    add_box(carbine_verts, {-0.016f, 0.074f, -0.12f}, {0.016f, 0.080f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Lower deck window sill
+
+    // B. Hollow Protective Hood / Frame (Left post, right post, top bridge, and protective chamfers)
+    add_box(carbine_verts, {-0.022f, 0.074f, -0.13f}, {-0.016f, 0.122f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Left hood wall
+    add_box(carbine_verts, { 0.016f, 0.074f, -0.13f}, { 0.022f, 0.122f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Right hood wall
+    add_box(carbine_verts, {-0.022f, 0.116f, -0.13f}, { 0.022f, 0.124f, -0.02f}, col_carbine_shroud, mat_carbine_armor); // Top hood roof bridge
+
+    // Beveled hood rim highlights / protective corner chamfers
+    add_box(carbine_verts, {-0.023f, 0.114f, -0.131f}, {-0.015f, 0.124f, -0.127f}, col_carbine_rails, mat_carbine_chrome);
+    add_box(carbine_verts, { 0.015f, 0.114f, -0.131f}, { 0.023f, 0.124f, -0.127f}, col_carbine_rails, mat_carbine_chrome);
+    add_box(carbine_verts, {-0.023f, 0.114f, -0.023f}, {-0.015f, 0.124f, -0.019f}, col_carbine_rails, mat_carbine_chrome);
+    add_box(carbine_verts, { 0.015f, 0.114f, -0.023f}, { 0.023f, 0.124f, -0.019f}, col_carbine_rails, mat_carbine_chrome);
+
+    // C. Optical Glass Lens Retainer Gasket (Rubberized seal around glass perimeter inside window)
+    add_box(carbine_verts, {-0.017f, 0.079f, -0.077f}, {-0.015f, 0.117f, -0.071f}, col_carbine_grip, mat_carbine_rubber); // Left gasket
+    add_box(carbine_verts, { 0.015f, 0.079f, -0.077f}, { 0.017f, 0.117f, -0.071f}, col_carbine_grip, mat_carbine_rubber); // Right gasket
+    add_box(carbine_verts, {-0.016f, 0.114f, -0.077f}, { 0.016f, 0.117f, -0.071f}, col_carbine_grip, mat_carbine_rubber); // Top gasket
+
+    // D. Diode Emitter Housing on Rear Base Deck (projects laser reticle forward onto lens)
+    add_box(carbine_verts, {-0.005f, 0.078f, -0.035f}, {0.005f, 0.086f, -0.025f}, col_chassis_dark, mat_carbine_armor);
+    add_box(carbine_verts, {-0.003f, 0.082f, -0.036f}, {0.003f, 0.085f, -0.034f}, col_plasma_cyan, mat_carbine_emissive);
+
+    // E. Transparent Polished Optical Glass Lens Pane (Thin 2mm pane, anti-reflective cyan polarized multi-coating)
+    // The window from x = -0.016f to 0.016f, y = 0.080f to 0.115f is completely see-through into the 3D world!
+    add_box(carbine_verts, {-0.0155f, 0.080f, -0.075f}, {0.0155f, 0.115f, -0.073f}, col_optic_glass, mat_carbine_glass);
+
+    // F. Floating Holographic Projected Reticle on the Lens (Center illuminated pip & outer tactical brackets)
+    add_box(carbine_verts, {-0.0015f, 0.0965f, -0.076f}, {0.0015f, 0.0995f, -0.072f}, col_plasma_white, mat_carbine_emissive); // Bright center pip
+    // 4 Directional Holographic Gate Brackets around the center pip on the glass
+    float b_offset = 0.008f;
+    add_box(carbine_verts, {-0.001f, 0.098f - b_offset - 0.003f, -0.076f}, {0.001f, 0.098f - b_offset, -0.072f}, col_plasma_cyan, mat_carbine_emissive); // Bottom
+    add_box(carbine_verts, {-0.001f, 0.098f + b_offset, -0.076f}, {0.001f, 0.098f + b_offset + 0.003f, -0.072f}, col_plasma_cyan, mat_carbine_emissive); // Top
+    add_box(carbine_verts, {-b_offset - 0.003f, 0.0975f, -0.076f}, {-b_offset, 0.0985f, -0.072f}, col_plasma_cyan, mat_carbine_emissive); // Left
+    add_box(carbine_verts, { b_offset, 0.0975f, -0.076f}, { b_offset + 0.003f, 0.0985f, -0.072f}, col_plasma_cyan, mat_carbine_emissive); // Right
 
     // 4.5 Pistol Grip & Trigger Assembly
     glm::mat4 grip_mat = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.085f, 0.02f));
@@ -873,6 +1008,49 @@ void ViewModel::init_geometry() {
         add_box(scatter_verts, { 0.028f, -0.002f, vz - 0.012f}, { 0.032f, 0.010f, vz + 0.012f}, col_scatter_flame, mat_carbine_emissive);
     }
 
+    // 5.3b Heavy Ruggedized Combat Thermal Scope & Molten Thermite Reticle
+    // A. Cantilever Mount Base clamped to Top Receiver Shield Rib
+    add_box(scatter_verts, {-0.014f, 0.060f, -0.15f}, {0.014f, 0.076f, -0.01f}, col_chassis_dark, mat_carbine_armor);
+    add_box(scatter_verts, {-0.018f, 0.068f, -0.14f}, {-0.012f, 0.084f, -0.11f}, col_scatter_body, mat_carbine_armor); // Left clamp
+    add_box(scatter_verts, { 0.012f, 0.068f, -0.14f}, { 0.018f, 0.084f, -0.11f}, col_scatter_body, mat_carbine_armor); // Right clamp
+
+    // B. Hollow Tubular Scope Housing (y = 0.088f, length 0.15f from z = 0.01f to -0.14f)
+    // Outer radius 0.018f, Inner radius 0.0135f -> 100% hollow cylindrical bore to look straight through!
+    add_tube(scatter_verts, {0.0f, 0.088f, 0.01f}, 0.0135f, 0.018f, 0.15f, 16, col_scatter_body, mat_carbine_armor, 2);
+
+    // Ocular Bezel Ring (Rear, facing delver with knurled heat rim)
+    add_tube(scatter_verts, {0.0f, 0.088f, 0.02f}, 0.014f, 0.020f, 0.015f, 16, col_scatter_shroud, mat_carbine_chrome, 2);
+    // Objective Sunshade Hood (Front)
+    add_tube(scatter_verts, {0.0f, 0.088f, -0.14f}, 0.014f, 0.019f, 0.020f, 16, col_scatter_shroud, mat_carbine_armor, 2);
+
+    // Heat radiator cooling ribs along top of scope housing
+    for (int rib = 0; rib < 3; ++rib) {
+        float rz = -0.04f - rib * 0.035f;
+        add_box(scatter_verts, {-0.019f, 0.085f, rz - 0.005f}, {0.019f, 0.089f, rz + 0.005f}, col_scatter_flame, mat_carbine_emissive);
+    }
+
+    // Tritium Amber Alignment Dots on Ocular Bezel
+    add_box(scatter_verts, {-0.019f, 0.085f, 0.018f}, {-0.015f, 0.091f, 0.022f}, col_scatter_amber, mat_carbine_emissive);
+    add_box(scatter_verts, { 0.015f, 0.085f, 0.018f}, { 0.019f, 0.091f, 0.022f}, col_scatter_amber, mat_carbine_emissive);
+
+    // C. Transparent Amber Thermal Optic Glass Lens Disc inside Scope
+    // (Positioned at z = -0.02f, radius = 0.0132f, 28% alpha amber optical coating)
+    glm::vec4 col_scatter_lens(1.0f, 0.68f, 0.18f, 0.28f);
+    add_lens_disc(scatter_verts, {0.0f, 0.088f, -0.02f}, 0.0132f, 16, col_scatter_lens, mat_carbine_glass, 2);
+
+    // D. Illuminated Thermite Ghost-Ring & Reticle on the 3D Amber Lens
+    float sc_ret_r = 0.007f;
+    for (int t = 0; t < 12; ++t) {
+        float a1 = t * (6.2831853f / 12.0f);
+        float a2 = (t + 1) * (6.2831853f / 12.0f);
+        glm::vec3 rp1(sc_ret_r * std::cos(a1), 0.088f + sc_ret_r * std::sin(a1), -0.021f);
+        glm::vec3 rp2(sc_ret_r * std::cos(a2), 0.088f + sc_ret_r * std::sin(a2), -0.021f);
+        add_box(scatter_verts, rp1 - glm::vec3(0.0006f), rp2 + glm::vec3(0.0006f), col_scatter_amber, mat_carbine_emissive);
+    }
+    // Front Sight Post & Molten Thermite Bead over muzzle (aligned straight through the scope bore!)
+    add_box(scatter_verts, {-0.003f, 0.036f, -0.44f}, {0.003f, 0.086f, -0.42f}, col_chassis_dark, mat_carbine_armor);
+    add_box(scatter_verts, {-0.0025f, 0.086f, -0.435f}, {0.0025f, 0.091f, -0.425f}, col_scatter_flame, mat_carbine_emissive);
+
     // 5.4 Heavy Pump Fore-End Slide & Grip
     add_box(scatter_verts, {-0.028f, -0.058f, -0.32f}, {0.028f, -0.028f, -0.20f}, col_scatter_grip, mat_carbine_rubber);
     // Pistol grip
@@ -921,7 +1099,7 @@ void ViewModel::init_geometry() {
     glm::vec4 col_rail_body(0.12f, 0.14f, 0.15f, 1.0f);        // Carbon weave chassis
     glm::vec4 col_rail_conductors(0.75f, 0.80f, 0.85f, 1.0f);  // Chrome superconductor rails
     glm::vec4 col_rail_emerald(0.15f, 1.0f, 0.45f, 1.0f);     // Superconducting emerald magnetic rings
-    glm::vec4 col_rail_optic(0.08f, 0.92f, 0.50f, 0.75f);      // Emerald sniper scope lens
+    glm::vec4 col_rail_optic(0.08f, 0.94f, 0.50f, 0.28f);      // Emerald sniper scope optical glass lens (28% alpha)
     glm::vec4 col_rail_grip(0.08f, 0.09f, 0.10f, 1.0f);
 
     // 6.1 Slender Precision Receiver
@@ -944,14 +1122,62 @@ void ViewModel::init_geometry() {
     // Needle Muzzle Stabilizer Tip
     add_cylinder(rail_verts, {0.0f, 0.005f, -0.66f}, 0.014f, 0.035f, 12, col_rail_conductors, mat_carbine_chrome, 2);
 
-    // 6.3 Elevated High-Precision Sniper Scope
-    add_box(rail_verts, {-0.008f, 0.038f, -0.14f}, {0.008f, 0.058f, -0.02f}, col_chassis_dark, mat_carbine_armor); // Mount
-    add_cylinder(rail_verts, {0.0f, 0.070f, -0.22f}, 0.015f, 0.24f, 14, col_rail_body, mat_carbine_armor, 2);      // Scope tube
-    add_cylinder(rail_verts, {0.0f, 0.070f, -0.22f}, 0.018f, 0.025f, 14, col_chassis_dark, mat_carbine_chrome, 2); // Objective bell
-    add_cylinder(rail_verts, {0.0f, 0.070f, 0.00f},  0.017f, 0.025f, 14, col_chassis_dark, mat_carbine_chrome, 2); // Ocular bell
-    // Lenses
-    add_cylinder(rail_verts, {0.0f, 0.070f, -0.225f}, 0.013f, 0.006f, 12, col_rail_optic, mat_carbine_glass, 2);
-    add_cylinder(rail_verts, {0.0f, 0.070f, 0.020f},  0.013f, 0.006f, 12, col_rail_optic, mat_carbine_glass, 2);
+    // 6.3 Elevated High-Precision Marksman Sniper Scope with Hollow Bore & Multi-Coated Optical Lenses
+    // A. Cantilever Mount Rings clamping to Carbon Chassis
+    add_box(rail_verts, {-0.008f, 0.038f, -0.16f}, {0.008f, 0.058f, -0.13f}, col_chassis_dark, mat_carbine_armor); // Front mount
+    add_box(rail_verts, {-0.008f, 0.038f, -0.05f}, {0.008f, 0.058f, -0.02f}, col_chassis_dark, mat_carbine_armor); // Rear mount
+    add_box(rail_verts, {-0.017f, 0.056f, -0.16f}, {0.017f, 0.068f, -0.13f}, col_rail_conductors, mat_carbine_chrome); // Front mount ring base
+    add_box(rail_verts, {-0.017f, 0.056f, -0.05f}, {0.017f, 0.068f, -0.02f}, col_rail_conductors, mat_carbine_chrome); // Rear mount ring base
+
+    // B. Hollow Scope Tube (Center at y = 0.070f, length 0.22f from z = 0.01f to -0.21f)
+    // Outer radius 0.0165f, Inner radius 0.0135f -> completely hollow optical tunnel to look straight through!
+    add_tube(rail_verts, {0.0f, 0.070f, 0.01f}, 0.0135f, 0.0165f, 0.22f, 16, col_rail_body, mat_carbine_armor, 2);
+
+    // Ocular Eyepiece Bell (Rear, facing delver: from z = 0.035f to 0.010f, length 0.025f)
+    // Outer radius 0.0195f, Inner radius 0.0142f
+    add_tube(rail_verts, {0.0f, 0.070f, 0.035f}, 0.0142f, 0.0195f, 0.025f, 16, col_chassis_dark, mat_carbine_chrome, 2);
+    // Knurled diopter rubber focus ring
+    add_tube(rail_verts, {0.0f, 0.070f, 0.028f}, 0.0185f, 0.0205f, 0.010f, 16, col_rail_grip, mat_carbine_rubber, 2);
+
+    // Objective Bell (Front: from z = -0.21f to -0.245f, length 0.035f)
+    // Outer radius 0.021f, Inner radius 0.0148f
+    add_tube(rail_verts, {0.0f, 0.070f, -0.21f}, 0.0148f, 0.0210f, 0.035f, 16, col_chassis_dark, mat_carbine_chrome, 2);
+
+    // C. External Windage & Elevation Adjustment Turret Caps
+    // Elevation turret (top)
+    add_cylinder(rail_verts, {0.0f, 0.070f + 0.016f, -0.10f}, 0.0055f, 0.008f, 10, col_chassis_dark, mat_carbine_chrome, 1);
+    // Windage turret (right)
+    add_cylinder(rail_verts, {0.016f, 0.070f, -0.10f}, 0.0055f, 0.008f, 10, col_chassis_dark, mat_carbine_chrome, 0);
+
+    // D. Multi-Coated Optical Glass Lenses (Thin optical glass discs with transparent emerald AR coating)
+    // 1. Ocular Lens Disc (facing player at z = 0.018f, radius 0.014f)
+    add_lens_disc(rail_verts, {0.0f, 0.070f, 0.018f}, 0.014f, 16, col_rail_optic, mat_carbine_glass, 2);
+
+    // 2. Objective Lens Disc (front of scope at z = -0.215f, radius 0.0145f)
+    add_lens_disc(rail_verts, {0.0f, 0.070f, -0.215f}, 0.0145f, 16, col_rail_optic, mat_carbine_glass, 2);
+
+    // E. Precision Illuminated Mil-Dot Reticle on the 3D Ocular Lens
+    // Center glowing illuminated needle dot
+    add_box(rail_verts, {-0.0008f, 0.070f - 0.0008f, 0.017f}, {0.0008f, 0.070f + 0.0008f, 0.019f}, col_plasma_white, mat_carbine_emissive);
+
+    // Hairline crosshairs etched inside the ocular aperture
+    float r_gap = 0.0025f;
+    float r_max = 0.0135f;
+    // Horizontal crosshair hairlines (Left and Right)
+    add_box(rail_verts, {-r_max, 0.070f - 0.0003f, 0.0175f}, {-r_gap, 0.070f + 0.0003f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+    add_box(rail_verts, { r_gap, 0.070f - 0.0003f, 0.0175f}, { r_max, 0.070f + 0.0003f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+    // Vertical crosshair hairlines (Bottom and Top)
+    add_box(rail_verts, {-0.0003f, 0.070f - r_max, 0.0175f}, {0.0003f, 0.070f - r_gap, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+    add_box(rail_verts, {-0.0003f, 0.070f + r_gap, 0.0175f}, {0.0003f, 0.070f + r_max, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+
+    // Subtle Mil-Dot hashes along axes
+    for (int md = 1; md <= 3; ++md) {
+        float m_off = md * 0.0032f;
+        add_box(rail_verts, {-m_off - 0.0004f, 0.070f - 0.0010f, 0.0175f}, {-m_off + 0.0004f, 0.070f + 0.0010f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+        add_box(rail_verts, { m_off - 0.0004f, 0.070f - 0.0010f, 0.0175f}, { m_off + 0.0004f, 0.070f + 0.0010f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+        add_box(rail_verts, {-0.0010f, 0.070f - m_off - 0.0004f, 0.0175f}, {0.0010f, 0.070f - m_off + 0.0004f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+        add_box(rail_verts, {-0.0010f, 0.070f + m_off - 0.0004f, 0.0175f}, {0.0010f, 0.070f + m_off + 0.0004f, 0.0185f}, col_rail_emerald, mat_carbine_emissive);
+    }
 
     // 6.4 Linear Needle Battery Cell
     add_box(rail_verts, {-0.014f, -0.115f, -0.10f}, {0.014f, -0.035f, -0.04f}, col_rail_body, mat_carbine_armor);
@@ -1195,9 +1421,9 @@ void ViewModel::render(
     float crouch_offset_z = is_crouching ? -0.05f : 0.0f;
     float sway_scale = is_crouching ? 0.5f : 1.0f;
 
-    // Locomotion bob (active strictly while moving)
-    float walk_bob_x = std::sin(m_walk_bob_phase) * 0.008f * sway_scale * m_walk_bob_weight;
-    float walk_bob_y = std::cos(m_walk_bob_phase * 2.0f) * 0.006f * sway_scale * m_walk_bob_weight;
+    // Locomotion bob (active strictly while moving) - gentle and pleasant
+    float walk_bob_x = std::sin(m_walk_bob_phase) * 0.004f * sway_scale * m_walk_bob_weight;
+    float walk_bob_y = std::cos(m_walk_bob_phase * 2.0f) * 0.003f * sway_scale * m_walk_bob_weight;
 
     // Idle breathing sway: very subtle 0.25 Hz physiological rise/fall, blends out during locomotion
     float idle_weight = 1.0f - m_walk_bob_weight;
@@ -1214,6 +1440,10 @@ void ViewModel::render(
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthRange(0.0f, 0.15f);
+
+    // Alpha blending for optical scope glass lenses & holographic reticles
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     m_shader.use();
     m_shader.set_mat4("uProjection", proj);
@@ -1395,13 +1625,27 @@ void ViewModel::render(
             }
         }
 
-        // Aim-Down-Sights (ADS) centering alignment:
+        // Aim-Down-Sights (ADS) centering alignment tailored per weapon archetype:
         float target_gun_x = 0.0f;
         float target_gun_y = -0.10f;
-        float target_gun_z = -0.30f;
+        float target_gun_z = -0.22f;
         float target_gun_yaw = 0.0f;
         float target_gun_pitch = 0.0f;
         float target_gun_roll = 0.0f;
+
+        if (m_character_class == CharacterClass::Scout) {
+            // Needler Railgun: Elevated marksman sniper scope center is at y = 0.070f
+            target_gun_y = -0.070f;
+            target_gun_z = -0.16f; // Frames the ocular eyepiece and emerald optical lens comfortably in view
+        } else if (m_character_class == CharacterClass::Demolitionist) {
+            // Magma Scattergun: Heavy thermal scope optical center is at y = 0.088f
+            target_gun_y = -0.088f;
+            target_gun_z = -0.20f;
+        } else {
+            // Vanguard Plasma Carbine: Reflex optic glass center is at y = 0.098f
+            target_gun_y = -0.098f;
+            target_gun_z = -0.22f; // Framed right behind the holographic HUD window
+        }
 
         float base_gun_x = glm::mix(0.15f, target_gun_x, zoom_progress);
         float base_gun_y = glm::mix(-0.14f, target_gun_y, zoom_progress);
@@ -1410,10 +1654,16 @@ void ViewModel::render(
         float base_gun_pitch = glm::mix(2.0f, target_gun_pitch, zoom_progress);
         float base_gun_roll = glm::mix(3.0f, target_gun_roll, zoom_progress);
 
+        // Hipfire posture lowers weapon during crouch (-0.08m Y, -0.05m Z).
+        // When aiming down sights (ADS), the delver brings the weapon sight directly up to eye level,
+        // ensuring identical, flawless sight alignment whether standing or crouching!
+        float effective_crouch_y = glm::mix(crouch_offset_y, 0.0f, zoom_progress);
+        float effective_crouch_z = glm::mix(crouch_offset_z, 0.0f, zoom_progress);
+
         glm::vec3 gun_pos(
             base_gun_x + lissajous_x + reload_offset_x + gun_melee_x,
-            base_gun_y + lissajous_y + switch_dip_y + crouch_offset_y + reload_offset_y + gun_melee_y,
-            base_gun_z + recoil_kick + switch_push_z + crouch_offset_z + reload_offset_z + gun_melee_z
+            base_gun_y + lissajous_y + switch_dip_y + effective_crouch_y + reload_offset_y + gun_melee_y,
+            base_gun_z + recoil_kick + switch_push_z + effective_crouch_z + reload_offset_z + gun_melee_z
         );
 
         glm::mat4 gun_model = glm::translate(glm::mat4(1.0f), gun_pos);
@@ -1425,6 +1675,7 @@ void ViewModel::render(
         float emissive = (m_muzzle_flash_timer > 0.0f) ? 0.95f : (0.35f + reload_emissive_boost + gun_melee_emissive);
         m_shader.set_float("uEmissive", emissive);
 
+        // All 3 firearms maintain visible viewmodels with see-through optical lenses across all zoom levels
         if (m_character_class == CharacterClass::Demolitionist) {
             glBindVertexArray(m_scattergun_vao);
             glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_scattergun_count));
@@ -1542,12 +1793,12 @@ void ViewModel::render(
             m_drill_rotation += 1800.0f * dt;
             if (m_drill_rotation > 360000.0f) m_drill_rotation -= 360000.0f;
 
-            // Recoil oscillation along view vector (Z offset jitter +-0.03m at 45 Hz)
-            recoil_z = std::sin(m_total_time * (2.0f * 3.14159265f * 45.0f)) * 0.030f;
-            jitter_x = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.003f;
-            jitter_y = ((static_cast<float>(rand() % 100) / 100.0f) - 0.5f) * 0.003f;
+            // Smooth, pleasant mechanical hum along view vector (toned down from aggressive 45Hz jitter)
+            recoil_z = std::sin(m_total_time * 24.0f) * 0.006f;
+            jitter_x = 0.0f;
+            jitter_y = 0.0f;
 
-            piston_z = std::sin(m_total_time * (2.0f * 3.14159265f * 45.0f)) * 0.030f;
+            piston_z = std::sin(m_total_time * 24.0f) * 0.008f;
 
             if (is_in_range && m_on_spark) {
                 m_spark_timer += dt;
@@ -1683,6 +1934,7 @@ void ViewModel::render(
         glBindVertexArray(0);
     }
 
+    glDisable(GL_BLEND);
     glDepthRange(0.0f, 1.0f);
     glEnable(GL_CULL_FACE);
 }
