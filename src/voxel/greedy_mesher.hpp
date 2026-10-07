@@ -33,8 +33,8 @@ public:
     }
 
     // Vertex Ambient Occlusion (returns 0..3)
-    // 0 = fully occluded corner (darkest)
-    // 3 = unoccluded corner (brightest)
+    // 0 = open (unoccluded corner)
+    // 3 = fully occluded corner
     static uint8_t compute_vertex_ao(
         bool side1_solid,
         bool side2_solid,

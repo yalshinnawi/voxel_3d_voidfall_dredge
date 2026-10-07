@@ -11,7 +11,8 @@ DynamicDebris::DynamicDebris(
     const glm::vec3& linear_vel,
     const glm::vec3& angular_vel,
     uint8_t material_id,
-    size_t block_count
+    size_t block_count,
+    World* world
 )
     : m_id(id)
     , m_position(position)
@@ -19,6 +20,7 @@ DynamicDebris::DynamicDebris(
     , m_angular_velocity(angular_vel)
     , m_material_id(material_id)
     , m_block_count(std::max(size_t(1), block_count))
+    , m_world(world)
 {
     m_blocks.push_back(DebrisBlock{glm::ivec3(0), Voxel{m_material_id, 0}});
     build_mesh();
@@ -30,7 +32,8 @@ DynamicDebris::DynamicDebris(
     const glm::vec3& linear_vel,
     const glm::vec3& angular_vel,
     const std::vector<DebrisBlock>& blocks,
-    uint8_t primary_material
+    uint8_t primary_material,
+    World* world
 )
     : m_id(id)
     , m_position(position)
@@ -39,6 +42,7 @@ DynamicDebris::DynamicDebris(
     , m_material_id(primary_material)
     , m_block_count(std::max(size_t(1), blocks.size()))
     , m_blocks(blocks)
+    , m_world(world)
 {
     if (m_blocks.empty()) {
         m_blocks.push_back(DebrisBlock{glm::ivec3(0), Voxel{m_material_id, 0}});
@@ -65,52 +69,52 @@ void DynamicDebris::build_mesh() {
         uint8_t mat = (b.voxel.material_id != MAT_AIR) ? b.voxel.material_id : m_material_id;
 
         // Face 0: +X (norm_idx = 0)
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 0, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 0, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 0, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 0, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 0, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 0, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 0, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 0, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 0, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 0, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 0, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 0, 0, mat, 1, 1, 3));
 
         // Face 1: -X (norm_idx = 1)
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 1, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 1, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 1, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 1, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 1, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 1, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 1, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 1, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 1, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 1, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 1, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 1, 0, mat, 1, 1, 3));
 
         // Face 2: +Y (norm_idx = 2)
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 2, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 2, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 2, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 2, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 2, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 2, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 2, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 2, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 2, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 2, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 2, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 2, 0, mat, 1, 1, 3));
 
         // Face 3: -Y (norm_idx = 3)
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 3, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 3, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 3, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 3, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 3, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 3, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 3, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 3, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 3, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 3, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 3, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 3, 0, mat, 1, 1, 3));
 
         // Face 4: +Z (norm_idx = 4)
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 4, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 4, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 4, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 4, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 4, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 4, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 4, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 1, 4, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 4, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 1, 4, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 1, 4, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 1, 4, 0, mat, 1, 1, 3));
 
         // Face 5: -Z (norm_idx = 5)
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 5, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 5, 3, mat, 1, 1, 1));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 5, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 5, 3, mat, 1, 1, 0));
-        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 5, 3, mat, 1, 1, 2));
-        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 5, 3, mat, 1, 1, 3));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 5, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 0, oz + 0, 5, 0, mat, 1, 1, 1));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 5, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 0, oz + 0, 5, 0, mat, 1, 1, 0));
+        verts.push_back(PackedVoxelVertex::encode(ox + 0, oy + 1, oz + 0, 5, 0, mat, 1, 1, 2));
+        verts.push_back(PackedVoxelVertex::encode(ox + 1, oy + 1, oz + 0, 5, 0, mat, 1, 1, 3));
     }
 
     m_vertex_count = verts.size();
@@ -151,9 +155,12 @@ DynamicDebris::DynamicDebris(DynamicDebris&& other) noexcept
     , m_block_count(other.m_block_count)
     , m_blocks(std::move(other.m_blocks))
     , m_mesh_offset(other.m_mesh_offset)
-    , m_sleeping(other.m_sleeping)
+    , m_isSleeping(other.m_isSleeping)
+    , m_low_velocity_timer(other.m_low_velocity_timer)
+    , m_sleep_timer(other.m_sleep_timer)
     , m_destroyed(other.m_destroyed)
     , m_life_time(other.m_life_time)
+    , m_world(other.m_world)
     , m_vao(other.m_vao)
     , m_vbo(other.m_vbo)
     , m_vertex_count(other.m_vertex_count)
@@ -162,6 +169,7 @@ DynamicDebris::DynamicDebris(DynamicDebris&& other) noexcept
     other.m_vao = 0;
     other.m_vbo = 0;
     other.m_vertex_count = 0;
+    other.m_world = nullptr;
 }
 
 DynamicDebris& DynamicDebris::operator=(DynamicDebris&& other) noexcept {
@@ -178,9 +186,12 @@ DynamicDebris& DynamicDebris::operator=(DynamicDebris&& other) noexcept {
         m_block_count = other.m_block_count;
         m_blocks = std::move(other.m_blocks);
         m_mesh_offset = other.m_mesh_offset;
-        m_sleeping = other.m_sleeping;
+        m_isSleeping = other.m_isSleeping;
+        m_low_velocity_timer = other.m_low_velocity_timer;
+        m_sleep_timer = other.m_sleep_timer;
         m_destroyed = other.m_destroyed;
         m_life_time = other.m_life_time;
+        m_world = other.m_world;
         m_vao = other.m_vao;
         m_vbo = other.m_vbo;
         m_vertex_count = other.m_vertex_count;
@@ -189,8 +200,64 @@ DynamicDebris& DynamicDebris::operator=(DynamicDebris&& other) noexcept {
         other.m_vao = 0;
         other.m_vbo = 0;
         other.m_vertex_count = 0;
+        other.m_world = nullptr;
     }
     return *this;
+}
+
+void DynamicDebris::re_voxelize_blocks(World& world) {
+    CollisionResult res;
+    re_voxelize_blocks(world, res);
+}
+
+void DynamicDebris::re_voxelize_blocks(World& world, CollisionResult& res) {
+    int bx = static_cast<int>(std::floor(m_position.x));
+    int bz = static_cast<int>(std::floor(m_position.z));
+    int center_place_y = static_cast<int>(std::floor(m_position.y));
+
+    if (m_blocks.size() > 1) {
+        for (const auto& b : m_blocks) {
+            int px_b = bx + b.local_offset.x;
+            int pz_b = bz + b.local_offset.z;
+            int py_b = center_place_y + b.local_offset.y;
+
+            while (py_b > 0 && !world.is_solid(px_b, py_b - 1, pz_b)) {
+                py_b--;
+            }
+            while (py_b < 127 && world.is_solid(px_b, py_b, pz_b)) {
+                py_b++;
+            }
+
+            if (py_b >= 0 && py_b < 128) {
+                uint8_t bmat = (b.voxel.material_id != MAT_AIR) ? b.voxel.material_id : m_material_id;
+                world.SetBlock(px_b, py_b, pz_b, bmat, b.voxel.flags_and_damage);
+            }
+        }
+        res.placed_on_ground = true;
+        res.place_pos = glm::ivec3(bx, center_place_y, bz);
+    } else {
+        int place_x = bx;
+        int place_y = center_place_y;
+        int place_z = bz;
+
+        if (place_y < 0) place_y = 0;
+        if (place_y > 127) place_y = 127;
+
+        while (place_y < 127 && world.is_solid(place_x, place_y, place_z)) {
+            place_y++;
+        }
+
+        if (place_y >= 0 && place_y < 128) {
+            world.SetBlock(place_x, place_y, place_z, m_material_id, 0);
+            res.placed_on_ground = true;
+            res.place_pos = glm::ivec3(place_x, place_y, place_z);
+        }
+    }
+
+    res.shattered = false;
+    res.shatter_pos = glm::vec3(res.place_pos.x + 0.5f, res.place_pos.y + 0.5f, res.place_pos.z + 0.5f);
+    res.shatter_mat = m_material_id;
+    res.spawned_dust_cloud = true;
 }
 
 DynamicDebris::CollisionResult DynamicDebris::update(
@@ -201,7 +268,43 @@ DynamicDebris::CollisionResult DynamicDebris::update(
     const std::vector<glm::vec3>& enemy_positions
 ) {
     CollisionResult res;
-    if (m_sleeping || m_destroyed) return res;
+    m_world = &world;
+    if (m_destroyed) return res;
+
+    // Sleeping state: If sleeping for > 2.5s, convert debris block positions back into static voxels in World::SetBlock() and remove the entity
+    if (m_isSleeping) {
+        m_sleep_timer += dt;
+        if (m_sleep_timer > 2.5f) {
+            re_voxelize_blocks(world, res);
+            m_destroyed = true;
+        }
+        return res; // Halt physics integration
+    }
+
+    // Velocity low-speed detection: If linear velocity glm::length(m_velocity) < 0.08f for > 1.0s, set m_isSleeping = true and halt physics integration
+    if (glm::length(m_velocity) < 0.08f) {
+        m_low_velocity_timer += dt;
+        if (m_low_velocity_timer > 1.0f) {
+            m_isSleeping = true;
+        }
+        return res; // Halt physics integration while linear velocity is below threshold
+    } else {
+        m_low_velocity_timer = 0.0f;
+    }
+
+    // Check if resting on cavern floor/solid blocks
+    int curr_bx = static_cast<int>(std::floor(m_position.x));
+    int curr_bz = static_cast<int>(std::floor(m_position.z));
+    int curr_by_below = static_cast<int>(std::floor(m_position.y - 0.45f));
+    bool on_ground = (curr_by_below < 0 || world.is_solid(curr_bx, curr_by_below, curr_bz));
+    if (on_ground && m_velocity.y <= 0.0f) {
+        m_velocity.y = 0.0f;
+        m_velocity.x *= 0.85f;
+        m_velocity.z *= 0.85f;
+        if (glm::length(m_velocity) < 0.01f) {
+            m_velocity = glm::vec3(0.0f);
+        }
+    }
 
     m_life_time += dt;
 
@@ -239,7 +342,7 @@ DynamicDebris::CollisionResult DynamicDebris::update(
     glm::vec3 p_min = glm::vec3(player_pos.x - 0.35f, std::min(player_pos.y - 0.95f, player_pos.y - 1.6f), player_pos.z - 0.35f);
     glm::vec3 p_max = glm::vec3(player_pos.x + 0.35f, std::max(player_pos.y + 0.95f, player_pos.y + 0.2f), player_pos.z + 0.35f);
 
-    bool player_overlap = (p_min.x <= d_max.x && p_max.x >= d_min.x) &&
+    bool player_overlap = (p_min.x <= d_max.x && p_max.y >= d_min.y) &&
                           (p_min.y <= d_max.y && p_max.y >= d_min.y) &&
                           (p_min.z <= d_max.z && p_max.z >= d_min.z);
 
@@ -353,7 +456,7 @@ DynamicDebris::CollisionResult DynamicDebris::update(
 
                 if (py_b >= 0 && py_b < 128) {
                     uint8_t bmat = (b.voxel.material_id != MAT_AIR) ? b.voxel.material_id : m_material_id;
-                    world.set_voxel(px_b, py_b, pz_b, Voxel{bmat, 0}, true);
+                    world.SetBlock(px_b, py_b, pz_b, bmat, b.voxel.flags_and_damage);
                 }
             }
             res.placed_on_ground = true;
@@ -386,7 +489,7 @@ DynamicDebris::CollisionResult DynamicDebris::update(
 
             // Place the physical block permanently on the ground
             if (place_y >= 0 && place_y < 128) {
-                world.set_voxel(place_x, place_y, place_z, Voxel{m_material_id, 0}, true);
+                world.SetBlock(place_x, place_y, place_z, m_material_id, 0);
                 res.placed_on_ground = true;
                 res.place_pos = glm::ivec3(place_x, place_y, place_z);
             }
@@ -412,6 +515,47 @@ DynamicDebris::CollisionResult DynamicDebris::update(
 
 void DynamicDebris::update(float dt, World& world) {
     update(dt, world, glm::vec3(-9999.0f), false);
+}
+
+void DynamicDebris::Update(float dt) {
+    if (m_world) {
+        update(dt, *m_world);
+    } else {
+        if (m_destroyed) return;
+        if (m_isSleeping) {
+            m_sleep_timer += dt;
+            if (m_sleep_timer > 2.5f) {
+                m_destroyed = true;
+            }
+            return;
+        }
+
+        if (glm::length(m_velocity) < 0.08f) {
+            m_low_velocity_timer += dt;
+            if (m_low_velocity_timer > 1.0f) {
+                m_isSleeping = true;
+                return;
+            }
+        } else {
+            m_low_velocity_timer = 0.0f;
+            m_velocity.y -= 18.0f * dt;
+            m_position += m_velocity * dt;
+        }
+    }
+}
+
+void DynamicDebris::Update(float dt, World& world) {
+    update(dt, world);
+}
+
+DynamicDebris::CollisionResult DynamicDebris::Update(
+    float dt,
+    World& world,
+    const glm::vec3& player_pos,
+    bool is_player_sheltered,
+    const std::vector<glm::vec3>& enemy_positions
+) {
+    return update(dt, world, player_pos, is_player_sheltered, enemy_positions);
 }
 
 void DynamicDebris::render() const {

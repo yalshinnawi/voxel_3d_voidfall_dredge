@@ -84,14 +84,15 @@ void main() {
     vec3 worldPos = (uInverseView * viewPos).xyz;
 
     vec3 rayDir = worldPos - uCameraPos;
-    float maxDist = length(rayDir);
+    float linearDepth = length(rayDir);
     rayDir = normalize(rayDir);
 
-    // Limit maximum raymarch distance for performance
-    maxDist = min(maxDist, 60.0);
+    // Limit maximum raymarch distance: clamp raymarching to min(linearDepth, 45.0)
+    // to prevent marching rays out to 100m+ in large vertical chasms
+    float maxMarchDepth = min(linearDepth, 45.0);
 
-    const int NUM_STEPS = 24;
-    float stepSize = maxDist / float(NUM_STEPS);
+    const int NUM_STEPS = 20;
+    float stepSize = maxMarchDepth / float(NUM_STEPS);
     vec3 inscatter = vec3(0.0);
     float transmittance = 1.0;
 

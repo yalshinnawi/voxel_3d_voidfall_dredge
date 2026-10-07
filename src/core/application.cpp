@@ -392,8 +392,11 @@ void Application::init_systems() {
             m_world->set_voxel(wx, wy, wz, Voxel{delta.material_id, delta.flags_and_damage}, true);
         });
         m_client->set_on_debris_spawn([this](const DynamicDebrisSpawnPacket& pkt) {
+            while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+                m_debris.erase(m_debris.begin());
+            }
             m_debris.emplace_back(pkt.debris_id, pkt.origin, pkt.linear_velocity,
-                                 pkt.angular_velocity, pkt.material_id, pkt.block_count);
+                                 pkt.angular_velocity, pkt.material_id, pkt.block_count, m_world.get());
         });
         m_client->set_on_sonar_ping([this](const SonarPingPacket& pkt) {
             m_renderer->trigger_sonar_pulse(pkt.origin);
@@ -855,10 +858,13 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         if (m_world->borders_hanging_overhang_or_stalactite(x, y, z)) {
             auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 64);
             for (const auto& island : unanchored) {
+                while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+                    m_debris.erase(m_debris.begin());
+                }
                 uint32_t did = m_next_debris_id++;
                 glm::vec3 vel(0.0f, -1.5f, 0.0f);
                 glm::vec3 rot(0.2f, 0.5f, 0.1f);
-                m_debris.emplace_back(did, island.center_of_mass, vel, rot, island.blocks, island.primary_material);
+                m_debris.emplace_back(did, island.center_of_mass, vel, rot, island.blocks, island.primary_material, m_world.get());
                 if (m_host) {
                     m_host->broadcast_debris_spawn(did, island.center_of_mass, vel, island.primary_material, island.blocks.size());
                 }
@@ -1236,7 +1242,10 @@ void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float ra
         float rot_y = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
         float rot_z = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
         glm::vec3 rot(rot_x, rot_y, rot_z);
-        m_debris.emplace_back(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, rot, v.material_id, 1);
+        while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+            m_debris.erase(m_debris.begin());
+        }
+        m_debris.emplace_back(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, rot, v.material_id, 1, m_world.get());
         if (m_host) {
             m_host->broadcast_debris_spawn(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, v.material_id, 1);
         }

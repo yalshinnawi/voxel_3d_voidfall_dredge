@@ -279,6 +279,16 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
   m_prev_player_pos = player_pos;
   m_has_prev_player_pos = true;
 
+  // Build zero-allocation spatial hash grid for swarm entities
+  m_spatial_hash.clear();
+  for (const auto &stalker : m_stalkers) {
+    if (stalker.state != StalkerState::Dead &&
+        stalker.state != StalkerState::Dying &&
+        stalker.state != StalkerState::Roosting) {
+      m_spatial_hash.insert(stalker.id, stalker.position);
+    }
+  }
+
   for (auto &s : m_stalkers) {
     // Reset per-frame one-shot notification flags for all entities
     s.just_screeched = false;
@@ -330,6 +340,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     float effective_move_speed = s.move_speed * speed_multiplier;
 
     s.state_timer += dt;
+    s.m_pathTickTimer += dt;
     s.glow_phase += dt * 2.0f;
     s.hit_flash_timer = std::max(0.0f, s.hit_flash_timer - dt);
     s.attack_cooldown = std::max(0.0f, s.attack_cooldown - dt);
@@ -355,6 +366,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       // surface flipping jitter
       sample.surface_state = StalkerSurfaceState::FLOOR;
       sample.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+      sample.distance = 0.05f;
+      sample.has_contact = true;
+    } else if (dist_to_player > 40.0f) {
+      // If distance to player > 40.0m, completely skip 6-direction raycast collision
+      sample.surface_state = s.surface_state;
+      sample.contact_normal = s.contact_normal;
       sample.distance = 0.05f;
       sample.has_contact = true;
     } else {
@@ -532,10 +549,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     s.is_in_light = headlamp_on && dist_to_player < 22.0f &&
                     is_in_headlamp(s.position, player_pos, headlamp_dir, 32.0f);
 
-    // Raycast Line of Sight from stalker eyes to delver torso
-    bool los =
-        has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f),
-                          player_pos + glm::vec3(0.0f, 0.7f, 0.0f), world);
+    // Raycast Line of Sight from stalker eyes to delver torso (skip if > 40.0m)
+    bool los = false;
+    if (dist_to_player <= 40.0f) {
+      los = has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f),
+                              player_pos + glm::vec3(0.0f, 0.7f, 0.0f), world);
+    }
     s.has_player_los = los;
 
     // Visual detection range (shadow vs light vs stealth crouch)
@@ -1176,66 +1195,82 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                                           "spine volley at player!");
       }
 
-      // Eerie burst-and-weave pursuit towards target_pos
-      glm::vec3 move_dir(0.0f);
-      float burst = 0.50f + 0.70f * std::abs(std::sin(s.walk_cycle * 0.45f));
-      float weave = 0.45f * std::sin(s.walk_cycle * 1.2f);
+      // Recalculate full player-tracking velocity vectors only every 0.15s (approx 6.6 Hz)
+      bool do_path_tick = (s.m_pathTickTimer >= 0.15f);
+      if (do_path_tick) {
+        s.m_pathTickTimer = 0.0f;
 
-      StalkerSurfaceState active_surf =
-          (s.surface_state == StalkerSurfaceState::TRANSITIONING)
-              ? s.target_surface_state
-              : s.surface_state;
+        glm::vec3 move_dir(0.0f);
+        float weave = 0.45f * std::sin(s.walk_cycle * 1.2f);
 
-      if (active_surf == StalkerSurfaceState::CEILING_CRAWLING) {
-        float vert_diff = s.position.y - s.target_pos.y;
-        if (vert_diff > 1.2f) {
-          // Stalker on ceiling: directly navigate walls to descend and reach player!
-          move_dir = AberrantAI::find_descending_wall_direction(
-              s.position, s.target_pos, world);
+        StalkerSurfaceState active_surf =
+            (s.surface_state == StalkerSurfaceState::TRANSITIONING)
+                ? s.target_surface_state
+                : s.surface_state;
+
+        if (active_surf == StalkerSurfaceState::CEILING_CRAWLING) {
+          float vert_diff = s.position.y - s.target_pos.y;
+          if (vert_diff > 1.2f) {
+            // Stalker on ceiling: directly navigate walls to descend and reach player!
+            move_dir = AberrantAI::find_descending_wall_direction(
+                s.position, s.target_pos, world);
+          } else {
+            glm::vec3 to_tgt_xz(s.target_pos.x - s.position.x, 0.0f,
+                                s.target_pos.z - s.position.z);
+            float horiz_to_tgt = glm::length(to_tgt_xz);
+            if (horiz_to_tgt > 0.1f) {
+              move_dir = to_tgt_xz / horiz_to_tgt;
+            }
+          }
+          if (glm::length(move_dir) > 0.01f) {
+            glm::vec3 perp(-move_dir.z, 0.0f, move_dir.x);
+            move_dir = glm::normalize(move_dir + perp * weave);
+            if (dist_to_player <= 40.0f) {
+              move_dir = AberrantAI::steer_around_obstacles(
+                  s.position, move_dir, s.contact_normal, world);
+            }
+          }
+        } else if (active_surf == StalkerSurfaceState::WALL_CLIMBING) {
+          move_dir = AberrantAI::calculate_wall_traversal_direction(
+              s.position, s.target_pos, s.contact_normal);
         } else {
           glm::vec3 to_tgt_xz(s.target_pos.x - s.position.x, 0.0f,
                               s.target_pos.z - s.position.z);
           float horiz_to_tgt = glm::length(to_tgt_xz);
           if (horiz_to_tgt > 0.1f) {
-            move_dir = to_tgt_xz / horiz_to_tgt;
+            glm::vec3 dir_xz = to_tgt_xz / horiz_to_tgt;
+            glm::vec3 perp(-dir_xz.z, 0.0f, dir_xz.x);
+            move_dir = glm::normalize(dir_xz + perp * weave);
+            if (dist_to_player <= 40.0f) {
+              move_dir = AberrantAI::steer_around_obstacles(
+                  s.position, move_dir, s.contact_normal, world);
+            }
           }
         }
+
+        // Swarm Boid Separation: Spatial grid query, completely skipped if distance to player > 40.0m
+        glm::vec3 f_sep(0.0f);
+        if (dist_to_player <= 40.0f) {
+          f_sep = m_spatial_hash.calculate_separation(s.id, s.position, 16.0f, 8.0f);
+        }
+
         if (glm::length(move_dir) > 0.01f) {
-          glm::vec3 perp(-move_dir.z, 0.0f, move_dir.x);
-          move_dir = glm::normalize(move_dir + perp * weave);
-          move_dir = AberrantAI::steer_around_obstacles(
-              s.position, move_dir, s.contact_normal, world);
+          s.m_targetVelocity = move_dir * effective_move_speed + f_sep;
+        } else {
+          s.m_targetVelocity = f_sep;
         }
-      } else if (active_surf == StalkerSurfaceState::WALL_CLIMBING) {
-        move_dir = AberrantAI::calculate_wall_traversal_direction(
-            s.position, s.target_pos, s.contact_normal);
+      }
+
+      // Interpolate movement smoothly between ticks
+      float burst = 0.50f + 0.70f * std::abs(std::sin(s.walk_cycle * 0.45f));
+      glm::vec3 desired_vel = s.m_targetVelocity * burst;
+      if (glm::length(s.velocity) < 0.01f) {
+        s.velocity = desired_vel;
       } else {
-        glm::vec3 to_tgt_xz(s.target_pos.x - s.position.x, 0.0f,
-                            s.target_pos.z - s.position.z);
-        float horiz_to_tgt = glm::length(to_tgt_xz);
-        if (horiz_to_tgt > 0.1f) {
-          glm::vec3 dir_xz = to_tgt_xz / horiz_to_tgt;
-          glm::vec3 perp(-dir_xz.z, 0.0f, dir_xz.x);
-          move_dir = glm::normalize(dir_xz + perp * weave);
-          move_dir = AberrantAI::steer_around_obstacles(
-              s.position, move_dir, s.contact_normal, world);
-        }
+        s.velocity = glm::mix(s.velocity, desired_vel, std::clamp(dt * 15.0f, 0.0f, 1.0f));
       }
 
-      // Swarm Boid Separation: Add pairwise repulsive forces
-      std::vector<glm::vec3> other_pos;
-      for (const auto &other : m_stalkers) {
-        if (&other != &s && other.state != StalkerState::Dead &&
-            other.state != StalkerState::Dying &&
-            other.state != StalkerState::Roosting) {
-          other_pos.push_back(other.position);
-        }
-      }
-      glm::vec3 f_sep = AberrantAI::calculate_swarm_separation(
-          s.position, other_pos, 5.0f, 8.0f);
-
-      if (glm::length(move_dir) > 0.01f) {
-        s.velocity = move_dir * effective_move_speed * burst + f_sep;
+      if (glm::length(s.velocity) > 0.01f) {
         s.position += s.velocity * dt;
         if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING ||
             glm::length(glm::vec2(s.velocity.x, s.velocity.z)) > 0.1f) {
@@ -1353,34 +1388,38 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         break;
       }
 
-      if (s.surface_state == StalkerSurfaceState::WALL_CLIMBING) {
-        glm::vec3 dir = AberrantAI::calculate_wall_traversal_direction(
-            s.position, player_pos, s.contact_normal);
-        float orbit_burst =
-            0.65f + 0.50f * std::abs(std::sin(s.walk_cycle * 0.40f));
-        s.velocity = dir * s.circle_speed * orbit_burst;
-        s.position += s.velocity * dt;
-      } else if (s.surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
-        glm::vec3 dir = AberrantAI::find_descending_wall_direction(
-            s.position, player_pos, world);
-        float orbit_burst =
-            0.65f + 0.50f * std::abs(std::sin(s.walk_cycle * 0.40f));
-        s.velocity = dir * s.circle_speed * orbit_burst;
-        s.position += s.velocity * dt;
-      } else {
-        // Eerie variable-radius orbit with height undulation (floor pattern)
-        float orbit_radius = 5.0f + std::sin(s.glow_phase * 0.65f) * 1.8f;
-        float orbit_angle = s.glow_phase * 0.85f;
-        glm::vec3 orbit_offset(std::cos(orbit_angle) * orbit_radius,
-                               std::sin(s.glow_phase * 1.1f) * 0.75f,
-                               std::sin(orbit_angle) * orbit_radius);
-        glm::vec3 target = player_pos + orbit_offset;
-        glm::vec3 dir = glm::normalize(target - s.position);
-        float orbit_burst =
-            0.65f + 0.50f * std::abs(std::sin(s.walk_cycle * 0.40f));
-        s.velocity = dir * s.circle_speed * orbit_burst;
-        s.position += s.velocity * dt;
+      bool do_circle_tick = (s.m_pathTickTimer >= 0.15f);
+      if (do_circle_tick) {
+        s.m_pathTickTimer = 0.0f;
+        glm::vec3 circle_dir(0.0f);
+        if (s.surface_state == StalkerSurfaceState::WALL_CLIMBING) {
+          circle_dir = AberrantAI::calculate_wall_traversal_direction(
+              s.position, player_pos, s.contact_normal);
+        } else if (s.surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
+          circle_dir = AberrantAI::find_descending_wall_direction(
+              s.position, player_pos, world);
+        } else {
+          // Eerie variable-radius orbit with height undulation (floor pattern)
+          float orbit_radius = 5.0f + std::sin(s.glow_phase * 0.65f) * 1.8f;
+          float orbit_angle = s.glow_phase * 0.85f;
+          glm::vec3 orbit_offset(std::cos(orbit_angle) * orbit_radius,
+                                 std::sin(s.glow_phase * 1.1f) * 0.75f,
+                                 std::sin(orbit_angle) * orbit_radius);
+          glm::vec3 target = player_pos + orbit_offset;
+          circle_dir = glm::normalize(target - s.position);
+        }
+        s.m_targetVelocity = circle_dir * s.circle_speed;
       }
+
+      float orbit_burst =
+          0.65f + 0.50f * std::abs(std::sin(s.walk_cycle * 0.40f));
+      glm::vec3 desired_circle_vel = s.m_targetVelocity * orbit_burst;
+      if (glm::length(s.velocity) < 0.01f) {
+        s.velocity = desired_circle_vel;
+      } else {
+        s.velocity = glm::mix(s.velocity, desired_circle_vel, std::clamp(dt * 15.0f, 0.0f, 1.0f));
+      }
+      s.position += s.velocity * dt;
       s.yaw = std::atan2((player_pos.x - s.position.x),
                          (player_pos.z - s.position.z));
 
@@ -2081,7 +2120,10 @@ void VoidStalkerManager::remove_dead() {
 
 void VoidStalkerManager::reset() {
   m_stalkers.clear();
+  m_projectiles.clear();
+  m_spatial_hash.clear();
   m_next_id = 1;
+  m_next_proj_id = 1;
 }
 
 } // namespace Voidfall

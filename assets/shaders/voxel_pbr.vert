@@ -19,6 +19,7 @@ out vec3 vTangent;
 out vec3 vBitangent;
 out vec2 vUV;
 flat out uint vTexLayer;
+flat out uint vAOIndex;
 out float vAO;
 out float vEmissive;
 out float vDamage;
@@ -71,9 +72,10 @@ void main() {
     vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
     vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
 
-    // Baked Ambient Occlusion multipliers: ao=3 -> 1.0, ao=2 -> 0.72, ao=1 -> 0.45, ao=0 -> 0.20
-    const float AO_FACTORS[4] = float[4](0.20, 0.45, 0.72, 1.0);
-    vAO = AO_FACTORS[aoIdx];
+    // Baked Ambient Occlusion multipliers: ao=0 -> 1.0, ao=1 -> 0.72, ao=2 -> 0.45, ao=3 -> 0.20
+    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    vAOIndex = aoIdx;
+    vAO = aoTable[aoIdx];
 
     vec3 localPos = vec3(localX, localY, localZ);
     vec4 worldPos4 = uModel * vec4(localPos + uChunkWorldPos, 1.0);

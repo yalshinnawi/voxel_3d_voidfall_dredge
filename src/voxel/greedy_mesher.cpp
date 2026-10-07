@@ -5,9 +5,9 @@ namespace Voidfall {
 
 uint8_t GreedyMesher::compute_vertex_ao(bool s1, bool s2, bool c) {
     if (s1 && s2) {
-        return 0; // Fully occluded corner
+        return 3; // Fully occluded corner
     }
-    return static_cast<uint8_t>(3 - ((s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0)));
+    return static_cast<uint8_t>((s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0));
 }
 
 Voxel GreedyMesher::sample_voxel(
@@ -288,7 +288,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         );
 
                         // Winding order and AO anisotropy diagonal flip
-                        bool flip_diag = (ao0 + ao2) > (ao1 + ao3);
+                        bool flip_diag = (ao0 + ao2) < (ao1 + ao3);
 
                         if (face_dir == 0) { // Forward face (+X, +Y, +Z)
                             if (flip_diag) {

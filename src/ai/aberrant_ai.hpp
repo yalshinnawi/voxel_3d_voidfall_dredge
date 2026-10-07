@@ -69,6 +69,54 @@ struct PerceptionEvaluation {
     bool triggered_swarm_alert{false};
 };
 
+/// Entry for fast spatial hashing of swarm entities
+struct SpatialGridEntry {
+    uint32_t id{0};
+    glm::vec3 position{0.0f};
+};
+
+/// High-efficiency, zero-allocation spatial hash grid for swarm entities.
+/// Grid cell size is 4.0m, matching the 16.0f distance-squared cutoff (r = 4.0m).
+class AISpatialHash {
+public:
+    static constexpr float CELL_SIZE = 4.0f;
+    static constexpr float CELL_SIZE_INV = 1.0f / CELL_SIZE;
+    static constexpr int BUCKET_COUNT = 512;
+    static constexpr int MAX_ENTITIES = 256;
+
+    AISpatialHash();
+
+    /// Clears the spatial hash table (O(1) with zero allocations)
+    void clear();
+
+    /// Inserts an entity into the spatial hash grid
+    void insert(uint32_t id, const glm::vec3& position);
+
+    /// Computes repulsive swarm separation against entities in adjacent spatial cells
+    /// with early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately.
+    glm::vec3 calculate_separation(
+        uint32_t self_id,
+        const glm::vec3& self_pos,
+        float max_dist_sq = 16.0f,
+        float separation_force = 8.0f
+    ) const;
+
+    int count() const { return m_count; }
+
+private:
+    static uint32_t hash_cell(int cx, int cy, int cz) {
+        uint32_t h = (static_cast<uint32_t>(cx) * 73856093u) ^
+                     (static_cast<uint32_t>(cy) * 19349663u) ^
+                     (static_cast<uint32_t>(cz) * 83492791u);
+        return h % BUCKET_COUNT;
+    }
+
+    int m_head[BUCKET_COUNT];
+    int m_next[MAX_ENTITIES];
+    SpatialGridEntry m_entries[MAX_ENTITIES];
+    int m_count{0};
+};
+
 /// AI utilities for aberrant surface attachment, 6-direction raycast sampling,
 /// contact normal classification, smooth transform orientation, and acoustic perception.
 class AberrantAI {
@@ -179,10 +227,20 @@ public:
 
     /// Calculates pairwise repulsive separation force between swarm entities:
     /// F_sep = sum((pos_i - pos_j) / ||pos_i - pos_j||^2) * 8.0f
+    /// Uses early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately.
     static glm::vec3 calculate_swarm_separation(
         const glm::vec3& self_pos,
         const std::vector<glm::vec3>& other_positions,
         float max_distance = 6.0f,
+        float separation_force = 8.0f
+    );
+
+    /// Swarm boid separation via AISpatialHash grid query with early-exit distance check (dist_sq > 16.0f)
+    static glm::vec3 calculate_swarm_separation(
+        const class AISpatialHash& grid,
+        uint32_t self_id,
+        const glm::vec3& self_pos,
+        float max_dist_sq = 16.0f,
         float separation_force = 8.0f
     );
 

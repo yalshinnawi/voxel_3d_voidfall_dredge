@@ -23,8 +23,12 @@ struct ChemicalFlare {
     float life_fraction() const { return max_lifetime > 0.0f ? (lifetime / max_lifetime) : 0.0f; }
 };
 
+using Flare = ChemicalFlare;
+
 class FlareManager {
 public:
+    static constexpr size_t MAX_ACTIVE_FLARES = 4;
+
     static FlareManager& instance();
 
     void reset();

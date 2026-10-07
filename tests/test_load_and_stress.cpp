@@ -255,8 +255,122 @@ int main() {
         log_pass("Late-Round Enemy Caps & Hazard Clock Verification");
     }
 
+    // ── Module 6: Chunk Mesh GPU Upload Throttling & Driver Amortization ──
+    std::cout << "\n=== [MODULE 6] Chunk Mesh GPU Upload Throttling & Driver Amortization ===\n";
+    {
+        // 1. Verify constant invariant
+        TEST_CHECK(World::MAX_CHUNK_UPLOADS_PER_FRAME == 2,
+                   "MAX_CHUNK_UPLOADS_PER_FRAME must be exactly 2 for driver amortization");
+
+        World throttle_world(4242, false);
+
+        // 2. Queue duplicate chunk positions and verify queue deduplication
+        ChunkPos p0{0, 0, 0};
+        ChunkPos p1{1, 0, 0};
+        ChunkPos p2{2, 0, 0};
+        ChunkPos p3{0, 1, 0};
+        ChunkPos p4{1, 1, 0};
+        ChunkPos p5{2, 1, 0};
+
+        throttle_world.get_or_create_chunk(p0);
+        throttle_world.get_or_create_chunk(p1);
+        throttle_world.get_or_create_chunk(p2);
+        throttle_world.get_or_create_chunk(p3);
+        throttle_world.get_or_create_chunk(p4);
+        throttle_world.get_or_create_chunk(p5);
+
+        // Clear any initial queue from creation
+        while (throttle_world.upload_queue_size() > 0) {
+            throttle_world.upload_mesh_queue(10);
+        }
+        TEST_CHECK(throttle_world.upload_queue_size() == 0, "Upload queue starts clean");
+
+        // Test deduplication
+        throttle_world.queue_chunk_for_upload(p0);
+        throttle_world.queue_chunk_for_upload(p0); // Redundant push
+        TEST_CHECK(throttle_world.upload_queue_size() == 1,
+                   "Redundant chunk upload requests must be deduplicated in upload queue");
+
+        // 3. Stage simulated greedy meshes on all 6 chunks
+        ChunkPos all_positions[6] = {p0, p1, p2, p3, p4, p5};
+        for (const auto& pos : all_positions) {
+            Chunk* c = throttle_world.get_chunk(pos);
+            TEST_CHECK(c != nullptr, "Chunk must exist in world");
+            std::vector<PackedVoxelVertex> dummy_verts(36);
+            c->stage_mesh(std::move(dummy_verts));
+            TEST_CHECK(c->has_staged_mesh(), "Chunk must have staged mesh");
+            throttle_world.queue_chunk_for_upload(pos);
+        }
+
+        TEST_CHECK(throttle_world.upload_queue_size() == 6,
+                   "Upload queue must contain exactly 6 pending chunk buffers");
+
+        // 4. Simulate Frame 1: World::Update() should upload exactly 2 buffers
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 4,
+                   "Frame 1: exactly 2 chunk buffers uploaded, 4 remain in queue");
+        TEST_CHECK(!throttle_world.get_chunk(p0)->has_staged_mesh(),
+                   "Chunk 0 mesh must be uploaded and staged flag cleared");
+        TEST_CHECK(!throttle_world.get_chunk(p1)->has_staged_mesh(),
+                   "Chunk 1 mesh must be uploaded and staged flag cleared");
+        TEST_CHECK(throttle_world.get_chunk(p2)->has_staged_mesh(),
+                   "Chunk 2 mesh must still be pending upload");
+
+        // 5. Simulate Frame 2: World::Update() uploads exactly 2 buffers
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 2,
+                   "Frame 2: exactly 2 chunk buffers uploaded, 2 remain in queue");
+        TEST_CHECK(!throttle_world.get_chunk(p2)->has_staged_mesh(),
+                   "Chunk 2 mesh must be uploaded and cleared");
+        TEST_CHECK(!throttle_world.get_chunk(p3)->has_staged_mesh(),
+                   "Chunk 3 mesh must be uploaded and cleared");
+
+        // 6. Simulate Frame 3: World::Update() uploads the final 2 buffers
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 0,
+                   "Frame 3: exactly 2 chunk buffers uploaded, 0 remain in queue");
+        TEST_CHECK(!throttle_world.get_chunk(p4)->has_staged_mesh(),
+                   "Chunk 4 mesh must be uploaded and cleared");
+        TEST_CHECK(!throttle_world.get_chunk(p5)->has_staged_mesh(),
+                   "Chunk 5 mesh must be uploaded and cleared");
+
+        // 7. Simulate Frame 4: Queue empty, World::Update() cleanly uploads 0 buffers
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 0,
+                   "Frame 4: Queue empty, 0 uploads executed");
+
+        // 8. Massive Cave-in Simulation: 7 chunks invalidated simultaneously
+        ChunkPos cavein_positions[7] = {
+            ChunkPos{0, 0, 0}, ChunkPos{1, 0, 0}, ChunkPos{2, 0, 0},
+            ChunkPos{0, 1, 0}, ChunkPos{1, 1, 0}, ChunkPos{2, 1, 0},
+            ChunkPos{0, 2, 0}
+        };
+        throttle_world.get_or_create_chunk(ChunkPos{0, 2, 0});
+
+        for (const auto& pos : cavein_positions) {
+            Chunk* c = throttle_world.get_chunk(pos);
+            std::vector<PackedVoxelVertex> cavein_mesh(48);
+            c->stage_mesh(std::move(cavein_mesh));
+            throttle_world.queue_chunk_for_upload(pos);
+        }
+        TEST_CHECK(throttle_world.upload_queue_size() == 7,
+                   "Massive cave-in must enqueue 7 chunk mesh uploads");
+
+        // Verify smooth multi-frame distribution: 2 + 2 + 2 + 1 over 4 frames
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 5, "Cave-in Frame 1: 2 uploaded (5 remain)");
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 3, "Cave-in Frame 2: 2 uploaded (3 remain)");
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 1, "Cave-in Frame 3: 2 uploaded (1 remain)");
+        throttle_world.Update();
+        TEST_CHECK(throttle_world.upload_queue_size() == 0, "Cave-in Frame 4: 1 uploaded (0 remain)");
+
+        log_pass("Chunk Mesh GPU Upload Throttling (MAX_CHUNK_UPLOADS_PER_FRAME = 2) & Cave-in Amortization");
+    }
+
     std::cout << "\n==========================================================\n";
-    std::cout << "  ALL LOAD, STRESS & LATE-ROUND TESTS PASSED (5/5 Modules)\n";
+    std::cout << "  ALL LOAD, STRESS & LATE-ROUND TESTS PASSED (6/6 Modules)\n";
     std::cout << "==========================================================\n";
     return 0;
 }

@@ -39,9 +39,10 @@ bool ClusteredLighting::init() {
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_SCENE_LIGHTS * sizeof(GpuPointLight), nullptr, GL_DYNAMIC_DRAW);
 
     // 2. Allocate Cluster Grid SSBO (TOTAL_CLUSTERS * sizeof(ClusterRecord))
+    std::vector<ClusterRecord> initial_clusters(TOTAL_CLUSTERS);
     glGenBuffers(1, &m_cluster_ssbo);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_cluster_ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, TOTAL_CLUSTERS * sizeof(ClusterRecord), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, TOTAL_CLUSTERS * sizeof(ClusterRecord), initial_clusters.data(), GL_DYNAMIC_DRAW);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     m_initialized = true;

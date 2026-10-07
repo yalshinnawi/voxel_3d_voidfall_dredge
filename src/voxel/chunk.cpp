@@ -72,6 +72,11 @@ void Chunk::upload_mesh() {
         m_has_staged_mesh.store(false, std::memory_order_release);
     }
 
+    if (!glad_glGenVertexArrays || !glad_glGenBuffers) {
+        m_uploaded_vertex_count = local_mesh.size();
+        return;
+    }
+
     if (!m_gpu_initialized) {
         glGenVertexArrays(1, &m_vao);
         glGenBuffers(1, &m_vbo);

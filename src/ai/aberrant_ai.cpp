@@ -275,6 +275,62 @@ void AberrantAI::cancel_forward_momentum(
     }
 }
 
+AISpatialHash::AISpatialHash() {
+    clear();
+}
+
+void AISpatialHash::clear() {
+    std::fill_n(m_head, BUCKET_COUNT, -1);
+    m_count = 0;
+}
+
+void AISpatialHash::insert(uint32_t id, const glm::vec3& position) {
+    if (m_count >= MAX_ENTITIES) return;
+    int idx = m_count++;
+    m_entries[idx] = {id, position};
+    int cx = static_cast<int>(std::floor(position.x * CELL_SIZE_INV));
+    int cy = static_cast<int>(std::floor(position.y * CELL_SIZE_INV));
+    int cz = static_cast<int>(std::floor(position.z * CELL_SIZE_INV));
+    uint32_t h = hash_cell(cx, cy, cz);
+    m_next[idx] = m_head[h];
+    m_head[h] = idx;
+}
+
+glm::vec3 AISpatialHash::calculate_separation(
+    uint32_t self_id,
+    const glm::vec3& self_pos,
+    float max_dist_sq,
+    float separation_force) const
+{
+    int cx = static_cast<int>(std::floor(self_pos.x * CELL_SIZE_INV));
+    int cy = static_cast<int>(std::floor(self_pos.y * CELL_SIZE_INV));
+    int cz = static_cast<int>(std::floor(self_pos.z * CELL_SIZE_INV));
+
+    glm::vec3 total_force(0.0f);
+
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                uint32_t h = hash_cell(cx + dx, cy + dy, cz + dz);
+                for (int idx = m_head[h]; idx != -1; idx = m_next[idx]) {
+                    const auto& ent = m_entries[idx];
+                    if (ent.id == self_id) continue;
+                    float diff_x = self_pos.x - ent.position.x;
+                    float diff_y = self_pos.y - ent.position.y;
+                    float diff_z = self_pos.z - ent.position.z;
+                    // Early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately
+                    float dist_sq = diff_x * diff_x + diff_y * diff_y + diff_z * diff_z;
+                    if (dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
+                        continue;
+                    }
+                    total_force += (glm::vec3(diff_x, diff_y, diff_z) / dist_sq) * separation_force;
+                }
+            }
+        }
+    }
+    return total_force;
+}
+
 glm::vec3 AberrantAI::calculate_swarm_separation(
     const glm::vec3& self_pos,
     const std::vector<glm::vec3>& other_positions,
@@ -282,14 +338,29 @@ glm::vec3 AberrantAI::calculate_swarm_separation(
     float separation_force)
 {
     glm::vec3 total_force(0.0f);
+    const float max_dist_sq = std::min(16.0f, max_distance * max_distance);
     for (const auto& other_pos : other_positions) {
-        glm::vec3 diff = self_pos - other_pos;
-        float dist_sq = glm::dot(diff, diff);
-        if (dist_sq > 0.0001f && dist_sq < max_distance * max_distance) {
-            total_force += (diff / dist_sq) * separation_force;
+        float dx = self_pos.x - other_pos.x;
+        float dy = self_pos.y - other_pos.y;
+        float dz = self_pos.z - other_pos.z;
+        // Early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately
+        float dist_sq = dx * dx + dy * dy + dz * dz;
+        if (dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
+            continue;
         }
+        total_force += (glm::vec3(dx, dy, dz) / dist_sq) * separation_force;
     }
     return total_force;
+}
+
+glm::vec3 AberrantAI::calculate_swarm_separation(
+    const AISpatialHash& grid,
+    uint32_t self_id,
+    const glm::vec3& self_pos,
+    float max_dist_sq,
+    float separation_force)
+{
+    return grid.calculate_separation(self_id, self_pos, max_dist_sq, separation_force);
 }
 
 float AberrantAI::calculate_received_noise_db(

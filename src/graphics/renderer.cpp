@@ -17,6 +17,9 @@
 #ifndef GL_POLYGON_OFFSET_FILL
 #define GL_POLYGON_OFFSET_FILL 0x8037
 #endif
+#ifndef GL_TEXTURE4
+#define GL_TEXTURE4 0x84C4
+#endif
 
 typedef void (APIENTRY *PFNGLPOLYGONOFFSETPROC)(GLfloat factor, GLfloat units);
 static PFNGLPOLYGONOFFSETPROC s_glPolygonOffset = nullptr;
@@ -26,8 +29,8 @@ namespace Voidfall {
 Renderer::Renderer(int width, int height)
     : m_width(width)
     , m_height(height)
-    , m_fog_width(width / 2)
-    , m_fog_height(height / 2)
+    , m_fog_width(std::max(1, width / 2))
+    , m_fog_height(std::max(1, height / 2))
 {
     // Initialize default clear color to the dark void tone
     glClearColor(0.015f, 0.018f, 0.024f, 1.0f);
@@ -237,9 +240,9 @@ void Renderer::init_framebuffers() {
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // 2. Volumetric Fog Half-Res 2D Image Texture
-    m_fog_width = m_width / 2;
-    m_fog_height = m_height / 2;
+    // 2. Volumetric Fog Half-Res 2D Image Texture (screenWidth / 2, screenHeight / 2 in GL_RGBA16F)
+    m_fog_width = std::max(1, m_width / 2);
+    m_fog_height = std::max(1, m_height / 2);
     glGenTextures(1, &m_fog_tex);
     glBindTexture(GL_TEXTURE_2D, m_fog_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_fog_width, m_fog_height, 0, GL_RGBA, GL_FLOAT, nullptr);
@@ -1249,7 +1252,7 @@ void Renderer::render_particles() {
 }
 
 void Renderer::add_point_light(const PointLight& light) {
-    if (m_point_lights.size() < 16) {
+    if (m_point_lights.size() < MAX_SCENE_LIGHTS) {
         m_point_lights.push_back(light);
     }
 }
@@ -1319,7 +1322,7 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
     m_voxel_shader.set_float("uHeadlampIntensity", get_effective_headlamp_intensity());
 
     // Point lights (fallback uniform array & fog compatibility)
-    m_voxel_shader.set_int("uNumPointLights", static_cast<int>(m_point_lights.size()));
+    m_voxel_shader.set_int("uNumPointLights", static_cast<int>(std::min(m_point_lights.size(), size_t(16))));
     for (size_t i = 0; i < m_point_lights.size() && i < 16; ++i) {
         std::string base = "uPointLights[" + std::to_string(i) + "]";
         m_voxel_shader.set_vec3(base + ".position", m_point_lights[i].position);
@@ -2285,7 +2288,43 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     }
 
-    // 2. Post-processing Tonemapping Composite to Screen
+    // 2. Kawase Bloom Blur Pass (4-pass down/up Kawase chain on GL_COLOR_ATTACHMENT1 / m_bright_tex)
+    unsigned int final_bloom_tex = m_bright_tex;
+    if (m_bloom_fbo[0] != 0 && m_bloom_fbo[1] != 0 && m_bright_tex != 0) {
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glViewport(0, 0, m_fog_width, m_fog_height);
+
+        m_bloom_shader.use();
+        m_bloom_shader.set_int("uImage", 0);
+
+        // 4-pass down/up Kawase chain:
+        // Pass 0 (Down 1): initial downsample from full-res emissive buffer
+        // Pass 1 (Down 2): expansion/diffusion
+        // Pass 2 (Up 1): wide gathering
+        // Pass 3 (Up 2): smooth consolidation
+        const float kawase_offsets[4] = { 0.0f, 1.0f, 2.0f, 1.0f };
+
+        unsigned int input_tex = m_bright_tex;
+        int dest_idx = 0;
+
+        for (int pass = 0; pass < 4; ++pass) {
+            glBindFramebuffer(GL_FRAMEBUFFER, m_bloom_fbo[dest_idx]);
+            m_bloom_shader.set_float("uOffset", kawase_offsets[pass]);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, input_tex);
+
+            render_quad();
+
+            input_tex = m_bloom_tex[dest_idx];
+            dest_idx = 1 - dest_idx;
+        }
+
+        final_bloom_tex = input_tex; // m_bloom_tex[1] after 4 passes
+    }
+
+    // 3. Post-processing Tonemapping Composite to Screen
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, m_width, m_height);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -2298,7 +2337,7 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
     m_postprocess_shader.set_int("uSceneColor", 0);
 
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_bright_tex);
+    glBindTexture(GL_TEXTURE_2D, final_bloom_tex);
     m_postprocess_shader.set_int("uBloomColor", 1);
 
     glActiveTexture(GL_TEXTURE2);
@@ -2310,10 +2349,17 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
     glBindTexture(GL_TEXTURE_2D, m_bright_tex);
     m_postprocess_shader.set_int("uSSAO", 3);
 
+    // Full-resolution depth texture for bilateral upsampling of half-resolution volumetric fog
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+    m_postprocess_shader.set_int("uDepthTexture", 4);
+
     m_postprocess_shader.set_float("uExposure", 1.15f * m_brightness);
     m_postprocess_shader.set_float("uBloomIntensity", 0.75f);
     m_postprocess_shader.set_float("uRadiationGlitch", glm::clamp(radiation_level / 100.0f, 0.0f, 1.0f));
     m_postprocess_shader.set_float("uTime", m_total_time);
+    m_postprocess_shader.set_float("uNear", 0.1f);
+    m_postprocess_shader.set_float("uFar", 250.0f);
 
     render_quad();
 }

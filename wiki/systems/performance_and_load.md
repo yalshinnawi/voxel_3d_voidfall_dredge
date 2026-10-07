@@ -51,6 +51,14 @@ This document details the performance optimizations, high-load mitigations, audi
   }
   ```
 
+### 1.4 Chunk Mesh GPU Upload Throttling & Driver Amortization
+- **Problem**: During seismic tremors, kinetic detonations, or massive ceiling cave-ins, dozens of chunks are modified and remeshed concurrently. If all completed greedy meshes are uploaded to the GPU (`glGenBuffers`, `glBufferData`) in a single render frame, driver pipeline stalls and GPU synchronization bubbles cause noticeable hitching ($\ge 40\,\text{ms}$ spikes).
+- **Architecture**:
+  - **Asynchronous Completion Queue**: Meshing thread completion is strictly separated from OpenGL driver uploads. When background worker threads finish greedy-meshing, they stage vertices in `Chunk::stage_mesh()` and push completed chunks to an internal upload queue (`World::m_upload_queue`).
+  - **Frame Rate Throttling**: In `World::Update()` / `World::update()`, at most **2 chunk VBO/VAO buffers** are uploaded to the GPU per frame (`MAX_CHUNK_UPLOADS_PER_FRAME = 2`), amortizing driver overhead across multiple frames.
+  - **Deduplication**: `m_upload_queued_set` guarantees that redundant dirty notifications for the same chunk do not duplicate entries in the upload queue.
+  - **Fallback Handling**: If synchronous meshing is used or the worker queue is bypassed, `World::upload_mesh_queue()` scans staged chunks while strictly respecting the per-frame upload budget.
+
 ---
 
 ## 2. Enemy AI State Stability & Anti-Clipping

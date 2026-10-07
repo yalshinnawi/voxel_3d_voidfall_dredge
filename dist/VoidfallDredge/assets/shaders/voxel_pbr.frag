@@ -9,6 +9,7 @@ in vec3 vTangent;
 in vec3 vBitangent;
 in vec2 vUV;
 flat in uint vTexLayer;
+flat in uint vAOIndex;
 in float vAO;
 in float vEmissive;
 in float vDamage;
@@ -155,16 +156,67 @@ void main() {
     vec3 V_tangent = transpose(TBN) * V;
 
     vec2 baseUV = fract(vUV);
-    vec3 texCoord = vec3(baseUV, float(vTexLayer));
 
     // Dynamic material UV animations
     if (vTexLayer == 6u) { // Thermite Slag molten magma convection flow
         vec2 flowOffset = vec2(sin(uTime * 0.35 + vWorldPos.x * 0.15), cos(uTime * 0.28 + vWorldPos.z * 0.15)) * 0.05;
-        texCoord.xy = fract(baseUV + flowOffset);
+        baseUV = fract(baseUV + flowOffset);
     } else if (vTexLayer == 11u) { // Crystal Aquifer water ripples
         vec2 waveOffset = vec2(sin(uTime * 0.60 + vWorldPos.x * 0.35), cos(uTime * 0.50 + vWorldPos.z * 0.35)) * 0.03;
-        texCoord.xy = fract(baseUV + waveOffset);
+        baseUV = fract(baseUV + waveOffset);
     }
+
+    // Distance-Gated Parallax Occlusion Mapping (POM)
+    vec3 v_FragPos = vWorldPos;
+    float camDist = length(v_FragPos - uCameraPos);
+
+    vec2 quadUV;
+    if (camDist < 8.0) {
+        // Blend POM depth scale smoothly to zero between 6.0m and 8.0m
+        float pomFade = smoothstep(8.0, 6.0, camDist);
+        float depthScale = 0.04 * pomFade;
+
+        // Perform 6-step Parallax Occlusion Mapping (POM) raymarch using displacement height channel
+        const float numSteps = 6.0;
+        float stepSize = 1.0 / numSteps;
+        vec2 p = (V_tangent.xy / max(abs(V_tangent.z), 0.25)) * depthScale;
+        vec2 deltaUV = p / numSteps;
+
+        float currentLayerDepth = 0.0;
+        vec2 currUV = baseUV;
+        float currentHeight = texture(uNormalArray, vec3(fract(currUV), float(vTexLayer))).a;
+        float currentDepthMapValue = 1.0 - currentHeight;
+
+        vec2 prevUV = currUV;
+        float prevLayerDepth = currentLayerDepth;
+        float prevDepthMapValue = currentDepthMapValue;
+
+        for (int step = 0; step < 6; ++step) {
+            if (currentLayerDepth >= currentDepthMapValue) {
+                break;
+            }
+            prevUV = currUV;
+            prevLayerDepth = currentLayerDepth;
+            prevDepthMapValue = currentDepthMapValue;
+
+            currUV -= deltaUV;
+            currentLayerDepth += stepSize;
+            currentHeight = texture(uNormalArray, vec3(fract(currUV), float(vTexLayer))).a;
+            currentDepthMapValue = 1.0 - currentHeight;
+        }
+
+        // Parallax Occlusion interpolation
+        float afterDepth = currentLayerDepth - currentDepthMapValue;
+        float beforeDepth = prevDepthMapValue - prevLayerDepth;
+        float denom = afterDepth + beforeDepth;
+        float weight = denom > 0.0001 ? clamp(beforeDepth / denom, 0.0, 1.0) : 0.0;
+        quadUV = mix(prevUV, currUV, weight);
+    } else {
+        // Skip POM raymarching entirely and use base quad UVs for normal map sampling
+        quadUV = baseUV;
+    }
+
+    vec3 texCoord = vec3(fract(quadUV), float(vTexLayer));
 
     // 1. Sample Texture Arrays or procedural fallback
     vec3 albedo;
@@ -175,7 +227,7 @@ void main() {
     bool isCrystal = (vTexLayer == 3u || vTexLayer == 13u);
 
     if (uUseTextureArray == 1) {
-        // Sample normal map and transform to world space
+        // Sample Tangent Normal and Roughness from the active GL_TEXTURE_2D_ARRAY
         vec3 mapN = texture(uNormalArray, texCoord).xyz * 2.0 - 1.0;
         N = normalize(TBN * mapN);
 
@@ -185,7 +237,7 @@ void main() {
         if (isCrystal) {
             // Interior Parallax Mapping: Look *into* the crystal volume!
             // As the camera moves, the deep glowing crystalline core shifts with true 3D depth
-            vec2 interiorUV = fract(baseUV - V_tangent.xy * 0.045);
+            vec2 interiorUV = fract(quadUV - V_tangent.xy * 0.045);
             vec3 interiorTexCoord = vec3(interiorUV, float(vTexLayer));
 
             vec3 surfaceEmissive = texture(uEmissiveArray, texCoord).rgb;
@@ -268,12 +320,12 @@ void main() {
     {
         vec3 lightDir = normalize(uHeadlampPos - vWorldPos);
         float dist = distance(uHeadlampPos, vWorldPos);
-        float attenuation = 1.0 / (1.0 + 0.05 * dist + 0.01 * dist * dist);
+        // Smooth inverse-square distance attenuation
+        float attenuation = 1.0 / (dist * dist + 1.0);
 
-        // Spotlight cone
+        // Smooth spotlight cone falloff between outer and inner cutoff (replaces hard cutoff)
         float theta = dot(lightDir, normalize(-uHeadlampDir));
-        float epsilon = uHeadlampInnerCutoff - uHeadlampOuterCutoff;
-        float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
+        float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
 
         if (spotFactor > 0.0) {
             vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
@@ -348,10 +400,12 @@ void main() {
         }
 
         uint clusterIdx = clusterX + clusterY * CLUSTERS_X + clusterZ * (CLUSTERS_X * CLUSTERS_Y);
+        clusterIdx = min(clusterIdx, TOTAL_CLUSTERS - 1u);
         uint clusterLightCount = min(bClusters[clusterIdx].count, MAX_LIGHTS_PER_CLUSTER);
 
         for (uint i = 0u; i < clusterLightCount; ++i) {
             uint lightIdx = bClusters[clusterIdx].light_indices[i];
+            if (lightIdx >= 256u) continue;
             vec3 lightPos = bPointLights[lightIdx].position_radius.xyz;
             float radius = bPointLights[lightIdx].position_radius.w;
             vec3 lightColor = bPointLights[lightIdx].color_intensity.rgb;
@@ -430,7 +484,11 @@ void main() {
     } else if (uSector >= 3) {
         baseSubterraneanAmbient = vec3(0.007, 0.020, 0.011); // Toxic Vault
     }
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * vAO;
+
+    // Unpack Baked Vertex AO
+    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    uint aoIndex = clamp(vAOIndex, 0u, 3u);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * aoTable[aoIndex];
 
     vec3 finalColor = ambient + Lo + emissive;
 

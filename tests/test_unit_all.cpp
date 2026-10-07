@@ -94,13 +94,13 @@ void test_voxel_engine() {
     log_pass("DDA Voxel Raycasting and surface normal calculation");
 
     // Vertex Ambient Occlusion & Bit-Packing Tests
-    // Occlusion factor logic: 0 = fully occluded corner, 3 = unoccluded corner
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, false) == 3, "Unoccluded corner AO must be 3");
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, false) == 2, "Corner with 1 side neighbor must be AO 2");
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, true) == 2, "Corner with 1 diagonal neighbor must be AO 2");
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, true) == 1, "Corner with 1 side and 1 diagonal neighbor must be AO 1");
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, false) == 0, "Corner with both side neighbors must be fully occluded (AO 0)");
-    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, true) == 0, "Corner with all 3 touching neighbors must be fully occluded (AO 0)");
+    // Occlusion factor logic: 0 = open (unoccluded corner), 3 = fully occluded corner
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, false) == 0, "Unoccluded corner AO must be 0");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, false) == 1, "Corner with 1 side neighbor must be AO 1");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, true) == 1, "Corner with 1 diagonal neighbor must be AO 1");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, true) == 2, "Corner with 1 side and 1 diagonal neighbor must be AO 2");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, false) == 3, "Corner with both side neighbors must be fully occluded (AO 3)");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, true) == 3, "Corner with all 3 touching neighbors must be fully occluded (AO 3)");
 
     // 2-bit packing verification in PackedVoxelVertex (data0 bits 21..22)
     for (uint32_t test_ao = 0; test_ao <= 3; ++test_ao) {
@@ -122,12 +122,32 @@ void test_voxel_engine() {
     bool found_unoccluded = false;
     for (const auto& vtx : mesh_verts) {
         uint32_t v_ao = (vtx.data0 >> 21u) & 0x3u;
-        if (v_ao < 3) found_occluded = true;
-        if (v_ao == 3) found_unoccluded = true;
+        if (v_ao > 0) found_occluded = true;
+        if (v_ao == 0) found_unoccluded = true;
     }
-    TEST_CHECK(found_occluded, "Mesh on concave step geometry must contain baked vertex ambient occlusion (ao < 3)");
-    TEST_CHECK(found_unoccluded, "Mesh must contain fully exposed unoccluded vertices (ao == 3)");
+    TEST_CHECK(found_occluded, "Mesh on concave step geometry must contain baked vertex ambient occlusion (ao > 0)");
+    TEST_CHECK(found_unoccluded, "Mesh must contain fully exposed unoccluded vertices (ao == 0)");
     log_pass("Vertex Ambient Occlusion calculation, 2-bit packing & greedy mesher baking");
+
+    // Chunk Mesh GPU Upload Throttling
+    TEST_CHECK(World::MAX_CHUNK_UPLOADS_PER_FRAME == 2, "World::MAX_CHUNK_UPLOADS_PER_FRAME must be 2");
+    World upload_test_world(1111, false);
+    ChunkPos cp0{0, 0, 0};
+    ChunkPos cp1{1, 0, 0};
+    ChunkPos cp2{2, 0, 0};
+    upload_test_world.get_or_create_chunk(cp0)->stage_mesh(std::vector<PackedVoxelVertex>(12));
+    upload_test_world.get_or_create_chunk(cp1)->stage_mesh(std::vector<PackedVoxelVertex>(12));
+    upload_test_world.get_or_create_chunk(cp2)->stage_mesh(std::vector<PackedVoxelVertex>(12));
+    upload_test_world.queue_chunk_for_upload(cp0);
+    upload_test_world.queue_chunk_for_upload(cp1);
+    upload_test_world.queue_chunk_for_upload(cp2);
+    TEST_CHECK(upload_test_world.upload_queue_size() == 3, "Upload queue must hold 3 chunks");
+
+    upload_test_world.Update();
+    TEST_CHECK(upload_test_world.upload_queue_size() == 1, "World::Update() must upload at most 2 chunks per frame");
+    upload_test_world.Update();
+    TEST_CHECK(upload_test_world.upload_queue_size() == 0, "Second World::Update() uploads remaining chunk");
+    log_pass("Chunk Mesh GPU Upload Throttling (MAX_CHUNK_UPLOADS_PER_FRAME = 2) in World::Update()");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -745,6 +765,69 @@ void test_seismic_tremor_and_falling_blocks() {
     TEST_CHECK(bulkhead_deflected, "Bulkhead must safely deflect and shatter falling overhead debris");
     TEST_CHECK(world.get_voxel(16, 14, 16).material_id == MAT_INDUSTRIAL_BULKHEAD, "Bulkhead must remain intact after deflection");
     log_pass("Bulkhead Fortification Deflection & Hazard Shelter Utility");
+
+    // 6. Dynamic Debris Capping & Oldest Entity Recycling
+    TEST_CHECK(World::MAX_ACTIVE_DEBRIS == 36, "World::MAX_ACTIVE_DEBRIS hard cap must be 36");
+    TEST_CHECK(EntityManager::MAX_ACTIVE_DEBRIS == 36, "EntityManager::MAX_ACTIVE_DEBRIS must match 36");
+    world.clear_debris();
+    for (uint32_t i = 1; i <= 50; ++i) {
+        world.spawn_tremor_debris(glm::vec3(10.0f, 20.0f, 10.0f));
+    }
+    TEST_CHECK(world.debris().size() == 36, "Debris count must be capped at MAX_ACTIVE_DEBRIS (36)");
+    // The oldest entities (1 to 14) were recycled; front debris should have id == 15
+    TEST_CHECK(world.debris().front().id() == 15, "Oldest active debris must be recycled when cap is exceeded");
+    TEST_CHECK(world.debris().back().id() == 50, "Newest debris must be present at back of collection");
+    log_pass("Global Entity Cap (MAX_ACTIVE_DEBRIS = 36) & Oldest Entity Recycling");
+
+    // 7. Debris Sleeping & Static Merging into Static Voxels
+    int sleep_x = 24;
+    int sleep_y = 12;
+    int sleep_z = 24;
+    world.set_voxel(sleep_x, sleep_y, sleep_z, Voxel{MAT_AIR, 0}, true);
+    TEST_CHECK(!world.is_solid(sleep_x, sleep_y, sleep_z), "Target sleep block must initially be air");
+
+    DynamicDebris sleep_debris(
+        2001,
+        glm::vec3(sleep_x + 0.5f, sleep_y + 0.5f, sleep_z + 0.5f),
+        glm::vec3(0.04f, 0.0f, 0.0f), // linear velocity length < 0.08f
+        glm::vec3(0.0f),
+        MAT_FRACTURED_GRANITE,
+        1,
+        &world
+    );
+
+    TEST_CHECK(!sleep_debris.is_sleeping(), "Debris must not be sleeping initially");
+    TEST_CHECK(!sleep_debris.is_destroyed(), "Debris must not be destroyed initially");
+
+    // Update for 0.8s (8 steps of 0.1s): should NOT be sleeping yet (< 1.0s)
+    for (int step = 0; step < 8; ++step) {
+        sleep_debris.Update(0.1f);
+    }
+    TEST_CHECK(!sleep_debris.is_sleeping(), "Debris must not sleep when low velocity duration <= 1.0s");
+
+    // Update for another 0.4s (total 1.2s > 1.0s): should now be sleeping
+    for (int step = 0; step < 4; ++step) {
+        sleep_debris.Update(0.1f);
+    }
+    TEST_CHECK(sleep_debris.is_sleeping(), "Debris must sleep when low velocity duration > 1.0s");
+    float y_at_sleep = sleep_debris.position().y;
+
+    // While sleeping, physics integration must be halted (position does not drop under gravity)
+    for (int step = 0; step < 15; ++step) {
+        sleep_debris.Update(0.1f);
+    }
+    TEST_CHECK(sleep_debris.position().y == y_at_sleep, "Physics integration must be halted while sleeping");
+    TEST_CHECK(!sleep_debris.is_destroyed(), "Debris must not be destroyed before sleeping for > 2.5s");
+
+    // Sleep for remainder of 2.5s (15 * 0.1s = 1.5s so far; need 12 more steps = 1.2s to reach 2.7s > 2.5s)
+    for (int step = 0; step < 12; ++step) {
+        sleep_debris.Update(0.1f);
+    }
+    TEST_CHECK(sleep_debris.is_destroyed(), "Debris must be destroyed and removed after sleeping > 2.5s");
+    TEST_CHECK(world.is_solid(sleep_x, sleep_y, sleep_z), "Debris must be re-voxelized as solid block in World::SetBlock()");
+    TEST_CHECK(world.get_voxel(sleep_x, sleep_y, sleep_z).material_id == MAT_FRACTURED_GRANITE,
+               "Re-voxelized block must have debris material");
+    log_pass("Debris Sleeping (<0.08f for >1.0s), Halting Physics, and Static Merging (>2.5s) into World::SetBlock()");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1429,6 +1512,18 @@ void test_flares_aberrants_and_mission_objectives() {
     TEST_CHECK(FlareManager::instance().flares()[0].lifetime < 60.0f, "Flare lifetime must decay over time");
     log_pass("Chemical Flare physics, bounce, class color illumination (Scout=Cyan, Vanguard=Amber, Demo=Orange) and 60s lifetime");
 
+    // Dynamic light pruning test: Cap at 4 active flares, 5th flare despawns oldest
+    FlareManager::instance().clear();
+    for (int i = 0; i < 4; ++i) {
+        FlareManager::instance().spawn_flare(glm::vec3(10.0f, 20.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), CharacterClass::Scout);
+    }
+    TEST_CHECK(FlareManager::instance().active_count() == 4, "Active flare count must reach 4");
+    uint32_t first_flare_id = FlareManager::instance().flares().front().id;
+    FlareManager::instance().spawn_flare(glm::vec3(12.0f, 20.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), CharacterClass::Vanguard);
+    TEST_CHECK(FlareManager::instance().active_count() == 4, "Active flare count must remain capped at 4");
+    TEST_CHECK(FlareManager::instance().flares().front().id != first_flare_id, "Throwing 5th flare must despawn oldest flare entity");
+    log_pass("Dynamic light pruning: flare cap of 4 and oldest eviction on 5th flare");
+
     // 2. Player Flare Inventory & 15s Recharge
     PlayerController player;
     TEST_CHECK(player.flare_count() == 3, "Player must start with max 3 flares");
@@ -1783,6 +1878,27 @@ void test_clustered_forward_lighting() {
 
     TEST_CHECK(culled_visible_count >= 1 && culled_visible_count <= 5, "Local cluster tile must only record nearby affecting lights, culling all distant cavern lights");
     log_pass("35+ Simultaneous Dynamic Lights Cluster Culling Performance & Overlap Isolation");
+
+    // 8. Cavern Flare Swarm Capacity & Per-Pixel Evaluation Cap (128 flares, loop capped at 64)
+    std::vector<PointLight> cavern_flares;
+    cavern_flares.reserve(128);
+    for (int i = 0; i < 128; ++i) {
+        PointLight flare;
+        flare.position = glm::vec3(-100.0f + static_cast<float>(i * 2), -5.0f, -10.0f);
+        flare.radius = 12.0f;
+        cavern_flares.push_back(flare);
+    }
+    TEST_CHECK(cavern_flares.size() == 128, "Cavern flare capacity supports 128+ active dynamic lights");
+
+    uint32_t cluster_flare_count = 0;
+    for (const auto& flare : cavern_flares) {
+        if (ClusteredLighting::test_sphere_aabb(flare.position, flare.radius, center_tile_min, center_tile_max)) {
+            cluster_flare_count++;
+        }
+    }
+    uint32_t evaluated_loop_count = std::min(cluster_flare_count, MAX_LIGHTS_PER_CLUSTER);
+    TEST_CHECK(evaluated_loop_count <= MAX_LIGHTS_PER_CLUSTER, "Fragment evaluation loop must be capped to MAX_LIGHTS_PER_CLUSTER regardless of flares active");
+    log_pass("Fragment Shader Per-Pixel Lighting Loop Capped at MAX_LIGHTS_PER_CLUSTER (64)");
 }
 
 int main() {

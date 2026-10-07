@@ -1080,7 +1080,89 @@ int main() {
         std::cout << " -> Ceiling-to-wall pathing, 3D wall descent & wall collision prevention verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 22 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 23: Time-Sliced AI Pathfinding Stagger & Spatial Hash Boid Separation
+    {
+        std::cout << "[Test 23] Testing Time-Sliced AI Pathfinding Stagger & Spatial Hash..." << std::endl;
+
+        World test_world;
+        for (int x = 10; x <= 30; ++x) {
+            for (int y = 15; y <= 25; ++y) {
+                for (int z = 10; z <= 30; ++z) {
+                    test_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+        for (int x = 10; x <= 30; ++x) {
+            for (int z = 10; z <= 30; ++z) {
+                test_world.set_voxel(x, 15, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+            }
+        }
+
+        VoidStalkerManager manager;
+        glm::vec3 player_pos(15.0f, 16.0f, 15.0f);
+        glm::vec3 stalker_pos(15.0f, 16.0f, 25.0f); // 10m away
+        manager.spawn_melee(stalker_pos);
+
+        auto& s = manager.stalkers_mut()[0];
+        s.state = StalkerState::Stalking;
+        s.target_pos = player_pos;
+        s.m_pathTickTimer = 0.0f; // Reset accumulator
+
+        // Step 1: Sub-tick updates (dt = 0.03s < 0.15s). Accumulator increments, movement interpolates smoothly.
+        glm::vec3 p_prev = s.position;
+        manager.update(0.03f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
+        CHECK(manager.stalkers()[0].m_pathTickTimer >= 0.029f && manager.stalkers()[0].m_pathTickTimer <= 0.031f,
+              "m_pathTickTimer must accumulate elapsed dt");
+
+        // Step 2: Accumulate past 0.15s threshold -> triggers path recalculation and resets timer
+        manager.update(0.13f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
+        // Total time 0.03 + 0.13 = 0.16s >= 0.15s -> tick fired, timer reset
+        CHECK(manager.stalkers()[0].m_pathTickTimer < 0.15f,
+              "m_pathTickTimer must reset after 0.15s tick boundary");
+        CHECK(glm::length(manager.stalkers()[0].velocity) > 0.1f,
+              "Stalker must calculate active tracking velocity on tick");
+        CHECK(manager.stalkers()[0].position != p_prev,
+              "Stalker movement must progress smoothly across ticks");
+
+        // Step 3: Test distance > 40.0m skips raycast collision and boid separation
+        VoidStalkerManager distant_mgr;
+        glm::vec3 far_stalker_pos(15.0f, 16.0f, 65.0f); // 50m away (> 40.0m)
+        distant_mgr.spawn_melee(far_stalker_pos);
+        distant_mgr.spawn_melee(far_stalker_pos + glm::vec3(1.0f, 0.0f, 0.0f)); // Nearby packmate 1m away
+        auto& far_s1 = distant_mgr.stalkers_mut()[0];
+        far_s1.state = StalkerState::Stalking;
+        far_s1.m_pathTickTimer = 0.15f; // Ready to tick
+
+        distant_mgr.update(0.016f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
+        // Verify raycast LOS was skipped (has_player_los remains false)
+        CHECK(!distant_mgr.stalkers()[0].has_player_los,
+              "Stalker > 40m from player must skip raycast line-of-sight");
+
+        // Step 4: Spatial Hashing and Early-Exit Boid Separation Test
+        AISpatialHash spatial_hash;
+        spatial_hash.clear();
+        spatial_hash.insert(1, glm::vec3(10.0f, 10.0f, 10.0f));
+        spatial_hash.insert(2, glm::vec3(10.5f, 10.0f, 10.0f)); // 0.5m away (< 4m, within dist_sq <= 16.0f)
+        spatial_hash.insert(3, glm::vec3(20.0f, 20.0f, 20.0f)); // > 14m away (> 4m, dist_sq > 16.0f)
+
+        // Query separation for entity 1 against spatial hash
+        glm::vec3 sep_force = spatial_hash.calculate_separation(1, glm::vec3(10.0f, 10.0f, 10.0f), 16.0f, 8.0f);
+        CHECK(glm::length(sep_force) > 0.1f, "Nearby entity within 4m (dist_sq <= 16.0) must exert repulsive separation force");
+        CHECK(sep_force.x < 0.0f, "Entity 1 must be pushed in -X direction away from entity 2 at +0.5m X");
+
+        // Query separation for entity 3 (all others > 4m away, dist_sq > 16.0f)
+        glm::vec3 far_sep = spatial_hash.calculate_separation(3, glm::vec3(20.0f, 20.0f, 20.0f), 16.0f, 8.0f);
+        CHECK(glm::length(far_sep) == 0.0f, "Entities beyond 4m (dist_sq > 16.0) must skip separation math and yield 0 force");
+
+        // Direct AberrantAI::calculate_swarm_separation early exit verification
+        std::vector<glm::vec3> others = { glm::vec3(10.5f, 10.0f, 10.0f), glm::vec3(30.0f, 30.0f, 30.0f) };
+        glm::vec3 direct_sep = AberrantAI::calculate_swarm_separation(glm::vec3(10.0f, 10.0f, 10.0f), others, 5.0f, 8.0f);
+        CHECK(glm::length(direct_sep) > 0.1f, "Direct calculate_swarm_separation must compute repulsion for nearby entity");
+
+        std::cout << " -> Time-sliced pathfinding stagger & spatial hash boid separation verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 23 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

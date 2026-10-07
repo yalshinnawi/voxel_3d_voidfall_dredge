@@ -154,6 +154,7 @@ void TextureArray::initialize_procedural_materials() {
                 float nx = 0.0f, ny = 0.0f, nz = 1.0f;
                 float rough = 200.0f, metal = 10.0f;
                 float er = 0.0f, eg = 0.0f, eb = 0.0f;
+                float height_disp = 0.5f;
 
                 switch (l) {
                     case 1: { // ── MAT_FRACTURED_GRANITE (Realistic igneous rock with mineral grains and fissures) ──
@@ -191,6 +192,7 @@ void TextureArray::initialize_procedural_materials() {
                         }
                         rough = 210.0f + (mineral_grain > 0.8f ? -120.0f : 20.0f); // Sparkling quartz mica flecks
                         metal = 12.0f;
+                        height_disp = std::clamp(0.5f + stone_fbm * 0.35f - is_crack * 0.5f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -214,6 +216,7 @@ void TextureArray::initialize_procedural_materials() {
                         float obsidian_fleck = noise2d(fx * 55.0f, fy * 55.0f);
                         rough = (obsidian_fleck > 0.82f) ? 35.0f : 235.0f;
                         metal = (obsidian_fleck > 0.82f) ? 45.0f : 20.0f;
+                        height_disp = std::clamp(0.6f + basalt_fbm * 0.3f - vesicle * 0.6f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -296,6 +299,7 @@ void TextureArray::initialize_procedural_materials() {
                         er = u8clamp(75.0f + 55.0f * center_glow + 105.0f * is_ridge);
                         eg = u8clamp(15.0f + 20.0f * center_glow + 45.0f  * is_ridge);
                         eb = u8clamp(155.0f + 45.0f * center_glow + 85.0f * is_ridge);
+                        height_disp = std::clamp(seed.height * 0.75f + is_ridge * 0.25f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -350,6 +354,7 @@ void TextureArray::initialize_procedural_materials() {
                             r = 75.0f + brushed; g = 80.0f + brushed; b = 88.0f + brushed;
                             rough = 85.0f; metal = 235.0f;
                         }
+                        height_disp = is_bolt ? 1.0f : (is_tread_rib ? 0.75f : (is_border ? 0.6f : 0.35f));
                         break;
                     }
 
@@ -373,6 +378,7 @@ void TextureArray::initialize_procedural_materials() {
                             r = 175.0f; g = 140.0f; b = 45.0f; // Recessed gold alloy panel
                             rough = 65.0f; metal = 240.0f;
                         }
+                        height_disp = is_ridge ? 0.85f : (is_worn ? 0.35f : 0.5f);
                         break;
                     }
 
@@ -393,6 +399,7 @@ void TextureArray::initialize_procedural_materials() {
                             eb = 30.0f;
 
                             rough = 70.0f; metal = 30.0f;
+                            height_disp = 0.2f - is_fissure * 0.2f;
                         } else {
                             // Black cooling volcanic crust islands
                             float crust_noise = fbm2d(fx * 14.0f, fy * 14.0f, 3);
@@ -405,6 +412,7 @@ void TextureArray::initialize_procedural_materials() {
                             nz = 0.9f;
 
                             rough = 240.0f; metal = 20.0f;
+                            height_disp = 0.7f + crust_noise * 0.3f;
                         }
                         break;
                     }
@@ -430,6 +438,7 @@ void TextureArray::initialize_procedural_materials() {
                             er = 30.0f;
                             eg = u8clamp(200.0f + 55.0f * needle_sharp);
                             eb = 70.0f;
+                            height_disp = 0.8f + needle_sharp * 0.2f;
                         } else {
                             // Dark rugged pitchblende matrix
                             float rock_noise = fbm2d(fx * 15.0f, fy * 15.0f, 4);
@@ -438,6 +447,7 @@ void TextureArray::initialize_procedural_materials() {
                             b = 32.0f + 20.0f * rock_noise;
 
                             rough = 220.0f; metal = 25.0f;
+                            height_disp = 0.4f + rock_noise * 0.2f;
                         }
                         break;
                     }
@@ -456,6 +466,7 @@ void TextureArray::initialize_procedural_materials() {
 
                         rough = (iron_fleck > 0.85f) ? 60.0f : 245.0f;
                         metal = (iron_fleck > 0.85f) ? 180.0f : 35.0f;
+                        height_disp = std::clamp(0.5f + strata * 0.3f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -495,6 +506,7 @@ void TextureArray::initialize_procedural_materials() {
                         er = 15.0f + 25.0f * caustic;
                         eg = 85.0f + 55.0f * caustic;
                         eb = 140.0f + 65.0f * caustic;
+                        height_disp = std::clamp(0.5f + caustic * 0.4f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -521,6 +533,7 @@ void TextureArray::initialize_procedural_materials() {
                         } else if (hyphae_vein > 0.4f) {
                             er = 15.0f; eg = 160.0f; eb = 65.0f;
                         }
+                        height_disp = is_spore_node ? 0.85f : (0.4f + moss_fbm * 0.3f);
                         break;
                     }
 
@@ -595,6 +608,7 @@ void TextureArray::initialize_procedural_materials() {
                         er = u8clamp(90.0f + 55.0f * center_glow + 95.0f * is_ridge);
                         eg = u8clamp(145.0f + 50.0f * center_glow + 60.0f * is_ridge);
                         eb = u8clamp(215.0f + 40.0f * center_glow);
+                        height_disp = std::clamp(seed.height * 0.75f + is_ridge * 0.25f, 0.0f, 1.0f);
                         break;
                     }
 
@@ -623,6 +637,7 @@ void TextureArray::initialize_procedural_materials() {
                             eg = 15.0f;
                             eb = 25.0f;
                         }
+                        height_disp = std::clamp(0.5f + conchoid * 0.3f + (is_warning_vein ? 0.2f : 0.0f), 0.0f, 1.0f);
                         break;
                     }
 
@@ -638,7 +653,7 @@ void TextureArray::initialize_procedural_materials() {
                 albedo_data[idx + 3] = u8clamp(a);
 
                 pack_normal(nx, ny, nz, normal_data[idx + 0], normal_data[idx + 1], normal_data[idx + 2]);
-                normal_data[idx + 3] = 255;
+                normal_data[idx + 3] = u8clamp(height_disp * 255.0f);
 
                 rough_metal_data[idx + 0] = u8clamp(rough);
                 rough_metal_data[idx + 1] = u8clamp(metal);

@@ -43,6 +43,10 @@ struct VoidStalker {
     glm::vec3 target_pos{0.0f};    // Cached player position
     float yaw{0.0f};               // Facing direction (radians)
 
+    // Time-sliced AI Pathfinding Stagger & Movement Interpolation
+    float m_pathTickTimer{0.15f};         // Update accumulator for 0.15s (approx 6.6 Hz) pathfinding stagger
+    glm::vec3 m_targetVelocity{0.0f};     // Full player-tracking velocity vector recalculated every 0.15s
+
     StalkerRole role{StalkerRole::Melee}; // Dedicated combat role (Melee = Red, Shooter = Green)
     StalkerState state{StalkerState::Idle};
     float state_timer{0.0f};        // Time in current state
@@ -308,6 +312,9 @@ public:
     /// Check line-of-sight between stalker and player
     bool has_line_of_sight(const glm::vec3& from, const glm::vec3& to, const World& world) const;
 
+    /// Get active spatial hash grid for swarm entities
+    const AISpatialHash& spatial_hash() const { return m_spatial_hash; }
+
 private:
     /// Find a valid spawn position near target (on a wall/ceiling)
     glm::vec3 find_spawn_pos(const glm::vec3& near, const World& world);
@@ -318,6 +325,7 @@ private:
 
     std::vector<VoidStalker> m_stalkers;
     std::vector<VoidSpikeProjectile> m_projectiles;
+    AISpatialHash m_spatial_hash;
     uint32_t m_next_id{1};
     uint32_t m_next_proj_id{1};
     float m_spawn_cooldown{0.0f};

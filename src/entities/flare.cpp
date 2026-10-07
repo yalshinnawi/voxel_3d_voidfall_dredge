@@ -28,6 +28,12 @@ glm::vec3 FlareManager::get_flare_color(CharacterClass cls) {
 }
 
 void FlareManager::spawn_flare(const glm::vec3& origin, const glm::vec3& forward_dir, CharacterClass cls) {
+    // Dynamic Light Pruning: Cap active thrown flares to 4 simultaneous instances.
+    // Throwing a 5th flare despawns the oldest flare entity.
+    while (m_flares.size() >= MAX_ACTIVE_FLARES) {
+        m_flares.erase(m_flares.begin());
+    }
+
     ChemicalFlare f;
     f.id = m_next_id++;
     f.owner_class = cls;
