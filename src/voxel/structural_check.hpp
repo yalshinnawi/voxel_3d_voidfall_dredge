@@ -5,11 +5,6 @@
 
 namespace Voidfall {
 
-struct DebrisBlock {
-    glm::ivec3 local_offset; // Relative to cluster center of mass
-    Voxel voxel;
-};
-
 struct UnanchoredIsland {
     glm::vec3 center_of_mass{0.0f};
     std::vector<glm::ivec3> world_positions;
@@ -26,7 +21,7 @@ public:
         int destroyed_x,
         int destroyed_y,
         int destroyed_z,
-        size_t max_search_nodes = 48
+        size_t max_search_nodes = 64
     );
 
     // Queries 3 to 6 stone ceiling blocks (MAT_GRANITE, MAT_BASALT) 3-10 units above player within 6-block radius

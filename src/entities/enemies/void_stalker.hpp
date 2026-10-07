@@ -11,38 +11,7 @@ namespace Voidfall {
 
 class World;
 
-/// Behavioral states for the Void Stalker AI finite state machine
-enum class StalkerState : uint8_t {
-    Idle = 0,           // Clinging to wall/ceiling, ambient prowling in cavern
-    Investigating,  // Scurrying towards heard sound event origin (sniffing/clicking in dark)
-    Stalking,       // Pursuing player while in visual contact or direct combat range
-    Circling,       // Circling around player at mid-range before attack
-    Lunging,        // Committed attack leap toward player (Melee only)
-    Stunned,        // Temporarily disabled (sonar pulse, bright light)
-    Fleeing,        // Retreating after taking critical damage
-    Burrowing,      // Escaping by burrowing through cavern rock walls
-    Dying,          // Death animation collapse & tumbling before carcass transition
-    Dead,           // Marked for removal
-    Roosting,       // Initial dormant state, clamped to surfaces with closed eyes/retracted limbs
-
-    // Uppercase aliases for compatibility with AIState enum conventions
-    IDLE = Idle,
-    ROOSTING = Roosting,
-    INVESTIGATING = Investigating,
-    STALKING = Stalking,
-    PURSUIT = Stalking,
-    Pursuit = Stalking,
-    CIRCLING = Circling,
-    LUNGING = Lunging,
-    STUNNED = Stunned,
-    FLEEING = Fleeing,
-    BURROWING = Burrowing,
-    ESCAPING = Burrowing,
-    DYING = Dying,
-    DEAD = Dead
-};
-
-using AIState = StalkerState;
+// StalkerState and AIState behavioral enums are defined in aberrant_ai.hpp
 
 /// Archetype combat role for hostile subterranean stalkers
 enum class StalkerRole : uint8_t {

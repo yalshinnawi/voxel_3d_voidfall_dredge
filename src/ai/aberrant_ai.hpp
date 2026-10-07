@@ -3,10 +3,45 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
+#include <vector>
+#include "../systems/stealth_system.hpp"
 
 namespace Voidfall {
 
 class World;
+
+/// Behavioral states for the subterranean creature AI finite state machine
+enum class StalkerState : uint8_t {
+    Idle = 0,           // Clinging to wall/ceiling, ambient prowling in cavern
+    Investigating,      // Scurrying towards heard sound event origin (sniffing/clicking in dark)
+    Stalking,           // Pursuing player while in visual contact or direct combat range
+    Circling,           // Circling around player at mid-range before attack
+    Lunging,            // Committed attack leap toward player (Melee only)
+    Stunned,            // Temporarily disabled (sonar pulse, bright light)
+    Fleeing,            // Retreating after taking critical damage
+    Burrowing,          // Escaping by burrowing through cavern rock walls
+    Dying,              // Death animation collapse & tumbling before carcass transition
+    Dead,               // Marked for removal
+    Roosting,           // Initial dormant state, clamped to surfaces with closed eyes/retracted limbs
+
+    // Uppercase aliases for compatibility with AIState enum conventions
+    IDLE = Idle,
+    ROOSTING = Roosting,
+    INVESTIGATING = Investigating,
+    STALKING = Stalking,
+    PURSUIT = Stalking,
+    Pursuit = Stalking,
+    CIRCLING = Circling,
+    LUNGING = Lunging,
+    STUNNED = Stunned,
+    FLEEING = Fleeing,
+    BURROWING = Burrowing,
+    ESCAPING = Burrowing,
+    DYING = Dying,
+    DEAD = Dead
+};
+
+using AIState = StalkerState;
 
 /// Explicit traversal state for aberrant subterranean crawlers
 enum class StalkerSurfaceState : uint8_t {
@@ -24,10 +59,57 @@ struct SurfaceContactSample {
     bool has_contact{false};
 };
 
+/// Result of evaluating acoustic and visual perception against an entity
+struct PerceptionEvaluation {
+    bool state_changed{false};
+    AIState new_state{AIState::ROOSTING};
+    glm::vec3 target_pos{0.0f};
+    float received_noise_db{0.0f};
+    bool triggered_screech{false};
+    bool triggered_swarm_alert{false};
+};
+
 /// AI utilities for aberrant surface attachment, 6-direction raycast sampling,
-/// contact normal classification, and smooth transform orientation.
+/// contact normal classification, smooth transform orientation, and acoustic perception.
 class AberrantAI {
 public:
+    /// Acoustic Hearing & Detection Thresholds
+    static constexpr float THRESHOLD_INVESTIGATE_DB = 30.0f;
+    static constexpr float THRESHOLD_PURSUIT_DB     = 70.0f;
+
+    /// Calculates acoustic noise received in dB from a sound source at distance
+    static float calculate_received_noise_db(
+        const glm::vec3& listener_pos,
+        const glm::vec3& noise_pos,
+        float emitted_db,
+        float audible_radius,
+        bool has_los = true
+    );
+
+    /// Evaluates enemy hearing and detection against a single noise source and visual sightlines:
+    /// 1. If player is spotted directly or noise reaches > 70 dB -> AIState::PURSUIT with screech and swarm alert.
+    /// 2. If noise reaches > 30 dB -> AIState::INVESTIGATING toward noise source.
+    /// 3. Otherwise, state is unchanged (remains in current state, e.g. AIState::ROOSTING).
+    static PerceptionEvaluation evaluate_hearing(
+        AIState current_state,
+        const glm::vec3& enemy_pos,
+        bool can_see_player,
+        const glm::vec3& player_pos,
+        const glm::vec3& noise_pos,
+        float emitted_db,
+        float audible_radius,
+        bool has_los = true
+    );
+
+    /// Evaluates multiple acoustic events (such as from StealthSystem) and visual sightlines
+    static PerceptionEvaluation evaluate_acoustic_and_visual_perception(
+        AIState current_state,
+        const glm::vec3& enemy_pos,
+        bool can_see_player,
+        const glm::vec3& player_pos,
+        const std::vector<AcousticNoiseEvent>& acoustic_events,
+        bool has_los = true
+    );
     /// Classifies contact normal into FLOOR, WALL_CLIMBING, or CEILING_CRAWLING based on:
     /// - Floor:   n · up > 0.7
     /// - Wall:    |n · up| <= 0.7

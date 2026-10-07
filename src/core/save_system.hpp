@@ -155,6 +155,7 @@ struct UserProfile {
     // Sectors 4+: also requires the previous sector to have a completion record OR
     //             highest_cleared_sector to cover the prerequisite (endless progression).
     bool is_sector_unlocked(int sector) const {
+        if (sector < 1 || sector >= MAX_SECTOR_RECORDS) return false;
         if (get_player_level() < get_required_level_for_sector(sector)) return false;
         if (sector <= 3) return true; // Classic sectors: level gate only
         // Endless sectors 4+: require prior sector cleared

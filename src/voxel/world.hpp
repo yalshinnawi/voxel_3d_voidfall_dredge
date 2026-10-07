@@ -4,6 +4,7 @@
 #include "level_shapes.hpp"
 #include "../entities/enemies/void_stalker.hpp"
 #include "../entities/vault_door.hpp"
+#include "../entities/dynamic_debris.hpp"
 #include <unordered_map>
 #include <memory>
 #include <vector>
@@ -14,6 +15,8 @@
 #include <atomic>
 
 namespace Voidfall {
+
+struct UnanchoredIsland;
 
 struct RaycastHit {
     bool hit{false};
@@ -113,6 +116,21 @@ public:
     const std::vector<glm::ivec3>& lava_sources() const { return m_lava_sources; }
     const std::vector<glm::ivec3>& aquifer_sources() const { return m_aquifer_sources; }
 
+    // Anchored-Island BFS structural collapse system
+    static constexpr int DEFAULT_CHUNK_CEILING = 64;
+    int chunk_ceiling() const { return m_chunk_ceiling; }
+    void set_chunk_ceiling(int c) { m_chunk_ceiling = c; }
+
+    bool borders_hanging_overhang_or_stalactite(int x, int y, int z) const;
+    bool break_voxel(int world_x, int world_y, int world_z);
+    std::vector<UnanchoredIsland> solve_structural_collapse(int x, int y, int z, size_t max_depth = 64);
+
+    std::vector<DynamicDebris>& debris() { return m_debris; }
+    const std::vector<DynamicDebris>& debris() const { return m_debris; }
+    void add_debris(DynamicDebris&& d) { m_debris.push_back(std::move(d)); }
+    void clear_debris() { m_debris.clear(); }
+    void update_debris(float dt, const glm::vec3& player_pos = glm::vec3(-9999.0f), bool is_player_sheltered = false);
+
 private:
     void generate_chunk_terrain(Chunk& chunk);
     float sample_cavern_noise(float x, float y, float z) const;
@@ -123,6 +141,8 @@ private:
 
     uint32_t m_seed{1337};
     int m_sector_index{1};
+    int m_chunk_ceiling{DEFAULT_CHUNK_CEILING};
+    std::vector<DynamicDebris> m_debris;
     glm::vec3 m_noise_offset{0.0f};
     std::unique_ptr<LevelGenerator> m_level_gen;
     mutable std::mutex m_world_mutex;

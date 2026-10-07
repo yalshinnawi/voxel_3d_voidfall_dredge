@@ -30,6 +30,7 @@
 #include "../src/ui/terrain_scanner.hpp"
 #include "../src/ui/debrief_menu.hpp"
 #include "../src/graphics/particle_system.hpp"
+#include "../src/graphics/clustered_lighting.hpp"
 
 using namespace Voidfall;
 
@@ -127,6 +128,87 @@ void test_structural_solver() {
     auto detach = StructuralCheck::query_seismic_detachment_blocks(world, player_pos, 2, 6, 8.0f, 3, 12);
     TEST_CHECK(!detach.empty(), "Seismic detachment query must find overhead granite blocks");
     log_pass("Seismic Detachment Candidate Query");
+
+    // ── Anchored-Island BFS Structural Collapse & Composite Debris Verification ──
+    World collapse_world(7777, false);
+    collapse_world.set_chunk_ceiling(64);
+
+    // Build solid floor at Y=5
+    for (int x = 10; x <= 20; ++x) {
+        for (int z = 10; z <= 20; ++z) {
+            collapse_world.set_voxel(x, 5, z, Voxel{MAT_DREDGE_BEDROCK, 0});
+            for (int y = 6; y <= 65; ++y) {
+                collapse_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+            }
+        }
+    }
+
+    // A. Anchored Stalactite: connected to chunk ceiling anchor plane (Y >= ChunkCeiling)
+    for (int y = 58; y <= 64; ++y) {
+        collapse_world.set_voxel(15, y, 15, Voxel{MAT_VOLCANIC_BASALT, 0});
+    }
+    // Breaking lowest tip at Y=58: remaining blocks 59..64 are connected to Y=64, so no collapse occurs
+    bool broke_tip = collapse_world.break_voxel(15, 58, 15);
+    TEST_CHECK(broke_tip, "Breaking stalactite tip must succeed");
+    TEST_CHECK(collapse_world.debris().empty(), "Anchored stalactite (reaching Y >= ChunkCeiling) must NOT collapse");
+    TEST_CHECK(collapse_world.is_solid(15, 60, 15), "Anchored blocks must remain in world grid");
+    log_pass("Chunk Ceiling Anchor Plane (Y >= ChunkCeiling) Structural Stability");
+
+    // B. Unanchored Hanging Stalactite: suspended in mid-air (Y = 35..40)
+    for (int y = 35; y <= 40; ++y) {
+        collapse_world.set_voxel(15, y, 15, Voxel{MAT_VOLCANIC_BASALT, 0});
+    }
+    TEST_CHECK(collapse_world.borders_hanging_overhang_or_stalactite(15, 40, 15),
+               "Broken root block must detect adjacent hanging stalactite");
+
+    // Break the root support block at Y=40
+    bool broke_root = collapse_world.break_voxel(15, 40, 15);
+    TEST_CHECK(broke_root, "Breaking unanchored stalactite root must succeed");
+    TEST_CHECK(!collapse_world.debris().empty(), "Unanchored island must spawn DynamicDebris");
+
+    // Verify island blocks detached from world grid
+    for (int y = 35; y <= 39; ++y) {
+        TEST_CHECK(!collapse_world.is_solid(15, y, 15),
+                   "Detached unanchored island voxels must become air in world grid");
+    }
+    DynamicDebris& spawned_debris = collapse_world.debris()[0];
+    TEST_CHECK(spawned_debris.block_count() == 5, "Spawned composite DynamicDebris must contain 5 blocks");
+    TEST_CHECK(spawned_debris.blocks().size() == 5, "Debris blocks array must match cluster count");
+    log_pass("Unanchored Stalactite Detachment and Composite DynamicDebris Spawning");
+
+    // C. Physical Simulation, Gravity (g = 18 m/s^2), Crushing Damage (20-50 HP) & Dust Cloud
+    glm::vec3 test_player_pos(15.5f, 6.0f, 15.5f);
+    std::vector<glm::vec3> test_enemy_pos = { glm::vec3(15.5f, 6.0f, 15.5f) };
+    bool crushing_damage_verified = false;
+    bool dust_cloud_verified = false;
+
+    // Simulate physics ticks
+    for (int tick = 0; tick < 120 && !spawned_debris.is_destroyed(); ++tick) {
+        float prev_vy = spawned_debris.velocity().y;
+        auto res = spawned_debris.update(1.0f / 60.0f, collapse_world, test_player_pos, false, test_enemy_pos);
+
+        // Check gravity acceleration: -18.0 m/s^2 * dt
+        float expected_vy = prev_vy - 18.0f * (1.0f / 60.0f);
+        TEST_CHECK(std::abs(spawned_debris.velocity().y - expected_vy) < 0.05f,
+                   "Falling debris gravity must accelerate at g = 18.0 m/s^2");
+
+        if (res.hit_player || res.hit_enemy) {
+            float dmg = res.hit_player ? res.damage : res.enemy_damage;
+            TEST_CHECK(dmg >= 20.0f && dmg <= 50.0f,
+                       "Kinetic crushing damage must be proportional between 20 and 50 HP");
+            crushing_damage_verified = true;
+        }
+
+        if (res.placed_on_ground) {
+            TEST_CHECK(res.spawned_dust_cloud, "Floor impact must spawn heavy dust cloud");
+            dust_cloud_verified = true;
+            break;
+        }
+    }
+
+    TEST_CHECK(crushing_damage_verified, "Falling cluster must inflict kinetic crushing damage to entity");
+    TEST_CHECK(dust_cloud_verified, "Debris floor impact must trigger dust cloud and physical placement");
+    log_pass("Composite DynamicDebris Physics Gravity, 20-50 HP Crushing Damage & Floor Dust Cloud");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1526,6 +1608,146 @@ void test_headlamp_briefing_melee_and_loot_systems() {
     log_pass("Debrief menu [RE-DEPLOY EXPEDITION] immediate sector restart routing");
 }
 
+// ─────────────────────────────────────────────────────────────
+// 17. CLUSTERED FORWARD LIGHTING (16x9x24 GRID & SSBO CULLING)
+// ─────────────────────────────────────────────────────────────
+void test_clustered_forward_lighting() {
+    std::cout << "\n=== [MODULE 17] Clustered Forward Lighting & 3D Frustum Culling ===" << std::endl;
+
+    // 1. Grid Dimensions & Capacity Constraints
+    TEST_CHECK(CLUSTERS_X == 16, "Cluster frustum grid width must be 16");
+    TEST_CHECK(CLUSTERS_Y == 9, "Cluster frustum grid height must be 9");
+    TEST_CHECK(CLUSTERS_Z == 24, "Cluster frustum grid depth slices must be 24");
+    TEST_CHECK(TOTAL_CLUSTERS == 3456, "Total cluster volume must be 16*9*24 = 3456");
+    TEST_CHECK(MAX_LIGHTS_PER_CLUSTER == 64, "Max active lights per cluster must be 64");
+    TEST_CHECK(MAX_SCENE_LIGHTS == 256, "Max scene dynamic lights capacity must be 256");
+    log_pass("16x9x24 Cluster Grid Specification & Volume Geometry");
+
+    // 2. SSBO Data Alignment & std430 Compatibility
+    TEST_CHECK(sizeof(GpuPointLight) == 32, "GpuPointLight must be exactly 32 bytes for std430 packing");
+    TEST_CHECK(alignof(GpuPointLight) == 16, "GpuPointLight alignment must be 16 bytes");
+    TEST_CHECK(sizeof(ClusterRecord) == 272, "ClusterRecord must be exactly 272 bytes (16-byte header + 64*4 byte indices)");
+    TEST_CHECK(alignof(ClusterRecord) == 16, "ClusterRecord alignment must be 16 bytes");
+    log_pass("std430 SSBO Memory Invariants & Zero-Padding Divergence Guard");
+
+    // 3. Cluster Spatial Indexing & 3D Bijection
+    TEST_CHECK(ClusteredLighting::compute_cluster_index(0, 0, 0) == 0, "Origin cluster index must be 0");
+    TEST_CHECK(ClusteredLighting::compute_cluster_index(15, 8, 23) == 3455, "Corner cluster index must be 3455");
+
+    bool indexing_valid = true;
+    for (uint32_t z = 0; z < CLUSTERS_Z; ++z) {
+        for (uint32_t y = 0; y < CLUSTERS_Y; ++y) {
+            for (uint32_t x = 0; x < CLUSTERS_X; ++x) {
+                uint32_t idx = ClusteredLighting::compute_cluster_index(x, y, z);
+                uint32_t rx, ry, rz;
+                ClusteredLighting::get_cluster_coords(idx, rx, ry, rz);
+                if (rx != x || ry != y || rz != z) {
+                    indexing_valid = false;
+                    break;
+                }
+            }
+        }
+    }
+    TEST_CHECK(indexing_valid, "Cluster indexing must be a lossless bijection across all 3456 cells");
+    log_pass("Lossless Bijective 3D Spatial Indexing Across 3456 Frustum Cells");
+
+    // 4. Exponential Depth Slicing Distribution
+    float near_z = 0.1f;
+    float far_z = 250.0f;
+    TEST_CHECK(ClusteredLighting::depth_to_slice(0.05f, near_z, far_z) == 0, "Depths <= near plane must clamp to slice 0");
+    TEST_CHECK(ClusteredLighting::depth_to_slice(250.0f, near_z, far_z) == 23, "Depth at far plane must clamp to slice 23");
+    TEST_CHECK(ClusteredLighting::depth_to_slice(500.0f, near_z, far_z) == 23, "Depths >= far plane must clamp to slice 23");
+
+    uint32_t prev_slice = 0;
+    bool monotonic = true;
+    for (float d = 0.1f; d <= 250.0f; d += 2.5f) {
+        uint32_t s = ClusteredLighting::depth_to_slice(d, near_z, far_z);
+        if (s < prev_slice) {
+            monotonic = false;
+            break;
+        }
+        prev_slice = s;
+    }
+    TEST_CHECK(monotonic, "Exponential depth slicing must be monotonically non-decreasing");
+
+    // Seamless depth range continuity
+    bool slices_continuous = true;
+    for (uint32_t s = 0; s < CLUSTERS_Z - 1; ++s) {
+        float n1, f1, n2, f2;
+        ClusteredLighting::slice_to_depth_range(s, near_z, far_z, n1, f1);
+        ClusteredLighting::slice_to_depth_range(s + 1, near_z, far_z, n2, f2);
+        if (std::abs(f1 - n2) > 0.001f) {
+            slices_continuous = false;
+            break;
+        }
+    }
+    TEST_CHECK(slices_continuous, "Adjacent depth slices must share continuous boundary planes without gaps");
+    log_pass("Continuous Exponential Depth Partitioning & Boundary Continuity");
+
+    // 5. View-Space Cluster AABB Frustum Derivation
+    glm::mat4 proj = glm::perspective(glm::radians(75.0f), 16.0f / 9.0f, near_z, far_z);
+    glm::vec3 aabb_min, aabb_max;
+    ClusteredLighting::compute_cluster_aabb_view(0, 0, 0, proj, near_z, far_z, aabb_min, aabb_max);
+    TEST_CHECK(aabb_min.x < aabb_max.x, "Cluster AABB X min must be strictly less than max");
+    TEST_CHECK(aabb_min.y < aabb_max.y, "Cluster AABB Y min must be strictly less than max");
+    TEST_CHECK(aabb_min.z < aabb_max.z, "Cluster AABB Z min must be strictly less than max (most negative to least negative)");
+    TEST_CHECK(aabb_max.z < 0.0f, "Cluster AABB in view-space must reside in negative Z halfspace");
+    log_pass("View-Space Cluster AABB Frustum Unprojection & Coordinate Validity");
+
+    // 6. View-Space Sphere vs AABB Culling Exactness
+    glm::vec3 test_aabb_min(-2.0f, -2.0f, -10.0f);
+    glm::vec3 test_aabb_max(2.0f, 2.0f, -5.0f);
+
+    // Light inside AABB
+    TEST_CHECK(ClusteredLighting::test_sphere_aabb(glm::vec3(0.0f, 0.0f, -7.0f), 1.0f, test_aabb_min, test_aabb_max), "Light inside cluster must intersect");
+    // Light outside but radius touches
+    TEST_CHECK(ClusteredLighting::test_sphere_aabb(glm::vec3(3.5f, 0.0f, -7.0f), 2.0f, test_aabb_min, test_aabb_max), "Light sphere touching AABB must intersect");
+    // Light completely outside
+    TEST_CHECK(!ClusteredLighting::test_sphere_aabb(glm::vec3(15.0f, 0.0f, -7.0f), 2.0f, test_aabb_min, test_aabb_max), "Distant light must be culled from cluster");
+    // Light behind camera
+    TEST_CHECK(!ClusteredLighting::test_sphere_aabb(glm::vec3(0.0f, 0.0f, 5.0f), 2.0f, test_aabb_min, test_aabb_max), "Light behind camera outside influence range must be culled");
+    log_pass("Arvo Sphere-AABB Intersection Invariants & Branchless Distance Testing");
+
+    // 7. Multi-Light Culling Stress Test (35+ Simultaneous Dynamic Lights)
+    std::vector<PointLight> test_scene_lights;
+    test_scene_lights.reserve(40);
+
+    // Place 35 dynamic lights: 5 in the local near cluster corridor, 30 scattered far throughout the cavern
+    for (int i = 0; i < 5; ++i) {
+        PointLight local_fl;
+        local_fl.position = glm::vec3(0.0f, 0.0f, -2.0f - static_cast<float>(i)); // Near camera view path
+        local_fl.radius = 5.0f;
+        local_fl.color = glm::vec3(0.1f, 0.9f, 0.3f);
+        local_fl.intensity = 3.0f;
+        test_scene_lights.push_back(local_fl);
+    }
+    for (int i = 0; i < 30; ++i) {
+        PointLight distant_flare;
+        distant_flare.position = glm::vec3(80.0f + static_cast<float>(i * 3), 40.0f, -120.0f); // Far cavern sector
+        distant_flare.radius = 8.0f;
+        distant_flare.color = glm::vec3(0.9f, 0.2f, 0.1f);
+        distant_flare.intensity = 2.5f;
+        test_scene_lights.push_back(distant_flare);
+    }
+    TEST_CHECK(test_scene_lights.size() == 35, "Must test with 35+ simultaneous dynamic lights");
+
+    // Cull against near cluster tile (8, 4, 1) - center of screen near camera
+    glm::vec3 center_tile_min, center_tile_max;
+    ClusteredLighting::compute_cluster_aabb_view(8, 4, 1, proj, near_z, far_z, center_tile_min, center_tile_max);
+
+    uint32_t culled_visible_count = 0;
+    for (const auto& light : test_scene_lights) {
+        // In view space with camera at origin looking down -Z:
+        glm::vec3 pos_view = light.position;
+        if (ClusteredLighting::test_sphere_aabb(pos_view, light.radius, center_tile_min, center_tile_max)) {
+            culled_visible_count++;
+        }
+    }
+
+    TEST_CHECK(culled_visible_count >= 1 && culled_visible_count <= 5, "Local cluster tile must only record nearby affecting lights, culling all distant cavern lights");
+    log_pass("35+ Simultaneous Dynamic Lights Cluster Culling Performance & Overlap Isolation");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE COMPREHENSIVE UNIT TEST SUITE" << std::endl;
@@ -1547,6 +1769,7 @@ int main() {
     test_satchel_charge_and_weapon_cycling();
     test_flares_aberrants_and_mission_objectives();
     test_headlamp_briefing_melee_and_loot_systems();
+    test_clustered_forward_lighting();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;

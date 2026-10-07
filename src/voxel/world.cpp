@@ -1,4 +1,5 @@
 #include "world.hpp"
+#include "structural_check.hpp"
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -358,7 +359,6 @@ uint8_t World::get_block_flags(const glm::ivec3& pos) const {
 
 bool World::is_solid(const glm::ivec3& pos) const {
     if (pos.y < 0) return false;  // Out-of-bounds below is the lethal void singularity chasm, NOT solid!
-    if (pos.y >= 26) return true; // Ceiling mantle layer is always solid
 
     int cx = (pos.x < 0) ? ((pos.x - 31) / 32) : (pos.x / 32);
     int cy = (pos.y < 0) ? ((pos.y - 31) / 32) : (pos.y / 32);
@@ -373,6 +373,8 @@ bool World::is_solid(const glm::ivec3& pos) const {
         Voxel v = chunk->get_voxel(lx, ly, lz);
         return v.is_solid();
     }
+
+    if (pos.y >= 26) return true; // Ceiling mantle layer is always solid when chunk is not present
 
     int world_w = m_level_gen ? m_level_gen->world_width() : LevelGenerator::WORLD_WIDTH;
     int world_d = m_level_gen ? m_level_gen->world_depth() : LevelGenerator::WORLD_DEPTH;
@@ -639,6 +641,75 @@ void World::force_mesh_all_sync() {
             std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, get_neighbor);
             chunk->stage_mesh(std::move(mesh));
             chunk->upload_mesh();
+        }
+    }
+}
+
+bool World::borders_hanging_overhang_or_stalactite(int x, int y, int z) const {
+    const glm::ivec3 neighbor_dirs[6] = {
+        glm::ivec3( 1,  0,  0),
+        glm::ivec3(-1,  0,  0),
+        glm::ivec3( 0,  1,  0),
+        glm::ivec3( 0, -1,  0),
+        glm::ivec3( 0,  0,  1),
+        glm::ivec3( 0,  0, -1)
+    };
+
+    for (const auto& dir : neighbor_dirs) {
+        int nx = x + dir.x;
+        int ny = y + dir.y;
+        int nz = z + dir.z;
+
+        if (is_solid(nx, ny, nz)) {
+            // Stalactite hanging below or overhang with empty space beneath
+            if (dir.y < 0 || !is_solid(nx, ny - 1, nz)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<UnanchoredIsland> World::solve_structural_collapse(int x, int y, int z, size_t max_depth) {
+    return StructuralCheck::solve_cavein(*this, x, y, z, max_depth);
+}
+
+bool World::break_voxel(int world_x, int world_y, int world_z) {
+    Voxel v = get_voxel(world_x, world_y, world_z);
+    if (!v.is_solid() || v.is_anchored()) {
+        return false;
+    }
+
+    // Set destroyed voxel to air
+    set_voxel(world_x, world_y, world_z, Voxel{MAT_AIR, 0}, true);
+
+    // If it borders a hanging ceiling overhang or stalactite, perform bounded BFS
+    if (borders_hanging_overhang_or_stalactite(world_x, world_y, world_z)) {
+        auto islands = solve_structural_collapse(world_x, world_y, world_z, 64);
+        for (const auto& island : islands) {
+            uint32_t did = static_cast<uint32_t>(m_debris.size() + 1);
+            glm::vec3 vel(0.0f, -1.5f, 0.0f);
+            glm::vec3 rot(0.2f, 0.5f, 0.1f);
+            m_debris.emplace_back(
+                did,
+                island.center_of_mass,
+                vel,
+                rot,
+                island.blocks,
+                island.primary_material
+            );
+        }
+    }
+    return true;
+}
+
+void World::update_debris(float dt, const glm::vec3& player_pos, bool is_player_sheltered) {
+    for (auto it = m_debris.begin(); it != m_debris.end();) {
+        it->update(dt, *this, player_pos, is_player_sheltered);
+        if (it->is_destroyed()) {
+            it = m_debris.erase(it);
+        } else {
+            ++it;
         }
     }
 }

@@ -1542,6 +1542,70 @@ void WeaponZoomAndFireMechanicsTest() {
     std::cout << "[ OK ] WeaponZoomAndFireMechanicsTest (all 3 weapon archetypes zoom, optical scope lens renders, crouching and zooming function seamlessly)" << std::endl;
 }
 
+static void RoundSpawnShootingPauseAndInputDischargePreventionTest() {
+    std::cout << "\n--- Testing Round Spawn Shooting Pause & Input Discharge Prevention ---" << std::endl;
+
+    PlayerController player;
+    player.set_active_tool(ToolSlot::CombatWeapon);
+
+    // 1. Initial standalone state: no pause active
+    ASSERT_FALSE(player.is_shooting_paused());
+    ASSERT_FALSE(player.is_lmb_release_required());
+    ASSERT_EQ(player.spawn_shoot_pause_timer(), 0.0f);
+
+    // 2. Spawn / level open pause triggered (e.g. from start_expedition or menu click transition)
+    player.reset_spawn_shoot_pause(0.6f);
+    ASSERT_TRUE(player.is_shooting_paused());
+    ASSERT_TRUE(player.is_lmb_release_required());
+    ASSERT_GE(player.spawn_shoot_pause_timer(), 0.59f);
+
+    // 3. Delver attempts to fire weapon while holding trigger down
+    player.set_drilling(true);
+    std::vector<PlayerPlasmaBolt> bolts;
+    int initial_ammo = player.weapon_ammo();
+    bool fired = player.try_fire_weapon(bolts, 0.016f);
+    ASSERT_FALSE(fired);
+    ASSERT_EQ(bolts.size(), 0);
+    ASSERT_EQ(player.weapon_ammo(), initial_ammo);
+
+    // 4. Timer advances past duration, but LMB has NOT been released yet (simulating held mouse button from opening level)
+    player.Update(0.7f);
+    ASSERT_EQ(player.spawn_shoot_pause_timer(), 0.0f);
+    ASSERT_TRUE(player.is_lmb_release_required()); // Still requires release!
+    ASSERT_TRUE(player.is_shooting_paused());      // Shooting remains locked!
+
+    bolts.clear();
+    fired = player.try_fire_weapon(bolts, 0.016f);
+    ASSERT_FALSE(fired);
+    ASSERT_EQ(bolts.size(), 0);
+    ASSERT_EQ(player.weapon_ammo(), initial_ammo);
+
+    // 5. Player releases mouse button (clear release lock or clear pause)
+    player.clear_spawn_shoot_pause();
+    ASSERT_FALSE(player.is_shooting_paused());
+    ASSERT_FALSE(player.is_lmb_release_required());
+
+    // 6. Delver pulls trigger intentionally -> weapon fires cleanly!
+    fired = player.try_fire_weapon(bolts, 0.016f);
+    ASSERT_TRUE(fired);
+    ASSERT_GT(bolts.size(), 0);
+    ASSERT_LT(player.weapon_ammo(), initial_ammo);
+
+    // 7. Verify pause duration countdown with early mouse release
+    player.reset_spawn_shoot_pause(0.5f);
+    ASSERT_TRUE(player.is_shooting_paused());
+    // Simulate mouse release during countdown
+    player.Update(0.2f);
+    ASSERT_GT(player.spawn_shoot_pause_timer(), 0.0f);
+    // Explicitly clear release requirement while timer is still running
+    // (simulating user releasing mouse after 0.2s)
+    player.reset_spawn_shoot_pause(0.3f);
+    player.clear_spawn_shoot_pause();
+    ASSERT_FALSE(player.is_shooting_paused());
+
+    std::cout << "[ OK ] RoundSpawnShootingPauseAndInputDischargePreventionTest (round start pause and LMB release check prevent accidental discharge when opening levels)" << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -1565,9 +1629,10 @@ int main() {
     EnvironmentalHazardDamageAndTelegraphTest_HazardTraumaIsolationAndVisualTelegraphs();
     EnemyAttackBloodSplatterAndFallDamageBoneCrackTest_BloodSplatterIsolationAndFallBoneCrackMechanics();
     WeaponZoomAndFireMechanicsTest();
+    RoundSpawnShootingPauseAndInputDischargePreventionTest();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 18 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 19 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

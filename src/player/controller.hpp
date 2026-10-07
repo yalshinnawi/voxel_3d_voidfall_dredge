@@ -244,6 +244,20 @@ public:
     void set_combat_inputs_paused(bool paused) { m_combat_inputs_paused = paused; }
     bool are_combat_inputs_paused() const { return m_combat_inputs_paused; }
 
+    void reset_spawn_shoot_pause(float duration = 0.6f) {
+        m_spawn_shoot_pause_timer = duration;
+        m_require_lmb_release = true;
+    }
+    void clear_spawn_shoot_pause() {
+        m_spawn_shoot_pause_timer = 0.0f;
+        m_require_lmb_release = false;
+    }
+    bool is_shooting_paused() const {
+        return m_spawn_shoot_pause_timer > 0.0f || m_require_lmb_release;
+    }
+    float spawn_shoot_pause_timer() const { return m_spawn_shoot_pause_timer; }
+    bool is_lmb_release_required() const { return m_require_lmb_release; }
+
     void set_reel_speed_multiplier(float mul) { m_reel_speed_multiplier = mul; }
     void set_thruster_regen_multiplier(float mul) { m_thruster_regen_multiplier = mul; }
     void set_drill_speed_multiplier(float mul) { m_drill_speed_multiplier = mul; }
@@ -483,6 +497,8 @@ private:
     // Insertion Pod Breach Shielding & Combat Pause
     float m_insertionShieldTimer{0.0f};
     bool m_combat_inputs_paused{false};
+    float m_spawn_shoot_pause_timer{0.0f};
+    bool m_require_lmb_release{false};
 
 public:
     void apply_fall_impact(float impact_speed);

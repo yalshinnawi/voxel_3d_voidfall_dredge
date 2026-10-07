@@ -268,4 +268,115 @@ glm::vec3 AberrantAI::calculate_swarm_separation(
     return total_force;
 }
 
+float AberrantAI::calculate_received_noise_db(
+    const glm::vec3& listener_pos,
+    const glm::vec3& noise_pos,
+    float emitted_db,
+    float audible_radius,
+    bool has_los)
+{
+    if (emitted_db <= 0.0f || audible_radius <= 0.0f) {
+        return 0.0f;
+    }
+    float dist = glm::distance(listener_pos, noise_pos);
+    if (dist > audible_radius) {
+        return 0.0f;
+    }
+    float falloff = 1.0f - (dist / audible_radius);
+    float los_factor = has_los ? 1.0f : 0.80f; // rock strata acoustic transmission factor
+    return std::max(0.0f, emitted_db * falloff * los_factor);
+}
+
+PerceptionEvaluation AberrantAI::evaluate_hearing(
+    AIState current_state,
+    const glm::vec3& enemy_pos,
+    bool can_see_player,
+    const glm::vec3& player_pos,
+    const glm::vec3& noise_pos,
+    float emitted_db,
+    float audible_radius,
+    bool has_los)
+{
+    PerceptionEvaluation result;
+    result.new_state = current_state;
+    result.target_pos = enemy_pos;
+
+    // Calculate noise arriving at enemy location
+    float received_db = calculate_received_noise_db(enemy_pos, noise_pos, emitted_db, audible_radius, has_los);
+    result.received_noise_db = received_db;
+
+    // Rule 4: If player is spotted directly OR noise exceeds 70 dB -> AIState::PURSUIT with screech and swarm alert
+    if (can_see_player || received_db > THRESHOLD_PURSUIT_DB) {
+        if (current_state != AIState::PURSUIT && current_state != AIState::DYING && current_state != AIState::DEAD) {
+            result.state_changed = true;
+            result.new_state = AIState::PURSUIT;
+            result.target_pos = can_see_player ? player_pos : noise_pos;
+            result.triggered_screech = true;
+            result.triggered_swarm_alert = true;
+        } else if (current_state == AIState::PURSUIT) {
+            result.target_pos = can_see_player ? player_pos : noise_pos;
+        }
+        return result;
+    }
+
+    // Rule 3: When noise reaching an enemy exceeds 30 dB -> transition to AIState::INVESTIGATING toward noise source
+    if (received_db > THRESHOLD_INVESTIGATE_DB) {
+        if (current_state == AIState::ROOSTING || current_state == AIState::IDLE) {
+            result.state_changed = true;
+            result.new_state = AIState::INVESTIGATING;
+            result.target_pos = noise_pos;
+            result.triggered_screech = false;
+            result.triggered_swarm_alert = false;
+        } else if (current_state == AIState::INVESTIGATING) {
+            // Already investigating -> redirect to louder or new noise disturbance
+            result.new_state = AIState::INVESTIGATING;
+            result.target_pos = noise_pos;
+        }
+        return result;
+    }
+
+    // Otherwise, noise <= 30 dB (e.g. Crouch 0 dB, Walk 15 dB):
+    // Stays in current state (e.g. AIState::ROOSTING dormant)
+    return result;
+}
+
+PerceptionEvaluation AberrantAI::evaluate_acoustic_and_visual_perception(
+    AIState current_state,
+    const glm::vec3& enemy_pos,
+    bool can_see_player,
+    const glm::vec3& player_pos,
+    const std::vector<AcousticNoiseEvent>& acoustic_events,
+    bool has_los)
+{
+    PerceptionEvaluation best_result;
+    best_result.new_state = current_state;
+    best_result.target_pos = enemy_pos;
+
+    // Direct visual spot immediately takes top priority: Rule 4
+    if (can_see_player) {
+        return evaluate_hearing(current_state, enemy_pos, true, player_pos, player_pos, 0.0f, 0.0f, true);
+    }
+
+    float max_db = 0.0f;
+    const AcousticNoiseEvent* loudest_event = nullptr;
+
+    for (const auto& evt : acoustic_events) {
+        if (evt.is_expired()) continue;
+        float rx_db = calculate_received_noise_db(enemy_pos, evt.position, evt.db, evt.radius, has_los);
+        if (rx_db > max_db) {
+            max_db = rx_db;
+            loudest_event = &evt;
+        }
+    }
+
+    if (loudest_event) {
+        return evaluate_hearing(
+            current_state, enemy_pos, false, player_pos,
+            loudest_event->position, loudest_event->db, loudest_event->radius, has_los
+        );
+    }
+
+    return best_result;
+}
+
 } // namespace Voidfall

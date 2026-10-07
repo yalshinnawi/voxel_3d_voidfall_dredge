@@ -367,17 +367,35 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
     float header_y = 28.0f * ui_scale;
     draw_text("SELECT EXPEDITION SECTOR", header_x, header_y, 2.4f * ui_scale, Typography::COLOR_CYAN);
     draw_text("CHOOSE A SECTOR TO COMMENCE EXTRACTION DESCENT", header_x + 4.0f, header_y + 32.0f * ui_scale, 1.15f * ui_scale, Typography::COLOR_PRIMARY);
+    if (!m_terminal_msg.empty()) {
+        float status_x = header_x + 580.0f * ui_scale;
+        if (status_x < w - 100.0f * ui_scale) {
+            draw_text(">> " + m_terminal_msg, status_x, header_y + 32.0f * ui_scale, 1.05f * ui_scale, m_terminal_msg_col);
+        }
+    }
     draw_rect(header_x, header_y + 52.0f * ui_scale, w - 2.0f * header_x, 2.0f, glm::vec4(0.0f, 0.90f, 1.0f, 0.40f));
 
     // --- Endless sector data generation ---
-    // Visible sectors: 1 through (highest_cleared + 1), capped at MAX_SECTOR_RECORDS-1
+    // Visible sectors pool:
+    // Classic sectors 1..3 are always present.
+    // Plus any sector that is unlocked or cleared, plus the next frontier sector.
     const int MAX_VISIBLE = UserProfile::MAX_SECTOR_RECORDS - 1;
-    int max_available = std::min(profile.highest_cleared_sector + 1, MAX_VISIBLE);
-    max_available = std::max(max_available, 1); // Always show at least Sector 1
+    int highest_unlocked = 1;
+    for (int s = 1; s <= MAX_VISIBLE; ++s) {
+        if (profile.is_sector_unlocked(s)) {
+            highest_unlocked = s;
+        }
+    }
+    int max_available = std::max({3, profile.highest_cleared_sector + 1, highest_unlocked});
+    if (highest_unlocked < MAX_VISIBLE && max_available < highest_unlocked + 1) {
+        max_available = highest_unlocked + 1;
+    }
+    max_available = std::clamp(max_available, 3, MAX_VISIBLE);
 
     // 3 cards per page
     static constexpr int CARDS_PER_PAGE = 3;
     int total_pages = (max_available + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+    total_pages = std::max(1, total_pages);
 
     // Clamp page index
     m_carousel_page = std::clamp(m_carousel_page, 0, total_pages - 1);
@@ -501,19 +519,34 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
         bool is_hovered  = (mouse_x >= cx && mouse_x <= cx + card_w &&
                             mouse_y >= start_y && mouse_y <= start_y + card_h);
 
-        // Ghost slot when this page has fewer than 3 valid sectors
-        if (sec_num > max_available) {
-            draw_panel_with_border(cx, start_y, card_w, card_h,
-                                   glm::vec4(0.02f, 0.02f, 0.03f, 0.55f),
-                                   glm::vec4(0.12f, 0.15f, 0.18f, 0.25f));
+        // Ghost slot when this slot is beyond max_available and not unlocked
+        bool is_ghost = (sec_num > max_available && !is_unlocked) || (sec_num > MAX_VISIBLE);
+        if (is_ghost) {
+            if (is_hovered && mouse_clicked) {
+                m_terminal_msg = "UNCHARTED SECTOR " + std::to_string(sec_num) + ": REQUIRES CLEARING SECTOR " + std::to_string(sec_num - 1) + " (LVL " + std::to_string(req_lvl) + ")";
+                m_terminal_msg_col = glm::vec4(1.0f, 0.5f, 0.35f, 1.0f);
+            }
+            glm::vec4 g_bg = is_hovered ? glm::vec4(0.04f, 0.04f, 0.06f, 0.70f) : glm::vec4(0.02f, 0.02f, 0.03f, 0.55f);
+            glm::vec4 g_bd = is_hovered ? glm::vec4(0.3f, 0.35f, 0.4f, 0.5f) : glm::vec4(0.12f, 0.15f, 0.18f, 0.25f);
+            draw_panel_with_border(cx, start_y, card_w, card_h, g_bg, g_bd, is_hovered ? 2.0f : 1.0f);
             draw_text_centered("-- UNCHARTED TERRITORY --", cx, start_y, card_w, card_h,
-                                1.0f * ui_scale, glm::vec4(0.3f, 0.35f, 0.4f, 0.5f));
+                                1.0f * ui_scale, is_hovered ? Typography::COLOR_PRIMARY : glm::vec4(0.3f, 0.35f, 0.4f, 0.5f));
             continue;
         }
+
+        bool has_record = (sec_num < UserProfile::MAX_SECTOR_RECORDS &&
+                           profile.sector_records[sec_num].highest_completion_rate > 0);
 
         if (is_hovered && mouse_clicked) {
             if (is_unlocked) {
                 selected_level = sec_num;
+                if (!has_record) {
+                    m_terminal_msg = "UNCHARTED SECTOR " + std::to_string(sec_num) + " SELECTED: COMMENCE EXPEDITION TO GENERATE TOPOLOGY";
+                    m_terminal_msg_col = Typography::COLOR_CYAN;
+                } else {
+                    m_terminal_msg = "SECTOR " + std::to_string(sec_num) + " SELECTED: EXPEDITION READY";
+                    m_terminal_msg_col = Typography::COLOR_GREEN;
+                }
             } else {
                 m_terminal_msg = "SECTOR LOCKED: REQUIRES DELVER LEVEL " + std::to_string(req_lvl);
                 m_terminal_msg_col = glm::vec4(1.0f, 0.35f, 0.35f, 1.0f);
@@ -557,22 +590,28 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
             line_y += line_h;
         }
 
-        // EXP multiplier & best badge
-        float bonus_y = start_y + card_h - 58.0f * ui_scale;
+        // EXP multiplier & survey status
+        float bonus_y = start_y + card_h - 78.0f * ui_scale;
         draw_rect(cx + pad, bonus_y - 6.0f * ui_scale, card_w - 2.0f * pad, 1.0f,
                   glm::vec4(0.25f, 0.4f, 0.55f, 0.4f));
         draw_text(get_bonus(sec_num), cx + pad, bonus_y, 1.10f * ui_scale,
                   is_unlocked ? Typography::COLOR_GREEN : glm::vec4(0.5f, 0.55f, 0.5f, 0.7f));
-        if (sec_num < UserProfile::MAX_SECTOR_RECORDS &&
-            profile.sector_records[sec_num].highest_completion_rate > 0) {
-            std::string badge_str = "BEST: " + profile.sector_records[sec_num].best_badge +
-                                    "  (" + std::to_string(profile.sector_records[sec_num].highest_completion_rate) + "%)";
-            draw_text(badge_str, cx + pad, bonus_y + 18.0f * ui_scale, 0.90f * ui_scale,
+        float status_y = bonus_y + 18.0f * ui_scale;
+        if (has_record) {
+            std::string badge_str = "RECORD: " + profile.sector_records[sec_num].best_badge +
+                                    " (" + std::to_string(profile.sector_records[sec_num].highest_completion_rate) + "%)";
+            draw_text(badge_str, cx + pad, status_y, 0.90f * ui_scale,
                       glm::vec4(0.6f, 1.0f, 0.75f, 0.9f));
+        } else if (is_unlocked) {
+            draw_text("STATUS: UNCHARTED FRONTIER", cx + pad, status_y, 0.90f * ui_scale,
+                      Typography::COLOR_AMBER);
+        } else {
+            draw_text("STATUS: CLASSIFIED ARCHIVE", cx + pad, status_y, 0.90f * ui_scale,
+                      Typography::COLOR_MUTED);
         }
 
         float badge_w = card_w - 2.0f * pad;
-        float badge_h = 26.0f * ui_scale;
+        float badge_h = 28.0f * ui_scale;
         float badge_x = cx + pad;
         float badge_y = start_y + card_h - badge_h - 10.0f * ui_scale;
 
@@ -585,8 +624,16 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
         } else if (is_selected) {
             draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
                                    glm::vec4(0.0f, 0.85f, 1.0f, 0.20f), Typography::COLOR_CYAN, 1.0f);
-            draw_text_centered_fitted("[ ACTIVE SECTOR ]", badge_x, badge_y, badge_w, badge_h,
+            std::string sel_label = has_record ? "[ ACTIVE SECTOR ]" : "[ ACTIVE // UNCHARTED ]";
+            draw_text_centered_fitted(sel_label, badge_x, badge_y, badge_w, badge_h,
                                       1.05f * ui_scale, Typography::COLOR_CYAN);
+        } else {
+            if (!has_record) {
+                draw_panel_with_border(badge_x, badge_y, badge_w, badge_h,
+                                       glm::vec4(0.12f, 0.10f, 0.02f, 0.75f), Typography::COLOR_AMBER, 1.0f);
+                draw_text_centered_fitted("[ UNCHARTED // CLICK TO SELECT ]", badge_x, badge_y, badge_w, badge_h,
+                                          0.95f * ui_scale, Typography::COLOR_AMBER);
+            }
         }
     }
 
@@ -663,6 +710,8 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
     // LAUNCH button
     bool cur_unlocked = profile.is_sector_unlocked(selected_level);
     int  cur_req_lvl  = UserProfile::get_required_level_for_sector(selected_level);
+    bool cur_uncharted = (selected_level < UserProfile::MAX_SECTOR_RECORDS &&
+                          profile.sector_records[selected_level].highest_completion_rate == 0);
 
     float launch_h = bar_h;
     float launch_x = start_x + total_cards_w - launch_w;
@@ -681,12 +730,13 @@ void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfil
                            launch_hov ? 2.5f : 1.5f);
 
     std::string launch_text = cur_unlocked
-        ? "[ LAUNCH SECTOR " + std::to_string(selected_level) + " ]"
+        ? (cur_uncharted ? "[ GENERATE SECTOR " + std::to_string(selected_level) + " ]"
+                         : "[ LAUNCH SECTOR " + std::to_string(selected_level) + " ]")
         : "[ LOCKED // LEVEL " + std::to_string(cur_req_lvl) + " REQUIRED ]";
-    float text_scale = cur_unlocked ? 1.45f * ui_scale : 1.20f * ui_scale;
+    float text_scale = cur_unlocked ? 1.40f * ui_scale : 1.20f * ui_scale;
     draw_text_centered_fitted(launch_text, launch_x, bar_y, launch_w, launch_h, text_scale,
                               !cur_unlocked ? glm::vec4(1.0f, 0.45f, 0.45f, 0.95f) :
-                              launch_hov    ? glm::vec4(1.0f) : Typography::COLOR_GREEN);
+                              launch_hov    ? glm::vec4(1.0f) : (cur_uncharted ? Typography::COLOR_CYAN : Typography::COLOR_GREEN));
 }
 
 
@@ -1390,9 +1440,18 @@ bool OrbitalHubUI::render_orbital_hub(int selected_level, const SkillMatrix& ski
         draw_rect(col1_x + pad, text_y, col1_w - 2.0f * pad, 1.0f, glm::vec4(0.2f, 0.4f, 0.5f, 0.5f));
         text_y += 10.0f * ui_scale;
 
-        std::string sec_name = (selected_level == 1) ? "SECTOR 1: CRYSTALLINE CAVERNS" :
-                               (selected_level == 2) ? "SECTOR 2: SUBTERRANEAN VAULT" :
-                                                       "SECTOR 3: FAULT-LINE COLLAPSE";
+        static const char* s_names[] = {
+            "PERIMETER DRIFT", "VOLATILE FAULT", "VOID CRADLE",
+            "MAGMA UNDERCROFT", "CRYSTALLINE RIFT", "ECHO ABYSS",
+            "TECTONIC MAW", "ASHEN SANCTUM", "OBSIDIAN DEEP",
+            "NECROTIC VEIN", "WARP FISSURE", "RESONANCE VAULT"
+        };
+        int s_idx = (selected_level - 1) % 12;
+        int s_cycle = (selected_level - 1) / 12;
+        char s_buf[80];
+        if (s_cycle == 0) std::snprintf(s_buf, sizeof(s_buf), "SECTOR %d: %s", selected_level, s_names[s_idx]);
+        else              std::snprintf(s_buf, sizeof(s_buf), "SECTOR %d: %s [CYCLE %d]", selected_level, s_names[s_idx], s_cycle + 1);
+        std::string sec_name(s_buf);
         draw_text(sec_name, col1_x + pad, text_y, 1.25f * ui_scale, glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
         text_y += 20.0f * ui_scale;
 
@@ -1549,13 +1608,16 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
             m_terminal_msg_col = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
         }
 
-        for (int s = 1; s <= 3; ++s) {
+        for (int s = 1; s < UserProfile::MAX_SECTOR_RECORDS; ++s) {
             if (inventory.sector_records[s].highest_completion_rate > profile.sector_records[s].highest_completion_rate) {
                 profile.sector_records[s].highest_completion_rate = inventory.sector_records[s].highest_completion_rate;
             }
             if (inventory.sector_records[s].best_badge != "UNEXPLORED") {
                 profile.sector_records[s].best_badge = inventory.sector_records[s].best_badge;
             }
+        }
+        if ((success && !inventory.is_abandoned && !inventory.suit_failed) || inventory.run_completion_rate >= 50) {
+            profile.highest_cleared_sector = std::max(profile.highest_cleared_sector, level);
         }
         m_profile_dirty = true;
     }

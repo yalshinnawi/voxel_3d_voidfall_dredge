@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include "../src/player/character_class.hpp"
 #include "../src/player/upgrades.hpp"
 #include "../src/core/save_system.hpp"
@@ -366,6 +367,59 @@ int main() {
         CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 100, 10, 10) == UpgradeLockReason::Unlocked, "Should be Unlocked");
 
         std::cout << " -> All 5 Tier cost records (100->656 Coins, 4->20 Voidite, 3->15 Titanium) & lock reasons verified." << std::endl;
+    }
+
+    // Test 8: Sector Progression, Uncharted Territory Gating & Save Persistence
+    {
+        std::cout << "[Test 8] Testing Sector Progression, Uncharted Territory & Persistence..." << std::endl;
+        UserProfile p;
+        p.total_exp = 0;
+        p.highest_cleared_sector = 1;
+
+        // Baseline: Level 1
+        CHECK(p.get_player_level() == 1, "Level must start at 1");
+        CHECK(p.is_sector_unlocked(1), "Sector 1 must be unlocked");
+        CHECK(!p.is_sector_unlocked(2), "Sector 2 must be locked at Level 1");
+        CHECK(!p.is_sector_unlocked(3), "Sector 3 must be locked at Level 1");
+
+        // Advance to Level 2
+        int lvls = 0, bonus = 0;
+        p.add_exp(350, lvls, bonus);
+        CHECK(p.get_player_level() == 2, "Must reach Level 2");
+        CHECK(p.is_sector_unlocked(2), "Sector 2 must unlock at Level 2");
+        CHECK(!p.is_sector_unlocked(3), "Sector 3 must remain locked at Level 2");
+
+        // Advance to Level 4 (Sector 3 requirement)
+        p.add_exp(1200, lvls, bonus);
+        CHECK(p.get_player_level() >= 4, "Must reach Level 4");
+        CHECK(p.is_sector_unlocked(3), "Sector 3 (Uncharted Territory) must be unlocked at Level 4");
+        CHECK(!p.is_sector_unlocked(4), "Sector 4 must remain locked before Sector 3 clear");
+
+        // Clear Sector 3 with 100% completion
+        p.sector_records[3].highest_completion_rate = 100;
+        p.sector_records[3].best_badge = "CLEARED (100%)";
+        p.highest_cleared_sector = 3;
+
+        // Advance to Level 6 (Sector 4 requirement)
+        p.add_exp(2500, lvls, bonus);
+        CHECK(p.get_player_level() >= 6, "Must reach Level 6");
+        CHECK(p.is_sector_unlocked(4), "Sector 4 must unlock once Sector 3 is cleared and Level 6 reached");
+
+        // Test persistence of highest_cleared_sector & sector records
+        const std::string test_save_path = "saves/test_sector_save.json";
+        bool save_ok = SaveSystem::save_profile(p, test_save_path);
+        CHECK(save_ok, "Must save profile successfully");
+
+        UserProfile loaded_p;
+        bool load_ok = SaveSystem::load_profile(loaded_p, test_save_path);
+        CHECK(load_ok, "Must load profile successfully");
+        CHECK(loaded_p.highest_cleared_sector >= 3, "highest_cleared_sector must persist >= 3");
+        CHECK(loaded_p.sector_records[3].highest_completion_rate == 100, "Sector 3 record must persist 100%");
+        CHECK(loaded_p.sector_records[3].best_badge == "CLEARED (100%)", "Sector 3 badge must persist");
+        CHECK(loaded_p.is_sector_unlocked(4), "Sector 4 must remain unlocked in loaded profile");
+
+        std::filesystem::remove(test_save_path);
+        std::cout << " -> Uncharted territory unlock, level gating, clear prereqs & save persistence verified." << std::endl;
     }
 
     std::cout << "========================================" << std::endl;

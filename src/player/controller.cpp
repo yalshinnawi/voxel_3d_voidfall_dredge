@@ -256,7 +256,13 @@ void PlayerController::handle_input(const Window& window, float dt) {
     // Slot 3 (Demolition Shaped Charges):
     //   LMB: Deploy shaped charge on targeted surface.
     //   RMB: Detonate placed shaped charges (blasts 3x1x1 tunnel).
-    bool lmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+    bool raw_lmb = window.is_mouse_button_down(GLFW_MOUSE_BUTTON_LEFT);
+    if (!raw_lmb) {
+        m_require_lmb_release = false;
+    }
+
+    bool can_primary_action = !m_combat_inputs_paused && !is_shooting_paused();
+    bool lmb = can_primary_action && raw_lmb;
     bool rmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
 
     if (m_active_tool == ToolSlot::MiningDrill) {
@@ -366,6 +372,9 @@ void PlayerController::update_physics(float dt, World& world) {
     m_current_world = &world;
 
     m_insertionShieldTimer = std::max(0.0f, m_insertionShieldTimer - dt);
+    if (m_spawn_shoot_pause_timer > 0.0f) {
+        m_spawn_shoot_pause_timer = std::max(0.0f, m_spawn_shoot_pause_timer - dt);
+    }
 
     // Flare recharge progression (15.0s per flare, capacity 3)
     if (m_flare_count < MAX_FLARES) {
@@ -840,6 +849,9 @@ void PlayerController::UpdatePhysics(float dt) {
         // In headless / worldless test runs, update player cooldowns and timers
         if (m_vault_timer > 0.0f) {
             m_vault_timer = std::max(0.0f, m_vault_timer - dt);
+        }
+        if (m_spawn_shoot_pause_timer > 0.0f) {
+            m_spawn_shoot_pause_timer = std::max(0.0f, m_spawn_shoot_pause_timer - dt);
         }
         if (m_fire_cooldown > 0.0f) {
             m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
@@ -1544,6 +1556,7 @@ void PlayerController::reload_weapon() {
 
 bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts, float dt) {
     if (m_active_tool != ToolSlot::CombatWeapon) return false;
+    if (is_shooting_paused()) return false;
     if (m_reload_timer > 0.0f) return false;
     if (m_fire_cooldown > 0.0f) return false;
     if ((m_current_buttons & BTN_MINE_DRILL) == 0) return false;

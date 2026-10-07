@@ -41,6 +41,10 @@ Renderer::Renderer(int width, int height)
     // 2. Initialize Texture Array
     m_texture_array = std::make_unique<TextureArray>(128, 128, 16);
 
+    // 2b. Initialize Clustered Forward Lighting (16x9x24 Frustum Grid)
+    m_clustered_lighting = std::make_unique<ClusteredLighting>();
+    m_clustered_lighting->init();
+
     // 3. Initialize Framebuffers and Quad
     init_framebuffers();
 
@@ -498,6 +502,26 @@ void Renderer::render_extraction_beacon(const glm::vec3& beacon_pos, float siren
 
 void Renderer::trigger_dust_kickup(float duration) {
     m_dust_timer = duration;
+}
+
+void Renderer::spawn_dust_cloud(const glm::vec3& pos, int count) {
+    for (int i = 0; i < count; ++i) {
+        BreakParticle p;
+        float rx = static_cast<float>(rand() % 100) / 50.0f - 1.0f;
+        float ry = static_cast<float>(rand() % 100) / 100.0f;
+        float rz = static_cast<float>(rand() % 100) / 50.0f - 1.0f;
+        p.pos = pos + glm::vec3(rx * 0.6f, ry * 0.2f, rz * 0.6f);
+        p.vel = glm::vec3(rx * 2.0f, ry * 1.5f + 0.5f, rz * 2.0f);
+        float shade = 0.60f + static_cast<float>(rand() % 30) * 0.01f;
+        p.color = glm::vec4(shade, shade * 0.95f, shade * 0.90f, 0.70f);
+        p.size = 0.45f + static_cast<float>(rand() % 100) / 200.0f;
+        p.max_life = 1.4f + static_cast<float>(rand() % 100) / 100.0f;
+        p.life = p.max_life;
+        p.gravity = 0.3f;
+        p.drag = 1.1f;
+        p.size_growth = 0.30f;
+        m_particles.push_back(p);
+    }
 }
 
 void Renderer::spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id) {
@@ -1263,6 +1287,14 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
+    // Clustered Forward Lighting Compute Pass & Buffer Binding
+    bool clustered_active = false;
+    if (m_clustered_lighting && m_clustered_lighting->is_initialized()) {
+        m_clustered_lighting->update_and_cull(m_view, m_proj, m_point_lights, 0.1f, 250.0f, m_width, m_height);
+        m_clustered_lighting->bind_buffers(0, 1);
+        clustered_active = true;
+    }
+
     // Setup Voxel Shader
     m_voxel_shader.use();
     m_voxel_shader.set_mat4("uView", m_view);
@@ -1270,6 +1302,10 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
     m_voxel_shader.set_vec3("uCameraPos", m_cam_pos);
     m_voxel_shader.set_float("uTime", m_total_time);
     m_voxel_shader.set_int("uSector", m_sector);
+    m_voxel_shader.set_vec2("uScreenSize", glm::vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
+    m_voxel_shader.set_float("uNear", 0.1f);
+    m_voxel_shader.set_float("uFar", 250.0f);
+    m_voxel_shader.set_int("uClusteredLightingEnabled", clustered_active ? 1 : 0);
 
     // Headlamp
     m_voxel_shader.set_vec3("uHeadlampPos", m_headlamp.position);
@@ -1279,7 +1315,7 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
     m_voxel_shader.set_float("uHeadlampOuterCutoff", m_headlamp.outer_cutoff);
     m_voxel_shader.set_float("uHeadlampIntensity", get_effective_headlamp_intensity());
 
-    // Point lights
+    // Point lights (fallback uniform array & fog compatibility)
     m_voxel_shader.set_int("uNumPointLights", static_cast<int>(m_point_lights.size()));
     for (size_t i = 0; i < m_point_lights.size() && i < 16; ++i) {
         std::string base = "uPointLights[" + std::to_string(i) + "]";
@@ -1328,7 +1364,7 @@ void Renderer::render_debris(const DynamicDebris& debris) {
     model = glm::rotate(model, rot.x, glm::vec3(1.0f, 0.0f, 0.0f));
     model = glm::rotate(model, rot.y, glm::vec3(0.0f, 1.0f, 0.0f));
     model = glm::rotate(model, rot.z, glm::vec3(0.0f, 0.0f, 1.0f));
-    model = glm::translate(model, glm::vec3(-0.5f, -0.5f, -0.5f));
+    model = glm::translate(model, glm::vec3(-0.5f, -0.5f, -0.5f) + debris.mesh_offset());
 
     m_voxel_shader.set_mat4("uModel", model);
     m_voxel_shader.set_vec3("uChunkWorldPos", glm::vec3(0.0f));

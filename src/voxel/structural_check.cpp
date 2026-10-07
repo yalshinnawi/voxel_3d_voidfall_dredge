@@ -65,7 +65,7 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
             Voxel cur_vox = world.get_voxel(current.x, current.y, current.z);
 
             // If we touch bedrock, ceiling bedrock, or an indestructible anchor, this entire component is stable
-            if (cur_vox.is_anchored() || current.y <= 1 || current.y >= 64) {
+            if (cur_vox.is_anchored() || cur_vox.material_id == MAT_DREDGE_BEDROCK || current.y <= 1 || current.y >= world.chunk_ceiling()) {
                 is_anchored = true;
                 break;
             }

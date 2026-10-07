@@ -30,7 +30,41 @@ uniform float uHeadlampInnerCutoff;
 uniform float uHeadlampOuterCutoff;
 uniform float uHeadlampIntensity;
 
-// Point Lights (Dropped flares, thermite burns, anomalies, beacon)
+// Point Lights Data & Clustered SSBOs
+struct PointLightData {
+    vec4 position_radius; // xyz = position, w = radius
+    vec4 color_intensity; // xyz = color, w = intensity
+};
+
+const uint CLUSTERS_X = 16u;
+const uint CLUSTERS_Y = 9u;
+const uint CLUSTERS_Z = 24u;
+const uint TOTAL_CLUSTERS = 3456u;
+const uint MAX_LIGHTS_PER_CLUSTER = 64u;
+
+struct ClusterRecord {
+    uint count;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+    uint light_indices[MAX_LIGHTS_PER_CLUSTER];
+};
+
+layout (std430, binding = 0) readonly buffer PointLightBuffer {
+    PointLightData bPointLights[];
+};
+
+layout (std430, binding = 1) readonly buffer ClusterLightBuffer {
+    ClusterRecord bClusters[TOTAL_CLUSTERS];
+};
+
+uniform mat4 uView;
+uniform vec2 uScreenSize;
+uniform float uNear;
+uniform float uFar;
+uniform int uClusteredLightingEnabled;
+
+// Fallback point lights (when clustered lighting disabled)
 struct PointLight {
     vec3 position;
     vec3 color;
@@ -67,14 +101,14 @@ vec3 get_material_albedo(uint layer) {
 
 vec2 get_material_rough_metal(uint layer) {
     switch (layer) {
-        case 3u: return vec2(0.12, 0.20); // Voidite crystal (polished gemstone)
+        case 3u: return vec2(0.15, 0.20); // Voidite crystal (polished gemstone)
         case 4u: return vec2(0.35, 0.88); // Industrial bulkhead (metallic)
         case 5u: return vec2(0.25, 0.92); // Vault door (polished metal)
         case 6u: return vec2(0.65, 0.30); // Molten slag
-        case 11u: return vec2(0.06, 0.15); // Water (fluid polish)
+        case 11u: return vec2(0.06, 0.15); // Water / puddle (fluid polish)
         case 12u: return vec2(0.65, 0.05); // Flora (soft moss)
-        case 13u: return vec2(0.08, 0.35); // Prismatic crystal (faceted diamond)
-        case 14u: return vec2(0.12, 0.45); // Obsidian spikes (glossy mineral glass)
+        case 13u: return vec2(0.15, 0.35); // Prismatic crystal (faceted diamond)
+        case 14u: return vec2(0.15, 0.45); // Obsidian spikes (glossy mineral glass)
         default: return vec2(0.85, 0.05); // Rock / granite / basalt
     }
 }
@@ -210,6 +244,23 @@ void main() {
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
 
+    // Identify material categories for roughness scaling
+    bool isPuddle = (vTexLayer == 11u);
+    bool isPolishedMetal = (metallic > 0.5) && (vTexLayer == 4u || vTexLayer == 5u || metallic >= 0.7);
+    bool isStone = (vTexLayer == 1u || vTexLayer == 2u || vTexLayer == 7u || vTexLayer == 8u) ||
+                   (!isPuddle && !isPolishedMetal && vTexLayer != 3u && vTexLayer != 6u &&
+                    vTexLayer != 12u && vTexLayer != 13u && vTexLayer != 14u);
+
+    // Restrict low roughness (< 0.15) strictly to puddles and polished metals
+    if (!isPuddle && !isPolishedMetal) {
+        roughness = max(roughness, 0.15);
+    }
+
+    // Clamp stone minimum roughness to 0.45 to prevent cavern walls from looking like polished plastic
+    if (isStone) {
+        roughness = max(roughness, 0.45);
+    }
+
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
 
@@ -278,36 +329,94 @@ void main() {
         }
     }
 
-    // 3. Dynamic Point Lights (Flares, Thermite, Anomalies, Beacon)
-    for (int i = 0; i < uNumPointLights && i < MAX_POINT_LIGHTS; ++i) {
-        vec3 lightPos = uPointLights[i].position;
-        vec3 lightDir = normalize(lightPos - vWorldPos);
-        float dist = distance(lightPos, vWorldPos);
-        float radius = uPointLights[i].radius;
+    // 3. Dynamic Point Lights (Clustered Forward Lighting / Fallback)
+    if (uClusteredLightingEnabled != 0) {
+        // Compute 3D Cluster coordinates (16x9x24)
+        uint clusterX = uint(clamp(gl_FragCoord.x / max(uScreenSize.x, 1.0) * float(CLUSTERS_X), 0.0, float(CLUSTERS_X - 1u)));
+        uint clusterY = uint(clamp(gl_FragCoord.y / max(uScreenSize.y, 1.0) * float(CLUSTERS_Y), 0.0, float(CLUSTERS_Y - 1u)));
 
-        if (dist < radius) {
-            float attenuation = clamp(1.0 - (dist / radius), 0.0, 1.0);
-            attenuation *= attenuation;
+        vec4 viewPos = uView * vec4(vWorldPos, 1.0);
+        float viewDepth = -viewPos.z;
 
-            vec3 radiance = uPointLights[i].color * uPointLights[i].intensity * attenuation;
-            float NdotL = max(dot(N, lightDir), 0.0);
-            vec3 H = normalize(V + lightDir);
+        uint clusterZ = 0u;
+        float zNear = max(uNear, 0.01);
+        float zFar = max(uFar, zNear + 1.0);
+        if (viewDepth > zNear) {
+            float depthRatio = clamp(viewDepth / zNear, 1.0, zFar / zNear);
+            float depthNorm = log(depthRatio) / log(zFar / zNear);
+            clusterZ = uint(clamp(depthNorm * float(CLUSTERS_Z), 0.0, float(CLUSTERS_Z - 1u)));
+        }
 
-            float NDF = distribution_ggx(N, H, roughness);
-            float G = geometry_smith(N, V, lightDir, roughness);
-            vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
+        uint clusterIdx = clusterX + clusterY * CLUSTERS_X + clusterZ * (CLUSTERS_X * CLUSTERS_Y);
+        uint clusterLightCount = min(bClusters[clusterIdx].count, MAX_LIGHTS_PER_CLUSTER);
 
-            vec3 kS = F;
-            vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        for (uint i = 0u; i < clusterLightCount; ++i) {
+            uint lightIdx = bClusters[clusterIdx].light_indices[i];
+            vec3 lightPos = bPointLights[lightIdx].position_radius.xyz;
+            float radius = bPointLights[lightIdx].position_radius.w;
+            vec3 lightColor = bPointLights[lightIdx].color_intensity.rgb;
+            float intensity = bPointLights[lightIdx].color_intensity.w;
 
-            vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
-            Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+            vec3 lightDir = normalize(lightPos - vWorldPos);
+            float dist = distance(lightPos, vWorldPos);
 
-            if (isCrystal) {
-                // Point light subsurface glow through crystal
-                float sss = pow(clamp(dot(V, -lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.0);
-                vec3 translucencyColor = (vTexLayer == 3u) ? vec3(0.55, 0.15, 0.75) : vec3(0.35, 0.65, 0.90);
-                Lo += translucencyColor * sss * radiance * 0.7;
+            if (dist < radius) {
+                float attenuation = clamp(1.0 - (dist / radius), 0.0, 1.0);
+                attenuation *= attenuation;
+
+                vec3 radiance = lightColor * intensity * attenuation;
+                float NdotL = max(dot(N, lightDir), 0.0);
+                vec3 H = normalize(V + lightDir);
+
+                float NDF = distribution_ggx(N, H, roughness);
+                float G = geometry_smith(N, V, lightDir, roughness);
+                vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
+
+                vec3 kS = F;
+                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+
+                if (isCrystal) {
+                    float sss = pow(clamp(dot(V, -lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.0);
+                    vec3 translucencyColor = (vTexLayer == 3u) ? vec3(0.55, 0.15, 0.75) : vec3(0.35, 0.65, 0.90);
+                    Lo += translucencyColor * sss * radiance * 0.7;
+                }
+            }
+        }
+    } else {
+        // Fallback unclustered loop
+        for (int i = 0; i < uNumPointLights && i < MAX_POINT_LIGHTS; ++i) {
+            vec3 lightPos = uPointLights[i].position;
+            vec3 lightDir = normalize(lightPos - vWorldPos);
+            float dist = distance(lightPos, vWorldPos);
+            float radius = uPointLights[i].radius;
+
+            if (dist < radius) {
+                float attenuation = clamp(1.0 - (dist / radius), 0.0, 1.0);
+                attenuation *= attenuation;
+
+                vec3 radiance = uPointLights[i].color * uPointLights[i].intensity * attenuation;
+                float NdotL = max(dot(N, lightDir), 0.0);
+                vec3 H = normalize(V + lightDir);
+
+                float NDF = distribution_ggx(N, H, roughness);
+                float G = geometry_smith(N, V, lightDir, roughness);
+                vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
+
+                vec3 kS = F;
+                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+
+                if (isCrystal) {
+                    // Point light subsurface glow through crystal
+                    float sss = pow(clamp(dot(V, -lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.0);
+                    vec3 translucencyColor = (vTexLayer == 3u) ? vec3(0.55, 0.15, 0.75) : vec3(0.35, 0.65, 0.90);
+                    Lo += translucencyColor * sss * radiance * 0.7;
+                }
             }
         }
     }

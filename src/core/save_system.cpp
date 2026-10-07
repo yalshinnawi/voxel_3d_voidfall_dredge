@@ -53,12 +53,13 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"kinetic_dynamo_tier\": " << profile.upgrades.kineticDynamoTier << ",\n";
     out << "  \"sonar_frequency_tier\": " << profile.upgrades.sonarFrequencyTier << ",\n";
     out << "  \"reinforced_plating_tier\": " << profile.upgrades.reinforcedPlatingTier << ",\n";
-    out << "  \"sector1_rate\": " << profile.sector_records[1].highest_completion_rate << ",\n";
-    out << "  \"sector1_badge\": \"" << profile.sector_records[1].best_badge << "\",\n";
-    out << "  \"sector2_rate\": " << profile.sector_records[2].highest_completion_rate << ",\n";
-    out << "  \"sector2_badge\": \"" << profile.sector_records[2].best_badge << "\",\n";
-    out << "  \"sector3_rate\": " << profile.sector_records[3].highest_completion_rate << ",\n";
-    out << "  \"sector3_badge\": \"" << profile.sector_records[3].best_badge << "\",\n";
+    out << "  \"highest_cleared_sector\": " << profile.highest_cleared_sector << ",\n";
+    for (int s = 1; s < UserProfile::MAX_SECTOR_RECORDS; ++s) {
+        if (s <= 3 || profile.sector_records[s].highest_completion_rate > 0) {
+            out << "  \"sector" << s << "_rate\": " << profile.sector_records[s].highest_completion_rate << ",\n";
+            out << "  \"sector" << s << "_badge\": \"" << profile.sector_records[s].best_badge << "\",\n";
+        }
+    }
     out << "  \"master_volume\": " << profile.settings.master_volume << ",\n";
     out << "  \"sfx_volume\": " << profile.settings.sfx_volume << ",\n";
     out << "  \"enemy_volume\": " << profile.settings.enemy_volume << ",\n";
@@ -117,30 +118,6 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
                 }
             }
         };
-
-        parse_int("save_version", profile.save_version);
-        parse_str("last_saved_time", profile.last_saved_time);
-        parse_str("player_name", profile.player_name);
-        parse_int("total_exp", profile.total_exp);
-        parse_int("total_coins", profile.total_coins);
-        parse_int("total_voidite", profile.total_voidite);
-        parse_int("total_titanium", profile.total_titanium);
-        parse_int("selected_class_id", profile.selected_class_id);
-        profile.selectedClass = static_cast<CharacterClass>(profile.selected_class_id);
-
-        parse_int("drill_speed_tier", profile.upgrades.drillSpeedTier);
-        parse_int("drill_durability_tier", profile.upgrades.drillDurabilityTier);
-        parse_int("thruster_tank_tier", profile.upgrades.thrusterTankTier);
-        parse_int("kinetic_dynamo_tier", profile.upgrades.kineticDynamoTier);
-        parse_int("sonar_frequency_tier", profile.upgrades.sonarFrequencyTier);
-        parse_int("reinforced_plating_tier", profile.upgrades.reinforcedPlatingTier);
-
-        parse_int("sector1_rate", profile.sector_records[1].highest_completion_rate);
-        parse_str("sector1_badge", profile.sector_records[1].best_badge);
-
-        parse_int("sector2_rate", profile.sector_records[2].highest_completion_rate);
-        parse_str("sector2_badge", profile.sector_records[2].best_badge);
-
         auto parse_float = [&](const std::string& key, float& val) {
             auto pos = line.find("\"" + key + "\":");
             if (pos != std::string::npos) {
@@ -160,8 +137,28 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
             }
         };
 
-        parse_int("sector3_rate", profile.sector_records[3].highest_completion_rate);
-        parse_str("sector3_badge", profile.sector_records[3].best_badge);
+        parse_int("save_version", profile.save_version);
+        parse_str("last_saved_time", profile.last_saved_time);
+        parse_str("player_name", profile.player_name);
+        parse_int("total_exp", profile.total_exp);
+        parse_int("total_coins", profile.total_coins);
+        parse_int("total_voidite", profile.total_voidite);
+        parse_int("total_titanium", profile.total_titanium);
+        parse_int("selected_class_id", profile.selected_class_id);
+        profile.selectedClass = static_cast<CharacterClass>(profile.selected_class_id);
+
+        parse_int("drill_speed_tier", profile.upgrades.drillSpeedTier);
+        parse_int("drill_durability_tier", profile.upgrades.drillDurabilityTier);
+        parse_int("thruster_tank_tier", profile.upgrades.thrusterTankTier);
+        parse_int("kinetic_dynamo_tier", profile.upgrades.kineticDynamoTier);
+        parse_int("sonar_frequency_tier", profile.upgrades.sonarFrequencyTier);
+        parse_int("reinforced_plating_tier", profile.upgrades.reinforcedPlatingTier);
+
+        parse_int("highest_cleared_sector", profile.highest_cleared_sector);
+        for (int s = 1; s < UserProfile::MAX_SECTOR_RECORDS; ++s) {
+            parse_int("sector" + std::to_string(s) + "_rate", profile.sector_records[s].highest_completion_rate);
+            parse_str("sector" + std::to_string(s) + "_badge", profile.sector_records[s].best_badge);
+        }
 
         parse_float("master_volume", profile.settings.master_volume);
         parse_float("sfx_volume", profile.settings.sfx_volume);
@@ -178,6 +175,14 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
     profile.settings.sanitize();
 
     in.close();
+
+    // Ensure highest_cleared_sector reflects loaded sector records
+    for (int s = 1; s < UserProfile::MAX_SECTOR_RECORDS; ++s) {
+        if (profile.sector_records[s].highest_completion_rate > 0) {
+            profile.highest_cleared_sector = std::max(profile.highest_cleared_sector, s);
+        }
+    }
+    profile.highest_cleared_sector = std::max(profile.highest_cleared_sector, 1);
 
     if (migrated) {
         save_profile(profile, filepath);

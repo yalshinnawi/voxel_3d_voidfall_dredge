@@ -4,6 +4,13 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+
 namespace Voidfall {
 
 namespace {
@@ -109,10 +116,11 @@ inline void pack_normal(float nx, float ny, float nz, uint8_t& out_r, uint8_t& o
 
 } // namespace
 
-TextureArray::TextureArray(int width, int height, int layers)
+TextureArray::TextureArray(int width, int height, int layers, bool pixel_art)
     : m_width(width)
     , m_height(height)
     , m_layers(layers)
+    , m_pixel_art(pixel_art || (width <= 32 || height <= 32))
 {
     initialize_procedural_materials();
 }
@@ -650,8 +658,23 @@ void TextureArray::initialize_procedural_materials() {
         glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
         glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, m_width, m_height, m_layers, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        if (m_pixel_art) {
+            // Low-res / pixel-art styles: set min/mag filter to GL_NEAREST_MIPMAP_LINEAR to keep texel borders crisp without blur
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
+        } else {
+            // High-res textures: enable 16x Anisotropic Filtering (GL_TEXTURE_MAX_ANISOTROPY_EXT) and set mip filter to GL_LINEAR_MIPMAP_LINEAR
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            GLfloat max_aniso = 1.0f;
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_aniso);
+            GLint aniso = (max_aniso >= 16.0f) ? 16 : (max_aniso > 1.0f ? static_cast<GLint>(max_aniso) : 16);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+        }
+
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
@@ -661,6 +684,34 @@ void TextureArray::initialize_procedural_materials() {
     create_tex_array(m_normal_tex, normal_data.data());
     create_tex_array(m_rough_metal_tex, rough_metal_data.data());
     create_tex_array(m_emissive_tex, emissive_data.data());
+}
+
+void TextureArray::set_pixel_art(bool enabled) {
+    m_pixel_art = enabled;
+    auto configure_tex = [this](unsigned int tex) {
+        if (tex == 0) return;
+        glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+        if (m_pixel_art) {
+            // Low-res / pixel-art styles: crisp texel borders without blur
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
+        } else {
+            // High-res textures: enable 16x Anisotropic Filtering and linear mip filter
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            GLfloat max_aniso = 1.0f;
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_aniso);
+            GLint aniso = (max_aniso >= 16.0f) ? 16 : (max_aniso > 1.0f ? static_cast<GLint>(max_aniso) : 16);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+        }
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    };
+
+    configure_tex(m_albedo_tex);
+    configure_tex(m_normal_tex);
+    configure_tex(m_rough_metal_tex);
+    configure_tex(m_emissive_tex);
 }
 
 void TextureArray::bind_albedo(unsigned int unit) const {

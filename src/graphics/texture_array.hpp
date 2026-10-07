@@ -6,13 +6,15 @@ namespace Voidfall {
 
 class TextureArray {
 public:
-    TextureArray(int width = 128, int height = 128, int layers = 16);
+    TextureArray(int width = 128, int height = 128, int layers = 16, bool pixel_art = false);
     ~TextureArray();
 
     TextureArray(const TextureArray&) = delete;
     TextureArray& operator=(const TextureArray&) = delete;
 
     void initialize_procedural_materials();
+    void set_pixel_art(bool enabled);
+    bool is_pixel_art() const { return m_pixel_art; }
 
     void bind_albedo(unsigned int unit = 0) const;
     void bind_normal(unsigned int unit = 1) const;
@@ -28,6 +30,7 @@ private:
     int m_width{128};
     int m_height{128};
     int m_layers{16};
+    bool m_pixel_art{false};
 
     unsigned int m_albedo_tex{0};
     unsigned int m_normal_tex{0};

@@ -90,6 +90,7 @@ set(ENGINE_CORE_SOURCES
     src/systems/mission_system.cpp
     src/graphics/animation_controller.cpp
     src/graphics/shader.cpp
+    src/graphics/clustered_lighting.cpp
     src/graphics/particle_system.cpp
     src/ui/hud.cpp
     src/ui/debrief_menu.cpp

@@ -1,0 +1,109 @@
+#version 430 core
+
+// 16x9x1 local workgroup size dispatched with (1, 1, 24) = 3456 total cluster threads
+layout (local_size_x = 16, local_size_y = 9, local_size_z = 1) in;
+
+struct PointLightData {
+    vec4 position_radius; // xyz = world position, w = radius
+    vec4 color_intensity; // xyz = color, w = intensity
+};
+
+const uint CLUSTERS_X = 16u;
+const uint CLUSTERS_Y = 9u;
+const uint CLUSTERS_Z = 24u;
+const uint TOTAL_CLUSTERS = 3456u;
+const uint MAX_LIGHTS_PER_CLUSTER = 64u;
+
+// std430 aligned structure matching C++ ClusterRecord
+struct ClusterRecord {
+    uint count;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+    uint light_indices[MAX_LIGHTS_PER_CLUSTER];
+};
+
+layout (std430, binding = 0) readonly buffer PointLightBuffer {
+    PointLightData bPointLights[];
+};
+
+layout (std430, binding = 1) writeonly buffer ClusterLightBuffer {
+    ClusterRecord bClusters[TOTAL_CLUSTERS];
+};
+
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform float uNear;
+uniform float uFar;
+uniform int uNumLights;
+
+void main() {
+    uvec3 clusterID = gl_GlobalInvocationID.xyz;
+    if (clusterID.x >= CLUSTERS_X || clusterID.y >= CLUSTERS_Y || clusterID.z >= CLUSTERS_Z) {
+        return;
+    }
+
+    uint clusterIndex = clusterID.x + clusterID.y * CLUSTERS_X + clusterID.z * (CLUSTERS_X * CLUSTERS_Y);
+
+    // 1. Calculate depth bounds for this slice (exponential/logarithmic distribution)
+    float zNear = max(uNear, 0.01);
+    float zFar = max(uFar, zNear + 1.0);
+    float logFarOverNear = log(zFar / zNear);
+
+    float sliceMinNorm = float(clusterID.z) / float(CLUSTERS_Z);
+    float sliceMaxNorm = float(clusterID.z + 1u) / float(CLUSTERS_Z);
+
+    float zTileNear = zNear * exp(sliceMinNorm * logFarOverNear);
+    float zTileFar  = zNear * exp(sliceMaxNorm * logFarOverNear);
+
+    // 2. Calculate NDC bounds of this tile
+    float xMinNDC = -1.0 + (float(clusterID.x) / float(CLUSTERS_X)) * 2.0;
+    float xMaxNDC = -1.0 + (float(clusterID.x + 1u) / float(CLUSTERS_X)) * 2.0;
+
+    float yMinNDC = -1.0 + (float(clusterID.y) / float(CLUSTERS_Y)) * 2.0;
+    float yMaxNDC = -1.0 + (float(clusterID.y + 1u) / float(CLUSTERS_Y)) * 2.0;
+
+    // 3. Unproject tile corners to view space AABB
+    // In perspective projection: X_view = X_ndc * Z / P[0][0], Y_view = Y_ndc * Z / P[1][1]
+    float invP00 = 1.0 / max(uProj[0][0], 0.0001);
+    float invP11 = 1.0 / max(uProj[1][1], 0.0001);
+
+    vec2 xNear = vec2(xMinNDC, xMaxNDC) * (zTileNear * invP00);
+    vec2 xFar  = vec2(xMinNDC, xMaxNDC) * (zTileFar  * invP00);
+    vec2 yNear = vec2(yMinNDC, yMaxNDC) * (zTileNear * invP11);
+    vec2 yFar  = vec2(yMinNDC, yMaxNDC) * (zTileFar  * invP11);
+
+    vec3 aabbMin;
+    aabbMin.x = min(min(xNear.x, xNear.y), min(xFar.x, xFar.y));
+    aabbMin.y = min(min(yNear.x, yNear.y), min(yFar.x, yFar.y));
+    aabbMin.z = -zTileFar; // OpenGL view space camera looks towards -Z
+
+    vec3 aabbMax;
+    aabbMax.x = max(max(xNear.x, xNear.y), max(xFar.x, xFar.y));
+    aabbMax.y = max(max(yNear.x, yNear.y), max(yFar.x, yFar.y));
+    aabbMax.z = -zTileNear;
+
+    // 4. Cull lights against cluster view-space AABB
+    uint visibleCount = 0u;
+    int numLights = clamp(uNumLights, 0, 256);
+
+    for (int l = 0; l < numLights; ++l) {
+        vec3 lightPosWorld = bPointLights[l].position_radius.xyz;
+        float radius = bPointLights[l].position_radius.w;
+        if (radius <= 0.001) continue;
+
+        vec3 posView = (uView * vec4(lightPosWorld, 1.0)).xyz;
+
+        // Closest point on cluster AABB to sphere center
+        vec3 closest = clamp(posView, aabbMin, aabbMax);
+        vec3 diff = posView - closest;
+        if (dot(diff, diff) <= (radius * radius)) {
+            if (visibleCount < MAX_LIGHTS_PER_CLUSTER) {
+                bClusters[clusterIndex].light_indices[visibleCount] = uint(l);
+                visibleCount++;
+            }
+        }
+    }
+
+    bClusters[clusterIndex].count = visibleCount;
+}

@@ -1,6 +1,7 @@
 #pragma once
 #include "shader.hpp"
 #include "texture_array.hpp"
+#include "clustered_lighting.hpp"
 #include "../voxel/chunk.hpp"
 #include "../skills/surveying.hpp"
 #include "../player/character_class.hpp"
@@ -19,12 +20,6 @@ struct VoidStalker;
 struct SeismicBurrower;
 struct EnemyCarcass;
 
-struct PointLight {
-    glm::vec3 position{0.0f};
-    glm::vec3 color{1.0f};
-    float radius{15.0f};
-    float intensity{1.5f};
-};
 
 struct Headlamp {
     glm::vec3 position{0.0f};
@@ -84,6 +79,7 @@ public:
     void render_extraction_beacon(const glm::vec3& beacon_pos, float siren_pulse, float time, bool is_pod_landed);
     void render_extraction_pod(const glm::vec3& beacon_pos, float drill_progress, float ramp_extension, float time, bool is_anchored);
     void trigger_dust_kickup(float duration = 3.0f);
+    void spawn_dust_cloud(const glm::vec3& pos, int count = 24);
 
     void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
     void spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id);
@@ -112,6 +108,9 @@ public:
 
     void add_point_light(const PointLight& light);
     void clear_point_lights();
+
+    ClusteredLighting* clustered_lighting() { return m_clustered_lighting.get(); }
+    const ClusteredLighting* clustered_lighting() const { return m_clustered_lighting.get(); }
 
     void set_brightness(float b) { m_brightness = std::clamp(b, 0.4f, 2.5f); }
     float brightness() const { return m_brightness; }
@@ -150,6 +149,7 @@ private:
     Headlamp m_headlamp;
     std::vector<PointLight> m_point_lights;
     SonarPulseState m_sonar;
+    std::unique_ptr<ClusteredLighting> m_clustered_lighting;
 
     // Shaders
     Shader m_voxel_shader;

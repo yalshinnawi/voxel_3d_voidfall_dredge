@@ -77,9 +77,15 @@ void Application::TransitionState(GameState newState) {
         m_map_dragging_last = false;
     }
 
-    // Reset single-trigger death guard when entering active gameplay
-    if (newState == GameState::Gameplay && m_state != GameState::Paused) {
-        AudioSystem::instance().reset_death_sound();
+    // Reset single-trigger death guard and pause shooting on entering active gameplay
+    if (newState == GameState::Gameplay) {
+        if (m_state != GameState::Paused) {
+            AudioSystem::instance().reset_death_sound();
+        }
+        if (m_player) {
+            float pause_dur = (m_state == GameState::Paused) ? 0.35f : 0.6f;
+            m_player->reset_spawn_shoot_pause(pause_dur);
+        }
     }
 
     m_state = newState;
@@ -543,6 +549,7 @@ void Application::start_expedition(int level) {
     FlareManager::instance().reset();
     m_player->clear_breadcrumbs();
     m_player->reset_insertion_shield(6.0f);
+    m_player->reset_spawn_shoot_pause(0.6f);
     m_terrain_scanner.reset();
     m_mission.reset(level);
     m_mission.embed_precursor_vault(*m_world, level);
@@ -838,16 +845,18 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         }
     }
 
-    // Authoritative Anchored Island BFS Cave-in Solver (Bounded 48 voxels max search depth)
+    // Authoritative Anchored Island BFS Cave-in Solver (Bounded 64 voxels max search depth)
     if (m_config.is_host) {
-        auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 48);
-        for (const auto& island : unanchored) {
-            uint32_t did = m_next_debris_id++;
-            glm::vec3 vel(0.0f, -1.5f, 0.0f);
-            glm::vec3 rot(0.2f, 0.5f, 0.1f);
-            m_debris.emplace_back(did, island.center_of_mass, vel, rot, island.primary_material, island.blocks.size());
-            if (m_host) {
-                m_host->broadcast_debris_spawn(did, island.center_of_mass, vel, island.primary_material, island.blocks.size());
+        if (m_world->borders_hanging_overhang_or_stalactite(x, y, z)) {
+            auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 64);
+            for (const auto& island : unanchored) {
+                uint32_t did = m_next_debris_id++;
+                glm::vec3 vel(0.0f, -1.5f, 0.0f);
+                glm::vec3 rot(0.2f, 0.5f, 0.1f);
+                m_debris.emplace_back(did, island.center_of_mass, vel, rot, island.blocks, island.primary_material);
+                if (m_host) {
+                    m_host->broadcast_debris_spawn(did, island.center_of_mass, vel, island.primary_material, island.blocks.size());
+                }
             }
         }
     }
@@ -1319,6 +1328,7 @@ void Application::process_input(int key, int action) {
                 m_map_open = false;
                 m_map_dragging_last = false;
                 m_window->set_cursor_locked(true);
+                if (m_player) m_player->reset_spawn_shoot_pause(0.2f);
                 return;
             }
             if (m_hud && m_hud->is_manual_briefing_open()) {
@@ -1349,6 +1359,9 @@ void Application::process_input(int key, int action) {
             m_map_dragging_last = false;
             m_window->set_cursor_locked(!m_map_open);
             m_last_map_mouse = m_window->get_cursor_pos();
+            if (!m_map_open && m_player) {
+                m_player->reset_spawn_shoot_pause(0.2f);
+            }
             return;
         }
     } else if (key == GLFW_KEY_F11 || ((key == GLFW_KEY_ENTER) && (m_window && (m_window->is_key_down(GLFW_KEY_LEFT_ALT) || m_window->is_key_down(GLFW_KEY_RIGHT_ALT))))) {
@@ -1467,12 +1480,15 @@ void Application::fixed_tick(float dt) {
 
         // Falling island blocks crush any subterranean monsters in downward trajectory
         if (it->velocity().y < -3.0f) {
-            float crush_dmg = std::clamp(15.0f + std::abs(it->velocity().y) * 1.5f, 15.0f, 45.0f);
-            m_stalkers.damage_nearest(it->position(), 1.6f, crush_dmg);
+            float crush_dmg = std::clamp(20.0f + std::abs(it->velocity().y) * 1.8f, 20.0f, 50.0f);
+            m_stalkers.damage_nearest(it->position(), 1.8f, crush_dmg);
+            m_burrowers.damage_nearest(it->position(), 2.0f, crush_dmg, true);
         }
 
         if (res.shattered) {
             m_renderer->spawn_break_particles(res.shatter_pos, glm::ivec3(0, 1, 0), res.shatter_mat);
+            m_renderer->spawn_dust_cloud(res.shatter_pos, 20);
+            m_renderer->trigger_dust_kickup(2.5f);
             if (m_audio) {
                 m_audio->play_sound_3d(SoundCue::VoxelHit, res.shatter_pos, 0.75f);
             }
@@ -1480,13 +1496,15 @@ void Application::fixed_tick(float dt) {
 
         if (res.placed_on_ground) {
             // Block landed on cavern floor and settled as physical voxel block
+            glm::vec3 ground_center = glm::vec3(res.place_pos) + glm::vec3(0.5f, 0.5f, 0.5f);
             if (m_renderer) {
+                m_renderer->spawn_dust_cloud(ground_center, 24);
                 m_renderer->spawn_break_particles(
                     glm::vec3(res.place_pos) + glm::vec3(0.5f, 0.9f, 0.5f),
                     glm::ivec3(0, 1, 0),
                     it->material_id()
                 );
-                m_renderer->trigger_dust_kickup(1.5f);
+                m_renderer->trigger_dust_kickup(3.0f);
             }
             if (m_audio) {
                 m_audio->play_sound_3d(SoundCue::VoxelHit, glm::vec3(res.place_pos), 0.85f);
@@ -1512,9 +1530,9 @@ void Application::fixed_tick(float dt) {
             m_noise_meter.add_debris_crash_sound(glm::vec3(res.place_pos), it->block_count());
 
             // Crushing impact damages nearby hostiles caught under falling ceiling blocks
-            glm::vec3 ground_pos = glm::vec3(res.place_pos) + glm::vec3(0.5f, 0.5f, 0.5f);
-            m_stalkers.damage_nearest(ground_pos, 2.4f, 40.0f);
-            m_burrowers.damage_nearest(ground_pos, 2.6f, 45.0f, true);
+            float floor_crush = std::clamp(20.0f + std::abs(it->velocity().y) * 1.8f, 20.0f, 50.0f);
+            m_stalkers.damage_nearest(ground_center, 2.4f, floor_crush);
+            m_burrowers.damage_nearest(ground_center, 2.6f, floor_crush, true);
         }
 
         if (res.hit_player) {
@@ -2896,8 +2914,8 @@ void Application::render(float dt) {
                 }
             }
 
-            // Target up to 10 cavern luminary slots (leaving reserve headroom for beacon sirens & active stalkers)
-            size_t num_to_add = std::min(count, static_cast<size_t>(10));
+            // Clustered Forward Lighting allows 48+ active cavern luminaries without bottlenecking
+            size_t num_to_add = std::min(count, static_cast<size_t>(48));
             if (num_to_add > 0) {
                 std::partial_sort(
                     candidates.begin(),
@@ -2959,10 +2977,10 @@ void Application::render(float dt) {
         m_renderer->add_point_light(cl);
     }
 
-    // Dynamic point lights for stalking/lunging hostiles (max 4 nearest)
+    // Dynamic point lights for stalking/lunging hostiles (max 16 nearest)
     int added_stalker_lights = 0;
     for (const auto& s : m_stalkers.stalkers()) {
-        if (s.is_dead() || added_stalker_lights >= 4) continue;
+        if (s.is_dead() || added_stalker_lights >= 16) continue;
         PointLight sl;
         sl.position = s.position + glm::vec3(0.0f, 0.35f, 0.0f);
         switch (s.state) {
@@ -3190,7 +3208,10 @@ void Application::render(float dt) {
         if (action == DebriefAction::LaunchNextSector) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             if (m_expedition_success) {
-                m_selected_level = std::min(3, m_selected_level + 1);
+                int next_sec = std::min(UserProfile::MAX_SECTOR_RECORDS - 1, m_selected_level + 1);
+                if (m_user_profile.is_sector_unlocked(next_sec)) {
+                    m_selected_level = next_sec;
+                }
             }
             LaunchSector(m_selected_level);
         } else if (action == DebriefAction::RedeployExpedition) {
@@ -3409,9 +3430,14 @@ void Application::run() {
         // 2. ORBITAL HUB INPUTS
         else if (m_state == GameState::OrbitalHub) {
             if (m_hub_ui->active_tab() == HubTab::SectorSelect) {
-                if (m_window->is_key_down(GLFW_KEY_1)) m_selected_level = 1;
-                if (m_window->is_key_down(GLFW_KEY_2)) m_selected_level = 2;
-                if (m_window->is_key_down(GLFW_KEY_3)) m_selected_level = 3;
+                for (int key = GLFW_KEY_1; key <= GLFW_KEY_9; ++key) {
+                    if (m_window->is_key_down(key)) {
+                        int sec = key - GLFW_KEY_1 + 1;
+                        if (m_user_profile.is_sector_unlocked(sec)) {
+                            m_selected_level = sec;
+                        }
+                    }
+                }
             }
 
             static bool launch_down_last = false;
@@ -3419,7 +3445,7 @@ void Application::run() {
                               m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (launch_now && !launch_down_last) {
-                if (m_hub_ui->active_tab() == HubTab::SectorSelect) {
+                if (m_hub_ui->active_tab() == HubTab::SectorSelect && m_user_profile.is_sector_unlocked(m_selected_level)) {
                     start_expedition(m_selected_level);
                 }
             }
@@ -3440,7 +3466,10 @@ void Application::run() {
                                m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (debrief_now && !debrief_down_last) {
-                m_selected_level = std::min(3, m_selected_level + 1);
+                int next_sec = std::min(UserProfile::MAX_SECTOR_RECORDS - 1, m_selected_level + 1);
+                if (m_user_profile.is_sector_unlocked(next_sec)) {
+                    m_selected_level = next_sec;
+                }
                 start_expedition(m_selected_level);
             }
             debrief_down_last = debrief_now;
