@@ -105,6 +105,7 @@ public:
     // Direct buffer staging (produced by GreedyMesher worker threads)
     void stage_mesh(std::vector<PackedVoxelVertex>&& vertices);
 
+    bool has_staged_mesh() const { return m_has_staged_mesh.load(std::memory_order_acquire); }
     size_t vertex_count() const { return m_uploaded_vertex_count; }
 
 private:
@@ -118,7 +119,7 @@ private:
     // Staging mesh (populated by mesher worker threads)
     std::mutex m_stage_mutex;
     std::vector<PackedVoxelVertex> m_staged_vertices;
-    bool m_has_staged_mesh{false};
+    std::atomic<bool> m_has_staged_mesh{false};
 
     // GPU resources
     unsigned int m_vao{0};

@@ -435,6 +435,11 @@ void Application::init_systems() {
         m_inventory.sector_records[s] = m_user_profile.sector_records[s];
     }
     sync_profile_with_player();
+
+    // Reveal the window seamlessly once all subsystems, shaders, and resources are fully initialized
+    if (m_window) {
+        m_window->show();
+    }
 }
 
 void Application::sync_audio_settings() {
@@ -991,6 +996,7 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
 
     // Explosive concussive blast generates severe spatial noise and shatters nearby stalkers & burrowers
     m_noise_meter.add_demolition_sound(blast_origin, is_micro);
+    StealthSystem::instance().EmitSatchelDetonation(blast_origin);
     if (m_hazard) {
         m_hazard->on_explosive_detonation(blast_origin, is_micro ? 25.0f : 45.0f);
     }
@@ -1658,6 +1664,13 @@ void Application::fixed_tick(float dt) {
     bool is_moving = (m_player->current_buttons() & (BTN_FORWARD | BTN_BACKWARD | BTN_LEFT | BTN_RIGHT)) != 0;
     bool is_sprinting = (m_player->current_buttons() & BTN_SPRINT) != 0;
     m_noise_meter.add_movement_sound(m_player->position(), dt, is_sprinting, is_crouching, m_player->is_grounded() && is_moving);
+    if (m_player->is_grounded() && is_moving) {
+        if (is_crouching) {
+            StealthSystem::instance().EmitCrouch(m_player->position());
+        } else {
+            StealthSystem::instance().EmitWalk(m_player->position());
+        }
+    }
 
     bool is_thruster_active = (m_player->current_buttons() & BTN_THRUSTER) != 0;
     if (is_thruster_active) {
@@ -1690,61 +1703,14 @@ void Application::fixed_tick(float dt) {
     // Without this call the enrage state is permanent (timer never decrements).
     SwarmManager::instance().Update(dt);
 
-    // Industrial Drill contact grinding: continuous damage against hostile enemies in front of the bit
+    // Industrial Drill excavation acoustics & seismic stress (Mining drill is strictly for rock/minerals; monsters cannot be mined)
     if (m_player->is_drilling()) {
         glm::vec3 drill_tip = m_player->position() + m_player->forward() * 1.5f;
         m_noise_meter.add_drill_sound(drill_tip, dt, 14.0f);
+        StealthSystem::instance().EmitDrill(drill_tip);
         if (m_hazard) {
             // Sustained drill contact generates continuous seismic micro-fracture stress in this excavation zone.
             m_hazard->add_seismic_stress(drill_tip, 3.8f * dt);
-        }
-        glm::vec3 player_pos = m_player->position();
-        glm::vec3 drill_dir = m_player->forward();
-        bool is_crit_stalker = false;
-        float dmg_dealt_stalker = 0.0f;
-        bool hit_stalker = m_stalkers.damage_nearest(drill_tip, 2.2f, 35.0f * dt, true, &is_crit_stalker, &dmg_dealt_stalker, &player_pos, &drill_dir);
-
-        bool is_crit_burrower = false;
-        float dmg_dealt_burrower = 0.0f;
-        bool hit_burrower = m_burrowers.damage_nearest(drill_tip, 2.6f, 40.0f * dt, false, true, &is_crit_burrower, &dmg_dealt_burrower, &player_pos, &drill_dir);
-
-        if (is_crit_stalker || is_crit_burrower) {
-            float total_crit_dmg = is_crit_stalker ? dmg_dealt_stalker : dmg_dealt_burrower;
-            if (m_hud) {
-                m_hud->trigger_hit_marker(true, total_crit_dmg);
-                m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
-            }
-            if (m_audio) {
-                m_audio->play_sound_3d(SoundCue::CritHit, drill_tip, 1.0f);
-            }
-        } else if (hit_stalker || hit_burrower) {
-            if (m_hud) {
-                m_hud->trigger_hit_marker(false, 35.0f * dt);
-            }
-        }
-
-        // Harvest persistent physical carcasses (+1-2 Chitinous Carapace / Organic Biomass)
-        int out_carapace = 0;
-        int out_biomass = 0;
-        glm::vec3 shatter_pos(0.0f);
-        bool harvested = CarcassManager::instance().harvest_nearest(drill_tip, 2.2f, 35.0f * dt, out_carapace, out_biomass, &shatter_pos);
-        if (harvested) {
-            m_inventory.scrap_metal += (out_carapace + out_biomass);
-            m_inventory.total_run_score += 20 * (out_carapace + out_biomass);
-            if (m_renderer) {
-                m_renderer->spawn_break_particles(shatter_pos, glm::ivec3(0, 1, 0), MAT_VOLCANIC_BASALT);
-            }
-            if (m_hud) {
-                m_hud->add_loot_toast("CHITINOUS CARAPACE", glm::vec4(0.9f, 0.45f, 0.15f, 1.0f), out_carapace);
-                m_hud->add_loot_toast("ORGANIC BIOMASS", glm::vec4(0.2f, 0.95f, 0.45f, 1.0f), out_biomass);
-            }
-            if (m_audio) {
-                m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, shatter_pos, 0.85f);
-            }
-        }
-
-        if ((hit_stalker || hit_burrower || harvested) && m_renderer) {
-            m_renderer->spawn_crack_debris(drill_tip, glm::ivec3(0, 1, 0), 0.6f, 3);
         }
     }
 
@@ -3589,9 +3555,16 @@ void Application::run() {
             }
         }
 
-        while (accumulator >= fixed_dt) {
+        int fixed_ticks_executed = 0;
+        constexpr int MAX_FIXED_TICKS_PER_FRAME = 4;
+        while (accumulator >= fixed_dt && fixed_ticks_executed < MAX_FIXED_TICKS_PER_FRAME) {
             fixed_tick(static_cast<float>(fixed_dt));
             accumulator -= fixed_dt;
+            fixed_ticks_executed++;
+        }
+        if (accumulator >= fixed_dt) {
+            // Spiral-of-death guard: discard backlog if frame took too long
+            accumulator = 0.0;
         }
 
         render(static_cast<float>(frame_time));

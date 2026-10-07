@@ -260,34 +260,35 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                                             (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
                         uint32_t aux = root.voxel.is_highlighted() ? 1 : 0;
 
-                        // 4 Quad vertices:
-                        // v0: (p)
-                        // v1: (p + du)
-                        // v2: (p + du + dv)
-                        // v3: (p + dv)
+                        // 4 Quad vertices with actual quad corner AO
+                        uint8_t ao0 = mask[i + j * CHUNK_SIZE].ao[0];
+                        uint8_t ao1 = mask[(i + width - 1) + j * CHUNK_SIZE].ao[1];
+                        uint8_t ao2 = mask[(i + width - 1) + (j + height - 1) * CHUNK_SIZE].ao[2];
+                        uint8_t ao3 = mask[i + (j + height - 1) * CHUNK_SIZE].ao[3];
+
                         PackedVoxelVertex vert0 = PackedVoxelVertex::encode(
                             p[0], p[1], p[2],
-                            norm_idx, root.ao[0], mat_id,
+                            norm_idx, ao0, mat_id,
                             width, height, 0, damage, emissive, aux
                         );
                         PackedVoxelVertex vert1 = PackedVoxelVertex::encode(
                             p[0] + du[0], p[1] + du[1], p[2] + du[2],
-                            norm_idx, root.ao[1], mat_id,
+                            norm_idx, ao1, mat_id,
                             width, height, 1, damage, emissive, aux
                         );
                         PackedVoxelVertex vert2 = PackedVoxelVertex::encode(
                             p[0] + du[0] + dv[0], p[1] + du[1] + dv[1], p[2] + du[2] + dv[2],
-                            norm_idx, root.ao[2], mat_id,
+                            norm_idx, ao2, mat_id,
                             width, height, 2, damage, emissive, aux
                         );
                         PackedVoxelVertex vert3 = PackedVoxelVertex::encode(
                             p[0] + dv[0], p[1] + dv[1], p[2] + dv[2],
-                            norm_idx, root.ao[3], mat_id,
+                            norm_idx, ao3, mat_id,
                             width, height, 3, damage, emissive, aux
                         );
 
                         // Winding order and AO anisotropy diagonal flip
-                        bool flip_diag = (root.ao[0] + root.ao[2]) > (root.ao[1] + root.ao[3]);
+                        bool flip_diag = (ao0 + ao2) > (ao1 + ao3);
 
                         if (face_dir == 0) { // Forward face (+X, +Y, +Z)
                             if (flip_diag) {

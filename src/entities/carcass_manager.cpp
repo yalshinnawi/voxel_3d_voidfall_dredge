@@ -116,43 +116,16 @@ void CarcassManager::update(float dt, World& world) {
 }
 
 bool CarcassManager::harvest_nearest(
-    const glm::vec3& origin,
-    float radius,
-    float drill_damage,
+    const glm::vec3& /*origin*/,
+    float /*radius*/,
+    float /*drill_damage*/,
     int& out_carapace,
     int& out_biomass,
-    glm::vec3* out_shatter_pos)
+    glm::vec3* /*out_shatter_pos*/)
 {
-    EnemyCarcass* nearest = nullptr;
-    float min_dist_sq = radius * radius;
-
-    for (auto& c : m_carcasses) {
-        glm::vec3 diff = c.position - origin;
-        float d2 = glm::dot(diff, diff);
-        if (d2 < min_dist_sq) {
-            min_dist_sq = d2;
-            nearest = &c;
-        }
-    }
-
-    if (!nearest) return false;
-
-    nearest->hp -= drill_damage;
-    if (nearest->hp <= 0.0f) {
-        nearest->harvested = true;
-        nearest->is_dissolving = true;
-        nearest->dissolve_timer = 0.0f;
-
-        // Yield +1–2 Chitinous Carapace and Organic Biomass
-        out_carapace = 1 + (static_cast<int>(nearest->id) % 2);
-        out_biomass = 1 + (static_cast<int>(nearest->id + 1) % 2);
-
-        if (out_shatter_pos) {
-            *out_shatter_pos = nearest->position;
-        }
-        return true;
-    }
-
+    // Delvers cannot mine monsters or carcasses with mining drills to obtain chitin
+    out_carapace = 0;
+    out_biomass = 0;
     return false;
 }
 

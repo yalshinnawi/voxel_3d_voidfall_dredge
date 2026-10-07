@@ -15,6 +15,7 @@
 #include "../src/ui/hud.hpp"
 #include "../src/player/controller.hpp"
 #include "../src/systems/noise_meter.hpp"
+#include "../src/systems/stealth_system.hpp"
 #include "../src/audio/audio_engine.hpp"
 #include "../src/voxel/world.hpp"
 
@@ -39,6 +40,12 @@ inline std::ostream& operator<<(std::ostream& os, StalkerSurfaceState s) {
 #define ASSERT_FALSE(expr) \
     if (expr) { \
         std::cerr << "[TEST FAILED] Assertion failed (expected false): " #expr " at line " << __LINE__ << std::endl; \
+        std::exit(1); \
+    }
+
+#define ASSERT_GT(a, b) \
+    if (!((a) > (b))) { \
+        std::cerr << "[TEST FAILED] " #a " (" << (a) << ") > " #b " (" << (b) << ") at line " << __LINE__ << std::endl; \
         std::exit(1); \
     }
 
@@ -152,15 +159,16 @@ void test_carcass_system_leaves_carcass_on_death() {
     ASSERT_TRUE(carcasses[0].is_sleeping);
     ASSERT_TRUE(carcasses[0].isSleeping());
 
-    // Harvest testing: mine with drill to harvest organic scrap
+    // Harvest testing: delvers cannot mine monsters/carcasses for chitin
     int carapace = 0;
     int biomass = 0;
     bool harvested = CarcassManager::instance().harvest_nearest(carcasses[0].position, 2.5f, 20.0f, carapace, biomass);
-    ASSERT_TRUE(harvested);
-    ASSERT_GE(carapace + biomass, 1);
+    ASSERT_FALSE(harvested);
+    ASSERT_EQ(carapace, 0);
+    ASSERT_EQ(biomass, 0);
 
-    std::cout << "  -> Passed: Slain stalker left sleeping physical carcass; harvested for carapace="
-              << carapace << ", biomass=" << biomass << std::endl;
+    std::cout << "  -> Passed: Slain stalker left sleeping physical carcass; monsters cannot be mined for chitin"
+              << std::endl;
 }
 
 // ─── TEST 3: SpawnPacingTest, InitialGracePeriodEnforced ──────────────────────
@@ -609,6 +617,132 @@ void test_viewmodel_melee_animations_all_weapons() {
     std::cout << "  -> Passed: All 3 weapon classes (Gun, Demo, Drill) correctly execute melee animation lifecycle." << std::endl;
 }
 
+// ─── TEST 11: Acoustic Profile System & Enemy Hearing Detection ─────────────
+void test_acoustic_profile_and_enemy_hearing_detection() {
+    std::cout << "[TEST 11] AcousticProfile.EnemyHearingAndDetection..." << std::endl;
+
+    // 1. Verify player action acoustic noise emission profiles
+    auto& stealth = StealthSystem::instance();
+    stealth.reset();
+
+    // Crouch: 0 dB (radius 0m)
+    stealth.EmitCrouch(glm::vec3(5.0f, 0.0f, 5.0f));
+    const auto& events_crouch = stealth.GetAcousticEvents();
+    ASSERT_EQ(events_crouch.size(), 1);
+    ASSERT_NEAR(events_crouch[0].db, StealthSystem::NOISE_CROUCH_WALK_DB, 0.001f);
+    ASSERT_NEAR(events_crouch[0].radius, StealthSystem::NOISE_CROUCH_WALK_RADIUS, 0.001f);
+    ASSERT_EQ(events_crouch[0].db, 0.0f);
+    ASSERT_EQ(events_crouch[0].radius, 0.0f);
+
+    // Walk: 15 dB (radius 10m)
+    stealth.reset();
+    stealth.EmitWalk(glm::vec3(5.0f, 0.0f, 5.0f));
+    const auto& events_walk = stealth.GetAcousticEvents();
+    ASSERT_EQ(events_walk.size(), 1);
+    ASSERT_NEAR(events_walk[0].db, 15.0f, 0.001f);
+    ASSERT_NEAR(events_walk[0].radius, 10.0f, 0.001f);
+
+    // Drill: 55 dB (radius 28m)
+    stealth.reset();
+    stealth.EmitDrill(glm::vec3(5.0f, 0.0f, 5.0f));
+    const auto& events_drill = stealth.GetAcousticEvents();
+    ASSERT_EQ(events_drill.size(), 1);
+    ASSERT_NEAR(events_drill[0].db, 55.0f, 0.001f);
+    ASSERT_NEAR(events_drill[0].radius, 28.0f, 0.001f);
+
+    // Satchel Detonation: 100 dB (radius 1000m - entire sector)
+    stealth.reset();
+    stealth.EmitSatchelDetonation(glm::vec3(5.0f, 0.0f, 5.0f));
+    const auto& events_satchel = stealth.GetAcousticEvents();
+    ASSERT_EQ(events_satchel.size(), 1);
+    ASSERT_NEAR(events_satchel[0].db, 100.0f, 0.001f);
+    ASSERT_GE(events_satchel[0].radius, 1000.0f);
+
+    // 2. Pre-spawned enemies initialize in AIState::ROOSTING dormant state on cavern walls/ceilings
+    VoidStalkerManager mgr;
+    mgr.spawn_roosting(glm::vec3(10.0f, 5.0f, 10.0f), StalkerRole::Melee);
+    mgr.spawn_roosting(glm::vec3(12.0f, 8.0f, 10.0f), StalkerRole::Shooter);
+
+    ASSERT_EQ(mgr.stalkers().size(), 2);
+    const auto& stalker_wall = mgr.stalkers()[0];
+    const auto& stalker_ceiling = mgr.stalkers()[1];
+
+    // Dormant state: AIState::ROOSTING (StalkerState::Roosting), zero velocity
+    ASSERT_EQ(static_cast<int>(stalker_wall.state), static_cast<int>(AIState::ROOSTING));
+    ASSERT_EQ(static_cast<int>(stalker_ceiling.state), static_cast<int>(AIState::ROOSTING));
+    ASSERT_NEAR(glm::length(stalker_wall.velocity), 0.0f, 0.001f);
+    ASSERT_NEAR(glm::length(stalker_ceiling.velocity), 0.0f, 0.001f);
+    ASSERT_EQ(stalker_wall.surface_state, StalkerSurfaceState::WALL_CLIMBING);
+    ASSERT_EQ(stalker_ceiling.surface_state, StalkerSurfaceState::CEILING_CRAWLING);
+
+    // 3. When noise reaching an enemy exceeds 30 dB, transition to AIState::INVESTIGATING toward noise source
+    World world;
+    world.generate_world(1, 1337);
+    // Carve spacious cavern
+    for (int x = 0; x <= 40; ++x) {
+        for (int y = 0; y <= 20; ++y) {
+            for (int z = 0; z <= 40; ++z) {
+                world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+            }
+        }
+    }
+    // Place solid rock separating wall at x = 14..16 to block visual line-of-sight while allowing acoustic transmission
+    for (int x = 14; x <= 16; ++x) {
+        for (int y = 0; y <= 20; ++y) {
+            for (int z = 0; z <= 40; ++z) {
+                world.set_voxel(x, y, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+        }
+    }
+
+    glm::vec3 hidden_player(18.0f, 5.0f, 10.0f); // 8m away behind solid stone wall (no direct visual sightline)
+    glm::vec3 fwd(0.0f, 0.0f, 1.0f);
+
+    // Sub-test A: Walking noise (15 dB, 10m radius) at 8m through stone -> arriving noise is ~2.4 dB (< 30 dB)
+    // Stalker should remain in ROOSTING dormant state
+    stealth.reset();
+    stealth.EmitWalk(hidden_player);
+
+    mgr.update(0.05f, hidden_player, fwd, fwd, false, 0.0f, false, world);
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::ROOSTING));
+
+    // Sub-test B: Mining Drill (55 dB, 28m radius) at 8m through stone -> arriving noise is ~31.4 dB (> 30 dB, < 70 dB)
+    // Stalker must transition to AIState::INVESTIGATING toward noise source
+    stealth.reset();
+    stealth.EmitDrill(hidden_player);
+
+    auto res_drill = mgr.update(0.05f, hidden_player, fwd, fwd, false, 0.0f, false, world);
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::INVESTIGATING));
+    ASSERT_NEAR(mgr.stalkers()[0].target_pos.x, hidden_player.x, 0.01f);
+    ASSERT_NEAR(mgr.stalkers()[0].target_pos.z, hidden_player.z, 0.01f);
+    ASSERT_FALSE(res_drill.any_screech); // No screech on sub-70 dB investigation
+
+    // 4. If noise exceeds 70 dB OR player is spotted directly -> transition to AIState::PURSUIT with screech and swarm alert
+    // Reset stalkers back to roosting for satchel blast test
+    mgr.stalkers_mut()[0].state = StalkerState::Roosting;
+    mgr.stalkers_mut()[1].state = StalkerState::Roosting;
+    stealth.reset();
+    stealth.EmitSatchelDetonation(hidden_player); // 8m away through stone, 100 dB detonation -> ~79.4 dB
+
+    auto res_blast = mgr.update(0.05f, hidden_player, fwd, fwd, false, 0.0f, false, world);
+    // Both stalkers should be in PURSUIT (StalkerState::Stalking) due to > 70 dB and swarm alert
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::PURSUIT));
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[1].state), static_cast<int>(AIState::PURSUIT));
+    ASSERT_TRUE(res_blast.any_screech); // Screech emitted!
+
+    // Also test direct visual spotting while roosting -> transition to AIState::PURSUIT
+    mgr.stalkers_mut()[0].state = StalkerState::Roosting;
+    glm::vec3 direct_player_pos(10.0f, 5.0f, 14.0f); // 4m away in direct line-of-sight on same side of wall
+    stealth.reset();
+    auto res_spotted = mgr.update(0.05f, direct_player_pos, fwd, fwd, false, 0.0f, false, world);
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::PURSUIT));
+    ASSERT_TRUE(res_spotted.any_spotted);
+    ASSERT_TRUE(res_spotted.any_screech);
+
+    stealth.reset();
+    std::cout << "  -> Passed: Acoustic Profile emissions, dormant roosting, >30 dB investigation, >70 dB/visual pursuit with screech verified." << std::endl;
+}
+
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 int main() {
     std::cout << "============================================================" << std::endl;
@@ -625,9 +759,10 @@ int main() {
     test_weapon_reload_cycle_and_audio();
     test_viewmodel_reload_state_defaults();
     test_viewmodel_melee_animations_all_weapons();
+    test_acoustic_profile_and_enemy_hearing_detection();
 
     std::cout << "============================================================" << std::endl;
-    std::cout << "ALL 10 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "ALL 11 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "============================================================" << std::endl;
     return 0;
 }

@@ -980,7 +980,107 @@ int main() {
         std::cout << " -> Anti-jitter surface lock and 1-block step clambering verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 21 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 22: Ceiling-to-Wall Pathing, 3D Wall Descent & Anti-Clip Voxel Collision
+    {
+        std::cout << "[Test 22] Testing Ceiling-to-Wall Navigation, 3D Wall Descent & Wall Collision..." << std::endl;
+
+        World cavern_world;
+        // Clear hollow interior of cavern chamber first
+        for (int x = 10; x <= 25; ++x) {
+            for (int y = 15; y <= 25; ++y) {
+                for (int z = 10; z <= 30; ++z) {
+                    cavern_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+        // Construct cavern chamber: floor y=15, ceiling y=25, east wall x=25, west wall x=10, north wall z=10, south wall z=30
+        for (int x = 10; x <= 25; ++x) {
+            for (int z = 10; z <= 30; ++z) {
+                cavern_world.set_voxel(x, 15, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+                cavern_world.set_voxel(x, 25, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+            }
+        }
+        for (int y = 16; y <= 24; ++y) {
+            for (int z = 10; z <= 30; ++z) {
+                cavern_world.set_voxel(25, y, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+                cavern_world.set_voxel(10, y, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+            for (int x = 10; x <= 25; ++x) {
+                cavern_world.set_voxel(x, y, 10, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+                cavern_world.set_voxel(x, y, 30, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+        }
+
+        // 22a: Ceiling Stalker Directly Above Delver
+        // Player is at (18.0f, 16.0f, 20.0f) on the floor.
+        // Stalker is directly overhead on the ceiling at (18.0f, 24.2f, 20.0f).
+        glm::vec3 player_floor(18.0f, 16.0f, 20.0f);
+        glm::vec3 stalker_ceiling(18.0f, 24.2f, 20.0f);
+
+        glm::vec3 wall_heading = AberrantAI::find_descending_wall_direction(stalker_ceiling, player_floor, cavern_world);
+        CHECK(glm::length(wall_heading) > 0.5f, "Wall heading from ceiling must not be zero vector");
+        // Verify heading points towards one of the room perimeter walls rather than freezing
+        CHECK(std::abs(wall_heading.x) > 0.3f || std::abs(wall_heading.z) > 0.3f,
+              "Ceiling stalker must navigate horizontally towards cavern wall to reach delver below");
+
+        VoidStalkerManager ceiling_mgr;
+        ceiling_mgr.spawn_stalker(stalker_ceiling, 1.0f, StalkerRole::Melee);
+        auto& c_s = ceiling_mgr.stalkers_mut()[0];
+        c_s.surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+        c_s.target_surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+        c_s.contact_normal = glm::vec3(0.0f, -1.0f, 0.0f);
+        c_s.state = StalkerState::Stalking;
+        c_s.target_pos = player_floor;
+
+        // Step multiple frames: verify it moves toward wall and does NOT freeze in place
+        glm::vec3 init_pos = c_s.position;
+        for (int f = 0; f < 10; ++f) {
+            ceiling_mgr.update(0.05f, player_floor, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, cavern_world);
+        }
+        float horiz_disp = glm::distance(glm::vec2(c_s.position.x, c_s.position.z), glm::vec2(init_pos.x, init_pos.z));
+        CHECK(horiz_disp > 0.2f, "Ceiling stalker directly above delver must actively traverse towards walls");
+        CHECK(c_s.velocity.x != 0.0f || c_s.velocity.z != 0.0f, "Ceiling stalker must maintain active navigation velocity");
+
+        // 22b: 3D Wall Descent towards Floor Target
+        // Stalker is on east wall at x=24.2, y=22.0, z=20.0, normal = (-1, 0, 0)
+        glm::vec3 stalker_wall(24.2f, 22.0f, 20.0f);
+        glm::vec3 wall_norm(-1.0f, 0.0f, 0.0f);
+        glm::vec3 wall_crawl_dir = AberrantAI::calculate_wall_traversal_direction(stalker_wall, player_floor, wall_norm);
+        CHECK(wall_crawl_dir.y < -0.3f, "Wall traversal vector must point down along Y towards lower floor delver");
+
+        VoidStalkerManager wall_mgr;
+        wall_mgr.spawn_stalker(stalker_wall, 1.0f, StalkerRole::Melee);
+        auto& w_s = wall_mgr.stalkers_mut()[0];
+        w_s.surface_state = StalkerSurfaceState::WALL_CLIMBING;
+        w_s.target_surface_state = StalkerSurfaceState::WALL_CLIMBING;
+        w_s.contact_normal = wall_norm;
+        w_s.state = StalkerState::Stalking;
+        w_s.target_pos = player_floor;
+        float prev_y = w_s.position.y;
+        for (int f = 0; f < 10; ++f) {
+            wall_mgr.update(0.05f, player_floor, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, cavern_world);
+        }
+        CHECK(w_s.position.y < prev_y, "Wall climbing stalker must climb down vertically towards delver on floor");
+
+        // 22c: Voxel Collision — Cannot Move or Clip Through Multi-Block Solid Walls
+        VoidStalkerManager col_mgr;
+        glm::vec3 stalker_floor(22.0f, 16.05f, 20.0f);
+        col_mgr.spawn_stalker(stalker_floor, 1.0f, StalkerRole::Melee);
+        auto& col_s = col_mgr.stalkers_mut()[0];
+        col_s.state = StalkerState::Stalking;
+        // Place player behind east wall at x=28 (wall is at x=25)
+        glm::vec3 player_behind_wall(28.0f, 16.0f, 20.0f);
+
+        for (int f = 0; f < 30; ++f) {
+            col_mgr.update(0.05f, player_behind_wall, glm::vec3(1, 0, 0), glm::vec3(1, 0, 0), false, 0.0f, false, cavern_world);
+        }
+        // East wall is at x=25. The stalker with radius 0.38m MUST NOT cross or penetrate inside x=25!
+        CHECK(col_s.position.x <= 24.65f, "Stalker must be halted by solid wall and cannot move through it");
+
+        std::cout << " -> Ceiling-to-wall pathing, 3D wall descent & wall collision prevention verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 22 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

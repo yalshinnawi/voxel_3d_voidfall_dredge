@@ -61,6 +61,12 @@ void main() {
         emissive += thermalGlow;
     }
     
+    // For transparent optical glass lenses, suppress diffuse/ambient body scatter to keep target view crystal-clear
+    if (vColor.a < 0.20) {
+        ambient *= 0.15;
+        diffuse *= 0.15;
+    }
+
     vec3 finalCol = ambient + diffuse + specular + emissive;
     FragColor = vec4(finalCol, vColor.a);
 }

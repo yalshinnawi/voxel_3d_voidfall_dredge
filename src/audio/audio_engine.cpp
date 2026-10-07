@@ -415,7 +415,7 @@ struct AudioEngine::PlatformData {
     std::atomic<bool> running{false};
 
     static constexpr size_t BUFFER_FRAMES = 1024;
-    static constexpr size_t NUM_BUFFERS = 4;
+    static constexpr size_t NUM_BUFFERS = 8;
     std::array<WAVEHDR, NUM_BUFFERS> headers{};
     std::array<std::vector<int16_t>, NUM_BUFFERS> buffers;
 };
@@ -666,25 +666,131 @@ void AudioEngine::update_spatial_pan(AudioVoice& voice) {
     voice.pan_right = std::sin(angle) * att;
 }
 
-void AudioEngine::play_sound_2d(SoundCue cue, float volume, float pitch, bool loop) {
-    std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+static int get_cue_priority(SoundCue cue) {
+    switch (cue) {
+        case SoundCue::StalkerEchoScreech:
+        case SoundCue::StalkerLunge:
+        case SoundCue::StalkerDie:
+        case SoundCue::BurrowerRoar:
+        case SoundCue::ExplosiveBlast:
+        case SoundCue::PlayerDeath:
+        case SoundCue::DamageWarning:
+        case SoundCue::BeaconSiren:
+        case SoundCue::EvacTouchdown:
+        case SoundCue::SectorArrival1:
+        case SoundCue::SectorArrival2:
+        case SoundCue::SectorArrival3:
+        case SoundCue::SectorArrival4:
+        case SoundCue::SectorArrival5:
+        case SoundCue::CritHit:
+        case SoundCue::BoneCrack:
+            return 3; // Critical gameplay & visceral horror
 
-    // Find free voice or steal oldest non-looping voice
-    int best_slot = -1;
-    float oldest_time = -1.0f;
+        case SoundCue::PlasmaFire:
+        case SoundCue::ScattergunFire:
+        case SoundCue::RailgunFire:
+        case SoundCue::PlasmaHit:
+        case SoundCue::EnemyFleshHit:
+        case SoundCue::DebrisArmorImpact:
+        case SoundCue::StalkerSpotted:
+        case SoundCue::StalkerHit:
+        case SoundCue::StalkerChitter:
+        case SoundCue::StalkerHiss:
+        case SoundCue::VoidStalkerRoar:
+        case SoundCue::BurrowerGrind:
+        case SoundCue::MonsterDigging:
+        case SoundCue::VoxelBreakTitanium:
+        case SoundCue::VoxelBreakVoidite:
+        case SoundCue::VoxelBreakBulkhead:
+        case SoundCue::UIUpgrade:
+        case SoundCue::SonarPulse:
+        case SoundCue::TacticalBarricade:
+        case SoundCue::TacticalOvercharge:
+        case SoundCue::PlasmaCarbineReload:
+        case SoundCue::ScattergunReload:
+        case SoundCue::RailgunReload:
+            return 2; // Combat & essential feedback
 
+        case SoundCue::Footstep:
+        case SoundCue::Jump:
+        case SoundCue::Land:
+        case SoundCue::VoxelHit:
+        case SoundCue::VoxelBreakBasalt:
+        case SoundCue::VoxelBreakRadioactive:
+        case SoundCue::BulkheadDeploy:
+        case SoundCue::BulkheadDismantle:
+        case SoundCue::UIBlip:
+        case SoundCue::PlayerGroan:
+        case SoundCue::PlayerAsphyxiation:
+        case SoundCue::PlayerBreathing:
+        case SoundCue::SuitPuncture:
+        case SoundCue::GrappleFire:
+        case SoundCue::GrappleReel:
+            return 1; // Standard player SFX
+
+        case SoundCue::GeigerClick:
+        case SoundCue::CavernDrip:
+        case SoundCue::CavernGroan:
+        case SoundCue::CrystalChime:
+        case SoundCue::GeothermalVent:
+        case SoundCue::VoidDistortion:
+        case SoundCue::LavaBubble:
+        case SoundCue::ThermalHiss:
+        case SoundCue::RadioactiveHum:
+        case SoundCue::VoidWind:
+        case SoundCue::GravityDistortion:
+        case SoundCue::SporePlop:
+        case SoundCue::OrganicCreak:
+        case SoundCue::IndustrialHum:
+        case SoundCue::HydraulicExhaust:
+        case SoundCue::PebbleSkitter:
+        case SoundCue::SpikeRattle:
+        case SoundCue::CavernSettling:
+        case SoundCue::RockSlide:
+        case SoundCue::ToxicGasHiss:
+        default:
+            return 0; // Low priority ambient & micro-events
+    }
+}
+
+int AudioEngine::find_or_steal_voice_slot(SoundCue cue) {
+    // 1. Search for any completely inactive voice slot
     for (size_t i = 0; i < MAX_VOICES; ++i) {
         if (!m_voices[i].active) {
-            best_slot = static_cast<int>(i);
-            break;
-        }
-        if (!m_voices[i].loop && m_voices[i].time > oldest_time) {
-            oldest_time = m_voices[i].time;
-            best_slot = static_cast<int>(i);
+            return static_cast<int>(i);
         }
     }
 
-    if (best_slot < 0) best_slot = 0;
+    // 2. All voices active: apply priority-based voice eviction
+    int new_prio = get_cue_priority(cue);
+    int best_slot = -1;
+    int best_victim_prio = 999;
+    float best_completion_ratio = -1.0f;
+
+    for (size_t i = 0; i < MAX_VOICES; ++i) {
+        auto& v = m_voices[i];
+        if (v.loop) continue; // Never steal active looping voices
+
+        int v_prio = get_cue_priority(v.cue);
+        // Candidate must be lower priority, OR equal priority if played for at least 0.12s
+        if (v_prio < new_prio || (v_prio == new_prio && v.time >= 0.12f)) {
+            float ratio = (v.duration > 0.001f) ? (v.time / v.duration) : 1.0f;
+            if (v_prio < best_victim_prio || (v_prio == best_victim_prio && ratio > best_completion_ratio)) {
+                best_victim_prio = v_prio;
+                best_completion_ratio = ratio;
+                best_slot = static_cast<int>(i);
+            }
+        }
+    }
+
+    return best_slot;
+}
+
+void AudioEngine::play_sound_2d(SoundCue cue, float volume, float pitch, bool loop) {
+    std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
+
+    int best_slot = find_or_steal_voice_slot(cue);
+    if (best_slot < 0) return; // Drop cleanly if voice channels saturated by higher priority cues
 
     auto& v = m_voices[best_slot];
     v.cue = cue;
@@ -743,21 +849,8 @@ void AudioEngine::play_sound_2d(SoundCue cue, float volume, float pitch, bool lo
 void AudioEngine::play_sound_3d(SoundCue cue, const glm::vec3& world_pos, float volume, float pitch) {
     std::lock_guard<std::recursive_mutex> lock(m_voice_mutex);
 
-    int best_slot = -1;
-    float oldest_time = -1.0f;
-
-    for (size_t i = 0; i < MAX_VOICES; ++i) {
-        if (!m_voices[i].active) {
-            best_slot = static_cast<int>(i);
-            break;
-        }
-        if (!m_voices[i].loop && m_voices[i].time > oldest_time) {
-            oldest_time = m_voices[i].time;
-            best_slot = static_cast<int>(i);
-        }
-    }
-
-    if (best_slot < 0) best_slot = 0;
+    int best_slot = find_or_steal_voice_slot(cue);
+    if (best_slot < 0) return; // Drop cleanly if voice channels saturated by higher priority cues
 
     auto& v = m_voices[best_slot];
     v.cue = cue;
@@ -3292,16 +3385,15 @@ void AudioEngine::init_platform_audio() {
         }
 
         while (m_platform->running) {
-            DWORD wait_res = WaitForSingleObject(m_platform->h_event, 50);
+            DWORD wait_res = WaitForSingleObject(m_platform->h_event, 20);
             if (!m_platform->running) break;
 
-            if (wait_res == WAIT_OBJECT_0) {
-                // Find completed buffer headers and refill them
-                for (size_t i = 0; i < PlatformData::NUM_BUFFERS; ++i) {
-                    if (m_platform->headers[i].dwFlags & WHDR_DONE) {
-                        render_mix_i16(m_platform->buffers[i].data(), PlatformData::BUFFER_FRAMES);
-                        waveOutWrite(m_platform->h_wave_out, &m_platform->headers[i], sizeof(WAVEHDR));
-                    }
+            // Replenish all completed buffers on both event signal and timeout
+            // to prevent underruns or lost notifications during intense CPU load
+            for (size_t i = 0; i < PlatformData::NUM_BUFFERS; ++i) {
+                if (m_platform->headers[i].dwFlags & WHDR_DONE) {
+                    render_mix_i16(m_platform->buffers[i].data(), PlatformData::BUFFER_FRAMES);
+                    waveOutWrite(m_platform->h_wave_out, &m_platform->headers[i], sizeof(WAVEHDR));
                 }
             }
         }

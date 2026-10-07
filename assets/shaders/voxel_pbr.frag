@@ -174,27 +174,60 @@ void main() {
 
     bool isCrystal = (vTexLayer == 3u || vTexLayer == 13u);
 
+    bool isNaturalRock = (vTexLayer == 1u || vTexLayer == 2u);
+
     if (uUseTextureArray == 1) {
-        // Sample normal map and transform to world space
-        vec3 mapN = texture(uNormalArray, texCoord).xyz * 2.0 - 1.0;
-        N = normalize(TBN * mapN);
+        if (isNaturalRock) {
+            // World-space triplanar mapping to eliminate UV repeat seams on natural rock (granite, basalt)
+            vec2 uvX = vWorldPos.zy;
+            vec2 uvY = vWorldPos.xz;
+            vec2 uvZ = vWorldPos.xy;
 
-        albedo = texture(uAlbedoArray, texCoord).rgb;
-        roughMetal = texture(uRoughMetalArray, texCoord).rg;
+            vec3 blendWeights = pow(abs(geoN), vec3(4.0));
+            blendWeights /= (blendWeights.x + blendWeights.y + blendWeights.z);
 
-        if (isCrystal) {
-            // Interior Parallax Mapping: Look *into* the crystal volume!
-            // As the camera moves, the deep glowing crystalline core shifts with true 3D depth
-            vec2 interiorUV = fract(baseUV - V_tangent.xy * 0.045);
-            vec3 interiorTexCoord = vec3(interiorUV, float(vTexLayer));
+            vec3 colX = texture(uAlbedoArray, vec3(fract(uvX), float(vTexLayer))).rgb;
+            vec3 colY = texture(uAlbedoArray, vec3(fract(uvY), float(vTexLayer))).rgb;
+            vec3 colZ = texture(uAlbedoArray, vec3(fract(uvZ), float(vTexLayer))).rgb;
+            albedo = colX * blendWeights.x + colY * blendWeights.y + colZ * blendWeights.z;
 
-            vec3 surfaceEmissive = texture(uEmissiveArray, texCoord).rgb;
-            vec3 interiorEmissive = texture(uEmissiveArray, interiorTexCoord).rgb;
+            vec2 rmX = texture(uRoughMetalArray, vec3(fract(uvX), float(vTexLayer))).rg;
+            vec2 rmY = texture(uRoughMetalArray, vec3(fract(uvY), float(vTexLayer))).rg;
+            vec2 rmZ = texture(uRoughMetalArray, vec3(fract(uvZ), float(vTexLayer))).rg;
+            roughMetal = rmX * blendWeights.x + rmY * blendWeights.y + rmZ * blendWeights.z;
 
-            // Blend surface facets with interior crystal nucleus - calibrated for radiant gemstone glow
-            emissive = (surfaceEmissive * 0.55 + interiorEmissive * 0.45) * (vEmissive * 1.1 + 0.35);
+            vec3 normX = texture(uNormalArray, vec3(fract(uvX), float(vTexLayer))).xyz * 2.0 - 1.0;
+            vec3 normY = texture(uNormalArray, vec3(fract(uvY), float(vTexLayer))).xyz * 2.0 - 1.0;
+            vec3 normZ = texture(uNormalArray, vec3(fract(uvZ), float(vTexLayer))).xyz * 2.0 - 1.0;
+
+            vec3 worldNormX = vec3(normX.z * sign(geoN.x), normX.y, normX.x * sign(geoN.x));
+            vec3 worldNormY = vec3(normY.x, normY.z * sign(geoN.y), normY.y * sign(geoN.y));
+            vec3 worldNormZ = vec3(normZ.x, normZ.y, normZ.z * sign(geoN.z));
+
+            N = normalize(worldNormX * blendWeights.x + worldNormY * blendWeights.y + worldNormZ * blendWeights.z);
+            emissive = texture(uEmissiveArray, vec3(fract(uvY), float(vTexLayer))).rgb * (vEmissive * 2.2 + 0.3);
         } else {
-            emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 2.2 + 0.3);
+            // Sample normal map and transform to world space
+            vec3 mapN = texture(uNormalArray, texCoord).xyz * 2.0 - 1.0;
+            N = normalize(TBN * mapN);
+
+            albedo = texture(uAlbedoArray, texCoord).rgb;
+            roughMetal = texture(uRoughMetalArray, texCoord).rg;
+
+            if (isCrystal) {
+                // Interior Parallax Mapping: Look *into* the crystal volume!
+                // As the camera moves, the deep glowing crystalline core shifts with true 3D depth
+                vec2 interiorUV = fract(baseUV - V_tangent.xy * 0.045);
+                vec3 interiorTexCoord = vec3(interiorUV, float(vTexLayer));
+
+                vec3 surfaceEmissive = texture(uEmissiveArray, texCoord).rgb;
+                vec3 interiorEmissive = texture(uEmissiveArray, interiorTexCoord).rgb;
+
+                // Blend surface facets with interior crystal nucleus - calibrated for radiant gemstone glow
+                emissive = (surfaceEmissive * 0.55 + interiorEmissive * 0.45) * (vEmissive * 1.1 + 0.35);
+            } else {
+                emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 2.2 + 0.3);
+            }
         }
     } else {
         albedo = get_material_albedo(vTexLayer);
@@ -268,12 +301,12 @@ void main() {
     {
         vec3 lightDir = normalize(uHeadlampPos - vWorldPos);
         float dist = distance(uHeadlampPos, vWorldPos);
-        float attenuation = 1.0 / (1.0 + 0.05 * dist + 0.01 * dist * dist);
+        // Smooth inverse-square distance attenuation
+        float attenuation = 1.0 / (dist * dist + 1.0);
 
-        // Spotlight cone
+        // Smooth spotlight cone falloff between outer and inner cutoff (replaces hard cutoff)
         float theta = dot(lightDir, normalize(-uHeadlampDir));
-        float epsilon = uHeadlampInnerCutoff - uHeadlampOuterCutoff;
-        float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
+        float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
 
         if (spotFactor > 0.0) {
             vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;

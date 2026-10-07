@@ -30,6 +30,9 @@ public:
     void poll_events();
     void swap_buffers();
 
+    void show();
+    bool is_visible() const { return m_is_visible; }
+
     GLFWwindow* handle() const { return m_window; }
     int width() const { return m_width; }
     int height() const { return m_height; }
@@ -65,6 +68,10 @@ private:
     int m_width{1600};
     int m_height{900};
     bool m_cursor_locked{true};
+    bool m_visible_requested{true};
+    bool m_is_visible{false};
+    bool m_auto_screen_size{true};
+    bool m_fullscreen{false};
 
     double m_last_mouse_x{0.0};
     double m_last_mouse_y{0.0};

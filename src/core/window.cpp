@@ -2,6 +2,17 @@
 #include "logger.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
 #include <iostream>
 #include <stdexcept>
 
@@ -10,6 +21,9 @@ namespace Voidfall {
 Window::Window(const WindowConfig& config)
     : m_width(config.width)
     , m_height(config.height)
+    , m_visible_requested(config.visible)
+    , m_auto_screen_size(config.auto_screen_size)
+    , m_fullscreen(config.fullscreen)
 {
     Logger::setup_glfw_error_callback();
 
@@ -40,7 +54,9 @@ Window::Window(const WindowConfig& config)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-    glfwWindowHint(GLFW_VISIBLE, config.visible ? GLFW_TRUE : GLFW_FALSE);
+    // Keep window strictly hidden initially during creation and initialization
+    // to prevent any white canvas flash or uninitialized surface exposure.
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 #ifndef NDEBUG
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 #endif
@@ -49,13 +65,15 @@ Window::Window(const WindowConfig& config)
         glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     }
 
-    GLFWmonitor* target_monitor = config.fullscreen ? primary_monitor : nullptr;
-    m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), target_monitor, nullptr);
+    // Always create windowed initially with GLFW_VISIBLE=FALSE so the window is never shown
+    // with uninitialized buffers or default white OS background.
+    m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
     if (!m_window) {
         VF_LOG_WARN("Window", "OpenGL 4.5 window creation failed, attempting fallback to OpenGL 4.3...");
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), target_monitor, nullptr);
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
         if (!m_window) {
             glfwTerminate();
             VF_LOG_FATAL("Window", "Failed to create GLFW OpenGL 4.3+ window context");
@@ -100,7 +118,35 @@ Window::Window(const WindowConfig& config)
 
     Logger::setup_gl_debug();
 
+#if defined(_WIN32)
+    HWND hwnd = glfwGetWin32Window(m_window);
+    if (hwnd) {
+        // Enforce dark mode titlebar and borders on Windows 10 & 11
+        HMODULE dwmapi = LoadLibraryA("dwmapi.dll");
+        if (dwmapi) {
+            typedef HRESULT (WINAPI *FnDwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+            auto fn = reinterpret_cast<FnDwmSetWindowAttribute>(GetProcAddress(dwmapi, "DwmSetWindowAttribute"));
+            if (fn) {
+                BOOL darkMode = TRUE;
+                DWORD attr20 = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE (Windows 10 20H1+ and Windows 11)
+                DWORD attr19 = 19; // Windows 10 1809 - 1909
+                fn(hwnd, attr20, &darkMode, sizeof(darkMode));
+                fn(hwnd, attr19, &darkMode, sizeof(darkMode));
+            }
+            FreeLibrary(dwmapi);
+        }
+    }
+#endif
+
     glViewport(0, 0, m_width, m_height);
+
+    // Prime both front and back buffers with deep voidfall clear color (0.015, 0.018, 0.024)
+    // to ensure any display swap is completely dark and free of default OS white flash.
+    glClearColor(0.015f, 0.018f, 0.024f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glfwSwapBuffers(m_window);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glfwSwapBuffers(m_window);
 
     glfwSwapInterval(config.vsync ? 1 : 0);
 
@@ -137,8 +183,30 @@ void Window::poll_events() {
     glfwPollEvents();
 }
 
+void Window::show() {
+    if (m_window && m_visible_requested && !m_is_visible) {
+        if (m_fullscreen) {
+            GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+            if (monitor) {
+                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                if (mode) {
+                    glfwSetWindowMonitor(m_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+                }
+            }
+        } else if (m_auto_screen_size) {
+            glfwMaximizeWindow(m_window);
+        }
+        glfwShowWindow(m_window);
+        glfwFocusWindow(m_window);
+        m_is_visible = true;
+    }
+}
+
 void Window::swap_buffers() {
     glfwSwapBuffers(m_window);
+    if (m_visible_requested && !m_is_visible) {
+        show();
+    }
 }
 
 void Window::set_cursor_locked(bool locked) {

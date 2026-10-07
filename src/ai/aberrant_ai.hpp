@@ -122,7 +122,8 @@ public:
         const glm::vec3& position,
         const World& world,
         float probe_distance = 1.4f,
-        StalkerSurfaceState current_state = StalkerSurfaceState::FLOOR
+        StalkerSurfaceState current_state = StalkerSurfaceState::FLOOR,
+        const glm::vec3* target_pos = nullptr
     );
 
     /// Computes target orientation quaternion from velocity v and contact normal n:
@@ -183,6 +184,45 @@ public:
         const std::vector<glm::vec3>& other_positions,
         float max_distance = 6.0f,
         float separation_force = 8.0f
+    );
+
+    /// When crawling on the ceiling and target is below, finds the optimal
+    /// horizontal heading towards an adjacent wall that allows descending to the floor.
+    static glm::vec3 find_descending_wall_direction(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& target_pos,
+        const World& world,
+        float max_probe_dist = 24.0f
+    );
+
+    /// Calculates 3D traversal direction along a climbing wall (tangent plane) towards target,
+    /// enabling vertical climbing up/down the wall as well as horizontal wall-crawling.
+    static glm::vec3 calculate_wall_traversal_direction(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& target_pos,
+        const glm::vec3& contact_normal
+    );
+
+    /// Samples forward and angled whiskers to steer smoothly around voxel obstacles on surfaces
+    static glm::vec3 steer_around_obstacles(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& desired_dir,
+        const glm::vec3& up_normal,
+        const World& world,
+        float probe_dist = 1.6f
+    );
+
+    /// Robust swept voxel collision resolving against walls/geometry.
+    /// Clamps movement to prevent clipping/moving through walls, while allowing 1-block step clambering
+    /// on floors when headroom is clear.
+    static bool resolve_voxel_collision(
+        glm::vec3& pos,
+        glm::vec3& velocity,
+        float radius,
+        float height,
+        StalkerSurfaceState surface_state,
+        const glm::vec3& contact_normal,
+        const World& world
     );
 };
 

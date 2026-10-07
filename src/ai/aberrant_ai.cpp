@@ -1,6 +1,7 @@
 #include "aberrant_ai.hpp"
 #include "../voxel/world.hpp"
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/constants.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -21,7 +22,8 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
     const glm::vec3& position,
     const World& world,
     float probe_distance,
-    StalkerSurfaceState current_state)
+    StalkerSurfaceState current_state,
+    const glm::vec3* target_pos)
 {
     SurfaceContactSample result;
     result.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -43,6 +45,9 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
     glm::vec3 best_normal(0.0f, 1.0f, 0.0f);
     bool has_down = false;
     float down_dist = probe_distance + 1.0f;
+    bool has_wall = false;
+    float wall_dist = probe_distance + 1.0f;
+    glm::vec3 wall_normal(0.0f);
 
     for (int i = 0; i < 6; ++i) {
         const glm::vec3& dir = directions[i];
@@ -88,6 +93,12 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
                 if (i == 0) { // Down
                     has_down = true;
                     down_dist = d;
+                } else if (i >= 2) { // Side walls
+                    if (d < wall_dist) {
+                        has_wall = true;
+                        wall_dist = d;
+                        wall_normal = face_normal;
+                    }
                 }
 
                 if (d < min_dist) {
@@ -101,17 +112,30 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
     }
 
     // Surface hysteresis selection:
-    // If currently on FLOOR (or transitioning from floor) and floor contact is valid within reachable ground distance (<= 1.25m),
+    // 1. If currently on FLOOR (or transitioning from floor) and floor contact is valid within reachable ground distance (<= 1.25m),
     // prioritize FLOOR over adjacent side walls to prevent rapid 60Hz surface flipping/jitter.
     if ((current_state == StalkerSurfaceState::FLOOR || current_state == StalkerSurfaceState::TRANSITIONING) && has_down && down_dist <= 1.25f) {
-        best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
-        min_dist = down_dist;
-        result.has_contact = true;
-    } else if (current_state == StalkerSurfaceState::WALL_CLIMBING && has_down && down_dist <= 0.55f) {
+        if (target_pos != nullptr && (target_pos->y > position.y + 1.8f) && has_wall && wall_dist <= 0.65f) {
+            best_normal = wall_normal;
+            min_dist = wall_dist;
+            result.has_contact = true;
+        } else {
+            best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            min_dist = down_dist;
+            result.has_contact = true;
+        }
+    } else if (current_state == StalkerSurfaceState::WALL_CLIMBING && has_down && down_dist <= 0.65f) {
         // Smoothly step down onto floor when reaching ground level
         best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
         min_dist = down_dist;
         result.has_contact = true;
+    } else if (current_state == StalkerSurfaceState::CEILING_CRAWLING && has_wall && wall_dist <= 0.80f) {
+        // Ceiling stalker within reach of vertical wall: transfer to wall climbing to descend toward floor!
+        if (target_pos == nullptr || target_pos->y < position.y - 1.2f) {
+            best_normal = wall_normal;
+            min_dist = wall_dist;
+            result.has_contact = true;
+        }
     }
 
     if (result.has_contact) {
@@ -379,4 +403,298 @@ PerceptionEvaluation AberrantAI::evaluate_acoustic_and_visual_perception(
     return best_result;
 }
 
+glm::vec3 AberrantAI::find_descending_wall_direction(
+    const glm::vec3& enemy_pos,
+    const glm::vec3& target_pos,
+    const World& world,
+    float max_probe_dist)
+{
+    constexpr int NUM_DIRS = 24;
+    float best_cost = 1e9f;
+    glm::vec3 best_dir(0.0f);
+    bool found_wall = false;
+
+    int py = static_cast<int>(std::floor(enemy_pos.y));
+
+    for (int i = 0; i < NUM_DIRS; ++i) {
+        float angle = static_cast<float>(i) * (2.0f * glm::pi<float>() / static_cast<float>(NUM_DIRS));
+        glm::vec3 dir(std::cos(angle), 0.0f, std::sin(angle));
+
+        float hit_dist = max_probe_dist;
+        bool hit = false;
+        const float step_size = 0.4f;
+        int max_steps = static_cast<int>(max_probe_dist / step_size);
+
+        for (int s = 1; s <= max_steps; ++s) {
+            glm::vec3 probe_pos = enemy_pos + dir * (static_cast<float>(s) * step_size);
+            int px = static_cast<int>(std::floor(probe_pos.x));
+            int pz = static_cast<int>(std::floor(probe_pos.z));
+
+            // World boundary clamp
+            if (px <= 4 || px >= 68 || pz <= 4 || pz >= 68) {
+                hit_dist = static_cast<float>(s) * step_size;
+                hit = true;
+                break;
+            }
+
+            // CRITICAL: Check wall obstacles at enemy crawl level and below (py, py - 1).
+            // Do NOT check py + 1, which is the solid ceiling right above the monster!
+            bool solid_at_level = world.is_solid(glm::ivec3(px, py, pz));
+            bool solid_below = world.is_solid(glm::ivec3(px, py - 1, pz));
+            if (solid_at_level || solid_below) {
+                hit_dist = static_cast<float>(s) * step_size;
+                hit = true;
+                break;
+            }
+        }
+
+        if (hit) {
+            glm::vec3 wall_pos = enemy_pos + dir * hit_dist;
+            float d_to_wall = hit_dist;
+            float d_wall_to_tgt = glm::distance(glm::vec2(wall_pos.x, wall_pos.z), glm::vec2(target_pos.x, target_pos.z));
+            
+            // Total cost: travel across ceiling to wall + distance from wall base to target
+            float cost = d_to_wall * 1.0f + d_wall_to_tgt * 1.25f;
+
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_dir = dir;
+                found_wall = true;
+            }
+        }
+    }
+
+    if (found_wall && glm::length(best_dir) > 0.001f) {
+        return glm::normalize(best_dir);
+    }
+
+    glm::vec3 to_tgt_xz(target_pos.x - enemy_pos.x, 0.0f, target_pos.z - enemy_pos.z);
+    if (glm::length(to_tgt_xz) > 0.1f) {
+        return glm::normalize(to_tgt_xz);
+    }
+    return glm::vec3(1.0f, 0.0f, 0.0f);
+}
+
+glm::vec3 AberrantAI::calculate_wall_traversal_direction(
+    const glm::vec3& enemy_pos,
+    const glm::vec3& target_pos,
+    const glm::vec3& contact_normal)
+{
+    glm::vec3 n = glm::length(contact_normal) > 0.001f
+        ? glm::normalize(contact_normal)
+        : glm::vec3(0.0f, 1.0f, 0.0f);
+
+    glm::vec3 to_tgt = target_pos - enemy_pos;
+    glm::vec3 v_wall = to_tgt - glm::dot(to_tgt, n) * n;
+
+    if (glm::length(v_wall) > 0.05f) {
+        return glm::normalize(v_wall);
+    }
+
+    glm::vec3 down_wall = glm::vec3(0.0f, -1.0f, 0.0f) - glm::dot(glm::vec3(0.0f, -1.0f, 0.0f), n) * n;
+    if (glm::length(down_wall) > 0.05f) {
+        return glm::normalize(down_wall);
+    }
+    return glm::vec3(0.0f, -1.0f, 0.0f);
+}
+
+glm::vec3 AberrantAI::steer_around_obstacles(
+    const glm::vec3& enemy_pos,
+    const glm::vec3& desired_dir,
+    const glm::vec3& up_normal,
+    const World& world,
+    float probe_dist)
+{
+    if (glm::length(desired_dir) < 0.001f) return desired_dir;
+    glm::vec3 fwd = glm::normalize(desired_dir);
+    glm::vec3 up = glm::length(up_normal) > 0.001f ? glm::normalize(up_normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::cross(up, fwd);
+    if (glm::length(right) < 0.001f) return fwd;
+    right = glm::normalize(right);
+
+    glm::vec3 probe_origin = enemy_pos + up * 0.40f;
+
+    auto is_blocked = [&](const glm::vec3& dir, float dist) -> bool {
+        for (float d = 0.4f; d <= dist; d += 0.4f) {
+            glm::vec3 pt = probe_origin + dir * d;
+            int cx = static_cast<int>(std::floor(pt.x));
+            int cy = static_cast<int>(std::floor(pt.y));
+            int cz = static_cast<int>(std::floor(pt.z));
+            if (world.is_solid(glm::ivec3(cx, cy, cz))) {
+                // If on floor and the space directly above is open, this is a clamberable 1-block step!
+                if (up.y > 0.7f && !world.get_voxel(cx, cy + 1, cz).is_solid()) {
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (!is_blocked(fwd, probe_dist)) {
+        return fwd;
+    }
+
+    // Direct path blocked! Check whiskered deviation angles left and right
+    const float angles[] = { 0.52f, -0.52f, 0.96f, -0.96f, 1.40f, -1.40f, 1.92f, -1.92f };
+    for (float ang : angles) {
+        glm::vec3 test_dir = glm::normalize(fwd * std::cos(ang) + right * std::sin(ang));
+        if (!is_blocked(test_dir, probe_dist * 0.9f)) {
+            return test_dir;
+        }
+    }
+
+    return right;
+}
+
+bool AberrantAI::resolve_voxel_collision(
+    glm::vec3& pos,
+    glm::vec3& velocity,
+    float radius,
+    float height,
+    StalkerSurfaceState surface_state,
+    const glm::vec3& contact_normal,
+    const World& world)
+{
+    bool collided = false;
+
+    // Sector bounds clamp
+    pos.x = std::clamp(pos.x, 4.5f + radius, 67.5f - radius);
+    pos.y = std::clamp(pos.y, 4.5f, 26.0f);
+    pos.z = std::clamp(pos.z, 4.5f + radius, 67.5f - radius);
+
+    // Multi-point radial offsets: 4 cardinal + 4 diagonal
+    const float d_r = radius * 0.7071f;
+    const glm::vec2 offsets[8] = {
+        glm::vec2( radius,  0.0f),
+        glm::vec2(-radius,  0.0f),
+        glm::vec2( 0.0f,    radius),
+        glm::vec2( 0.0f,   -radius),
+        glm::vec2( d_r,     d_r),
+        glm::vec2(-d_r,     d_r),
+        glm::vec2( d_r,    -d_r),
+        glm::vec2(-d_r,    -d_r)
+    };
+
+    if (surface_state == StalkerSurfaceState::FLOOR) {
+        int cx = static_cast<int>(std::floor(pos.x));
+        int cy = static_cast<int>(std::floor(pos.y));
+        int cz = static_cast<int>(std::floor(pos.z));
+
+        Voxel current_v = world.get_voxel(cx, cy, cz);
+        if (current_v.is_solid()) {
+            Voxel above_v = world.get_voxel(cx, cy + 1, cz);
+            if (!above_v.is_solid()) {
+                pos.y = static_cast<float>(cy + 1) + 0.05f;
+            } else {
+                collided = true;
+                float fx = pos.x - (static_cast<float>(cx) + 0.5f);
+                float fz = pos.z - (static_cast<float>(cz) + 0.5f);
+                if (std::abs(fx) > std::abs(fz)) {
+                    pos.x = static_cast<float>(cx) + (fx > 0.0f ? (1.0f + radius + 0.02f) : (-radius - 0.02f));
+                    velocity.x = 0.0f;
+                } else {
+                    pos.z = static_cast<float>(cz) + (fz > 0.0f ? (1.0f + radius + 0.02f) : (-radius - 0.02f));
+                    velocity.z = 0.0f;
+                }
+            }
+        }
+
+        // Test horizontal perimeter at feet level and mid-body
+        for (const auto& off : offsets) {
+            glm::vec3 check_pos = pos + glm::vec3(off.x, 0.35f, off.y);
+            int ix = static_cast<int>(std::floor(check_pos.x));
+            int iy = static_cast<int>(std::floor(check_pos.y));
+            int iz = static_cast<int>(std::floor(check_pos.z));
+
+            if (world.is_solid(glm::ivec3(ix, iy, iz))) {
+                Voxel above_v = world.get_voxel(ix, iy + 1, iz);
+                // 1-block step clambering: only if there's clear space above!
+                if (!above_v.is_solid() && iy == cy) {
+                    pos.y = std::max(pos.y, static_cast<float>(iy + 1) + 0.05f);
+                    continue;
+                }
+                // Solid wall: push out along penetrating axis
+                collided = true;
+                float center_vx = static_cast<float>(ix) + 0.5f;
+                float center_vz = static_cast<float>(iz) + 0.5f;
+                float dx = pos.x - center_vx;
+                float dz = pos.z - center_vz;
+                if (std::abs(dx) > std::abs(dz)) {
+                    pos.x = static_cast<float>(ix) + (dx > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                    if (dx > 0.0f) velocity.x = std::max(0.0f, velocity.x);
+                    else velocity.x = std::min(0.0f, velocity.x);
+                } else {
+                    pos.z = static_cast<float>(iz) + (dz > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                    if (dz > 0.0f) velocity.z = std::max(0.0f, velocity.z);
+                    else velocity.z = std::min(0.0f, velocity.z);
+                }
+            }
+        }
+    } else if (surface_state == StalkerSurfaceState::WALL_CLIMBING) {
+        glm::vec3 n = glm::length(contact_normal) > 0.001f ? glm::normalize(contact_normal) : glm::vec3(0, 1, 0);
+        float dot_v = glm::dot(velocity, n);
+        if (dot_v < 0.0f) {
+            velocity -= dot_v * n;
+        }
+
+        // Center check
+        int cx = static_cast<int>(std::floor(pos.x));
+        int cy = static_cast<int>(std::floor(pos.y));
+        int cz = static_cast<int>(std::floor(pos.z));
+        if (world.is_solid(glm::ivec3(cx, cy, cz))) {
+            collided = true;
+            pos += n * 0.25f;
+        }
+
+        // Tangent boundary checks: prevent clipping into adjoining inside corners
+        glm::vec3 tangent_right = glm::cross(n, glm::vec3(0.0f, 1.0f, 0.0f));
+        if (glm::length(tangent_right) > 0.01f) {
+            tangent_right = glm::normalize(tangent_right);
+            for (float sign : { -1.0f, 1.0f }) {
+                glm::vec3 check_side = pos + tangent_right * (radius * sign);
+                int sx = static_cast<int>(std::floor(check_side.x));
+                int sy = static_cast<int>(std::floor(check_side.y));
+                int sz = static_cast<int>(std::floor(check_side.z));
+                if (world.is_solid(glm::ivec3(sx, sy, sz))) {
+                    collided = true;
+                    pos -= tangent_right * (sign * 0.15f);
+                }
+            }
+        }
+    } else if (surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
+        if (velocity.y > 0.0f) velocity.y = 0.0f;
+
+        int cx = static_cast<int>(std::floor(pos.x));
+        int cy = static_cast<int>(std::floor(pos.y));
+        int cz = static_cast<int>(std::floor(pos.z));
+        if (world.is_solid(glm::ivec3(cx, cy, cz))) {
+            collided = true;
+            pos.y = static_cast<float>(cy) - 0.15f;
+        }
+
+        for (const auto& off : offsets) {
+            glm::vec3 check_pos = pos + glm::vec3(off.x, 0.0f, off.y);
+            int ix = static_cast<int>(std::floor(check_pos.x));
+            int iy = static_cast<int>(std::floor(check_pos.y));
+            int iz = static_cast<int>(std::floor(check_pos.z));
+            if (world.is_solid(glm::ivec3(ix, iy, iz))) {
+                collided = true;
+                float center_vx = static_cast<float>(ix) + 0.5f;
+                float center_vz = static_cast<float>(iz) + 0.5f;
+                float dx = pos.x - center_vx;
+                float dz = pos.z - center_vz;
+                if (std::abs(dx) > std::abs(dz)) {
+                    pos.x = static_cast<float>(ix) + (dx > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                } else {
+                    pos.z = static_cast<float>(iz) + (dz > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                }
+            }
+        }
+    }
+
+    return collided;
+}
+
 } // namespace Voidfall
+

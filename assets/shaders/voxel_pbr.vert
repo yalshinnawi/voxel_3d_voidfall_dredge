@@ -60,7 +60,7 @@ void main() {
     float localY = float((d0 >> 6u) & 0x3Fu);
     float localZ = float((d0 >> 12u) & 0x3Fu);
     uint normIdx = (d0 >> 18u) & 0x7u;
-    float aoRaw  = float((d0 >> 21u) & 0x3u);
+    uint aoIdx   = (d0 >> 21u) & 0x3u;
     vTexLayer    = (d0 >> 23u) & 0xFFu;
     uint auxBits = (d0 >> 31u) & 0x1u;
 
@@ -71,9 +71,9 @@ void main() {
     vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
     vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
 
-    // Baked Ambient Occlusion curve: 0..3 scaled to 0.15..1.0
-    // Quadratic curve for dramatic deep crevice shadows
-    vAO = mix(0.12, 1.0, pow(aoRaw / 3.0, 1.4));
+    // Baked Ambient Occlusion multipliers: ao=3 -> 1.0, ao=2 -> 0.72, ao=1 -> 0.45, ao=0 -> 0.20
+    const float AO_FACTORS[4] = float[4](0.20, 0.45, 0.72, 1.0);
+    vAO = AO_FACTORS[aoIdx];
 
     vec3 localPos = vec3(localX, localY, localZ);
     vec4 worldPos4 = uModel * vec4(localPos + uChunkWorldPos, 1.0);

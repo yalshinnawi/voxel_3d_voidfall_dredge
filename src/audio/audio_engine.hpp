@@ -225,7 +225,7 @@ class AudioEngine {
 public:
     static constexpr int SAMPLE_RATE = 44100;
     static constexpr int NUM_CHANNELS = 2; // Stereo
-    static constexpr size_t MAX_VOICES = 32;
+    static constexpr size_t MAX_VOICES = 64;
 
     AudioEngine();
     ~AudioEngine();
@@ -388,6 +388,7 @@ private:
     // Voice synthesis generators
     float synth_sample(AudioVoice& voice, float dt);
     void update_spatial_pan(AudioVoice& voice);
+    int find_or_steal_voice_slot(SoundCue cue);
 
     // Audio Mastering Chain (Ear Protection)
     void apply_mastering_chain(float* buffer, size_t num_frames);

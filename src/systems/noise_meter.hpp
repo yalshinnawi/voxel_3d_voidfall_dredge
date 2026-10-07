@@ -36,6 +36,7 @@ struct SoundEvent {
     float audible_radius{10.0f};    // Distance in meters subterranean creatures can hear this sound
     float age{0.0f};                // Seconds elapsed since emission
     float lifetime{0.45f};          // Acoustic echo linger duration
+    float db{0.0f};                 // Acoustic volume in decibels [0..100 dB]
 
     bool is_expired() const { return age >= lifetime; }
 };
@@ -196,7 +197,14 @@ public:
         }
 
         // Track spatial sound event for creature acoustic AI
-        m_recent_sounds.push_back({type, pos, effective_intensity, effective_radius, 0.0f, lifetime});
+        float sound_db = 0.0f;
+        if (type == SoundEventType::DemolitionBlast) sound_db = StealthSystem::NOISE_SATCHEL_BLAST_DB;
+        else if (type == SoundEventType::Gunshot) sound_db = StealthSystem::NOISE_WEAPON_FIRING_DB;
+        else if (type == SoundEventType::DrillVibration) sound_db = StealthSystem::NOISE_MINING_DRILL_DB;
+        else if (type == SoundEventType::FootstepWalk) sound_db = StealthSystem::NOISE_NORMAL_WALK_DB;
+        else sound_db = effective_intensity;
+
+        m_recent_sounds.push_back({type, pos, effective_intensity, effective_radius, 0.0f, lifetime, sound_db});
     }
 
     /// Access all recent active sound events

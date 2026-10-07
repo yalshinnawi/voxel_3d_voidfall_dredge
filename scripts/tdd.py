@@ -69,6 +69,11 @@ TESTS = {
         "target": "test_gameplay_mechanics",
         "exe": f"test_gameplay_mechanics{EXE_EXT}",
         "name": "Gameplay Mechanics: Agitation Loop, Crouch Noise, Aiming Parallax & Monster Death Lifecycle (4 modules)"
+    },
+    "load_and_stress": {
+        "target": "test_load_and_stress",
+        "exe": f"test_load_and_stress{EXE_EXT}",
+        "name": "Load, Stress & Late-Round Pacing / Anti-Clipping (5 modules)"
     }
 }
 

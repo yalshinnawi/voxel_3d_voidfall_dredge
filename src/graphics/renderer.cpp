@@ -29,6 +29,9 @@ Renderer::Renderer(int width, int height)
     , m_fog_width(width / 2)
     , m_fog_height(height / 2)
 {
+    // Initialize default clear color to the dark void tone
+    glClearColor(0.015f, 0.018f, 0.024f, 1.0f);
+
     // 1. Load Shaders
     m_voxel_shader.load_graphics("assets/shaders/voxel_pbr.vert", "assets/shaders/voxel_pbr.frag");
     m_fog_compute_shader.load_compute("assets/shaders/volumetric_fog.comp");
@@ -1343,18 +1346,63 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
         m_voxel_shader.set_int("uEmissiveArray", 3);
         m_voxel_shader.set_int("uUseTextureArray", 1);
     }
+
+    // Camera frustum extraction (Gribb-Hartmann method from Projection * View)
+    glm::mat4 vp = m_proj * m_view;
+    glm::vec4 row0(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
+    glm::vec4 row1(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
+    glm::vec4 row2(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
+    glm::vec4 row3(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+
+    m_frustum_planes[0] = row3 + row0; // Left
+    m_frustum_planes[1] = row3 - row0; // Right
+    m_frustum_planes[2] = row3 + row1; // Bottom
+    m_frustum_planes[3] = row3 - row1; // Top
+    m_frustum_planes[4] = row3 + row2; // Near
+    m_frustum_planes[5] = row3 - row2; // Far
+
+    for (int i = 0; i < 6; ++i) {
+        float len = glm::length(glm::vec3(m_frustum_planes[i]));
+        if (len > 0.00001f) {
+            m_frustum_planes[i] /= len;
+        }
+    }
+}
+
+bool Renderer::is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const {
+    for (int i = 0; i < 6; ++i) {
+        glm::vec3 p(
+            (m_frustum_planes[i].x > 0.0f) ? max_pt.x : min_pt.x,
+            (m_frustum_planes[i].y > 0.0f) ? max_pt.y : min_pt.y,
+            (m_frustum_planes[i].z > 0.0f) ? max_pt.z : min_pt.z
+        );
+        if (glm::dot(glm::vec3(m_frustum_planes[i]), p) + m_frustum_planes[i].w < 0.0f) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void Renderer::render_chunk(const Chunk& chunk) {
-    if (chunk.is_empty()) return;
+    if (chunk.is_empty() || chunk.vertex_count() == 0) return;
+
+    glm::vec3 min_pt = chunk.get_world_pos();
+    glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
+    if (!is_box_in_frustum(min_pt, max_pt)) return;
+
     glm::mat4 model = glm::mat4(1.0f);
     m_voxel_shader.set_mat4("uModel", model);
-    m_voxel_shader.set_vec3("uChunkWorldPos", chunk.get_world_pos());
+    m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
     chunk.render();
 }
 
 void Renderer::render_debris(const DynamicDebris& debris) {
     if (debris.is_destroyed() || debris.vertex_count() == 0 || debris.vao() == 0) return;
+
+    glm::vec3 dpos = debris.position();
+    glm::vec3 dmin = dpos - glm::vec3(2.0f);
+    glm::vec3 dmax = dpos + glm::vec3(2.0f);
+    if (!is_box_in_frustum(dmin, dmax)) return;
 
     m_voxel_shader.use();
 

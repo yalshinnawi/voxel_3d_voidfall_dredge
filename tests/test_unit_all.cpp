@@ -9,6 +9,7 @@
 #include "../src/voxel/chunk.hpp"
 #include "../src/voxel/world.hpp"
 #include "../src/voxel/structural_check.hpp"
+#include "../src/voxel/greedy_mesher.hpp"
 #include "../src/player/character_class.hpp"
 #include "../src/player/upgrades.hpp"
 #include "../src/player/loadout.hpp"
@@ -91,6 +92,42 @@ void test_voxel_engine() {
     TEST_CHECK(hit.block_pos.x == 16 && hit.block_pos.z == 16, "Raycast hit coordinate mismatch");
     TEST_CHECK(hit.normal == glm::ivec3(0, 1, 0), "Raycast top face normal must be (0, 1, 0)");
     log_pass("DDA Voxel Raycasting and surface normal calculation");
+
+    // Vertex Ambient Occlusion & Bit-Packing Tests
+    // Occlusion factor logic: 0 = fully occluded corner, 3 = unoccluded corner
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, false) == 3, "Unoccluded corner AO must be 3");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, false) == 2, "Corner with 1 side neighbor must be AO 2");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(false, false, true) == 2, "Corner with 1 diagonal neighbor must be AO 2");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, false, true) == 1, "Corner with 1 side and 1 diagonal neighbor must be AO 1");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, false) == 0, "Corner with both side neighbors must be fully occluded (AO 0)");
+    TEST_CHECK(GreedyMesher::compute_vertex_ao(true, true, true) == 0, "Corner with all 3 touching neighbors must be fully occluded (AO 0)");
+
+    // 2-bit packing verification in PackedVoxelVertex (data0 bits 21..22)
+    for (uint32_t test_ao = 0; test_ao <= 3; ++test_ao) {
+        PackedVoxelVertex pv = PackedVoxelVertex::encode(10, 15, 20, 2, test_ao, MAT_FRACTURED_GRANITE, 1, 1, 0);
+        uint32_t unpacked_ao = (pv.data0 >> 21u) & 0x3u;
+        TEST_CHECK(unpacked_ao == test_ao, "2-bit PackedVoxelVertex AO attribute extraction mismatch");
+    }
+
+    // Chunk mesh generation with baked corner AO
+    Chunk ao_chunk(ChunkPos{1, 0, 1});
+    // Create an L-shaped structure (step) that induces a concave corner
+    ao_chunk.set_voxel(10, 10, 10, Voxel{MAT_FRACTURED_GRANITE, 0});
+    ao_chunk.set_voxel(10, 11, 10, Voxel{MAT_FRACTURED_GRANITE, 0});
+    ao_chunk.set_voxel(11, 10, 10, Voxel{MAT_FRACTURED_GRANITE, 0});
+
+    auto mesh_verts = GreedyMesher::generate_mesh(ao_chunk);
+    TEST_CHECK(!mesh_verts.empty(), "Greedy mesher must generate vertices for L-shape");
+    bool found_occluded = false;
+    bool found_unoccluded = false;
+    for (const auto& vtx : mesh_verts) {
+        uint32_t v_ao = (vtx.data0 >> 21u) & 0x3u;
+        if (v_ao < 3) found_occluded = true;
+        if (v_ao == 3) found_unoccluded = true;
+    }
+    TEST_CHECK(found_occluded, "Mesh on concave step geometry must contain baked vertex ambient occlusion (ao < 3)");
+    TEST_CHECK(found_unoccluded, "Mesh must contain fully exposed unoccluded vertices (ao == 3)");
+    log_pass("Vertex Ambient Occlusion calculation, 2-bit packing & greedy mesher baking");
 }
 
 // ─────────────────────────────────────────────────────────────

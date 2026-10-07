@@ -2,6 +2,29 @@
 
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
+## 2026-10-07
+- **Late-Round Performance Optimization, Spiral-of-Death Guard & Anti-Clipping Stabilization**:
+  - **Identified Late-Round Bottlenecks & Failure Modes**:
+    - *Phantom Chunk Generation*: `World::update(viewer_pos, 2)` queried chunks beyond level bounds without clamping, spawning unneeded 32x32x32 solid bedrock chunks on the main thread and bloating memory.
+    - *Overdraw & Un-culled Rendering*: All chunks were rendered every frame regardless of view angle, including chunks 180 degrees behind the camera and fully hollow/empty chunks with zero vertices.
+    - *Simulation Spiral-of-Death*: Variable delta-time accumulator loop had no execution cap, accumulating up to 15 fixed ticks during momentary frame drops and causing recursive stalls.
+    - *Enemy Alert/Combat State Clipping*: Void Stalker visual range inverted from 20m in `Investigating` to 12m in `Stalking`, causing creatures at ~15m to immediately lose LOS on transition. Un-reset `lost_los_timer` caused instant fallback.
+    - *Audio Starvation & Dropout*: Windows `waveOut` audio worker thread only replenished buffers on `WAIT_OBJECT_0`, leaving audio dead upon momentary buffer underruns. Low 32-voice capacity caused high-frequency Geiger clicks to evict combat sounds mid-sample.
+  - **Engine Performance & Render Pipeline Hardening**:
+    - **Bounded World Streaming**: Restricted `World::update()` iteration strictly to Level Generator dimensions `[0..max_cx-1, 0..max_cy-1, 0..max_cz-1]`, preventing phantom chunk leaks.
+    - **Gribb-Hartmann Frustum Culling**: Extracted 6 view-frustum planes in `Renderer::begin_frame()`. Filtered chunk bounding boxes and dynamic debris spheres, skipping draw calls and uniform bindings for off-screen and empty chunks.
+    - **Simulation Death-Spiral Protection**: Clamped fixed ticks per frame to `MAX_FIXED_TICKS_PER_FRAME = 4`, clearing excess accumulator backlog to ensure immediate recovery from frame spikes.
+  - **Enemy AI Perception Envelope & State Hysteresis**:
+    - **Unified Perception Range**: Standardized detection range to 20m across `Investigating`, `Stalking`, `Circling`, and `Lunging` states.
+    - **State Commitment & Timer Reset**: Reset `lost_los_timer = 0.0f` on entry into combat states and required `state_timer >= 1.0f` before allowing state demotion, eliminating rapid flip-flopping.
+  - **Audio Engine Anti-Clipping & Priority Allocation**:
+    - **Self-Healing Buffer Replenishment**: Expanded buffer pool to 8 buffers (185ms cushion) and refilled completed headers on both event signals and 20ms timeouts, auto-recovering from underruns.
+    - **64-Voice Capacity & Priority Scheduling**: Increased voice limit to 64 and introduced 4-tier priority eviction (`get_cue_priority`), safeguarding monster roars, weapon discharges, and arrival stingers against low-priority ambient and Geiger clicks.
+  - **Automated Verification & Telemetry**:
+    - Created dedicated test suite `tests/test_load_and_stress.cpp` (`LoadAndStressTests`) validating 5 load modules.
+    - All 11 parallel test suites pass cleanly in ~1.05s via `python scripts/tdd.py`.
+    - Automated visual test (`--auto-play-test`) confirmed 10/10 phase pass with 0 errors in `voidfall.log`.
+
 ## 2026-10-06
 - **3D Weapon Scope Optical Lenses & Crouch-Zoom Alignment Integration**:
   - **Identified Immersion & ADS Visibility Bottleneck**:

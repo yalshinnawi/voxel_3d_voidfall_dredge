@@ -191,6 +191,9 @@ target_link_libraries(test_gameplay_mechanics PRIVATE voidfall_engine_core)
 add_executable(test_spawn_safety tests/test_spawn_safety.cpp)
 target_link_libraries(test_spawn_safety PRIVATE voidfall_engine_core)
 
+add_executable(test_load_and_stress tests/test_load_and_stress.cpp)
+target_link_libraries(test_load_and_stress PRIVATE voidfall_engine_core)
+
 # ── Reuse Precompiled Headers Across All Test Executables ──
 set(VOIDFALL_TEST_TARGETS
     test_progression
@@ -204,6 +207,7 @@ set(VOIDFALL_TEST_TARGETS
     test_combat_omni_ai
     test_gameplay_mechanics
     test_spawn_safety
+    test_load_and_stress
 )
 foreach(tgt ${VOIDFALL_TEST_TARGETS})
     target_precompile_headers(${tgt} REUSE_FROM voidfall_engine_core)
@@ -222,4 +226,5 @@ add_test(NAME AudioSystemTests COMMAND test_audio_system)
 add_test(NAME CombatOmniAITests COMMAND test_combat_omni_ai)
 add_test(NAME GameplayMechanicsTests COMMAND test_gameplay_mechanics)
 add_test(NAME SpawnSafetyTests COMMAND test_spawn_safety)
+add_test(NAME LoadAndStressTests COMMAND test_load_and_stress)
 

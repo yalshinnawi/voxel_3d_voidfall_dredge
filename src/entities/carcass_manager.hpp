@@ -55,8 +55,8 @@ public:
     /// Step carcass physics (gravity, collision with world voxels, settling, and dissolver fade)
     void update(float dt, World& world);
 
-    /// Attempt to harvest carcass with mining drill (Tool Slot 1).
-    /// Returns true if harvest was successful, yields +1-2 Chitinous Carapace / Biomass.
+    /// Monsters and carcasses cannot be mined for chitin with the drill.
+    /// Always returns false, preserving carcasses without yielding chitin drops.
     bool harvest_nearest(
         const glm::vec3& origin,
         float radius,

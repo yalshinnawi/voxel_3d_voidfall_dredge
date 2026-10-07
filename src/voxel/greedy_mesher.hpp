@@ -32,13 +32,6 @@ public:
         return is_face_visible(chunk, get_neighbor, x, y, z, nx, ny, nz);
     }
 
-private:
-    static Voxel sample_voxel(
-        const Chunk& chunk,
-        const NeighborChunkGetter& get_neighbor,
-        int x, int y, int z
-    );
-
     // Vertex Ambient Occlusion (returns 0..3)
     // 0 = fully occluded corner (darkest)
     // 3 = unoccluded corner (brightest)
@@ -46,6 +39,13 @@ private:
         bool side1_solid,
         bool side2_solid,
         bool corner_solid
+    );
+
+private:
+    static Voxel sample_voxel(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor,
+        int x, int y, int z
     );
 };
 

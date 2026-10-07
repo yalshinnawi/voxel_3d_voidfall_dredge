@@ -1606,6 +1606,83 @@ static void RoundSpawnShootingPauseAndInputDischargePreventionTest() {
     std::cout << "[ OK ] RoundSpawnShootingPauseAndInputDischargePreventionTest (round start pause and LMB release check prevent accidental discharge when opening levels)" << std::endl;
 }
 
+// ─── TEST 20: Scope Aperture, FOV Magnification & Sightline Clearance ────────
+void ScopeApertureAndOpticalVisibilityTest() {
+    std::cout << "[TEST 20] Scope Aperture, FOV Magnification & Line of Sight Clearance..." << std::endl;
+
+    World world;
+    // Clear air corridor
+    for (int z = 0; z <= 20; ++z) {
+        for (int y = 1; y <= 5; ++y) {
+            world.set_voxel(0, y, z, {MAT_AIR, 0}, false);
+        }
+    }
+    // Target voxel at (0, 2, 20)
+    world.set_voxel(0, 2, 20, {MAT_TITANIUM, 0}, false);
+
+    PlayerController player(glm::vec3(0.0f, 1.65f, 0.0f));
+
+    // 1. Scout Needler Railgun: 4.0x Sniper Scope Magnification
+    player.set_character_class(CharacterClass::Scout);
+    player.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_EQ(player.weapon_archetype(), WeaponArchetype::NeedlerRailgun);
+    ASSERT_EQ(player.zoom_progress(), 0.0f);
+    ASSERT_NEAR(player.current_fov(75.0f), 75.0f, 0.01f);
+
+    player.set_aiming(true);
+    player.Update(0.25f);
+    ASSERT_NEAR(player.zoom_progress(), 1.0f, 0.01f);
+    // Magnification: 0.25x FOV multiplier (18.75 deg)
+    float scout_fov = player.current_fov(75.0f);
+    ASSERT_NEAR(scout_fov, 75.0f * 0.25f, 0.01f);
+
+    // Aim directly at target center voxel
+    glm::vec3 target_center(0.5f, 2.5f, 20.5f);
+    glm::vec3 aim_dir = glm::normalize(target_center - player.eye_position());
+    player.set_direction(aim_dir);
+    RaycastHit hit_rail = player.QueryRaycastTarget(world, 30.0f);
+    ASSERT_TRUE(hit_rail.hit);
+    ASSERT_EQ(hit_rail.block_pos, glm::ivec3(0, 2, 20));
+
+    // 2. Demolitionist Magma Scattergun: 1.5x Thermal Optic
+    player.set_aiming(false);
+    player.Update(0.25f);
+    player.set_character_class(CharacterClass::Demolitionist);
+    player.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_EQ(player.weapon_archetype(), WeaponArchetype::MagmaScattergun);
+
+    player.set_aiming(true);
+    player.Update(0.25f);
+    ASSERT_NEAR(player.zoom_progress(), 1.0f, 0.01f);
+    float demo_fov = player.current_fov(75.0f);
+    ASSERT_NEAR(demo_fov, 75.0f * 0.65f, 0.01f);
+
+    player.set_direction(aim_dir);
+    RaycastHit hit_scatter = player.QueryRaycastTarget(world, 30.0f);
+    ASSERT_TRUE(hit_scatter.hit);
+    ASSERT_EQ(hit_scatter.block_pos, glm::ivec3(0, 2, 20));
+
+    // 3. Vanguard Plasma Carbine: 2.0x Reflex Optic
+    player.set_aiming(false);
+    player.Update(0.25f);
+    player.set_character_class(CharacterClass::Vanguard);
+    player.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_EQ(player.weapon_archetype(), WeaponArchetype::PlasmaCarbine);
+
+    player.set_aiming(true);
+    player.Update(0.25f);
+    ASSERT_NEAR(player.zoom_progress(), 1.0f, 0.01f);
+    float carb_fov = player.current_fov(75.0f);
+    ASSERT_NEAR(carb_fov, 75.0f * 0.50f, 0.01f);
+
+    player.set_direction(aim_dir);
+    RaycastHit hit_carb = player.QueryRaycastTarget(world, 30.0f);
+    ASSERT_TRUE(hit_carb.hit);
+    ASSERT_EQ(hit_carb.block_pos, glm::ivec3(0, 2, 20));
+
+    std::cout << "[ OK ] ScopeApertureAndOpticalVisibilityTest (magnification ratios, unobstructed sightlines, and raycasts align across all weapon classes)" << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -1630,9 +1707,10 @@ int main() {
     EnemyAttackBloodSplatterAndFallDamageBoneCrackTest_BloodSplatterIsolationAndFallBoneCrackMechanics();
     WeaponZoomAndFireMechanicsTest();
     RoundSpawnShootingPauseAndInputDischargePreventionTest();
+    ScopeApertureAndOpticalVisibilityTest();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 19 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 20 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

@@ -59,7 +59,7 @@ void Chunk::set_voxel_idx(size_t idx, Voxel v) {
 void Chunk::stage_mesh(std::vector<PackedVoxelVertex>&& vertices) {
     std::lock_guard<std::mutex> lock(m_stage_mutex);
     m_staged_vertices = std::move(vertices);
-    m_has_staged_mesh = true;
+    m_has_staged_mesh.store(true, std::memory_order_release);
     clear_mesh_dirty();
 }
 
@@ -67,9 +67,9 @@ void Chunk::upload_mesh() {
     std::vector<PackedVoxelVertex> local_mesh;
     {
         std::lock_guard<std::mutex> lock(m_stage_mutex);
-        if (!m_has_staged_mesh) return;
+        if (!m_has_staged_mesh.load(std::memory_order_acquire)) return;
         local_mesh = std::move(m_staged_vertices);
-        m_has_staged_mesh = false;
+        m_has_staged_mesh.store(false, std::memory_order_release);
     }
 
     if (!m_gpu_initialized) {

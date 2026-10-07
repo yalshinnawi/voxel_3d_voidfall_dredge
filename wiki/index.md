@@ -34,6 +34,7 @@ Welcome to the central design, mechanics, and systems knowledge base for **Voidf
 - **[Player Controller](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/README.md)**: Movement, grapple hook, thruster jetpack, class archetypes.
 - **[Multiplayer Networking](file:///d:/Projects/voxel_3d_voidfall_dredge/src/net/README.md)**: UDP packets, deterministic seeds, delta block sync.
 - **[Audio Engine & Ear Safety](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/systems/audio_engine.md)**: 3D spatialization, procedural synthesis, 5-stage ear safety mastering chain.
+- **[Performance, Load Scaling & Anti-Clipping](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/systems/performance_and_load.md)**: View-frustum culling, chunk bounding, simulation spiral-of-death guard, audio thread starvation defense, and AI hysteresis.
 - **[User Interface & Menus](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/README.md)**: Orbital hub, HUD, debrief, bitmap font renderer.
 
 ---

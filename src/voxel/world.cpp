@@ -267,6 +267,10 @@ const Chunk* World::get_chunk(const ChunkPos& pos) const {
 }
 
 Chunk* World::get_or_create_chunk(const ChunkPos& pos) {
+    if (pos.y < 0 || pos.y > 16) {
+        return nullptr;
+    }
+
     std::lock_guard<std::mutex> lock(m_world_mutex);
     auto it = m_chunks.find(pos);
     if (it != m_chunks.end()) {
@@ -604,6 +608,11 @@ void World::worker_thread_loop() {
 }
 
 void World::update(const glm::vec3& viewer_pos, int render_distance) {
+    int max_cx = m_level_gen ? ((m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 8;
+    int max_cy = std::max((m_chunk_ceiling + CHUNK_SIZE - 1) / CHUNK_SIZE,
+                          m_level_gen ? ((m_level_gen->world_height() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 1);
+    int max_cz = m_level_gen ? ((m_level_gen->world_depth() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 8;
+
     ChunkPos center{
         floor_div(static_cast<int>(viewer_pos.x), CHUNK_SIZE),
         floor_div(static_cast<int>(viewer_pos.y), CHUNK_SIZE),
@@ -611,10 +620,18 @@ void World::update(const glm::vec3& viewer_pos, int render_distance) {
     };
 
     for (int dz = -render_distance; dz <= render_distance; ++dz) {
-        for (int dy = -1; dy <= 1; ++dy) {
+        int cz = center.z + dz;
+        if (cz < 0 || cz >= max_cz) continue;
+
+        for (int dy = -render_distance; dy <= render_distance; ++dy) {
+            int cy = center.y + dy;
+            if (cy < 0 || cy >= max_cy) continue;
+
             for (int dx = -render_distance; dx <= render_distance; ++dx) {
-                ChunkPos p{center.x + dx, center.y + dy, center.z + dz};
-                get_or_create_chunk(p);
+                int cx = center.x + dx;
+                if (cx < 0 || cx >= max_cx) continue;
+
+                get_or_create_chunk(ChunkPos{cx, cy, cz});
             }
         }
     }
@@ -623,7 +640,9 @@ void World::update(const glm::vec3& viewer_pos, int render_distance) {
 void World::upload_dirty_chunks() {
     std::lock_guard<std::mutex> lock(m_world_mutex);
     for (auto& [pos, chunk] : m_chunks) {
-        chunk->upload_mesh();
+        if (chunk && chunk->has_staged_mesh()) {
+            chunk->upload_mesh();
+        }
     }
 }
 

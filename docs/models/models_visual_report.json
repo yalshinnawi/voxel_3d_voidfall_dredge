@@ -6,9 +6,9 @@
     {
       "slot": 0,
       "model_label": "VOID STALKER",
-      "timestamp": "2026-10-06 16:11:46",
+      "timestamp": "2026-10-07 09:29:05",
       "master_file": "docs/models/enemy_void_stalker.png",
-      "mean_luminance": 0.192116,
+      "mean_luminance": 0.194596,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -16,9 +16,9 @@
     {
       "slot": 1,
       "model_label": "SEISMIC BURROWER",
-      "timestamp": "2026-10-06 16:11:47",
+      "timestamp": "2026-10-07 09:29:05",
       "master_file": "docs/models/enemy_seismic_burrower.png",
-      "mean_luminance": 0.193673,
+      "mean_luminance": 0.159867,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -26,9 +26,9 @@
     {
       "slot": 2,
       "model_label": "MINING DRILL RIG",
-      "timestamp": "2026-10-06 16:11:47",
+      "timestamp": "2026-10-07 09:29:05",
       "master_file": "docs/models/system_viewmodel_drill.png",
-      "mean_luminance": 0.187063,
+      "mean_luminance": 0.175043,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -36,9 +36,9 @@
     {
       "slot": 3,
       "model_label": "KAELEN (DEMOLITIONIST)",
-      "timestamp": "2026-10-06 16:11:47",
+      "timestamp": "2026-10-07 09:29:05",
       "master_file": "docs/models/character_demolitionist_kaelen.png",
-      "mean_luminance": 0.179279,
+      "mean_luminance": 0.171986,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -46,9 +46,9 @@
     {
       "slot": 4,
       "model_label": "RHODES (VANGUARD)",
-      "timestamp": "2026-10-06 16:11:47",
+      "timestamp": "2026-10-07 09:29:05",
       "master_file": "docs/models/character_vanguard_rhodes.png",
-      "mean_luminance": 0.174014,
+      "mean_luminance": 0.166847,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -56,9 +56,9 @@
     {
       "slot": 5,
       "model_label": "VESPER (SCOUT)",
-      "timestamp": "2026-10-06 16:11:47",
+      "timestamp": "2026-10-07 09:29:06",
       "master_file": "docs/models/character_scout_vesper.png",
-      "mean_luminance": 0.166539,
+      "mean_luminance": 0.158725,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"

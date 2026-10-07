@@ -205,6 +205,10 @@ private:
     int m_sector{1};
     float m_brightness{1.0f};
     float m_headlamp_flicker{0.0f};
+
+    // Camera frustum culling
+    std::array<glm::vec4, 6> m_frustum_planes{};
+    bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
 };
 
 } // namespace Voidfall
