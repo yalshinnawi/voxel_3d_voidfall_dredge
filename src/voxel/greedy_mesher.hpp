@@ -21,6 +21,20 @@ public:
         return generate_mesh(chunk, get_neighbor);
     }
 
+    // Dedicated liquid and waterlogged sub-block meshing pass
+    static void mesh_liquid_pass(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor,
+        std::vector<PackedVoxelVertex>& vertices
+    );
+    static inline void MeshLiquidPass(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor,
+        std::vector<PackedVoxelVertex>& vertices
+    ) {
+        mesh_liquid_pass(chunk, get_neighbor, vertices);
+    }
+
     // Queries face visibility between adjacent voxels.
     // If neighbor chunk is unloaded, treats boundary block as SOLID (MAT_GRANITE) to prevent void leaks.
     static bool is_face_visible(

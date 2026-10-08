@@ -2,6 +2,29 @@
 
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
+## 2026-10-08
+- **Optimized Event-Driven Liquid Physics, Sub-Block Waterlogging & Slope Conformance (`src/voxel/`, `src/graphics/`, `src/player/`)**:
+  - **Liquid Metadata & Waterlogging Allocation (`src/voxel/chunk.hpp`, `src/voxel/voxel_types.hpp`, `src/voxel/packed_vertex.hpp`)**:
+    - Allocated bit 2 (`0x04`) in `flags_and_damage` as `VOXEL_FLAG_WATERLOGGED`.
+    - Pure liquid blocks (`MAT_WATER`, `MAT_ACID`, `MAT_COOLANT`) use bits `[2:0]` (`VOXEL_FLUID_LEVEL_MASK`) to encode fluid levels 1 to 5 (5 = full/source block, 1 = shallow terminal trickle).
+    - Added helper methods `IsLiquid()`, `IsWaterlogged()`, `SetWaterlogged()`, `fluid_level()`, and `set_fluid_level()`.
+  - **Active Queue & Event-Driven Cellular Automaton (`src/voxel/fluid_sim.hpp`, `src/voxel/fluid_sim.cpp`, `src/voxel/world.cpp`)**:
+    - Implemented active double-ended queue `std::deque<glm::ivec3> m_activeFluids` with `std::unordered_set<uint64_t> m_activeFluidSet` for $O(1)$ spatial coordinate deduplication via `FluidSim::PackPos`.
+    - Completely eliminates CPU simulation overhead for settled lakes and enclosed pools (0 ticks while asleep).
+    - Wake-up hooks integrated in `World::DestroyBlock` and `World::set_voxel`: whenever a block is broken or becomes `MAT_AIR`, orthogonal neighbors are inspected and wake adjacent fluids automatically into the active queue.
+    - Fixed-rate 12 Hz simulation tick with `MAX_FLUID_STEPS_PER_TICK = 192` prevents frame spikes during large cavern reservoir breaches.
+    - Automaton rules: pure downward gravity without lateral spreading while falling, horizontal spreading with linear level decay ($L - 1$) terminating at $L = 1$, and sub-block ramp/slab waterlogging with downhill cascade.
+  - **Greedy Mesher Slope & Sub-Block Conformance (`src/voxel/greedy_mesher.cpp`, `assets/shaders/voxel_pbr.vert`)**:
+    - Dedicated `MeshLiquidPass` handling pure liquids, waterlogged slabs, and waterlogged ramps with neighbor face culling against identical fluids.
+    - Waterlogged slabs (`SHAPE_SLAB_BOTTOM` + `VOXEL_FLAG_WATERLOGGED`) render a top liquid plane at $Y = 0.5\text{m}$.
+    - Waterlogged ramps (`SHAPE_RAMP_*` + `VOXEL_FLAG_WATERLOGGED`) render a $45^\circ$ diagonal liquid plane offset by $+0.04\text{m}$ (via vertex bit 27 `water_offset` unpacked in vertex shader) to eliminate Z-fighting against the underlying rock ramp geometry.
+    - Vertical sealing quads eliminate air voids adjacent to ramp boundaries.
+  - **Engine Performance & Meshing Guardrails (`src/voxel/world.cpp`)**:
+    - Chunks modified during fluid ticks are gathered in `m_fluidDirtyChunks` and marked dirty at tick completion to avoid duplicate re-meshing requests.
+    - Enforced `MAX_CHUNK_UPLOADS_PER_FRAME = 2` GPU upload budget to guarantee smooth 60+ FPS pacing.
+  - **Player Controller Submersion Integration (`src/player/controller.cpp`)**:
+    - Updated underfoot wading and bounding box submersion checks to detect `is_waterlogged()` ramps and slabs and evaluate partial immersion depth from fluid levels.
+
 ## 2026-10-07
 - **Smooth Ramp Traversal Physics & Slope Normal Projection (`src/player/controller.cpp`, `src/player/controller.hpp`)**:
   - **Step-Up & Ramp Motion**:

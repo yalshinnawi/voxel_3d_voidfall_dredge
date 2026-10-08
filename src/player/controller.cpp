@@ -493,10 +493,16 @@ void PlayerController::update_physics(float dt, World& world) {
                 Voxel v = world.get_voxel(x, y, z);
                 if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
                     in_lava = true;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y + 1));
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT) {
                     in_water = true;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y + 1));
+                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
+                } else if (v.is_waterlogged()) {
+                    in_water = true;
+                    float surf = (v.shape() == SHAPE_SLAB_BOTTOM) ? 0.5f : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + surf);
                 }
             }
         }
@@ -510,10 +516,16 @@ void PlayerController::update_physics(float dt, World& world) {
                 Voxel v = world.get_voxel(x, foot_y, z);
                 if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
                     in_lava = true;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y + 1));
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT) {
                     in_water = true;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y + 1));
+                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
+                } else if (v.is_waterlogged()) {
+                    in_water = true;
+                    float surf = (v.shape() == SHAPE_SLAB_BOTTOM) ? 0.5f : 1.0f;
+                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + surf);
                 }
             }
         }

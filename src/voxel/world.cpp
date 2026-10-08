@@ -1,5 +1,6 @@
 #include "world.hpp"
 #include "structural_check.hpp"
+#include "fluid_sim.hpp"
 #include <glm/gtc/matrix_access.hpp>
 #include <cmath>
 #include <iostream>
@@ -404,6 +405,13 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
         } else if (!old_is_rad && new_is_rad) {
             m_radioactive_sources.push_back(glm::ivec3(world_x, world_y, world_z));
         }
+    }
+
+    // Event-Driven Fluid Wake-Up Hooks:
+    if (v.material_id == MAT_AIR) {
+        check_wake_fluid_around(glm::ivec3(world_x, world_y, world_z));
+    } else if (IsLiquid(v.material_id) || v.is_waterlogged()) {
+        WakeFluid(glm::ivec3(world_x, world_y, world_z));
     }
 
     queue_chunk_for_meshing(cpos);
@@ -1451,6 +1459,131 @@ void World::update_debris(float dt, const glm::vec3& player_pos, bool is_player_
         }
     }
     EntityManager::active_debris_count = m_debris.size();
+}
+
+bool World::DestroyBlock(const glm::ivec3& pos) {
+    bool broke = break_voxel(pos.x, pos.y, pos.z);
+    if (!broke) {
+        set_voxel(pos.x, pos.y, pos.z, Voxel{MAT_AIR, 0}, true);
+        broke = true;
+    }
+    check_wake_fluid_around(pos);
+    return broke;
+}
+
+void World::WakeFluid(const glm::ivec3& pos) {
+    uint64_t key = FluidSim::PackPos(pos);
+    if (m_activeFluidSet.insert(key).second) {
+        m_activeFluids.push_back(pos);
+    }
+}
+
+void World::check_wake_fluid_around(const glm::ivec3& pos) {
+    static const glm::ivec3 NEIGHBORS_6[6] = {
+        glm::ivec3(1, 0, 0), glm::ivec3(-1, 0, 0),
+        glm::ivec3(0, 1, 0), glm::ivec3(0, -1, 0),
+        glm::ivec3(0, 0, 1), glm::ivec3(0, 0, -1)
+    };
+    for (const auto& offset : NEIGHBORS_6) {
+        glm::ivec3 np = pos + offset;
+        Voxel nv = get_voxel(np.x, np.y, np.z);
+        if (IsLiquid(nv.material_id) || nv.is_waterlogged()) {
+            WakeFluid(np);
+        }
+    }
+}
+
+void World::set_fluid_cell(const glm::ivec3& pos, uint8_t mat, uint8_t level, bool is_waterlogged) {
+    int cx = floor_div(pos.x, CHUNK_SIZE);
+    int cy = floor_div(pos.y, CHUNK_SIZE);
+    int cz = floor_div(pos.z, CHUNK_SIZE);
+    ChunkPos cpos{cx, cy, cz};
+    Chunk* chunk = get_or_create_chunk(cpos);
+    if (!chunk) return;
+
+    int lx = floor_mod(pos.x, CHUNK_SIZE);
+    int ly = floor_mod(pos.y, CHUNK_SIZE);
+    int lz = floor_mod(pos.z, CHUNK_SIZE);
+
+    Voxel v;
+    v.material_id = mat;
+    v.flags_and_damage = (level & 0x07);
+    if (is_waterlogged) {
+        v.flags_and_damage |= VOXEL_FLAG_WATERLOGGED;
+    }
+    chunk->set_voxel(lx, ly, lz, v);
+
+    // Mesher Throttling: collect modified chunks in m_fluidDirtyChunks
+    m_fluidDirtyChunks.insert(chunk);
+    if (lx == 0)              { Chunk* c = get_chunk(ChunkPos{cx - 1, cy, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lx == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx + 1, cy, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (ly == 0)              { Chunk* c = get_chunk(ChunkPos{cx, cy - 1, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (ly == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx, cy + 1, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lz == 0)              { Chunk* c = get_chunk(ChunkPos{cx, cy, cz - 1}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lz == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx, cy, cz + 1}); if (c) m_fluidDirtyChunks.insert(c); }
+}
+
+void World::set_waterlogged_cell(const glm::ivec3& pos, bool state) {
+    int cx = floor_div(pos.x, CHUNK_SIZE);
+    int cy = floor_div(pos.y, CHUNK_SIZE);
+    int cz = floor_div(pos.z, CHUNK_SIZE);
+    ChunkPos cpos{cx, cy, cz};
+    Chunk* chunk = get_or_create_chunk(cpos);
+    if (!chunk) return;
+
+    int lx = floor_mod(pos.x, CHUNK_SIZE);
+    int ly = floor_mod(pos.y, CHUNK_SIZE);
+    int lz = floor_mod(pos.z, CHUNK_SIZE);
+
+    chunk->SetWaterlogged(lx, ly, lz, state);
+
+    m_fluidDirtyChunks.insert(chunk);
+    if (lx == 0)              { Chunk* c = get_chunk(ChunkPos{cx - 1, cy, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lx == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx + 1, cy, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (ly == 0)              { Chunk* c = get_chunk(ChunkPos{cx, cy - 1, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (ly == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx, cy + 1, cz}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lz == 0)              { Chunk* c = get_chunk(ChunkPos{cx, cy, cz - 1}); if (c) m_fluidDirtyChunks.insert(c); }
+    if (lz == CHUNK_SIZE - 1) { Chunk* c = get_chunk(ChunkPos{cx, cy, cz + 1}); if (c) m_fluidDirtyChunks.insert(c); }
+}
+
+void World::flush_fluid_dirty_chunks() {
+    for (Chunk* c : m_fluidDirtyChunks) {
+        if (c) {
+            c->mark_mesh_dirty();
+            queue_chunk_for_meshing(c->get_pos());
+        }
+    }
+    m_fluidDirtyChunks.clear();
+}
+
+void World::SimulateFluidCell(const glm::ivec3& pos) {
+    FluidSim::SimulateFluidCell(*this, pos);
+}
+
+void World::update_fluids(float dt) {
+    m_fluidAccumulator += dt;
+    if (m_fluidAccumulator > 0.5f) {
+        m_fluidAccumulator = 0.5f; // Prevent spiral of death
+    }
+
+    constexpr float FLUID_TICK_RATE = 12.0f;
+    constexpr float FLUID_STEP_DT = 1.0f / FLUID_TICK_RATE; // ~0.08333f (12 Hz)
+    constexpr int MAX_FLUID_STEPS_PER_TICK = 192;
+
+    while (m_fluidAccumulator >= FLUID_STEP_DT) {
+        m_fluidAccumulator -= FLUID_STEP_DT;
+
+        int stepsProcessed = 0;
+        while (!m_activeFluids.empty() && stepsProcessed < MAX_FLUID_STEPS_PER_TICK) {
+            glm::ivec3 pos = m_activeFluids.front();
+            m_activeFluids.pop_front();
+            m_activeFluidSet.erase(FluidSim::PackPos(pos));
+            SimulateFluidCell(pos);
+            stepsProcessed++;
+        }
+
+        flush_fluid_dirty_chunks();
+    }
 }
 
 } // namespace Voidfall

@@ -5,7 +5,11 @@ namespace Voidfall {
 
 constexpr uint8_t VOXEL_FLAG_PLAYER_PLACED = 0x80;
 constexpr uint8_t VOXEL_SHAPE_MASK         = 0x78; // Bits 3, 4, 5, 6
+constexpr uint8_t VOXEL_FLAG_WATERLOGGED   = 0x04; // Set when liquid occupies a slab or ramp
 constexpr uint8_t VOXEL_DAMAGE_MASK        = 0x07; // Bits 0, 1, 2
+constexpr uint8_t VOXEL_FLUID_LEVEL_MASK   = 0x07; // Bits 0, 1, 2: fluid level [1..5]
+constexpr uint8_t VOXEL_FLUID_LEVEL_SOURCE = 5;
+constexpr uint8_t VOXEL_FLUID_LEVEL_MIN    = 1;
 
 enum VoxelShape : uint8_t {
     SHAPE_CUBE            = 0x00, // Standard 1x1x1 cube

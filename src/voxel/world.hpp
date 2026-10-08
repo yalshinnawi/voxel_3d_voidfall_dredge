@@ -13,6 +13,7 @@
 #include <functional>
 #include <thread>
 #include <queue>
+#include <deque>
 #include <condition_variable>
 #include <mutex>
 #include <atomic>
@@ -123,6 +124,7 @@ public:
     bool is_liquid(int world_x, int world_y, int world_z) const;
     bool IsLiquid(const glm::ivec3& pos) const { return is_liquid(pos); }
     bool IsLiquid(int world_x, int world_y, int world_z) const { return is_liquid(world_x, world_y, world_z); }
+    bool IsLiquid(uint8_t mat) const { return Voidfall::IsLiquid(mat); }
 
     float get_highest_solid_surface(int x, int z) const;
 
@@ -236,7 +238,34 @@ public:
     void despawn_or_revoxelize_oldest_debris(bool force_revoxelize = false);
     void remove_destroyed_debris();
     void update_debris(float dt, const glm::vec3& player_pos = glm::vec3(-9999.0f), bool is_player_sheltered = false);
-    void Update(float dt) { update_debris(dt); }
+
+    // Event-Driven Fluid Simulation Engine (Active Queue Architecture)
+    std::deque<glm::ivec3> m_activeFluids;
+    std::unordered_set<uint64_t> m_activeFluidSet;
+    float m_fluidAccumulator{0.0f};
+    std::unordered_set<Chunk*> m_fluidDirtyChunks;
+
+    void WakeFluid(const glm::ivec3& pos);
+    void wake_fluid(const glm::ivec3& pos) { WakeFluid(pos); }
+    void check_wake_fluid_around(const glm::ivec3& pos);
+
+    void set_fluid_cell(const glm::ivec3& pos, uint8_t mat, uint8_t level, bool is_waterlogged = false);
+    void set_waterlogged_cell(const glm::ivec3& pos, bool state);
+    void flush_fluid_dirty_chunks();
+    void update_fluids(float dt);
+    void UpdateFluids(float dt) { update_fluids(dt); }
+
+    void SimulateFluidCell(const glm::ivec3& pos);
+
+    size_t active_fluid_count() const { return m_activeFluids.size(); }
+    size_t ActiveFluidCount() const { return active_fluid_count(); }
+
+    bool DestroyBlock(const glm::ivec3& pos);
+
+    void Update(float dt) {
+        update_debris(dt);
+        update_fluids(dt);
+    }
 
 private:
     void generate_chunk_terrain(Chunk& chunk);

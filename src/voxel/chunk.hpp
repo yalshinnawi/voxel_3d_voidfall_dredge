@@ -102,6 +102,19 @@ public:
     inline VoxelShape get_shape(int x, int y, int z) const { return GetShape(x, y, z); }
     inline void set_shape(int x, int y, int z, VoxelShape shape) { SetShape(x, y, z, shape); }
 
+    inline bool IsLiquid(uint8_t mat) const {
+        return mat == MAT_WATER || mat == MAT_ACID || mat == MAT_COOLANT;
+    }
+    inline bool IsWaterlogged(int x, int y, int z) const {
+        return (GetFlags(x, y, z) & VOXEL_FLAG_WATERLOGGED) != 0;
+    }
+    inline void SetWaterlogged(int x, int y, int z, bool state) {
+        uint8_t flags = GetFlags(x, y, z);
+        SetFlags(x, y, z, state ? (flags | VOXEL_FLAG_WATERLOGGED) : (flags & ~VOXEL_FLAG_WATERLOGGED));
+    }
+    inline bool is_waterlogged(int x, int y, int z) const { return IsWaterlogged(x, y, z); }
+    inline void set_waterlogged(int x, int y, int z, bool state) { SetWaterlogged(x, y, z, state); }
+
     inline Voxel get_voxel_idx(size_t idx) const {
         if (idx < m_voxels.size()) {
             return m_voxels[idx];

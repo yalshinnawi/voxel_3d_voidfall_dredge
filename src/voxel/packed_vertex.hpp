@@ -35,6 +35,8 @@ constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
 constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
 constexpr uint8_t MAT_WATER = MAT_CRYSTAL_AQUIFER;
 constexpr uint8_t MAT_AQUIFER = MAT_CRYSTAL_AQUIFER;
+constexpr uint8_t MAT_COOLANT = MAT_CRYSTAL_AQUIFER;
+constexpr uint8_t MAT_ACID = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_FLORA = MAT_BIOLUMINESCENT_FLORA;
 constexpr uint8_t MAT_MOSS = MAT_BIOLUMINESCENT_FLORA;
 constexpr uint8_t MAT_CRYSTAL = MAT_PRISMATIC_CRYSTAL;
@@ -43,6 +45,10 @@ constexpr uint8_t MAT_MOLTEN_MAGMA = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_LAVA = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_SPIKES = MAT_OBSIDIAN_SPIKES;
 constexpr uint8_t MAT_PRECURSOR_STONE = MAT_DREDGE_BEDROCK;
+
+inline bool IsLiquid(uint8_t mat) {
+    return mat == MAT_WATER || mat == MAT_ACID || mat == MAT_COOLANT || mat == MAT_THERMITE_SLAG || mat == MAT_CRYSTAL_AQUIFER;
+}
 
 // Voxel bit flags
 constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;
@@ -54,7 +60,8 @@ constexpr uint8_t VOXEL_FLAG_SURVEYED      = 0x40;
 struct Voxel {
     uint8_t material_id{MAT_AIR};
     // Flags:
-    // bit 0-3: Damage tier (0..15)
+    // bit 0-2: Damage tier (0..7) or fluid level (1..5)
+    // bit 2:   Waterlogged flag (0x04) when occupied by liquid on slab/ramp
     // bit 4:   Anchored / structural node (0x10)
     // bit 5:   Active emissive (0x20)
     // bit 6:   Surveyed / pinged highlight (0x40)
@@ -62,7 +69,20 @@ struct Voxel {
     uint8_t flags_and_damage{0};
 
     inline bool is_liquid() const {
-        return material_id == MAT_THERMITE_SLAG || material_id == MAT_CRYSTAL_AQUIFER;
+        return IsLiquid(material_id);
+    }
+    inline bool is_waterlogged() const {
+        return (flags_and_damage & VOXEL_FLAG_WATERLOGGED) != 0;
+    }
+    inline void set_waterlogged(bool w) {
+        if (w) flags_and_damage |= VOXEL_FLAG_WATERLOGGED;
+        else   flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
+    }
+    inline uint8_t fluid_level() const {
+        return flags_and_damage & VOXEL_FLUID_LEVEL_MASK;
+    }
+    inline void set_fluid_level(uint8_t lvl) {
+        flags_and_damage = (flags_and_damage & ~VOXEL_FLUID_LEVEL_MASK) | (lvl & VOXEL_FLUID_LEVEL_MASK);
     }
     inline bool is_solid() const {
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE && !is_liquid();
@@ -137,7 +157,8 @@ struct PackedVoxelVertex {
     // [14..17] damage_tier (4 bits: 0..15 crack overlay)
     // [18..25] emission_intensity (8 bits: 0..255)
     // [26]     sub_y_half (1 bit: 0 or 1, offsets Y by -0.5 for half-slabs)
-    // [27..31] reserved / extra
+    // [27]     water_slope_offset (1 bit: offsets Y by +0.04 for sloped water surface)
+    // [28..31] reserved / extra
     uint32_t data1;
 
     static inline PackedVoxelVertex encode(
@@ -145,7 +166,7 @@ struct PackedVoxelVertex {
         uint32_t normal_idx, uint32_t ao, uint32_t tex_layer,
         uint32_t u_dim, uint32_t v_dim, uint32_t corner_idx,
         uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0,
-        uint32_t sub_y_half = 0
+        uint32_t sub_y_half = 0, uint32_t water_offset = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
@@ -161,13 +182,14 @@ struct PackedVoxelVertex {
                   ((corner_idx & 0x3u) << 12) |
                   ((damage & 0xFu) << 14) |
                   ((emission & 0xFFu) << 18) |
-                  ((sub_y_half & 0x1u) << 26);
+                  ((sub_y_half & 0x1u) << 26) |
+                  ((water_offset & 0x1u) << 27);
         return v;
     }
 
     inline glm::vec3 position() const {
         float px = static_cast<float>(data0 & 0x3Fu);
-        float py = static_cast<float>((data0 >> 6) & 0x3Fu) - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f);
+        float py = static_cast<float>((data0 >> 6) & 0x3Fu) - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f) + (((data1 >> 27) & 0x1u) ? 0.04f : 0.0f);
         float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
         return glm::vec3(px, py, pz);
     }

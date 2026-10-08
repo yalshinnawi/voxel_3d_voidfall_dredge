@@ -59,7 +59,8 @@ void main() {
     // Unpack data0: 8 bytes bitfield
     float localX = float(d0 & 0x3Fu);
     uint subYHalf = (d1 >> 26u) & 0x1u;
-    float localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5;
+    uint slopeWaterOffset = (d1 >> 27u) & 0x1u;
+    float localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04;
     float localZ = float((d0 >> 12u) & 0x3Fu);
     uint normIdx = (d0 >> 18u) & 0x7u;
     uint aoIdx   = (d0 >> 21u) & 0x3u;

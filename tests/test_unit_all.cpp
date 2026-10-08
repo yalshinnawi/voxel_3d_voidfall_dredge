@@ -11,6 +11,7 @@
 #include "../src/voxel/world.hpp"
 #include "../src/voxel/structural_check.hpp"
 #include "../src/voxel/greedy_mesher.hpp"
+#include "../src/voxel/fluid_sim.hpp"
 #include "../src/player/character_class.hpp"
 #include "../src/player/upgrades.hpp"
 #include "../src/player/loadout.hpp"
@@ -2218,6 +2219,181 @@ void test_clustered_forward_lighting() {
     log_pass("Fragment Shader Per-Pixel Lighting Loop Capped at MAX_LIGHTS_PER_CLUSTER (64)");
 }
 
+// ─────────────────────────────────────────────────────────────
+// 18. CELLULAR AUTOMATON FLUID SIMULATION & SLOPE CONFORMANCE
+// ─────────────────────────────────────────────────────────────
+void test_cellular_fluid_simulation() {
+    std::cout << "\n=== [MODULE 18] Cellular Automaton Fluid Simulation & Slope Conformance ===" << std::endl;
+
+    // 1. Metadata and Waterlogging Flags
+    TEST_CHECK(VOXEL_FLAG_WATERLOGGED == 0x04, "Waterlogged flag bit must be 0x04");
+    TEST_CHECK(VOXEL_FLUID_LEVEL_MASK == 0x07, "Fluid level mask must be 0x07");
+    TEST_CHECK(IsLiquid(MAT_WATER), "MAT_WATER must be liquid");
+    TEST_CHECK(IsLiquid(MAT_ACID), "MAT_ACID must be liquid");
+    TEST_CHECK(IsLiquid(MAT_COOLANT), "MAT_COOLANT must be liquid");
+    TEST_CHECK(!IsLiquid(MAT_FRACTURED_GRANITE), "Granite must not be liquid");
+    TEST_CHECK(!IsLiquid(MAT_AIR), "Air must not be liquid");
+
+    Chunk chunk(ChunkPos{0, 0, 0});
+    chunk.set_voxel(5, 5, 5, Voxel{MAT_FRACTURED_GRANITE, 0});
+    chunk.SetShape(5, 5, 5, SHAPE_RAMP_EAST);
+    TEST_CHECK(!chunk.IsWaterlogged(5, 5, 5), "Ramp must start dry");
+    chunk.SetWaterlogged(5, 5, 5, true);
+    TEST_CHECK(chunk.IsWaterlogged(5, 5, 5), "Ramp must report waterlogged");
+    chunk.SetWaterlogged(5, 5, 5, false);
+    TEST_CHECK(!chunk.IsWaterlogged(5, 5, 5), "Ramp must report dry after clearing");
+
+    Voxel liquid_vox{MAT_WATER, 0};
+    liquid_vox.set_fluid_level(5);
+    TEST_CHECK(liquid_vox.fluid_level() == 5, "Voxel fluid level must set to 5");
+    liquid_vox.set_fluid_level(2);
+    TEST_CHECK(liquid_vox.fluid_level() == 2, "Voxel fluid level must set to 2");
+    log_pass("Fluid Metadata, Waterlogging Bit 2 & 3-bit Fluid Levels (1-5)");
+
+    // 2. Downward Gravity Flow
+    World world(1337, false);
+    for (int y = 10; y <= 15; ++y) {
+        world.SetBlock(16, y, 16, MAT_AIR, 0);
+    }
+    world.SetBlock(16, 9, 16, MAT_DREDGE_BEDROCK, 0);
+    TEST_CHECK(world.ActiveFluidCount() == 0, "Undisturbed world must have 0 active fluids");
+
+    world.set_fluid_cell(glm::ivec3(16, 15, 16), MAT_WATER, 5, false);
+    world.WakeFluid(glm::ivec3(16, 15, 16));
+    TEST_CHECK(world.ActiveFluidCount() >= 1, "Waking fluid must enqueue cell");
+
+    for (int step = 0; step < 6; ++step) {
+        world.update_fluids(0.085f);
+    }
+
+    Voxel floor_liq = world.get_voxel(16, 10, 16);
+    TEST_CHECK(IsLiquid(floor_liq.material_id), "Floor cell must become liquid via downward gravity");
+    TEST_CHECK(floor_liq.fluid_level() == 5, "Falling liquid must maintain level 5");
+    log_pass("Event-Driven Downward Gravity Flow & Pure Fall Behavior");
+
+    // 3. Lateral Spreading & Level Decay (L - 1)
+    World spread_world(1337, false);
+    for (int x = 14; x <= 18; ++x) {
+        for (int z = 14; z <= 18; ++z) {
+            spread_world.SetBlock(x, 10, z, MAT_DREDGE_BEDROCK, 0);
+            spread_world.SetBlock(x, 11, z, MAT_AIR, 0);
+        }
+    }
+    spread_world.set_fluid_cell(glm::ivec3(16, 11, 16), MAT_WATER, 3, false);
+    spread_world.WakeFluid(glm::ivec3(16, 11, 16));
+    spread_world.update_fluids(0.085f);
+
+    Voxel east = spread_world.get_voxel(17, 11, 16);
+    TEST_CHECK(IsLiquid(east.material_id), "East neighbor must receive liquid");
+    TEST_CHECK(east.fluid_level() == 2, "Lateral spreading must decay level by 1 (3 -> 2)");
+
+    spread_world.update_fluids(0.085f);
+    Voxel east2 = spread_world.get_voxel(18, 11, 16);
+    TEST_CHECK(IsLiquid(east2.material_id), "Secondary spread must reach distance 2");
+    TEST_CHECK(east2.fluid_level() == 1, "Level must decay to 1 (2 -> 1)");
+
+    spread_world.update_fluids(0.085f);
+    Voxel east3 = spread_world.get_voxel(19, 11, 16);
+    TEST_CHECK(!IsLiquid(east3.material_id), "Terminal trickle level 1 must terminate spreading");
+    log_pass("Lateral Spreading with Linear Level Cascade & Shallow Boundary Clamping");
+
+    // 4. Sub-Block Waterlogging & Slope Downhill Conformance
+    World slope_world(1337, false);
+    slope_world.SetBlock(16, 10, 16, MAT_FRACTURED_GRANITE, 0);
+    slope_world.set_block_with_flags(glm::ivec3(16, 10, 16), MAT_FRACTURED_GRANITE, static_cast<uint8_t>(SHAPE_RAMP_EAST));
+    slope_world.SetBlock(16, 11, 16, MAT_AIR, 0);
+    slope_world.SetBlock(15, 10, 16, MAT_AIR, 0); // Open downhill space
+
+    slope_world.set_fluid_cell(glm::ivec3(16, 11, 16), MAT_WATER, 5, false);
+    slope_world.WakeFluid(glm::ivec3(16, 11, 16));
+    slope_world.update_fluids(0.085f);
+
+    Voxel ramp_vox = slope_world.get_voxel(16, 10, 16);
+    TEST_CHECK(ramp_vox.is_waterlogged(), "Ramp cell under liquid must be flagged waterlogged");
+    TEST_CHECK(ramp_vox.shape() == SHAPE_RAMP_EAST, "Waterlogged ramp must preserve geometry");
+
+    slope_world.update_fluids(0.085f);
+    Voxel downhill_vox = slope_world.get_voxel(15, 10, 16);
+    TEST_CHECK(IsLiquid(downhill_vox.material_id), "Water must flow downhill off ramp base");
+    log_pass("Sub-Block Waterlogging & Downhill Surface Flow Conformance");
+
+    // 5. Reservoir Breach & 0% CPU Sleep
+    World res_world(1337, false);
+    res_world.SetBlock(16, 9, 16, MAT_FRACTURED_GRANITE, 0);
+    res_world.SetBlock(17, 10, 16, MAT_FRACTURED_GRANITE, 0);
+    res_world.SetBlock(15, 10, 16, MAT_FRACTURED_GRANITE, 0);
+    res_world.SetBlock(16, 10, 17, MAT_FRACTURED_GRANITE, 0);
+    res_world.SetBlock(16, 10, 15, MAT_FRACTURED_GRANITE, 0);
+    res_world.SetBlock(16, 11, 16, MAT_FRACTURED_GRANITE, 0);
+    res_world.set_fluid_cell(glm::ivec3(16, 10, 16), MAT_WATER, 5, false);
+
+    res_world.m_activeFluids.clear();
+    res_world.m_activeFluidSet.clear();
+    TEST_CHECK(res_world.ActiveFluidCount() == 0, "Quiet pool must have 0 active fluids in queue");
+
+    res_world.update_fluids(0.085f);
+    TEST_CHECK(res_world.ActiveFluidCount() == 0, "Undisturbed reservoir must consume 0 CPU ticks");
+
+    res_world.DestroyBlock(glm::ivec3(17, 10, 16));
+    TEST_CHECK(res_world.ActiveFluidCount() >= 1, "Drilling retaining wall must wake dormant reservoir");
+
+    res_world.update_fluids(0.085f);
+    Voxel breach_vox = res_world.get_voxel(17, 10, 16);
+    TEST_CHECK(IsLiquid(breach_vox.material_id), "Liquid must flood excavated cavity");
+    log_pass("Zero-CPU Dormant Reservoir Sleep & Excavation Breach Wake-Up");
+
+    // 6. Greedy Mesher Slope Conformance & Bit 27 Vertex Offset
+    Chunk mesh_chunk(ChunkPos{0, 0, 0});
+    mesh_chunk.set_voxel(2, 2, 2, Voxel{MAT_FRACTURED_GRANITE, 0});
+    mesh_chunk.SetShape(2, 2, 2, SHAPE_RAMP_EAST);
+    mesh_chunk.SetWaterlogged(2, 2, 2, true);
+
+    mesh_chunk.set_voxel(4, 2, 4, Voxel{MAT_FRACTURED_GRANITE, 0});
+    mesh_chunk.SetShape(4, 2, 4, SHAPE_SLAB_BOTTOM);
+    mesh_chunk.SetWaterlogged(4, 2, 4, true);
+
+    auto mesh = GreedyMesher::generate_mesh(mesh_chunk, nullptr);
+    TEST_CHECK(!mesh.empty(), "Generated mesh must contain vertices");
+
+    bool found_ramp_plane = false;
+    bool found_slab_plane = false;
+    for (const auto& v : mesh) {
+        uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+        uint32_t norm = (v.data0 >> 18u) & 0x7u;
+        uint32_t water_offset = (v.data1 >> 27u) & 0x1u;
+        uint32_t sub_y_half = (v.data1 >> 26u) & 0x1u;
+
+        if (layer == MAT_WATER && norm == 2 && water_offset == 1) {
+            found_ramp_plane = true;
+            glm::vec3 pos = v.position();
+            TEST_CHECK(std::abs(pos.y - std::floor(pos.y) - 0.04f) < 0.01f, "Ramp liquid plane must be offset +0.04m to prevent z-fighting");
+        }
+        if (layer == MAT_WATER && norm == 2 && sub_y_half == 1 && water_offset == 0) {
+            found_slab_plane = true;
+            glm::vec3 pos = v.position();
+            TEST_CHECK(std::abs(pos.y - 2.5f) < 0.01f, "Waterlogged slab top quad must sit at Y=0.5m");
+        }
+    }
+    TEST_CHECK(found_ramp_plane, "Mesher must generate +0.04m diagonal quad for waterlogged ramp");
+    TEST_CHECK(found_slab_plane, "Mesher must generate Y=0.5m top quad for waterlogged bottom slab");
+    log_pass("Greedy Mesher Sub-Block Liquid Passes & Diagonal +0.04m Anti-Z-Fight Plane");
+
+    // 7. Player Waterlogged Immersion
+    World player_world(1337, false);
+    for (int x = 14; x <= 18; ++x) {
+        for (int z = 14; z <= 18; ++z) {
+            player_world.SetBlock(x, 10, z, MAT_FRACTURED_GRANITE, 0);
+            player_world.set_block_with_flags(glm::ivec3(x, 10, z), MAT_FRACTURED_GRANITE, static_cast<uint8_t>(SHAPE_SLAB_BOTTOM));
+            player_world.set_waterlogged_cell(glm::ivec3(x, 10, z), true);
+        }
+    }
+    PlayerController player(glm::vec3(16.0f, 10.6f, 16.0f));
+    player.update_physics(0.016f, player_world);
+    TEST_CHECK(player.is_in_liquid(), "Player wading on waterlogged slab must report in liquid");
+    TEST_CHECK(player.current_liquid_material() == MAT_CRYSTAL_AQUIFER, "Liquid material must match water/aquifer");
+    log_pass("Delver Underfoot Wading & Sub-Block Waterlogged Submersion Tracking");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE COMPREHENSIVE UNIT TEST SUITE" << std::endl;
@@ -2240,9 +2416,11 @@ int main() {
     test_flares_aberrants_and_mission_objectives();
     test_headlamp_briefing_melee_and_loot_systems();
     test_clustered_forward_lighting();
+    test_cellular_fluid_simulation();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;
     std::cout << "==========================================================" << std::endl;
     return 0;
 }
+

@@ -79,6 +79,11 @@ TESTS = {
         "target": "test_voxel_geometry",
         "exe": f"test_voxel_geometry{EXE_EXT}",
         "name": "Watertight Voxel Geometry, Topo Smoothing & Ramp Traversal (5 modules)"
+    },
+    "fluid": {
+        "target": "test_fluid_simulation",
+        "exe": f"test_fluid_simulation{EXE_EXT}",
+        "name": "Cellular Automaton Fluid Sim, Sub-Block Waterlogging & Slope Conformance (7 modules)"
     }
 }
 

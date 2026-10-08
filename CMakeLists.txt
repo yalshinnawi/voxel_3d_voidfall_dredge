@@ -73,6 +73,7 @@ set(ENGINE_CORE_SOURCES
     src/voxel/level_shapes.cpp
     src/voxel/world.cpp
     src/voxel/structural_check.cpp
+    src/voxel/fluid_sim.cpp
     src/skills/surveying.cpp
     src/systems/hazard_clock.cpp
     src/systems/extraction.cpp
@@ -197,6 +198,9 @@ target_link_libraries(test_load_and_stress PRIVATE voidfall_engine_core)
 add_executable(test_voxel_geometry tests/test_voxel_geometry.cpp)
 target_link_libraries(test_voxel_geometry PRIVATE voidfall_engine_core)
 
+add_executable(test_fluid_simulation tests/test_fluid_simulation.cpp)
+target_link_libraries(test_fluid_simulation PRIVATE voidfall_engine_core)
+
 # ── Reuse Precompiled Headers Across All Test Executables ──
 set(VOIDFALL_TEST_TARGETS
     test_progression
@@ -212,6 +216,7 @@ set(VOIDFALL_TEST_TARGETS
     test_spawn_safety
     test_load_and_stress
     test_voxel_geometry
+    test_fluid_simulation
 )
 foreach(tgt ${VOIDFALL_TEST_TARGETS})
     target_precompile_headers(${tgt} REUSE_FROM voidfall_engine_core)
@@ -232,4 +237,5 @@ add_test(NAME GameplayMechanicsTests COMMAND test_gameplay_mechanics)
 add_test(NAME SpawnSafetyTests COMMAND test_spawn_safety)
 add_test(NAME LoadAndStressTests COMMAND test_load_and_stress)
 add_test(NAME VoxelGeometryTests COMMAND test_voxel_geometry)
+add_test(NAME FluidSimulationTests COMMAND test_fluid_simulation)
 

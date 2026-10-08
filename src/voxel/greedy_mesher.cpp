@@ -169,7 +169,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         mask[mask_idx].visible = false;
 
                         Voxel current = chunk.get_voxel(x[0], x[1], x[2]);
-                        if (!current.is_renderable() || current.shape() != SHAPE_CUBE) {
+                        if (!current.is_renderable() || current.shape() != SHAPE_CUBE || current.is_liquid()) {
                             continue;
                         }
 
@@ -891,7 +891,215 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // PART 5: Dedicated Liquid & Waterlogged Sub-Block Meshing Pass
+    // ─────────────────────────────────────────────────────────────
+    mesh_liquid_pass(chunk, get_neighbor, vertices);
+
     return vertices;
+}
+
+void GreedyMesher::mesh_liquid_pass(
+    const Chunk& chunk,
+    const NeighborChunkGetter& get_neighbor,
+    std::vector<PackedVoxelVertex>& vertices
+) {
+    if (chunk.is_empty()) return;
+
+    auto emit_quad = [&](
+        const glm::ivec3& p0, const glm::ivec3& p1, const glm::ivec3& p2, const glm::ivec3& p3,
+        uint32_t norm_idx, uint32_t mat_id, uint32_t u_dim, uint32_t v_dim,
+        uint32_t damage, uint32_t emissive, uint32_t aux, uint32_t sub_y_half = 0, uint32_t water_offset = 0
+    ) {
+        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half, water_offset);
+        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half, water_offset);
+        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half, water_offset);
+        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half, water_offset);
+
+        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+    };
+
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                Voxel cur = chunk.get_voxel(x, y, z);
+                bool is_pure_liquid = cur.is_liquid();
+                bool is_waterlogged = cur.is_waterlogged();
+
+                if (!is_pure_liquid && !is_waterlogged) {
+                    continue;
+                }
+
+                // ─────────────────────────────────────────────────────────────
+                // PASS 1: PURE LIQUID BLOCKS (MAT_WATER, MAT_ACID, MAT_COOLANT)
+                // ─────────────────────────────────────────────────────────────
+                if (is_pure_liquid) {
+                    uint32_t mat_id = cur.material_id;
+                    uint32_t emissive = get_emissive_intensity(mat_id);
+                    uint32_t aux = cur.is_highlighted() ? 1 : 0;
+                    uint8_t fluid_lvl = cur.fluid_level();
+                    uint32_t top_sub_half = (fluid_lvl > 0 && fluid_lvl <= 2) ? 1 : 0;
+
+                    // 1. Top face (+Y, normal_idx = 2)
+                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                    bool top_culled = (above.material_id == cur.material_id) ||
+                                      (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
+                    if (!top_culled) {
+                        emit_quad(
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z),
+                            2, mat_id, 1, 1, 0, emissive, aux, top_sub_half
+                        );
+                    }
+
+                    // 2. Bottom face (-Y, normal_idx = 3)
+                    Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
+                    bool bottom_culled = (below.material_id == cur.material_id) ||
+                                         (below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP));
+                    if (!bottom_culled) {
+                        emit_quad(
+                            glm::ivec3(x,     y, z),
+                            glm::ivec3(x + 1, y, z),
+                            glm::ivec3(x + 1, y, z + 1),
+                            glm::ivec3(x,     y, z + 1),
+                            3, mat_id, 1, 1, 0, emissive, aux, 0
+                        );
+                    }
+
+                    // 3. Side face: +X (normal_idx = 0)
+                    Voxel n_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                    bool px_culled = (n_px.material_id == cur.material_id) ||
+                                     (n_px.is_solid() && n_px.shape() == SHAPE_CUBE);
+                    if (!px_culled) {
+                        emit_quad(
+                            glm::ivec3(x + 1, y,     z + 1),
+                            glm::ivec3(x + 1, y,     z),
+                            glm::ivec3(x + 1, y + 1, z),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            0, mat_id, 1, 1, 0, emissive, aux, top_sub_half
+                        );
+                    }
+
+                    // 4. Side face: -X (normal_idx = 1)
+                    Voxel n_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                    bool nx_culled = (n_nx.material_id == cur.material_id) ||
+                                     (n_nx.is_solid() && n_nx.shape() == SHAPE_CUBE);
+                    if (!nx_culled) {
+                        emit_quad(
+                            glm::ivec3(x, y,     z),
+                            glm::ivec3(x, y,     z + 1),
+                            glm::ivec3(x, y + 1, z + 1),
+                            glm::ivec3(x, y + 1, z),
+                            1, mat_id, 1, 1, 0, emissive, aux, top_sub_half
+                        );
+                    }
+
+                    // 5. Side face: +Z (normal_idx = 4)
+                    Voxel n_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                    bool pz_culled = (n_pz.material_id == cur.material_id) ||
+                                     (n_pz.is_solid() && n_pz.shape() == SHAPE_CUBE);
+                    if (!pz_culled) {
+                        emit_quad(
+                            glm::ivec3(x,     y,     z + 1),
+                            glm::ivec3(x + 1, y,     z + 1),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            4, mat_id, 1, 1, 0, emissive, aux, top_sub_half
+                        );
+                    }
+
+                    // 6. Side face: -Z (normal_idx = 5)
+                    Voxel n_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                    bool nz_culled = (n_nz.material_id == cur.material_id) ||
+                                     (n_nz.is_solid() && n_nz.shape() == SHAPE_CUBE);
+                    if (!nz_culled) {
+                        emit_quad(
+                            glm::ivec3(x + 1, y,     z),
+                            glm::ivec3(x,     y,     z),
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x + 1, y + 1, z),
+                            5, mat_id, 1, 1, 0, emissive, aux, top_sub_half
+                        );
+                    }
+                }
+
+                // ─────────────────────────────────────────────────────────────
+                // PASS 2: WATERLOGGED SLABS (SHAPE_SLAB_BOTTOM + WATERLOGGED)
+                // ─────────────────────────────────────────────────────────────
+                if (cur.shape() == SHAPE_SLAB_BOTTOM && is_waterlogged) {
+                    uint32_t mat_id = MAT_WATER;
+                    uint32_t emissive = get_emissive_intensity(mat_id);
+                    uint32_t aux = cur.is_highlighted() ? 1 : 0;
+
+                    // Liquid surface sitting at Y = 0.5m (sub_y_half = 1)
+                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                    bool above_culled = IsLiquid(above.material_id) ||
+                                        (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
+                    if (!above_culled) {
+                        emit_quad(
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z),
+                            2, mat_id, 1, 1, 0, emissive, aux, 1 /* Y = 0.5m */
+                        );
+                    }
+                }
+
+                // ─────────────────────────────────────────────────────────────
+                // PASS 3: WATERLOGGED RAMPS (SHAPE_RAMP_* + WATERLOGGED)
+                // ─────────────────────────────────────────────────────────────
+                if (cur.is_ramp() && is_waterlogged) {
+                    uint32_t mat_id = MAT_WATER;
+                    uint32_t emissive = get_emissive_intensity(mat_id);
+                    uint32_t aux = cur.is_highlighted() ? 1 : 0;
+
+                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                    bool above_solid = above.is_solid() && (above.shape() == SHAPE_CUBE);
+
+                    if (!above_solid) {
+                        // Diagonal 45° liquid top plane offset by +0.04m (water_offset = 1)
+                        if (cur.shape() == SHAPE_RAMP_EAST) {
+                            emit_quad(
+                                glm::ivec3(x,     y,     z),
+                                glm::ivec3(x,     y,     z + 1),
+                                glm::ivec3(x + 1, y + 1, z + 1),
+                                glm::ivec3(x + 1, y + 1, z),
+                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
+                            );
+                        } else if (cur.shape() == SHAPE_RAMP_WEST) {
+                            emit_quad(
+                                glm::ivec3(x + 1, y,     z + 1),
+                                glm::ivec3(x + 1, y,     z),
+                                glm::ivec3(x,     y + 1, z),
+                                glm::ivec3(x,     y + 1, z + 1),
+                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
+                            );
+                        } else if (cur.shape() == SHAPE_RAMP_SOUTH) {
+                            emit_quad(
+                                glm::ivec3(x + 1, y,     z),
+                                glm::ivec3(x,     y,     z),
+                                glm::ivec3(x,     y + 1, z + 1),
+                                glm::ivec3(x + 1, y + 1, z + 1),
+                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
+                            );
+                        } else if (cur.shape() == SHAPE_RAMP_NORTH) {
+                            emit_quad(
+                                glm::ivec3(x,     y,     z + 1),
+                                glm::ivec3(x + 1, y,     z + 1),
+                                glm::ivec3(x + 1, y + 1, z),
+                                glm::ivec3(x,     y + 1, z),
+                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 } // namespace Voidfall
