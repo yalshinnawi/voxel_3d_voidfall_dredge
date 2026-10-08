@@ -336,10 +336,9 @@ void main() {
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
-    // Perturb planar quads with high-frequency micro-grain
+    // Low-amplitude continuous grain so natural stone remains matte without looking like static noise
     if (vTexLayer != MAT_WATER) {
-        float microNoise = fract(sin(dot(v_FragPos.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
-        normal = normalize(normal + (microNoise - 0.5) * 0.12);
+        normal = normalize(normal + sin(v_FragPos * 16.0) * 0.04);
     }
     N = normal;
 

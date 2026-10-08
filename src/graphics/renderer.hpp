@@ -73,7 +73,7 @@ public:
     void render_burrowers(const std::vector<SeismicBurrower>& burrowers);
     void render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts);
     void render_delver(const glm::vec3& pos, float yaw, CharacterClass cls, float anim_time = 0.0f);
-    void end_frame(float delta_time, float radiation_level = 0.0f);
+    void end_frame(float delta_time, float radiation_level = 0.0f, float shield_timer = 0.0f);
 
     void trigger_sonar_pulse(const glm::vec3& origin);
     void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);

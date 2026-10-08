@@ -89,6 +89,9 @@ public:
 
     const glm::vec3& GetPlayerSpawnPos() const { return m_playerSpawnPos; }
     void SetPlayerSpawnPos(const glm::vec3& p) { m_playerSpawnPos = p; }
+    float GetPlayerSpawnYaw() const { return m_playerSpawnYaw; }
+    void SetPlayerSpawnYaw(float yaw) { m_playerSpawnYaw = yaw; }
+    float calculate_spawn_yaw(const glm::vec3& spawn_pos) const;
 
     const VaultDoor& vault_door() const { return m_vault_door; }
     VaultDoor& vault_door_mut() { return m_vault_door; }
@@ -259,6 +262,7 @@ private:
     std::vector<glm::ivec3> m_aquifer_sources;
 
     glm::vec3 m_playerSpawnPos{16.0f, 5.1f, 16.0f};
+    float m_playerSpawnYaw{0.0f};
     std::vector<FaunaEntity> m_active_entities;
     VaultDoor m_vault_door;
 

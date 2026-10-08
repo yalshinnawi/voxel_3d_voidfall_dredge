@@ -77,10 +77,13 @@ void Application::TransitionState(GameState newState) {
         m_map_dragging_last = false;
     }
 
-    // Reset single-trigger death guard and pause shooting on entering active gameplay
+    // Reset single-trigger death guard, trigger 0.6s fade-from-black, and pause shooting on entering active gameplay
     if (newState == GameState::Gameplay) {
         if (m_state != GameState::Paused) {
             AudioSystem::instance().reset_death_sound();
+            if (m_hud) {
+                m_hud->trigger_spawn_fade(0.6f);
+            }
         }
         if (m_player) {
             float pause_dur = (m_state == GameState::Paused) ? 0.35f : 0.6f;
@@ -547,6 +550,7 @@ void Application::start_expedition(int level) {
         m_world->level_generator()->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     m_player->set_position(spawn_pos);
     m_player->clamp_to_surface(*m_world);
+    m_player->align_spawn_yaw(*m_world);
     m_trauma = 0.0f;
     m_player->set_trauma(0.0f);
     m_player->set_velocity(glm::vec3(0.0f));
@@ -638,6 +642,7 @@ void Application::start_expedition(int level) {
     if (m_hud) {
         m_hud->set_death_sequence(false);
         m_hud->SetContractorBriefing(true, 8.0f);
+        m_hud->trigger_spawn_fade(0.6f);
     }
 
     m_map_open = false;
@@ -3139,7 +3144,8 @@ void Application::render(float dt) {
     }
 
     // End HDR Frame & Post-Processing Tonemap
-    m_renderer->end_frame(dt, m_hazard->radiation_level());
+    float shield_timer = (m_state == GameState::Gameplay && m_player) ? m_player->insertion_shield_timer() : 0.0f;
+    m_renderer->end_frame(dt, m_hazard->radiation_level(), shield_timer);
 
     // Mouse coordinates and clicks for responsive menus
     glm::dvec2 cur_pos = m_window->get_cursor_pos();

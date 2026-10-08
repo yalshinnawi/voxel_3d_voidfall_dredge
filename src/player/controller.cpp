@@ -852,6 +852,11 @@ void PlayerController::clamp_to_surface(const World& world) {
                 m_velocity.y = 0.0f;
                 m_on_ground = true;
                 m_isGrounded = true;
+                // Ensure player is oriented toward open grotto/corridor rather than facing solid rock wall
+                RaycastHit hit = world.raycast(eye_position(), m_front, 1.5f);
+                if (hit.hit) {
+                    align_spawn_yaw(world);
+                }
                 return;
             }
         }
@@ -866,6 +871,10 @@ void PlayerController::clamp_to_surface(const World& world) {
                 m_velocity.y = 0.0f;
                 m_on_ground = true;
                 m_isGrounded = true;
+                RaycastHit hit = world.raycast(eye_position(), m_front, 1.5f);
+                if (hit.hit) {
+                    align_spawn_yaw(world);
+                }
                 return;
             }
         }
@@ -875,6 +884,15 @@ void PlayerController::clamp_to_surface(const World& world) {
     m_velocity.y = 0.0f;
     m_on_ground = true;
     m_isGrounded = true;
+    RaycastHit hit = world.raycast(eye_position(), m_front, 1.5f);
+    if (hit.hit) {
+        align_spawn_yaw(world);
+    }
+}
+
+void PlayerController::align_spawn_yaw(const World& world) {
+    float best_yaw = world.calculate_spawn_yaw(m_position);
+    set_look_angles(best_yaw, 0.0f);
 }
 
 void PlayerController::UpdatePhysics(float dt) {

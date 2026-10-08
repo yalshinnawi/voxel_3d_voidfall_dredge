@@ -114,6 +114,13 @@ public:
         m_death_duration = max_duration;
     }
 
+    void trigger_spawn_fade(float duration = 0.6f) {
+        m_spawn_fade_timer = duration;
+        m_spawn_fade_duration = duration;
+    }
+    float spawn_fade_timer() const { return m_spawn_fade_timer; }
+    bool is_spawn_fade_active() const { return m_spawn_fade_timer > 0.0f; }
+
     void SetReloadStatus(bool show, float timer = 0.0f) { m_show_reload = show; m_reload_status_timer = timer; }
     void ClearReloadStatus() { m_show_reload = false; m_reload_status_timer = 0.0f; }
     void set_reload_status(bool show, float timer = 0.0f) { SetReloadStatus(show, timer); }
@@ -266,6 +273,10 @@ private:
     // Weapon Reload HUD state
     bool m_show_reload{false};
     float m_reload_status_timer{0.0f};
+
+    // Spawn Fade-From-Black Overlay State
+    float m_spawn_fade_timer{0.0f};
+    float m_spawn_fade_duration{0.6f};
 };
 
 } // namespace Voidfall

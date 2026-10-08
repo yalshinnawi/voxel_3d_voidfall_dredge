@@ -55,6 +55,7 @@ public:
     void place_bulkhead(World& world, const glm::ivec3& place_pos);
     void PlaceBulkhead(World& world, const glm::ivec3& place_pos);
     void clamp_to_surface(const World& world);
+    void align_spawn_yaw(const World& world);
 
     static constexpr float EYE_HEIGHT_STAND = 1.65f;
     static constexpr float EYE_HEIGHT_CROUCH = 0.95f;

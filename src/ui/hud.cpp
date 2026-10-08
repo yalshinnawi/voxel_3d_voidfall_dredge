@@ -129,6 +129,9 @@ void HUD::update(float dt) {
     if (m_tool_switch_toast_timer > 0.0f) {
         m_tool_switch_toast_timer = std::max(0.0f, m_tool_switch_toast_timer - dt);
     }
+    if (m_spawn_fade_timer > 0.0f) {
+        m_spawn_fade_timer = std::max(0.0f, m_spawn_fade_timer - dt);
+    }
 
     // Update screen-space visor toxic vapor particles
     for (auto it = m_screen_toxic_particles.begin(); it != m_screen_toxic_particles.end();) {
@@ -2132,12 +2135,11 @@ void HUD::render(
 
     // 10e. INSERTION POD RECALL MATRIX SHIELD VIGNETTE
     if (player.has_insertion_shield()) {
-        float s_alpha = std::clamp(player.insertion_shield_timer() / 4.0f, 0.0f, 1.0f);
+        // Smoothly fade shield alpha from 1.0 to 0.0 over final 1.0s of the timer to eliminate abrupt pop
+        float s_alpha = std::clamp(player.insertion_shield_timer() / 1.0f, 0.0f, 1.0f);
         float b_thick = 24.0f * ui_scale;
         glm::vec4 shield_cyan(0.0f, 0.95f, 1.0f, s_alpha * 0.75f);
-        // Low-opacity cyan wash across full screen
-        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.0f, 0.80f, 1.0f, s_alpha * 0.12f));
-        // Outer cybernetic cyan border
+        // Outer cybernetic cyan border (full-screen wash removed to preserve cavern shadow depth and center contrast)
         draw_rect(0.0f, 0.0f, sw, b_thick, shield_cyan);
         draw_rect(0.0f, sh - b_thick, sw, b_thick, shield_cyan);
         draw_rect(0.0f, 0.0f, b_thick, sh, shield_cyan);
@@ -2352,6 +2354,12 @@ void HUD::render(
         float bar_y = card_y + card_h - 18.0f * ui_scale;
         draw_rect(bar_x, bar_y, bar_w, bar_h, glm::vec4(0.2f, 0.05f, 0.05f, 0.8f));
         draw_rect(bar_x, bar_y, bar_w * t, bar_h, glm::vec4(1.0f, 0.25f, 0.15f, 1.0f));
+    }
+
+    // 14. SPAWN FADE-FROM-BLACK OVERLAY (0.6s smooth reveal on sector entry)
+    if (m_spawn_fade_timer > 0.0f && m_spawn_fade_duration > 0.0f) {
+        float fade_alpha = std::clamp(m_spawn_fade_timer / m_spawn_fade_duration, 0.0f, 1.0f);
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.0f, 0.0f, 0.0f, fade_alpha));
     }
 
     glDisable(GL_BLEND);

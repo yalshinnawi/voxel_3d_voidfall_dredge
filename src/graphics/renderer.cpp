@@ -2242,7 +2242,7 @@ void Renderer::render_quad() {
     glBindVertexArray(0);
 }
 
-void Renderer::end_frame(float delta_time, float radiation_level) {
+void Renderer::end_frame(float delta_time, float radiation_level, float shield_timer) {
     m_total_time += delta_time;
 
     // Update sonar pulse radius
@@ -2376,6 +2376,8 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
     m_postprocess_shader.set_float("uNear", 0.1f);
     m_postprocess_shader.set_float("uFar", 250.0f);
     m_postprocess_shader.set_int("uSector", m_sector);
+    m_postprocess_shader.set_float("u_ShieldActive", shield_timer > 0.0f ? 1.0f : 0.0f);
+    m_postprocess_shader.set_float("u_ShieldTimer", shield_timer);
 
     render_quad();
 }

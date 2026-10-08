@@ -16,6 +16,8 @@ uniform float uTime;
 uniform float uNear;
 uniform float uFar;
 uniform int uSector;
+uniform float u_ShieldActive;
+uniform float u_ShieldTimer;
 
 // ACES Filmic Tonemapping (Stephen Hill / Narkowicz Fit)
 // Transforms sRGB primaries to ACEScg, applies ACES RRT + ODT curve,
@@ -165,6 +167,20 @@ void main() {
 
     // Gamma correction
     vec3 mapped = pow(ldr, vec3(1.0 / 2.2));
+    vec4 color = vec4(mapped, 1.0);
 
-    FragColor = vec4(mapped, 1.0);
+    // Apply shield strictly as an edge vignette, keeping center contrast intact
+    if (u_ShieldActive > 0.0) {
+        vec2 uv = vUV - 0.5;
+        float vignette_edge = smoothstep(0.35, 0.75, length(uv)); // Confine to screen borders
+        
+        // Smooth fade-out over the final 1.0s instead of an abrupt pop
+        float shieldAlpha = clamp(u_ShieldTimer / 1.0, 0.0, 1.0); 
+        
+        vec3 shieldCyan = vec3(0.0, 0.95, 1.0);
+        // Blend using screen or additive blending strictly on the edges
+        color.rgb += shieldCyan * vignette_edge * shieldAlpha * 0.35;
+    }
+
+    FragColor = color;
 }

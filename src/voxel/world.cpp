@@ -112,6 +112,7 @@ void World::generate_world(int sector_index, uint32_t seed) {
         }
     }
     PopulateFauna();
+    m_playerSpawnYaw = calculate_spawn_yaw(m_playerSpawnPos);
 
     if (m_enable_background_meshing) {
         for (const auto& pos : to_mesh) {
@@ -307,6 +308,7 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
         }
     }
     PopulateFauna();
+    m_playerSpawnYaw = calculate_spawn_yaw(m_playerSpawnPos);
 
     for (const auto& pos : to_mesh) {
         queue_chunk_for_meshing(pos);
@@ -911,6 +913,78 @@ RaycastHit World::raycast(const glm::vec3& origin, const glm::vec3& direction, f
     }
 
     return hit;
+}
+
+float World::calculate_spawn_yaw(const glm::vec3& spawn_pos) const {
+    // Eye level for clearance raycasting
+    glm::vec3 eye = spawn_pos + glm::vec3(0.0f, 1.6f, 0.0f);
+
+    // If level generator is present and has corridors leading from spawn room (grid 0, 0),
+    // prioritize open corridors with genuine clearance
+    if (m_level_gen) {
+        const auto* r = m_level_gen->get_room_at_grid(0, 0);
+        if (r) {
+            float best_corr_clearance = -1.0f;
+            glm::vec3 best_corr_dir(0.0f);
+            for (const auto& c : m_level_gen->corridors()) {
+                glm::vec3 start(static_cast<float>(c.start_pos.x), static_cast<float>(c.floor_y + 1), static_cast<float>(c.start_pos.z));
+                glm::vec3 end(static_cast<float>(c.end_pos.x), static_cast<float>(c.floor_y + 1), static_cast<float>(c.end_pos.z));
+                float dist_s = glm::distance(glm::vec2(spawn_pos.x, spawn_pos.z), glm::vec2(start.x, start.z));
+                float dist_e = glm::distance(glm::vec2(spawn_pos.x, spawn_pos.z), glm::vec2(end.x, end.z));
+
+                glm::vec3 candidate_target(0.0f);
+                if (dist_s < 24.0f) {
+                    candidate_target = end;
+                } else if (dist_e < 24.0f) {
+                    candidate_target = start;
+                }
+
+                if (glm::length(candidate_target) > 0.1f) {
+                    glm::vec3 dir = candidate_target - spawn_pos;
+                    dir.y = 0.0f;
+                    if (glm::length(dir) > 0.01f) {
+                        dir = glm::normalize(dir);
+                        RaycastHit hit = raycast(eye, dir, 48.0f);
+                        float clearance = hit.hit ? hit.distance : 48.0f;
+                        if (clearance > best_corr_clearance) {
+                            best_corr_clearance = clearance;
+                            best_corr_dir = dir;
+                        }
+                    }
+                }
+            }
+            if (best_corr_clearance > 6.0f) {
+                return glm::degrees(std::atan2(best_corr_dir.z, best_corr_dir.x));
+            }
+        }
+    }
+
+    // Cast 32 radial horizontal rays to locate the open grotto or corridor
+    constexpr int NUM_RAYS = 32;
+    float distances[NUM_RAYS];
+    for (int i = 0; i < NUM_RAYS; ++i) {
+        float angle = static_cast<float>(i) * (2.0f * 3.14159265358979323846f / static_cast<float>(NUM_RAYS));
+        glm::vec3 dir(std::cos(angle), 0.0f, std::sin(angle));
+        RaycastHit hit = raycast(eye, dir, 48.0f);
+        distances[i] = hit.hit ? hit.distance : 48.0f;
+    }
+
+    // Weighted 3-tap smoothing kernel (0.25, 0.5, 0.25) to favor wide corridors/grottos over narrow alcoves
+    float best_score = -1.0f;
+    int best_idx = 0;
+    for (int i = 0; i < NUM_RAYS; ++i) {
+        int prev = (i - 1 + NUM_RAYS) % NUM_RAYS;
+        int next = (i + 1) % NUM_RAYS;
+        float score = distances[prev] * 0.25f + distances[i] * 0.5f + distances[next] * 0.25f;
+        if (score > best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+
+    float best_angle = static_cast<float>(best_idx) * (2.0f * 3.14159265358979323846f / static_cast<float>(NUM_RAYS));
+    glm::vec3 best_dir(std::cos(best_angle), 0.0f, std::sin(best_angle));
+    return glm::degrees(std::atan2(best_dir.z, best_dir.x));
 }
 
 void World::queue_chunk_for_meshing(const ChunkPos& pos) {

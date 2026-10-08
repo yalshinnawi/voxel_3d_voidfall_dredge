@@ -10,6 +10,8 @@
 #include "../src/systems/stealth_system.hpp"
 #include "../src/systems/mission_system.hpp"
 #include "../src/ai/spawn_manager.hpp"
+#include "../src/player/controller.hpp"
+#include "../src/ui/hud.hpp"
 
 using namespace Voidfall;
 
@@ -209,6 +211,68 @@ TEST(VaultTest, VaultDoorResistsDrillMining) {
     std::cout << "[PASS] VaultTest.MissionSystemInteractiveRelicPickup (out-of-range rejected, no auto-pickup, [E] interaction secured)" << std::endl;
 }
 
+// ── Test 4: Spawn Camera Yaw Alignment Towards Open Corridor / Grotto ──
+TEST(SpawnSafetyTest, SpawnCameraYawAlignsToOpenCorridor) {
+    std::cout << "[RUN] SpawnSafetyTest.SpawnCameraYawAlignsToOpenCorridor" << std::endl;
+
+    const uint32_t test_seeds[5] = { 101, 505, 1337, 4242, 9999 };
+    for (uint32_t seed : test_seeds) {
+        World world(seed);
+        world.generate_world(1, seed);
+
+        const glm::vec3& spawn_pos = world.GetPlayerSpawnPos();
+        float spawn_yaw = world.GetPlayerSpawnYaw();
+
+        // Calculate clearance along the spawn yaw direction
+        float rad = glm::radians(spawn_yaw);
+        glm::vec3 front(std::cos(rad), 0.0f, std::sin(rad));
+        glm::vec3 eye = spawn_pos + glm::vec3(0.0f, 1.6f, 0.0f);
+        RaycastHit hit = world.raycast(eye, front, 48.0f);
+        float clearance = hit.hit ? hit.distance : 48.0f;
+
+        // Player must NOT spawn 1 meter away facing a solid rock wall
+        ASSERT_GE(clearance, 4.0f);
+
+        // PlayerController align_spawn_yaw verification
+        PlayerController player(spawn_pos);
+        player.align_spawn_yaw(world);
+        ASSERT_EQ(player.yaw(), spawn_yaw);
+
+        // If player is placed right against a wall facing it, clamp_to_surface must realign to open space
+        player.set_look_angles(-90.0f, 0.0f); // Arbitrary initial angle
+        player.clamp_to_surface(world);
+        RaycastHit facing_hit = world.raycast(player.eye_position(), player.forward(), 1.5f);
+        ASSERT_FALSE(facing_hit.hit); // Must not be facing a wall < 1.5m
+    }
+
+    std::cout << "[PASS] SpawnSafetyTest.SpawnCameraYawAlignsToOpenCorridor (open grotto clearance verified across 5 seeds)" << std::endl;
+}
+
+// ── Test 5: HUD 0.6s Spawn Fade-From-Black Overlay ──
+TEST(SpawnSafetyTest, SpawnFadeFromBlackCountdown) {
+    std::cout << "[RUN] SpawnSafetyTest.SpawnFadeFromBlackCountdown" << std::endl;
+
+    HUD hud(1600, 900, true);
+    ASSERT_FALSE(hud.is_spawn_fade_active());
+    ASSERT_EQ(hud.spawn_fade_timer(), 0.0f);
+
+    hud.trigger_spawn_fade(0.6f);
+    ASSERT_TRUE(hud.is_spawn_fade_active());
+    ASSERT_EQ(hud.spawn_fade_timer(), 0.6f);
+
+    // Halfway through (0.3s)
+    hud.update(0.3f);
+    ASSERT_TRUE(hud.is_spawn_fade_active());
+    ASSERT_TRUE(hud.spawn_fade_timer() > 0.25f && hud.spawn_fade_timer() < 0.35f);
+
+    // Expiration after remaining 0.35s
+    hud.update(0.35f);
+    ASSERT_FALSE(hud.is_spawn_fade_active());
+    ASSERT_EQ(hud.spawn_fade_timer(), 0.0f);
+
+    std::cout << "[PASS] SpawnSafetyTest.SpawnFadeFromBlackCountdown (0.6s smooth countdown and active flag verified)" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " RUNNING SPAWN SAFETY & VAULT REGRESSION TESTS" << std::endl;
@@ -217,6 +281,8 @@ int main() {
     SpawnSafetyTest_NoFaunaWithinSafeRadiusOnWorldLoad();
     SpawnSafetyTest_EnemiesInitializeDormant();
     VaultTest_VaultDoorResistsDrillMining();
+    SpawnSafetyTest_SpawnCameraYawAlignsToOpenCorridor();
+    SpawnSafetyTest_SpawnFadeFromBlackCountdown();
 
     std::cout << "========================================" << std::endl;
     std::cout << " ALL SPAWN SAFETY & VAULT TESTS PASSED!" << std::endl;
