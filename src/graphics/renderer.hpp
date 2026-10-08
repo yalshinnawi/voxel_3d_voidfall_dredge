@@ -2,6 +2,7 @@
 #include "shader.hpp"
 #include "texture_array.hpp"
 #include "clustered_lighting.hpp"
+#include "surface_clutter.hpp"
 #include "../voxel/chunk.hpp"
 #include "../skills/surveying.hpp"
 #include "../player/character_class.hpp"
@@ -64,6 +65,9 @@ public:
 
     void begin_frame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& cam_pos);
     void render_chunk(const Chunk& chunk);
+    void render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos);
+    SurfaceClutterSystem& clutter_system() { return m_clutter_system; }
+    const SurfaceClutterSystem& clutter_system() const { return m_clutter_system; }
     bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
     const std::array<glm::vec4, 6>& frustum_planes() const { return m_frustum_planes; }
     void render_debris(const DynamicDebris& debris);
@@ -210,6 +214,9 @@ private:
 
     // Camera frustum culling
     std::array<glm::vec4, 6> m_frustum_planes{};
+
+    // Surface clutter decoration system
+    SurfaceClutterSystem m_clutter_system;
 };
 
 } // namespace Voidfall

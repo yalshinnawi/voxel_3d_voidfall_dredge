@@ -1,6 +1,7 @@
 #pragma once
 #include "packed_vertex.hpp"
 #include "voxel_types.hpp"
+#include "clutter_types.hpp"
 #include <vector>
 #include <memory>
 #include <atomic>
@@ -133,6 +134,7 @@ public:
 
     bool is_mesh_dirty() const { return m_dirty_mesh.load(); }
     void mark_mesh_dirty() { m_dirty_mesh.store(true); }
+    void MarkDirty() { mark_mesh_dirty(); }
     void clear_mesh_dirty() { m_dirty_mesh.store(false); }
 
     bool is_structural_dirty() const { return m_dirty_structural.load(); }
@@ -149,10 +151,15 @@ public:
     bool has_staged_mesh() const { return m_has_staged_mesh.load(std::memory_order_acquire); }
     size_t vertex_count() const { return m_uploaded_vertex_count; }
 
+    const std::vector<ClutterInstance>& clutter_instances() const { return m_clutter_instances; }
+    std::vector<ClutterInstance>& clutter_instances_mut() { return m_clutter_instances; }
+    void set_clutter_instances(std::vector<ClutterInstance> instances) { m_clutter_instances = std::move(instances); }
+
 private:
     ChunkPos m_pos;
     std::vector<Voxel> m_voxels;
     size_t m_solid_count{0};
+    std::vector<ClutterInstance> m_clutter_instances;
 
     std::atomic<bool> m_dirty_mesh{true};
     std::atomic<bool> m_dirty_structural{false};

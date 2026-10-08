@@ -53,6 +53,8 @@ using namespace Voidfall;
     std::exit(1);                                                              \
   }
 
+#define TEST(Suite, Case) void Suite##_##Case()
+
 // ─────────────────────────────────────────────────────────────
 // 1. LIQUID METADATA & WATERLOGGING FLAGS
 // ─────────────────────────────────────────────────────────────
@@ -442,6 +444,105 @@ void test_player_waterlogged_immersion() {
   std::cout << "  -> PASSED" << std::endl;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 8. EVENT-DRIVEN WAKE-UP & SIMULATION SPECIFICATION TESTS
+// ─────────────────────────────────────────────────────────────
+TEST(FluidSimTest, MiningAdjacentBlockWakesLiquid) {
+  std::cout << "[Test 8] MiningAdjacentBlockWakesLiquid..." << std::endl;
+  World world(1337, false);
+  world.set_fluid_cell(glm::ivec3(0, 0, 0), MAT_WATER, 5, false);
+  world.SetBlock(1, 0, 0, MAT_GRANITE, 0);
+
+  // Verify m_activeFluids is initially empty
+  world.m_activeFluids.clear();
+  world.m_activeFluidSet.clear();
+  ASSERT_EQ(world.m_activeFluids.size(), 0);
+
+  // Call world.DestroyBlock(glm::ivec3(1, 0, 0))
+  world.DestroyBlock(glm::ivec3(1, 0, 0));
+
+  // Assert that (0, 0, 0) is added to m_activeFluids
+  bool found_origin = false;
+  for (const auto& pos : world.m_activeFluids) {
+    if (pos == glm::ivec3(0, 0, 0)) {
+      found_origin = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found_origin);
+  std::cout << "  -> PASSED" << std::endl;
+}
+
+TEST(FluidSimTest, GravityDownwardFlowTakesPriority) {
+  std::cout << "[Test 9] GravityDownwardFlowTakesPriority..." << std::endl;
+  World world(1337, false);
+
+  // Carve air around (0, 5, 0)
+  for (int y = 0; y <= 6; ++y) {
+    world.SetBlock(0, y, 0, MAT_AIR, 0);
+  }
+  world.SetBlock(1, 5, 0, MAT_AIR, 0);
+  world.SetBlock(-1, 5, 0, MAT_AIR, 0);
+  world.SetBlock(0, 5, 1, MAT_AIR, 0);
+  world.SetBlock(0, 5, -1, MAT_AIR, 0);
+
+  // Place a single MAT_WATER block at (0, 5, 0) with air beneath it
+  world.set_fluid_cell(glm::ivec3(0, 5, 0), MAT_WATER, 5, false);
+  world.WakeFluid(glm::ivec3(0, 5, 0));
+
+  // Step FluidSim::Update(0.1f)
+  FluidSim::Update(0.1f);
+
+  // Assert that (0, 4, 0) becomes MAT_WATER and (0, 5, 0) does not spread horizontally to (1, 5, 0)
+  ASSERT_EQ(world.get_voxel(0, 4, 0).material_id, MAT_WATER);
+  ASSERT_EQ(world.get_voxel(1, 5, 0).material_id, MAT_AIR);
+  ASSERT_EQ(world.get_voxel(-1, 5, 0).material_id, MAT_AIR);
+  ASSERT_EQ(world.get_voxel(0, 5, 1).material_id, MAT_AIR);
+  ASSERT_EQ(world.get_voxel(0, 5, -1).material_id, MAT_AIR);
+
+  std::cout << "  -> PASSED" << std::endl;
+}
+
+TEST(FluidSimTest, InternalLiquidFacesAreCulled) {
+  std::cout << "[Test 10] InternalLiquidFacesAreCulled..." << std::endl;
+  Chunk chunk(ChunkPos{0, 0, 0});
+  chunk.set_voxel(0, 0, 0, Voxel{MAT_WATER, 5});
+  chunk.set_voxel(1, 0, 0, Voxel{MAT_WATER, 5});
+
+  auto mesh = GreedyMesher::MeshChunk(chunk, nullptr);
+  ASSERT_FALSE(mesh.empty());
+
+  // Assert that the shared boundary face between (0, 0, 0) and (1, 0, 0) generates 0 vertices
+  // Shared face is at X = 1 between (0, 0, 0) facing +X (norm 0) and (1, 0, 0) facing -X (norm 1)
+  int shared_face_vertices = 0;
+  for (const auto& v : mesh) {
+    uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+    uint32_t norm = (v.data0 >> 18u) & 0x7u;
+    if (layer == MAT_WATER) {
+      glm::vec3 pos = v.position();
+      if ((norm == 0 || norm == 1) && std::abs(pos.x - 1.0f) < 0.01f && pos.y < 1.0f && pos.z < 1.0f) {
+        shared_face_vertices++;
+      }
+    }
+  }
+  ASSERT_EQ(shared_face_vertices, 0);
+
+  // Assert top surface quads merge and are placed at recessed Y = 0.90m relative to base
+  bool found_recessed_top = false;
+  for (const auto& v : mesh) {
+    uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+    uint32_t norm = (v.data0 >> 18u) & 0x7u;
+    if (layer == MAT_WATER && norm == 2) {
+      glm::vec3 pos = v.position();
+      ASSERT_NEAR(pos.y, 0.90f, 0.01f);
+      found_recessed_top = true;
+    }
+  }
+  ASSERT_TRUE(found_recessed_top);
+
+  std::cout << "  -> PASSED" << std::endl;
+}
+
 int main() {
   std::cout << "=========================================================="
             << std::endl;
@@ -457,10 +558,13 @@ int main() {
   test_reservoir_breach_and_zero_cpu_sleep();
   test_greedy_mesher_liquid_conformance();
   test_player_waterlogged_immersion();
+  FluidSimTest_MiningAdjacentBlockWakesLiquid();
+  FluidSimTest_GravityDownwardFlowTakesPriority();
+  FluidSimTest_InternalLiquidFacesAreCulled();
 
   std::cout << "=========================================================="
             << std::endl;
-  std::cout << "  ALL 7 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)   "
+  std::cout << "  ALL 10 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)  "
             << std::endl;
   std::cout << "=========================================================="
             << std::endl;

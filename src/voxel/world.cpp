@@ -1,6 +1,7 @@
 #include "world.hpp"
 #include "structural_check.hpp"
 #include "fluid_sim.hpp"
+#include "../graphics/surface_clutter.hpp"
 #include <glm/gtc/matrix_access.hpp>
 #include <cmath>
 #include <iostream>
@@ -31,6 +32,8 @@ static inline int floor_mod(int a, int b) {
 World::World(uint32_t seed, bool enable_background_meshing)
     : m_seed(seed), m_enable_background_meshing(enable_background_meshing)
 {
+    FluidSim::SetActiveWorld(this);
+
     const char* env_headless = std::getenv("VOIDFALL_HEADLESS_TEST");
     if (env_headless && std::strcmp(env_headless, "1") == 0) {
         m_enable_background_meshing = false;
@@ -48,6 +51,9 @@ World::World(uint32_t seed, bool enable_background_meshing)
 }
 
 World::~World() {
+    if (FluidSim::s_activeWorld == this) {
+        FluidSim::SetActiveWorld(nullptr);
+    }
     m_running.store(false);
     m_queue_cv.notify_all();
     for (auto& t : m_workers) {
@@ -110,6 +116,7 @@ void World::generate_world(int sector_index, uint32_t seed) {
     for (auto& [cpos, chunk] : m_chunks) {
         if (chunk) {
             ApplyTopologicalShapes(*chunk);
+            GenerateChunkClutter(*chunk);
         }
     }
     PopulateFauna();
@@ -573,6 +580,10 @@ Voxel World::get_voxel_unlocked(int world_x, int world_y, int world_z) const {
     int ly = floor_mod(world_y, CHUNK_SIZE);
     int lz = floor_mod(world_z, CHUNK_SIZE);
     return it->second->get_voxel(lx, ly, lz);
+}
+
+void World::GenerateChunkClutter(Chunk& chunk) {
+    chunk.set_clutter_instances(SurfaceClutterSystem::generate_chunk_clutter(chunk, m_seed));
 }
 
 void World::ApplyTopologicalShapes(Chunk& chunk) {
@@ -1476,8 +1487,12 @@ bool World::DestroyBlock(const glm::ivec3& pos) {
     return broke;
 }
 
+uint8_t World::GetBlockMaterial(const glm::ivec3& pos) const {
+    return get_voxel(pos.x, pos.y, pos.z).material_id;
+}
+
 void World::WakeFluid(const glm::ivec3& pos) {
-    uint64_t key = FluidSim::PackPos(pos);
+    uint64_t key = PackCoord(pos);
     if (m_activeFluidSet.insert(key).second) {
         m_activeFluids.push_back(pos);
     }
@@ -1491,8 +1506,9 @@ void World::check_wake_fluid_around(const glm::ivec3& pos) {
     };
     for (const auto& offset : NEIGHBORS_6) {
         glm::ivec3 np = pos + offset;
+        uint8_t mat = GetBlockMaterial(np);
         Voxel nv = get_voxel(np.x, np.y, np.z);
-        if (IsLiquid(nv.material_id) || nv.is_waterlogged()) {
+        if (IsLiquid(mat) || nv.is_waterlogged()) {
             WakeFluid(np);
         }
     }
@@ -1554,7 +1570,7 @@ void World::set_waterlogged_cell(const glm::ivec3& pos, bool state) {
 void World::flush_fluid_dirty_chunks() {
     for (Chunk* c : m_fluidDirtyChunks) {
         if (c) {
-            c->mark_mesh_dirty();
+            c->MarkDirty();
             queue_chunk_for_meshing(c->get_pos());
         }
     }
@@ -1563,6 +1579,10 @@ void World::flush_fluid_dirty_chunks() {
 
 void World::SimulateFluidCell(const glm::ivec3& pos) {
     FluidSim::SimulateFluidCell(*this, pos);
+}
+
+void World::SimulateFluidCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks) {
+    FluidSim::SimulateFluidCell(*this, pos, dirtyChunks);
 }
 
 void World::update_fluids(float dt) {
@@ -1579,12 +1599,22 @@ void World::update_fluids(float dt) {
         m_fluidAccumulator -= FLUID_STEP_DT;
 
         int stepsProcessed = 0;
+        std::unordered_set<Chunk*> dirtyChunks;
+
         while (!m_activeFluids.empty() && stepsProcessed < MAX_FLUID_STEPS_PER_TICK) {
             glm::ivec3 pos = m_activeFluids.front();
             m_activeFluids.pop_front();
-            m_activeFluidSet.erase(FluidSim::PackPos(pos));
-            SimulateFluidCell(pos);
+            m_activeFluidSet.erase(PackCoord(pos));
+
+            SimulateFluidCell(pos, dirtyChunks);
             stepsProcessed++;
+        }
+
+        for (Chunk* chunk : dirtyChunks) {
+            if (chunk) {
+                chunk->MarkDirty();
+                queue_chunk_for_meshing(chunk->get_pos());
+            }
         }
 
         flush_fluid_dirty_chunks();

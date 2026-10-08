@@ -909,12 +909,13 @@ void GreedyMesher::mesh_liquid_pass(
     auto emit_quad = [&](
         const glm::ivec3& p0, const glm::ivec3& p1, const glm::ivec3& p2, const glm::ivec3& p3,
         uint32_t norm_idx, uint32_t mat_id, uint32_t u_dim, uint32_t v_dim,
-        uint32_t damage, uint32_t emissive, uint32_t aux, uint32_t sub_y_half = 0, uint32_t water_offset = 0
+        uint32_t damage, uint32_t emissive, uint32_t aux, uint32_t sub_y_half = 0, uint32_t water_offset = 0,
+        uint32_t water_recess = 0
     ) {
-        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half, water_offset);
-        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half, water_offset);
-        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half, water_offset);
-        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half, water_offset);
+        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half, water_offset, water_recess);
+        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half, water_offset, water_recess);
+        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half, water_offset, water_recess);
+        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half, water_offset, water_recess);
 
         vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
         vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
@@ -1024,12 +1025,13 @@ void GreedyMesher::mesh_liquid_pass(
                 }
 
                 // Emit greedy rectangular top quad (+Y, normal_idx = 2)
+                uint32_t top_recess = (root.sub_y_half == 0) ? 1 : 0;
                 emit_quad(
                     glm::ivec3(x,         y + 1, z),
                     glm::ivec3(x,         y + 1, z + height),
                     glm::ivec3(x + width, y + 1, z + height),
                     glm::ivec3(x + width, y + 1, z),
-                    2, root.mat_id, width, height, 0, root.emissive, root.aux, root.sub_y_half, 0
+                    2, root.mat_id, width, height, 0, root.emissive, root.aux, root.sub_y_half, 0, top_recess
                 );
 
                 x += width;

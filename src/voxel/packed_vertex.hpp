@@ -158,7 +158,8 @@ struct PackedVoxelVertex {
     // [18..25] emission_intensity (8 bits: 0..255)
     // [26]     sub_y_half (1 bit: 0 or 1, offsets Y by -0.5 for half-slabs)
     // [27]     water_slope_offset (1 bit: offsets Y by +0.04 for sloped water surface)
-    // [28..31] reserved / extra
+    // [28]     water_recess (1 bit: offsets Y by -0.10 for recessed water surface at Y = 0.90m)
+    // [29..31] reserved / extra
     uint32_t data1;
 
     static inline PackedVoxelVertex encode(
@@ -166,7 +167,8 @@ struct PackedVoxelVertex {
         uint32_t normal_idx, uint32_t ao, uint32_t tex_layer,
         uint32_t u_dim, uint32_t v_dim, uint32_t corner_idx,
         uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0,
-        uint32_t sub_y_half = 0, uint32_t water_offset = 0
+        uint32_t sub_y_half = 0, uint32_t water_offset = 0,
+        uint32_t water_recess = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
@@ -183,13 +185,17 @@ struct PackedVoxelVertex {
                   ((damage & 0xFu) << 14) |
                   ((emission & 0xFFu) << 18) |
                   ((sub_y_half & 0x1u) << 26) |
-                  ((water_offset & 0x1u) << 27);
+                  ((water_offset & 0x1u) << 27) |
+                  ((water_recess & 0x1u) << 28);
         return v;
     }
 
     inline glm::vec3 position() const {
         float px = static_cast<float>(data0 & 0x3Fu);
-        float py = static_cast<float>((data0 >> 6) & 0x3Fu) - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f) + (((data1 >> 27) & 0x1u) ? 0.04f : 0.0f);
+        float py = static_cast<float>((data0 >> 6) & 0x3Fu)
+                   - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f)
+                   + (((data1 >> 27) & 0x1u) ? 0.04f : 0.0f)
+                   - (((data1 >> 28) & 0x1u) ? 0.10f : 0.0f);
         float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
         return glm::vec3(px, py, pz);
     }

@@ -97,6 +97,7 @@ set(ENGINE_CORE_SOURCES
     src/ui/debrief_menu.cpp
     src/entities/vault_door.cpp
     src/ui/terrain_scanner.cpp
+    src/graphics/surface_clutter.cpp
 )
 
 add_library(voidfall_engine_core STATIC ${ENGINE_CORE_SOURCES})

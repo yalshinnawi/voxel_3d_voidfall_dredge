@@ -1399,6 +1399,34 @@ void Renderer::render_chunk(const Chunk& chunk) {
     chunk.render();
 }
 
+void Renderer::render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos) {
+    if (chunk.clutter_instances().empty()) return;
+
+    glm::vec3 min_pt = chunk.get_world_pos();
+    glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
+    if (!is_box_in_frustum(min_pt, max_pt)) return;
+
+    if (!m_clutter_system.is_gpu_initialized()) {
+        m_clutter_system.init_gpu();
+    }
+
+    m_clutter_system.render_chunk_clutter(
+        chunk.clutter_instances(),
+        player_pos,
+        m_view,
+        m_proj,
+        m_cam_pos,
+        m_headlamp.position,
+        m_headlamp.direction,
+        m_headlamp.color,
+        m_headlamp.enabled,
+        m_total_time
+    );
+
+    // Restore voxel shader state for subsequent chunk rendering
+    m_voxel_shader.use();
+}
+
 void Renderer::render_debris(const DynamicDebris& debris) {
     if (debris.is_destroyed() || debris.vertex_count() == 0 || debris.vao() == 0) return;
 

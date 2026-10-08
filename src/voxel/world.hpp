@@ -84,6 +84,8 @@ public:
     void detect_natural_floor_steps();
     void ApplyTopologicalShapes(Chunk& chunk);
     void apply_topological_shapes(Chunk& chunk) { ApplyTopologicalShapes(chunk); }
+    void GenerateChunkClutter(Chunk& chunk);
+    void generate_chunk_clutter(Chunk& chunk) { GenerateChunkClutter(chunk); }
 
     const std::vector<FaunaEntity>& GetActiveEntities() const { return m_active_entities; }
     std::vector<FaunaEntity>& GetActiveEntities() { return m_active_entities; }
@@ -180,8 +182,9 @@ public:
     requires (!std::is_same_v<std::decay_t<TRenderer>, glm::vec3>)
     void Render(TRenderer& renderer, const glm::vec3& camera_pos, const glm::vec3& player_pos) {
         set_frustum_planes(renderer.frustum_planes());
-        render([&renderer](const Chunk& chunk) {
+        render([&renderer, &player_pos](const Chunk& chunk) {
             renderer.render_chunk(chunk);
+            renderer.render_chunk_clutter(chunk, player_pos);
         }, player_pos);
     }
 
@@ -245,9 +248,17 @@ public:
     float m_fluidAccumulator{0.0f};
     std::unordered_set<Chunk*> m_fluidDirtyChunks;
 
+    static inline uint64_t PackCoord(const glm::ivec3& p) {
+        return (uint64_t(p.x & 0x1FFFFF) << 42) | (uint64_t(p.y & 0x1FFFFF) << 21) | uint64_t(p.z & 0x1FFFFF);
+    }
+    static inline uint64_t PackPos(const glm::ivec3& pos) { return PackCoord(pos); }
+
     void WakeFluid(const glm::ivec3& pos);
     void wake_fluid(const glm::ivec3& pos) { WakeFluid(pos); }
     void check_wake_fluid_around(const glm::ivec3& pos);
+
+    uint8_t GetBlockMaterial(const glm::ivec3& pos) const;
+    uint8_t get_block_material(const glm::ivec3& pos) const { return GetBlockMaterial(pos); }
 
     void set_fluid_cell(const glm::ivec3& pos, uint8_t mat, uint8_t level, bool is_waterlogged = false);
     void set_waterlogged_cell(const glm::ivec3& pos, bool state);
@@ -256,6 +267,7 @@ public:
     void UpdateFluids(float dt) { update_fluids(dt); }
 
     void SimulateFluidCell(const glm::ivec3& pos);
+    void SimulateFluidCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
 
     size_t active_fluid_count() const { return m_activeFluids.size(); }
     size_t ActiveFluidCount() const { return active_fluid_count(); }
@@ -265,6 +277,7 @@ public:
     void Update(float dt) {
         update_debris(dt);
         update_fluids(dt);
+        upload_mesh_queue(MAX_CHUNK_UPLOADS_PER_FRAME);
     }
 
 private:

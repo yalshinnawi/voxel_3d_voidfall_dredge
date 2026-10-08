@@ -337,31 +337,50 @@ void main() {
     // Zero-Cost Procedural Edge Chamfering:
     // To eliminate the razor-sharp digital 90° look on cubic faces without adding extra geometry:
     vec3 normal = N;
-    // Chamfer outer edges based on UV proximity
     vec2 v_TexCoords = fract(vUV);
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
+    float minEdge = min(edgeDist.x, edgeDist.y);
     vec3 v_Normal = vNormal;
-    // Do NOT bevel edges of liquids (prevents the scalloped "separate tile" look)
-    bool isLiquidMat = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT);
-    if (!isLiquidMat && minEdge < 0.04) {
-        float bevel = smoothstep(0.0, 0.04, minEdge);
-        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.12 + dFdy(v_FragPos) * 0.12);
+
+    // Only bevel solid rock/metal edges; leave liquid surfaces perfectly smooth
+    if (!isLiquid && minEdge < 0.045) {
+        float bevel = smoothstep(0.0, 0.045, minEdge);
+        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.15 + dFdy(v_FragPos) * 0.15);
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
-    // Low-amplitude continuous grain so natural stone remains matte without looking like static noise
-    if (!isLiquidMat) {
-        normal = normalize(normal + sin(v_FragPos * 16.0) * 0.04);
+    // Distance-Gated Surface Relief & Normal Micro-Detail:
+    // For fragments close to the camera (< 7.0m), apply continuous 3D noise displacement to the surface normal
+    if (!isLiquid && length(v_FragPos - uCameraPos) < 7.0) {
+        float grain = sin(v_FragPos.x * 12.0) * cos(v_FragPos.y * 12.0) * sin(v_FragPos.z * 12.0);
+        normal = normalize(normal + grain * 0.06);
     }
-    N = normal;
 
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
 
+    // World-Space Continuous UV Projection & Mirror Specular for Liquids:
+    if (isLiquid) {
+        vec2 fluidUV = v_FragPos.xz * 0.25; // 4-meter repeat cycle across all chunks
+        vec2 flowOffset = vec2(uTime * 0.03, uTime * 0.015);
+
+        // Sample moving caustics/normals seamlessly
+        if (uUseTextureArray == 1) {
+            vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(v_MaterialID)));
+            vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.4 - flowOffset * 0.7, float(v_MaterialID)));
+            normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.2);
+        } else {
+            float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
+            normal = normalize(v_Normal + vec3(wave, 0.0, wave));
+        }
+        roughness = 0.02; // Mirror specular reflection for water
+    }
+    N = normal;
+
     uint matType = vTexLayer;
 
     // Reserve low roughness values (< 0.20) strictly for wet puddle pools and polished Precursor glass
-    bool isPuddle = (matType == MAT_WATER);
+    bool isPuddle = (matType == MAT_WATER || isLiquid);
     bool isPrecursorGlass = (matType == MAT_PRISMATIC_CRYSTAL || matType == MAT_PRECURSOR_GLASS || matType == MAT_VOIDITE || matType == MAT_OBSIDIAN);
     if (!isPuddle && !isPrecursorGlass) {
         roughness = max(roughness, 0.20);
