@@ -1,5 +1,6 @@
 #include "world.hpp"
 #include "structural_check.hpp"
+#include <glm/gtc/matrix_access.hpp>
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -73,8 +74,8 @@ void World::generate_world(int sector_index, uint32_t seed) {
     }
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
-        std::queue<ChunkPos> empty_queue;
-        std::swap(m_upload_queue, empty_queue);
+        std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
+        std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
     }
 
@@ -216,8 +217,8 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
     }
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
-        std::queue<ChunkPos> empty_queue;
-        std::swap(m_upload_queue, empty_queue);
+        std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
+        std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
     }
 
@@ -631,81 +632,121 @@ void World::worker_thread_loop() {
         };
 
         std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, get_neighbor);
-        chunk->stage_mesh(std::move(mesh));
-        queue_chunk_for_upload(target_pos);
+        auto mesh_data = std::make_unique<ChunkMeshData>();
+        mesh_data->pos = target_pos;
+        mesh_data->chunk = chunk.get();
+        mesh_data->chunk_ref = chunk;
+        mesh_data->vertices = std::move(mesh);
+
+        {
+            std::lock_guard<std::mutex> lock(m_upload_mutex);
+            if (m_upload_queued_set.insert(target_pos).second) {
+                m_pendingUploads.push(std::move(mesh_data));
+            }
+        }
+    }
+}
+
+void World::push_pending_upload(std::unique_ptr<ChunkMeshData> data) {
+    if (!data) return;
+    std::lock_guard<std::mutex> lock(m_upload_mutex);
+    if (m_upload_queued_set.insert(data->pos).second) {
+        m_pendingUploads.push(std::move(data));
     }
 }
 
 void World::queue_chunk_for_upload(const ChunkPos& pos) {
     std::lock_guard<std::mutex> lock(m_upload_mutex);
     if (m_upload_queued_set.insert(pos).second) {
-        m_upload_queue.push(pos);
+        auto data = std::make_unique<ChunkMeshData>();
+        data->pos = pos;
+        {
+            std::lock_guard<std::mutex> wlock(m_world_mutex);
+            auto it = m_chunks.find(pos);
+            if (it != m_chunks.end()) {
+                data->chunk = it->second.get();
+                data->chunk_ref = it->second;
+            }
+        }
+        m_pendingUploads.push(std::move(data));
     }
 }
 
 size_t World::upload_queue_size() const {
     std::lock_guard<std::mutex> lock(m_upload_mutex);
-    return m_upload_queue.size();
+    return m_pendingUploads.size();
 }
 
 size_t World::upload_mesh_queue(size_t max_uploads) {
     if (max_uploads == 0) return 0;
 
-    size_t uploaded_count = 0;
+    size_t uploadsDone = 0;
 
     // 1. Drain up to max_uploads completed chunks from the worker upload queue
-    while (uploaded_count < max_uploads) {
-        ChunkPos target_pos;
-        {
-            std::lock_guard<std::mutex> lock(m_upload_mutex);
-            if (m_upload_queue.empty()) {
-                break;
+    {
+        std::lock_guard<std::mutex> lock(m_upload_mutex);
+        while (!m_pendingUploads.empty() && uploadsDone < max_uploads) {
+            auto& front = m_pendingUploads.front();
+            if (front) {
+                m_upload_queued_set.erase(front->pos);
+                front->UploadToGPU();
             }
-            target_pos = m_upload_queue.front();
-            m_upload_queue.pop();
-            m_upload_queued_set.erase(target_pos);
-        }
-
-        std::shared_ptr<Chunk> chunk;
-        {
-            std::lock_guard<std::mutex> lock(m_world_mutex);
-            auto it = m_chunks.find(target_pos);
-            if (it != m_chunks.end()) {
-                chunk = it->second;
-            }
-        }
-
-        if (chunk && chunk->has_staged_mesh()) {
-            chunk->upload_mesh();
-            uploaded_count++;
+            m_pendingUploads.pop();
+            uploadsDone++;
         }
     }
 
     // 2. Fallback check: if upload queue is exhausted but there are still staged chunks in m_chunks,
     // upload up to the remaining per-frame budget
-    if (uploaded_count < max_uploads) {
+    if (uploadsDone < max_uploads) {
         std::lock_guard<std::mutex> lock(m_world_mutex);
         for (auto& [pos, chunk] : m_chunks) {
-            if (uploaded_count >= max_uploads) break;
+            if (uploadsDone >= max_uploads) break;
             if (chunk && chunk->has_staged_mesh()) {
                 chunk->upload_mesh();
-                uploaded_count++;
+                uploadsDone++;
             }
         }
     }
 
-    return uploaded_count;
+    return uploadsDone;
 }
 
 void World::update() {
-    m_uploads_this_frame = 0;
-    m_uploads_this_frame = upload_mesh_queue(MAX_CHUNK_UPLOADS_PER_FRAME);
+    constexpr int MAX_CHUNK_UPLOADS_PER_FRAME = 2;
+    int uploadsDone = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_upload_mutex);
+        while (!m_pendingUploads.empty() && uploadsDone < MAX_CHUNK_UPLOADS_PER_FRAME) {
+            auto& front = m_pendingUploads.front();
+            if (front) {
+                m_upload_queued_set.erase(front->pos);
+                front->UploadToGPU();
+            }
+            m_pendingUploads.pop();
+            uploadsDone++;
+        }
+    }
+    m_uploads_this_frame = uploadsDone;
 }
 
 void World::update(const glm::vec3& viewer_pos, int render_distance) {
     // Amortize OpenGL driver overhead: upload at most MAX_CHUNK_UPLOADS_PER_FRAME buffers per frame
-    m_uploads_this_frame = 0;
-    m_uploads_this_frame = upload_mesh_queue(MAX_CHUNK_UPLOADS_PER_FRAME);
+    constexpr int MAX_CHUNK_UPLOADS_PER_FRAME = 2;
+    int uploadsDone = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_upload_mutex);
+        while (!m_pendingUploads.empty() && uploadsDone < MAX_CHUNK_UPLOADS_PER_FRAME) {
+            auto& front = m_pendingUploads.front();
+            if (front) {
+                m_upload_queued_set.erase(front->pos);
+                front->UploadToGPU();
+            }
+            m_pendingUploads.pop();
+            uploadsDone++;
+        }
+    }
+    m_uploads_this_frame = uploadsDone;
 
     int max_cx = m_level_gen ? ((m_level_gen->world_width() + CHUNK_SIZE - 1) / CHUNK_SIZE) : 8;
     int max_cy = std::max((m_chunk_ceiling + CHUNK_SIZE - 1) / CHUNK_SIZE,
@@ -765,9 +806,134 @@ void World::force_mesh_all_sync() {
     // Flush upload queue to prevent redundant uploads
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
-        std::queue<ChunkPos> empty_queue;
-        std::swap(m_upload_queue, empty_queue);
+        std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
+        std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
+    }
+}
+
+void World::set_frustum_planes(const std::array<glm::vec4, 6>& planes) {
+    m_frustum_planes = planes;
+    m_has_frustum = true;
+}
+
+void World::set_camera_frustum(const glm::mat4& view_proj) {
+    glm::vec4 row0 = glm::row(view_proj, 0);
+    glm::vec4 row1 = glm::row(view_proj, 1);
+    glm::vec4 row2 = glm::row(view_proj, 2);
+    glm::vec4 row3 = glm::row(view_proj, 3);
+
+    m_frustum_planes[0] = row3 + row0; // Left
+    m_frustum_planes[1] = row3 - row0; // Right
+    m_frustum_planes[2] = row3 + row1; // Bottom
+    m_frustum_planes[3] = row3 - row1; // Top
+    m_frustum_planes[4] = row3 + row2; // Near
+    m_frustum_planes[5] = row3 - row2; // Far
+
+    for (int i = 0; i < 6; ++i) {
+        float len = glm::length(glm::vec3(m_frustum_planes[i]));
+        if (len > 1e-6f) {
+            m_frustum_planes[i] /= len;
+        }
+    }
+    m_has_frustum = true;
+}
+
+bool World::is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const {
+    if (!m_has_frustum) return true;
+    for (int i = 0; i < 6; ++i) {
+        glm::vec3 p(
+            (m_frustum_planes[i].x > 0.0f) ? max_pt.x : min_pt.x,
+            (m_frustum_planes[i].y > 0.0f) ? max_pt.y : min_pt.y,
+            (m_frustum_planes[i].z > 0.0f) ? max_pt.z : min_pt.z
+        );
+        if (glm::dot(glm::vec3(m_frustum_planes[i]), p) + m_frustum_planes[i].w < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool World::is_vertical_occluded(const ChunkPos& chunkPos, int playerChunkY) const {
+    int dy = chunkPos.y - playerChunkY;
+    if (std::abs(dy) <= 3) {
+        return false;
+    }
+
+    int ceiling_chunk_y = (m_chunk_ceiling + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    if (dy > 0 && chunkPos.y >= ceiling_chunk_y) {
+        return true;
+    }
+    if (dy < 0 && chunkPos.y < 0) {
+        return true;
+    }
+
+    int step = (dy > 0) ? 1 : -1;
+    for (int y = playerChunkY + step; y != chunkPos.y; y += step) {
+        ChunkPos mid_pos{chunkPos.x, y, chunkPos.z};
+        auto it = m_chunks.find(mid_pos);
+        if (it != m_chunks.end() && it->second) {
+            if (it->second->is_fully_solid()) {
+                return true;
+            }
+            if (dy > 0 && y >= ceiling_chunk_y) {
+                return true;
+            }
+            if (dy < 0 && y < 0) {
+                return true;
+            }
+        } else {
+            if ((dy > 0 && y >= ceiling_chunk_y) || (dy < 0 && y < 0)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void World::render() {
+    render(m_playerSpawnPos);
+}
+
+void World::render(const glm::vec3& player_pos) {
+    render([](const Chunk& chunk) {
+        chunk.render();
+    }, player_pos);
+}
+
+void World::render(const std::function<void(const Chunk&)>& draw_fn, const glm::vec3& player_pos) {
+    m_rendered_chunks_count = 0;
+    m_culled_chunks_count = 0;
+    int playerChunkY = floor_div(static_cast<int>(player_pos.y), CHUNK_SIZE);
+
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    for (const auto& [pos, chunk] : m_chunks) {
+        if (!chunk || (chunk->vertex_count() == 0 && !chunk->has_staged_mesh())) {
+            m_culled_chunks_count++;
+            continue;
+        }
+
+        // Vertical occlusion culling
+        if (std::abs(pos.y - playerChunkY) > 3 && is_vertical_occluded(pos, playerChunkY)) {
+            m_culled_chunks_count++;
+            continue;
+        }
+
+        // Camera view frustum culling
+        glm::vec3 min_pt = chunk->get_world_pos();
+        glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
+        if (m_has_frustum && !is_box_in_frustum(min_pt, max_pt)) {
+            m_culled_chunks_count++;
+            continue;
+        }
+
+        if (draw_fn) {
+            draw_fn(*chunk);
+        } else {
+            chunk->render();
+        }
+        m_rendered_chunks_count++;
     }
 }
 
@@ -831,13 +997,41 @@ bool World::break_voxel(int world_x, int world_y, int world_z) {
     return true;
 }
 
+void World::despawn_or_revoxelize_oldest_debris(bool force_revoxelize) {
+    if (m_debris.empty()) return;
+    auto& oldest = m_debris.front();
+    if (force_revoxelize || oldest.is_sleeping()) {
+        oldest.re_voxelize_blocks(*this);
+    }
+    m_debris.erase(m_debris.begin());
+    EntityManager::active_debris_count = m_debris.size();
+}
+
 void World::add_debris(DynamicDebris&& d) {
     while (m_debris.size() >= MAX_ACTIVE_DEBRIS) {
-        // Recycle / despawn oldest active debris entity
-        m_debris.erase(m_debris.begin());
+        // Recycle / despawn or re-voxelize oldest active debris entity
+        despawn_or_revoxelize_oldest_debris();
     }
     d.set_world(this);
     m_debris.push_back(std::move(d));
+    EntityManager::active_debris_count = m_debris.size();
+}
+
+void World::clear_debris() {
+    m_debris.clear();
+    m_next_debris_id = 1;
+    EntityManager::active_debris_count = 0;
+}
+
+void World::remove_destroyed_debris() {
+    for (auto it = m_debris.begin(); it != m_debris.end();) {
+        if (it->is_destroyed()) {
+            it = m_debris.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    EntityManager::active_debris_count = m_debris.size();
 }
 
 void World::spawn_tremor_debris(const glm::vec3& pos, uint8_t mat_id, const glm::vec3& vel) {
@@ -855,6 +1049,7 @@ void World::update_debris(float dt, const glm::vec3& player_pos, bool is_player_
             ++it;
         }
     }
+    EntityManager::active_debris_count = m_debris.size();
 }
 
 } // namespace Voidfall

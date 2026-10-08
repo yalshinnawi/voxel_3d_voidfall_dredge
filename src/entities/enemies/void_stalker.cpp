@@ -42,6 +42,12 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3 &pos,
                                0.1f; // Staggered initial screech
   s.just_screeched = false;
 
+  // Stagger player-tracking path calculations across a 10 Hz accumulator (m_pathTimer >= 0.10f)
+  // with randomized initial phase per enemy [0.0f, 0.10f)
+  static std::mt19937 phase_rng(1337);
+  std::uniform_real_distribution<float> phase_dist(0.0f, 0.10f);
+  s.m_pathTimer = phase_dist(phase_rng);
+
   // Initialize surface climbing orientation & rig alignment
   s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
   s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -368,8 +374,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       sample.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
       sample.distance = 0.05f;
       sample.has_contact = true;
-    } else if (dist_to_player > 40.0f) {
-      // If distance to player > 40.0m, completely skip 6-direction raycast collision
+    } else if (dist_to_player > 35.0f) {
+      // If distance to player > 35.0m, enter dormant low-tick mode: skip 6-direction raycast collision
       sample.surface_state = s.surface_state;
       sample.contact_normal = s.contact_normal;
       sample.distance = 0.05f;
@@ -549,9 +555,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     s.is_in_light = headlamp_on && dist_to_player < 22.0f &&
                     is_in_headlamp(s.position, player_pos, headlamp_dir, 32.0f);
 
-    // Raycast Line of Sight from stalker eyes to delver torso (skip if > 40.0m)
+    // Raycast Line of Sight from stalker eyes to delver torso (skip if > 35.0m in dormant low-tick mode)
     bool los = false;
-    if (dist_to_player <= 40.0f) {
+    if (dist_to_player <= 35.0f) {
       los = has_line_of_sight(s.position + glm::vec3(0.0f, 0.4f, 0.0f),
                               player_pos + glm::vec3(0.0f, 0.7f, 0.0f), world);
     }
@@ -1195,10 +1201,10 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                                           "spine volley at player!");
       }
 
-      // Recalculate full player-tracking velocity vectors only every 0.15s (approx 6.6 Hz)
-      bool do_path_tick = (s.m_pathTickTimer >= 0.15f);
+      // Recalculate full player-tracking velocity vectors only every 0.10s (10 Hz accumulator)
+      bool do_path_tick = (s.m_pathTimer >= 0.10f);
       if (do_path_tick) {
-        s.m_pathTickTimer = 0.0f;
+        s.m_pathTimer = 0.0f;
 
         glm::vec3 move_dir(0.0f);
         float weave = 0.45f * std::sin(s.walk_cycle * 1.2f);
@@ -1225,7 +1231,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           if (glm::length(move_dir) > 0.01f) {
             glm::vec3 perp(-move_dir.z, 0.0f, move_dir.x);
             move_dir = glm::normalize(move_dir + perp * weave);
-            if (dist_to_player <= 40.0f) {
+            if (dist_to_player <= 35.0f) {
               move_dir = AberrantAI::steer_around_obstacles(
                   s.position, move_dir, s.contact_normal, world);
             }
@@ -1241,16 +1247,16 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             glm::vec3 dir_xz = to_tgt_xz / horiz_to_tgt;
             glm::vec3 perp(-dir_xz.z, 0.0f, dir_xz.x);
             move_dir = glm::normalize(dir_xz + perp * weave);
-            if (dist_to_player <= 40.0f) {
+            if (dist_to_player <= 35.0f) {
               move_dir = AberrantAI::steer_around_obstacles(
                   s.position, move_dir, s.contact_normal, world);
             }
           }
         }
 
-        // Swarm Boid Separation: Spatial grid query, completely skipped if distance to player > 40.0m
+        // Swarm Boid Separation: Spatial grid query, completely skipped if distance to player > 35.0m (dormant low-tick mode)
         glm::vec3 f_sep(0.0f);
-        if (dist_to_player <= 40.0f) {
+        if (dist_to_player <= 35.0f) {
           f_sep = m_spatial_hash.calculate_separation(s.id, s.position, 16.0f, 8.0f);
         }
 
@@ -1388,9 +1394,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         break;
       }
 
-      bool do_circle_tick = (s.m_pathTickTimer >= 0.15f);
+      bool do_circle_tick = (s.m_pathTimer >= 0.10f);
       if (do_circle_tick) {
-        s.m_pathTickTimer = 0.0f;
+        s.m_pathTimer = 0.0f;
         glm::vec3 circle_dir(0.0f);
         if (s.surface_state == StalkerSurfaceState::WALL_CLIMBING) {
           circle_dir = AberrantAI::calculate_wall_traversal_direction(
@@ -1408,7 +1414,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           glm::vec3 target = player_pos + orbit_offset;
           circle_dir = glm::normalize(target - s.position);
         }
-        s.m_targetVelocity = circle_dir * s.circle_speed;
+        glm::vec3 f_sep(0.0f);
+        if (dist_to_player <= 35.0f) {
+          f_sep = m_spatial_hash.calculate_separation(s.id, s.position, 16.0f, 8.0f);
+        }
+        s.m_targetVelocity = circle_dir * s.circle_speed + f_sep;
       }
 
       float orbit_burst =
@@ -1756,7 +1766,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       }
 
       // Robust Voxel Collision & Boundary Clamping (Prevents moving through
-      // walls)
+      // walls, enables 1-block step clambering)
       float col_radius = (s.role == StalkerRole::ChitinGoliath) ? 0.65f : 0.38f;
       float col_height = (s.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f;
       AberrantAI::resolve_voxel_collision(s.position, s.velocity, col_radius,

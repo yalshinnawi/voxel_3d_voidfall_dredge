@@ -94,6 +94,14 @@ public:
     float low_velocity_timer() const { return m_low_velocity_timer; }
     bool is_destroyed() const { return m_destroyed; }
     uint8_t material_id() const { return m_material_id; }
+    uint8_t debris_material() const { return m_material_id; }
+    glm::ivec3 debris_voxel_pos() const {
+        return glm::ivec3(
+            static_cast<int>(std::floor(m_position.x)),
+            static_cast<int>(std::floor(m_position.y)),
+            static_cast<int>(std::floor(m_position.z))
+        );
+    }
     unsigned int vao() const { return m_vao; }
     size_t vertex_count() const { return m_vertex_count; }
     size_t block_count() const { return m_block_count; }

@@ -87,12 +87,11 @@ void main() {
     float linearDepth = length(rayDir);
     rayDir = normalize(rayDir);
 
-    // Limit maximum raymarch distance: clamp raymarching to min(linearDepth, 45.0)
-    // to prevent marching rays out to 100m+ in large vertical chasms
-    float maxMarchDepth = min(linearDepth, 45.0);
+    // Prevent unbounded ray iterations in deep chasms or large procedural hollows
+    float maxMarchDistance = min(linearDepth, 40.0);
 
-    const int NUM_STEPS = 20;
-    float stepSize = maxMarchDepth / float(NUM_STEPS);
+    const int NUM_STEPS = 16;
+    float stepSize = maxMarchDistance / float(NUM_STEPS);
     vec3 inscatter = vec3(0.0);
     float transmittance = 1.0;
 

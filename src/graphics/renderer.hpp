@@ -64,6 +64,8 @@ public:
 
     void begin_frame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& cam_pos);
     void render_chunk(const Chunk& chunk);
+    bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
+    const std::array<glm::vec4, 6>& frustum_planes() const { return m_frustum_planes; }
     void render_debris(const DynamicDebris& debris);
     void render_stalkers(const std::vector<VoidStalker>& stalkers);
     void render_stalkers(const std::vector<VoidStalker>& stalkers, const std::vector<VoidSpikeProjectile>& projectiles);
@@ -208,7 +210,6 @@ private:
 
     // Camera frustum culling
     std::array<glm::vec4, 6> m_frustum_planes{};
-    bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
 };
 
 } // namespace Voidfall

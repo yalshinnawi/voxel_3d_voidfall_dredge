@@ -2360,6 +2360,7 @@ void Renderer::end_frame(float delta_time, float radiation_level) {
     m_postprocess_shader.set_float("uTime", m_total_time);
     m_postprocess_shader.set_float("uNear", 0.1f);
     m_postprocess_shader.set_float("uFar", 250.0f);
+    m_postprocess_shader.set_int("uSector", m_sector);
 
     render_quad();
 }

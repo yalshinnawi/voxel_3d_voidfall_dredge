@@ -15,6 +15,7 @@ uniform float uRadiationGlitch;
 uniform float uTime;
 uniform float uNear;
 uniform float uFar;
+uniform int uSector;
 
 // ACES Filmic Tonemapping (Stephen Hill / Narkowicz Fit)
 // Transforms sRGB primaries to ACEScg, applies ACES RRT + ODT curve,
@@ -124,6 +125,22 @@ void main() {
     vec3 scene = texture(uSceneColor, uv).rgb;
     vec3 bloom = texture(uBloomColor, uv).rgb;
     vec4 fog   = sample_bilateral_fog(uv); // rgb = inscatter, a = fog factor (bilateral upsampled)
+
+    // Cavern expanses beyond 40.0m smoothly blend into an ambient depth haze
+    float linearDepth = linearize_depth(texture(uDepthTexture, uv).r);
+    if (linearDepth > 40.0) {
+        vec3 depthHazeColor = vec3(0.04, 0.05, 0.07); // Subterranean ambient haze (Sector 1: Cold slate)
+        if (uSector == 2) {
+            depthHazeColor = vec3(0.08, 0.045, 0.025); // Sector 2: Volcanic amber
+        } else if (uSector >= 3) {
+            depthHazeColor = vec3(0.025, 0.07, 0.04); // Sector 3: Toxic emerald
+        }
+        if (uRadiationGlitch > 0.0) {
+            depthHazeColor = mix(depthHazeColor, vec3(0.06, 0.18, 0.08), uRadiationGlitch * 0.7);
+        }
+        float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
+        scene = mix(scene, depthHazeColor, depthHazeFactor);
+    }
 
     // Composite volumetric fog light shafts
     if (fog.a > 0.001) {

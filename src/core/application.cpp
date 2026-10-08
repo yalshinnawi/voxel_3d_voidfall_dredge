@@ -393,6 +393,9 @@ void Application::init_systems() {
         });
         m_client->set_on_debris_spawn([this](const DynamicDebrisSpawnPacket& pkt) {
             while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+                if (!m_debris.empty() && m_debris.front().is_sleeping() && m_world) {
+                    m_debris.front().re_voxelize_blocks(*m_world);
+                }
                 m_debris.erase(m_debris.begin());
             }
             m_debris.emplace_back(pkt.debris_id, pkt.origin, pkt.linear_velocity,
@@ -859,6 +862,9 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
             auto unanchored = StructuralCheck::solve_cavein(*m_world, x, y, z, 64);
             for (const auto& island : unanchored) {
                 while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+                    if (!m_debris.empty() && m_debris.front().is_sleeping() && m_world) {
+                        m_debris.front().re_voxelize_blocks(*m_world);
+                    }
                     m_debris.erase(m_debris.begin());
                 }
                 uint32_t did = m_next_debris_id++;
@@ -1243,6 +1249,9 @@ void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float ra
         float rot_z = (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 4.0f;
         glm::vec3 rot(rot_x, rot_y, rot_z);
         while (m_debris.size() >= World::MAX_ACTIVE_DEBRIS) {
+            if (!m_debris.empty() && m_debris.front().is_sleeping() && m_world) {
+                m_debris.front().re_voxelize_blocks(*m_world);
+            }
             m_debris.erase(m_debris.begin());
         }
         m_debris.emplace_back(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, rot, v.material_id, 1, m_world.get());
@@ -3019,10 +3028,8 @@ void Application::render(float dt) {
     // Begin HDR Frame
     m_renderer->begin_frame(view, proj, cam_pos);
 
-    // Render Chunks
-    for (const auto& [pos, chunk] : m_world->chunks()) {
-        m_renderer->render_chunk(*chunk);
-    }
+    // Render Chunks with Vertical & Frustum Culling
+    m_world->Render(*m_renderer, cam_pos, m_player ? m_player->position() : cam_pos);
 
     // Render Falling Dynamic Debris
     for (const auto& d : m_debris) {

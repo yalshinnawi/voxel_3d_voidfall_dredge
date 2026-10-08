@@ -148,6 +148,98 @@ void test_voxel_engine() {
     upload_test_world.Update();
     TEST_CHECK(upload_test_world.upload_queue_size() == 0, "Second World::Update() uploads remaining chunk");
     log_pass("Chunk Mesh GPU Upload Throttling (MAX_CHUNK_UPLOADS_PER_FRAME = 2) in World::Update()");
+
+    // Verify m_pendingUploads staging queue & ChunkMeshData
+    auto custom_mesh_data = std::make_unique<ChunkMeshData>();
+    custom_mesh_data->pos = ChunkPos{5, 0, 0};
+    custom_mesh_data->chunk = upload_test_world.get_or_create_chunk(ChunkPos{5, 0, 0});
+    custom_mesh_data->vertices = std::vector<PackedVoxelVertex>(24);
+    upload_test_world.push_pending_upload(std::move(custom_mesh_data));
+    TEST_CHECK(upload_test_world.upload_queue_size() == 1, "m_pendingUploads staging queue contains pushed data");
+    upload_test_world.Update();
+    TEST_CHECK(upload_test_world.upload_queue_size() == 0, "m_pendingUploads processed via World::Update()");
+    log_pass("ChunkMeshData & m_pendingUploads GPU staging queue upload amortization");
+
+    // Camera View Frustum & Vertical Occlusion Chunk Culling in World::Render()
+    World culling_world(2222, false);
+    culling_world.set_chunk_ceiling(256);
+    glm::vec3 player_pos(16.0f, 16.0f, 16.0f); // Player at chunk Y = 0
+
+    // 1. Chunk in front of camera inside frustum: (1, 0, 0)
+    auto c_in_frustum = culling_world.get_or_create_chunk(ChunkPos{1, 0, 0});
+    c_in_frustum->stage_mesh(std::vector<PackedVoxelVertex>(36));
+    c_in_frustum->upload_mesh();
+
+    // 2. Chunk behind camera outside frustum: (-2, 0, 0)
+    auto c_behind = culling_world.get_or_create_chunk(ChunkPos{-2, 0, 0});
+    c_behind->stage_mesh(std::vector<PackedVoxelVertex>(36));
+    c_behind->upload_mesh();
+
+    // 3. Chunk within vertical threshold dy <= 3: (1, 1, 0) -> dy = 1 (NOT occluded)
+    auto c_dy1 = culling_world.get_or_create_chunk(ChunkPos{1, 1, 0});
+    c_dy1->stage_mesh(std::vector<PackedVoxelVertex>(36));
+    c_dy1->upload_mesh();
+
+    // 4. Chunk beyond vertical threshold dy > 3: (1, 5, 0) -> dy = 5
+    // Intervening chunk (1, 2, 0) is fully solid boundary
+    auto c_dy5 = culling_world.get_or_create_chunk(ChunkPos{1, 5, 0});
+    c_dy5->stage_mesh(std::vector<PackedVoxelVertex>(36));
+    c_dy5->upload_mesh();
+
+    auto c_intervening = culling_world.get_or_create_chunk(ChunkPos{1, 2, 0});
+    for (size_t i = 0; i < CHUNK_VOLUME; ++i) {
+        c_intervening->set_voxel_idx(i, Voxel{MAT_GRANITE, 0});
+    }
+    TEST_CHECK(c_intervening->is_fully_solid(), "Intervening boundary chunk is fully solid");
+
+    // Verify vertical occlusion check directly:
+    TEST_CHECK(culling_world.is_vertical_occluded(ChunkPos{1, 5, 0}, 0) == true,
+               "Chunk with dy > 3 occluded by solid ceiling boundary must return true");
+    TEST_CHECK(culling_world.is_vertical_occluded(ChunkPos{1, 1, 0}, 0) == false,
+               "Chunk with dy <= 3 must not be occluded by vertical distance");
+    TEST_CHECK(culling_world.is_vertical_occluded(ChunkPos{1, 3, 0}, 0) == false,
+               "Chunk with dy <= 3 must not be occluded by vertical distance");
+
+    // Open vertical shaft: dy > 3 but NO solid boundary intervening
+    auto c_open_shaft = culling_world.get_or_create_chunk(ChunkPos{3, 4, 0});
+    TEST_CHECK(culling_world.is_vertical_occluded(ChunkPos{3, 4, 0}, 0) == false,
+               "Chunk with dy > 3 in open cavern shaft must not be occluded");
+
+    // Setup camera frustum looking towards +X with broad FOV:
+    glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 16.0f, 16.0f), glm::vec3(100.0f, 32.0f, 16.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 proj = glm::perspective(glm::radians(90.0f), 16.0f / 9.0f, 0.1f, 250.0f);
+    culling_world.set_camera_frustum(proj * view);
+
+    // Verify frustum check directly:
+    glm::vec3 min_front = c_in_frustum->get_world_pos();
+    glm::vec3 max_front = min_front + glm::vec3(32.0f);
+    TEST_CHECK(culling_world.is_box_in_frustum(min_front, max_front) == true, "Front chunk is inside frustum");
+
+    glm::vec3 min_behind = c_behind->get_world_pos();
+    glm::vec3 max_behind = min_behind + glm::vec3(32.0f);
+    TEST_CHECK(culling_world.is_box_in_frustum(min_behind, max_behind) == false, "Behind chunk is outside frustum");
+
+    // Run World::Render() and verify draw calls
+    std::vector<ChunkPos> drawn_chunks;
+    culling_world.Render([&drawn_chunks](const Chunk& c) {
+        drawn_chunks.push_back(c.get_pos());
+    }, player_pos);
+
+    bool drew_front = false;
+    bool drew_behind = false;
+    bool drew_dy1 = false;
+    bool drew_dy5 = false;
+    for (const auto& cp : drawn_chunks) {
+        if (cp == ChunkPos{1, 0, 0}) drew_front = true;
+        if (cp == ChunkPos{-2, 0, 0}) drew_behind = true;
+        if (cp == ChunkPos{1, 1, 0}) drew_dy1 = true;
+        if (cp == ChunkPos{1, 5, 0}) drew_dy5 = true;
+    }
+    TEST_CHECK(drew_front, "Chunk inside frustum was rendered");
+    TEST_CHECK(!drew_behind, "Chunk outside view frustum was culled and skipped");
+    TEST_CHECK(drew_dy1, "Chunk within vertical threshold dy <= 3 was rendered");
+    TEST_CHECK(!drew_dy5, "Chunk with dy > 3 occluded by solid floor/ceiling boundary was culled and skipped");
+    log_pass("World::Render() Camera View Frustum & Vertical Occlusion Chunk Culling");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -770,14 +862,40 @@ void test_seismic_tremor_and_falling_blocks() {
     TEST_CHECK(World::MAX_ACTIVE_DEBRIS == 36, "World::MAX_ACTIVE_DEBRIS hard cap must be 36");
     TEST_CHECK(EntityManager::MAX_ACTIVE_DEBRIS == 36, "EntityManager::MAX_ACTIVE_DEBRIS must match 36");
     world.clear_debris();
+    TEST_CHECK(world.active_debris_count() == 0, "Debris count must be 0 after clear");
+    TEST_CHECK(EntityManager::active_debris_count == 0, "EntityManager active debris must match 0");
     for (uint32_t i = 1; i <= 50; ++i) {
         world.spawn_tremor_debris(glm::vec3(10.0f, 20.0f, 10.0f));
     }
     TEST_CHECK(world.debris().size() == 36, "Debris count must be capped at MAX_ACTIVE_DEBRIS (36)");
+    TEST_CHECK(world.active_debris_count() == 36, "Active debris count must match MAX_ACTIVE_DEBRIS (36)");
+    TEST_CHECK(EntityManager::active_debris_count == 36, "EntityManager count must match 36");
     // The oldest entities (1 to 14) were recycled; front debris should have id == 15
     TEST_CHECK(world.debris().front().id() == 15, "Oldest active debris must be recycled when cap is exceeded");
     TEST_CHECK(world.debris().back().id() == 50, "Newest debris must be present at back of collection");
-    log_pass("Global Entity Cap (MAX_ACTIVE_DEBRIS = 36) & Oldest Entity Recycling");
+
+    // Test capping re-voxelization: if oldest active entity is sleeping when cap is exceeded,
+    // it must re-voxelize into the world instead of merely vanishing
+    int cap_rx = 28, cap_ry = 15, cap_rz = 28;
+    world.set_voxel(cap_rx, cap_ry, cap_rz, Voxel{MAT_AIR, 0}, true);
+    DynamicDebris oldest_sleep(
+        9999,
+        glm::vec3(cap_rx + 0.5f, cap_ry + 0.5f, cap_rz + 0.5f),
+        glm::vec3(0.0f),
+        glm::vec3(0.0f),
+        MAT_VOLCANIC_BASALT,
+        1,
+        &world
+    );
+    oldest_sleep.set_sleeping(true);
+    world.debris().insert(world.debris().begin(), std::move(oldest_sleep));
+    // World now has 37 debris; adding new debris triggers capping and re-voxelizes the oldest sleeping debris
+    world.spawn_tremor_debris(glm::vec3(10.0f, 20.0f, 10.0f));
+    TEST_CHECK(world.debris().size() == 36, "Debris count must remain capped at 36");
+    TEST_CHECK(world.is_solid(cap_rx, cap_ry, cap_rz), "Oldest sleeping debris must be re-voxelized into world upon cap recycling");
+    TEST_CHECK(world.get_voxel(cap_rx, cap_ry, cap_rz).material_id == MAT_VOLCANIC_BASALT,
+               "Re-voxelized block must retain debris material");
+    log_pass("Global Entity Cap (MAX_ACTIVE_DEBRIS = 36) & Oldest Entity Recycling / Re-voxelization");
 
     // 7. Debris Sleeping & Static Merging into Static Voxels
     int sleep_x = 24;

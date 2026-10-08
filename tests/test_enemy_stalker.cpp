@@ -1103,40 +1103,46 @@ int main() {
         glm::vec3 stalker_pos(15.0f, 16.0f, 25.0f); // 10m away
         manager.spawn_melee(stalker_pos);
 
+        // Step 0: Randomized initial phase per enemy in [0.0f, 0.10f)
+        CHECK(manager.stalkers()[0].m_pathTimer >= 0.0f && manager.stalkers()[0].m_pathTimer < 0.10f,
+              "Spawned stalker must have randomized initial phase in [0.0f, 0.10f)");
+
         auto& s = manager.stalkers_mut()[0];
         s.state = StalkerState::Stalking;
         s.target_pos = player_pos;
-        s.m_pathTickTimer = 0.0f; // Reset accumulator
+        s.m_pathTimer = 0.0f; // Reset accumulator
 
-        // Step 1: Sub-tick updates (dt = 0.03s < 0.15s). Accumulator increments, movement interpolates smoothly.
+        // Step 1: Sub-tick updates (dt = 0.03s < 0.10f). Accumulator increments, movement interpolates smoothly.
         glm::vec3 p_prev = s.position;
         manager.update(0.03f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
-        CHECK(manager.stalkers()[0].m_pathTickTimer >= 0.029f && manager.stalkers()[0].m_pathTickTimer <= 0.031f,
-              "m_pathTickTimer must accumulate elapsed dt");
+        CHECK(manager.stalkers()[0].m_pathTimer >= 0.029f && manager.stalkers()[0].m_pathTimer <= 0.031f,
+              "m_pathTimer must accumulate elapsed dt");
+        CHECK(manager.stalkers()[0].m_pathTickTimer == manager.stalkers()[0].m_pathTimer,
+              "m_pathTickTimer alias must mirror m_pathTimer identically");
 
-        // Step 2: Accumulate past 0.15s threshold -> triggers path recalculation and resets timer
-        manager.update(0.13f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
-        // Total time 0.03 + 0.13 = 0.16s >= 0.15s -> tick fired, timer reset
-        CHECK(manager.stalkers()[0].m_pathTickTimer < 0.15f,
-              "m_pathTickTimer must reset after 0.15s tick boundary");
+        // Step 2: Accumulate past 0.10s threshold (10 Hz) -> triggers path recalculation and resets timer
+        manager.update(0.08f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
+        // Total time 0.03 + 0.08 = 0.11s >= 0.10s -> tick fired, timer reset
+        CHECK(manager.stalkers()[0].m_pathTimer < 0.10f,
+              "m_pathTimer must reset after 0.10s tick boundary (10 Hz)");
         CHECK(glm::length(manager.stalkers()[0].velocity) > 0.1f,
               "Stalker must calculate active tracking velocity on tick");
         CHECK(manager.stalkers()[0].position != p_prev,
               "Stalker movement must progress smoothly across ticks");
 
-        // Step 3: Test distance > 40.0m skips raycast collision and boid separation
+        // Step 3: Test distance > 35.0m enters dormant low-tick mode (skips collision raycasts and boid separation)
         VoidStalkerManager distant_mgr;
-        glm::vec3 far_stalker_pos(15.0f, 16.0f, 65.0f); // 50m away (> 40.0m)
+        glm::vec3 far_stalker_pos(15.0f, 16.0f, 52.0f); // 37m away (> 35.0m)
         distant_mgr.spawn_melee(far_stalker_pos);
         distant_mgr.spawn_melee(far_stalker_pos + glm::vec3(1.0f, 0.0f, 0.0f)); // Nearby packmate 1m away
         auto& far_s1 = distant_mgr.stalkers_mut()[0];
         far_s1.state = StalkerState::Stalking;
-        far_s1.m_pathTickTimer = 0.15f; // Ready to tick
+        far_s1.m_pathTimer = 0.10f; // Ready to tick
 
         distant_mgr.update(0.016f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, test_world);
-        // Verify raycast LOS was skipped (has_player_los remains false)
+        // Verify raycast LOS was skipped (has_player_los remains false) in dormant low-tick mode
         CHECK(!distant_mgr.stalkers()[0].has_player_los,
-              "Stalker > 40m from player must skip raycast line-of-sight");
+              "Stalker > 35m from player must enter dormant low-tick mode and skip raycast line-of-sight");
 
         // Step 4: Spatial Hashing and Early-Exit Boid Separation Test
         AISpatialHash spatial_hash;

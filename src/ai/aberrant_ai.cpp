@@ -308,22 +308,22 @@ glm::vec3 AISpatialHash::calculate_separation(
 
     glm::vec3 total_force(0.0f);
 
-    for (int dz = -1; dz <= 1; ++dz) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                uint32_t h = hash_cell(cx + dx, cy + dy, cz + dz);
+    for (int dz_cell = -1; dz_cell <= 1; ++dz_cell) {
+        for (int dy_cell = -1; dy_cell <= 1; ++dy_cell) {
+            for (int dx_cell = -1; dx_cell <= 1; ++dx_cell) {
+                uint32_t h = hash_cell(cx + dx_cell, cy + dy_cell, cz + dz_cell);
                 for (int idx = m_head[h]; idx != -1; idx = m_next[idx]) {
                     const auto& ent = m_entries[idx];
                     if (ent.id == self_id) continue;
-                    float diff_x = self_pos.x - ent.position.x;
-                    float diff_y = self_pos.y - ent.position.y;
-                    float diff_z = self_pos.z - ent.position.z;
+                    float dx = self_pos.x - ent.position.x;
+                    float dy = self_pos.y - ent.position.y;
+                    float dz = self_pos.z - ent.position.z;
                     // Early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately
-                    float dist_sq = diff_x * diff_x + diff_y * diff_y + diff_z * diff_z;
-                    if (dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
+                    float dist_sq = dx * dx + dy * dy + dz * dz;
+                    if (dist_sq > 16.0f || dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
                         continue;
                     }
-                    total_force += (glm::vec3(diff_x, diff_y, diff_z) / dist_sq) * separation_force;
+                    total_force += (glm::vec3(dx, dy, dz) / dist_sq) * separation_force;
                 }
             }
         }
@@ -345,7 +345,7 @@ glm::vec3 AberrantAI::calculate_swarm_separation(
         float dz = self_pos.z - other_pos.z;
         // Early-exit distance check: dx*dx + dy*dy + dz*dz > 16.0f skips separation math immediately
         float dist_sq = dx * dx + dy * dy + dz * dz;
-        if (dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
+        if (dist_sq > 16.0f || dist_sq > max_dist_sq || dist_sq <= 0.0001f) {
             continue;
         }
         total_force += (glm::vec3(dx, dy, dz) / dist_sq) * separation_force;

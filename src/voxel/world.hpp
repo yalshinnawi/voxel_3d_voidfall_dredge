@@ -9,6 +9,8 @@
 #include <unordered_set>
 #include <memory>
 #include <vector>
+#include <array>
+#include <functional>
 #include <thread>
 #include <queue>
 #include <condition_variable>
@@ -17,7 +19,25 @@
 
 namespace Voidfall {
 
+class Renderer;
 struct UnanchoredIsland;
+
+struct ChunkMeshData {
+    ChunkPos pos{0, 0, 0};
+    Chunk* chunk{nullptr};
+    std::shared_ptr<Chunk> chunk_ref{nullptr};
+    std::vector<PackedVoxelVertex> vertices;
+
+    void UploadToGPU() {
+        Chunk* c = chunk ? chunk : chunk_ref.get();
+        if (c) {
+            if (!vertices.empty()) {
+                c->stage_mesh(std::move(vertices));
+            }
+            c->upload_mesh();
+        }
+    }
+};
 
 struct RaycastHit {
     bool hit{false};
@@ -41,6 +61,7 @@ struct FaunaEntity {
 
 struct EntityManager {
     static constexpr size_t MAX_ACTIVE_DEBRIS = 36;
+    inline static size_t active_debris_count{0};
 };
 
 class World {
@@ -117,8 +138,59 @@ public:
     size_t upload_dirty_chunks(size_t max_uploads = MAX_CHUNK_UPLOADS_PER_FRAME);
     size_t upload_mesh_queue(size_t max_uploads = MAX_CHUNK_UPLOADS_PER_FRAME);
     void queue_chunk_for_upload(const ChunkPos& pos);
+    void push_pending_upload(std::unique_ptr<ChunkMeshData> data);
     size_t upload_queue_size() const;
     size_t pending_upload_count() const { return upload_queue_size(); }
+    std::queue<std::unique_ptr<ChunkMeshData>>& pending_uploads() { return m_pendingUploads; }
+    const std::queue<std::unique_ptr<ChunkMeshData>>& pending_uploads() const { return m_pendingUploads; }
+
+    // Pending GPU upload staging queue (thread-safe)
+    std::queue<std::unique_ptr<ChunkMeshData>> m_pendingUploads;
+
+    // Frustum and Vertical Culling & Rendering
+    void set_frustum_planes(const std::array<glm::vec4, 6>& planes);
+    void set_camera_frustum(const glm::mat4& view_proj);
+    bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
+    bool is_vertical_occluded(const ChunkPos& chunkPos, int playerChunkY) const;
+    bool is_chunk_occluded_vertically(const ChunkPos& chunkPos, int playerChunkY) const {
+        return is_vertical_occluded(chunkPos, playerChunkY);
+    }
+
+    void render();
+    void render(const glm::vec3& player_pos);
+    void render(const std::function<void(const Chunk&)>& draw_fn, const glm::vec3& player_pos = glm::vec3(0.0f));
+
+    // PascalCase aliases
+    void Render() { render(); }
+    void Render(const glm::vec3& player_pos) { render(player_pos); }
+    void Render(const std::function<void(const Chunk&)>& draw_fn, const glm::vec3& player_pos = glm::vec3(0.0f)) {
+        render(draw_fn, player_pos);
+    }
+
+    // Template overloads for external renderer objects (e.g. Renderer)
+    template <typename TRenderer>
+    requires (!std::is_same_v<std::decay_t<TRenderer>, glm::vec3>)
+    void Render(TRenderer& renderer, const glm::vec3& camera_pos, const glm::vec3& player_pos) {
+        set_frustum_planes(renderer.frustum_planes());
+        render([&renderer](const Chunk& chunk) {
+            renderer.render_chunk(chunk);
+        }, player_pos);
+    }
+
+    template <typename TRenderer>
+    requires (!std::is_same_v<std::decay_t<TRenderer>, glm::vec3>)
+    void Render(TRenderer& renderer, const glm::vec3& camera_or_player_pos) {
+        Render(renderer, camera_or_player_pos, camera_or_player_pos);
+    }
+
+    template <typename TRenderer>
+    requires (!std::is_same_v<std::decay_t<TRenderer>, glm::vec3>)
+    void Render(TRenderer& renderer) {
+        Render(renderer, m_playerSpawnPos, m_playerSpawnPos);
+    }
+
+    size_t rendered_chunks_count() const { return m_rendered_chunks_count; }
+    size_t culled_chunks_count() const { return m_culled_chunks_count; }
 
     // Synchronously meshes and uploads all chunks immediately (for staging/testing)
     void force_mesh_all_sync();
@@ -150,11 +222,15 @@ public:
     static constexpr size_t MAX_ACTIVE_DEBRIS = 36;
     std::vector<DynamicDebris>& debris() { return m_debris; }
     const std::vector<DynamicDebris>& debris() const { return m_debris; }
+    size_t active_debris_count() const { return m_debris.size(); }
     void add_debris(DynamicDebris&& d);
     void spawn_debris(DynamicDebris&& d) { add_debris(std::move(d)); }
     void spawn_tremor_debris(const glm::vec3& pos, uint8_t mat_id = MAT_FRACTURED_GRANITE, const glm::vec3& vel = glm::vec3(0.0f, -2.0f, 0.0f));
-    void clear_debris() { m_debris.clear(); m_next_debris_id = 1; }
+    void clear_debris();
+    void despawn_or_revoxelize_oldest_debris(bool force_revoxelize = false);
+    void remove_destroyed_debris();
     void update_debris(float dt, const glm::vec3& player_pos = glm::vec3(-9999.0f), bool is_player_sheltered = false);
+    void Update(float dt) { update_debris(dt); }
 
 private:
     void generate_chunk_terrain(Chunk& chunk);
@@ -194,9 +270,14 @@ private:
 
     // Mesh GPU upload queue
     mutable std::mutex m_upload_mutex;
-    std::queue<ChunkPos> m_upload_queue;
     std::unordered_set<ChunkPos, ChunkPosHash> m_upload_queued_set;
     size_t m_uploads_this_frame{0};
+
+    // Camera view frustum culling
+    std::array<glm::vec4, 6> m_frustum_planes{};
+    bool m_has_frustum{false};
+    size_t m_rendered_chunks_count{0};
+    size_t m_culled_chunks_count{0};
 };
 
 } // namespace Voidfall

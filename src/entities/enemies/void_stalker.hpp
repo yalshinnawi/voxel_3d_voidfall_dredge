@@ -43,9 +43,12 @@ struct VoidStalker {
     glm::vec3 target_pos{0.0f};    // Cached player position
     float yaw{0.0f};               // Facing direction (radians)
 
-    // Time-sliced AI Pathfinding Stagger & Movement Interpolation
-    float m_pathTickTimer{0.15f};         // Update accumulator for 0.15s (approx 6.6 Hz) pathfinding stagger
-    glm::vec3 m_targetVelocity{0.0f};     // Full player-tracking velocity vector recalculated every 0.15s
+    // Time-sliced AI Pathfinding Stagger & Movement Interpolation (10 Hz accumulator)
+    union {
+        float m_pathTickTimer{0.10f};         // Update accumulator for 0.10s (10 Hz) pathfinding stagger
+        float m_pathTimer;
+    };
+    glm::vec3 m_targetVelocity{0.0f};     // Full player-tracking velocity vector recalculated every 0.10s
 
     StalkerRole role{StalkerRole::Melee}; // Dedicated combat role (Melee = Red, Shooter = Green)
     StalkerState state{StalkerState::Idle};

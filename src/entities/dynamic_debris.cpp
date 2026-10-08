@@ -248,9 +248,11 @@ void DynamicDebris::re_voxelize_blocks(World& world, CollisionResult& res) {
         }
 
         if (place_y >= 0 && place_y < 128) {
-            world.SetBlock(place_x, place_y, place_z, m_material_id, 0);
+            glm::ivec3 debrisVoxelPos(place_x, place_y, place_z);
+            uint8_t debrisMaterial = m_material_id;
+            world.SetBlock(debrisVoxelPos, debrisMaterial, 0);
             res.placed_on_ground = true;
-            res.place_pos = glm::ivec3(place_x, place_y, place_z);
+            res.place_pos = debrisVoxelPos;
         }
     }
 
