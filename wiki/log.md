@@ -3,6 +3,18 @@
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
 ## 2026-10-07
+- **Combat Ballistics & Enemy AI Motion Continuity (Gunshot Non-Stun Enforcement)**:
+  - **Identified Failure Mode**:
+    - When shooting enemies, players observed creatures halting their forward movement as if stunned.
+    - Two root causes were identified:
+      1. Ballistic projectile impacts on enemy bodies were erroneously emitting `SoundEventType::BulletImpact` at the enemy's coordinates. Stalkers in `Stalking` or `Circling` states interpreted this sound as an acoustic distraction (>4.5m from the player) and transitioned to `Investigating` their own position, setting `velocity = 0` for 5 seconds.
+      2. Heavy weapon damage (>20 HP) assigned `nearest->stun_timer = 0.25f`, and repeated hits on lunging/stalking enemies repeatedly reset `state_timer = 0.0f`, forcing `lunge_ramp` to 0 and zeroing out forward speed.
+  - **Resolution & Fix**:
+    - **Acoustic Decoupling on Entity Hits**: Suppressed wall-impact acoustic distraction events when bullets hit enemy entities in `src/core/application.cpp`.
+    - **Engagement Distraction Immunity**: Enforced that active combat pursuit (`is_pursuing_attacker`) and sounds located at the entity's own body (`dist_to_sound <= 2.0m`) never distract enemies into `Investigating` in `src/entities/enemies/void_stalker.cpp`.
+    - **Zero Gunshot Stun Policy**: Removed `stun_timer` assignment on weapon hits in `damage_nearest`. Stun is strictly reserved for Sonar Pulse, Repulsor Blasts, and Burrower bedrock collisions.
+    - **Momentum & Timer Continuity**: Ensured subsequent gunshots during an active lunge maintain `state_timer` progression and guaranteed minimum initial lunge velocity (`lunge_ramp >= 0.40f`), allowing enemies to aggressively close distance under fire.
+    - Added Test 24 to `tests/test_enemy_stalker.cpp` verifying continuous forward motion under sustained ballistic fire.
 - **Late-Round Performance Optimization, Spiral-of-Death Guard & Anti-Clipping Stabilization**:
   - **Identified Late-Round Bottlenecks & Failure Modes**:
     - *Phantom Chunk Generation*: `World::update(viewer_pos, 2)` queried chunks beyond level bounds without clamping, spawning unneeded 32x32x32 solid bedrock chunks on the main thread and bloating memory.

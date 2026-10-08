@@ -156,15 +156,17 @@ glm::quat AberrantAI::calculate_orientation(
     const glm::vec3& contact_normal,
     const glm::vec3& fallback_forward)
 {
-    glm::vec3 n = glm::length(contact_normal) > 0.001f
+    glm::vec3 n = (glm::length(contact_normal) > 0.001f && !std::isnan(contact_normal.x))
         ? glm::normalize(contact_normal)
         : glm::vec3(0.0f, 1.0f, 0.0f);
 
-    glm::vec3 fwd_candidate = velocity;
+    glm::vec3 fwd_candidate = (!std::isnan(velocity.x) && glm::length(velocity) > 0.001f)
+        ? velocity
+        : fallback_forward;
 
     // Anti-jitter: If fallback_forward is valid and velocity is moving backward (e.g. knockback/recoil from weapon fire),
     // keep facing the forward direction instead of flipping 180 degrees.
-    if (glm::length(fallback_forward) > 0.01f) {
+    if (glm::length(fallback_forward) > 0.01f && !std::isnan(fallback_forward.x)) {
         glm::vec3 fwd_ref = fallback_forward - glm::dot(fallback_forward, n) * n;
         if (glm::length(fwd_ref) > 0.01f) {
             glm::vec3 v_tangent = fwd_candidate - glm::dot(fwd_candidate, n) * n;
@@ -177,20 +179,27 @@ glm::quat AberrantAI::calculate_orientation(
     // Project velocity onto tangent plane: fwd = v - (v · n)n
     glm::vec3 fwd_proj = fwd_candidate - glm::dot(fwd_candidate, n) * n;
 
-    if (glm::length(fwd_proj) < 0.01f) {
+    if (glm::length(fwd_proj) < 0.01f || std::isnan(fwd_proj.x)) {
         // Fall back to projected previous facing direction
-        fwd_proj = fallback_forward - glm::dot(fallback_forward, n) * n;
+        if (glm::length(fallback_forward) > 0.01f && !std::isnan(fallback_forward.x)) {
+            fwd_proj = fallback_forward - glm::dot(fallback_forward, n) * n;
+        }
     }
 
-    if (glm::length(fwd_proj) < 0.01f) {
+    if (glm::length(fwd_proj) < 0.01f || std::isnan(fwd_proj.x)) {
         // Choose arbitrary tangent perpendicular to n
         glm::vec3 temp = (std::abs(n.y) < 0.9f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 1.0f);
         fwd_proj = glm::cross(n, temp);
     }
 
-    glm::vec3 forward = glm::normalize(fwd_proj);
+    glm::vec3 forward = (glm::length(fwd_proj) > 0.001f && !std::isnan(fwd_proj.x))
+        ? glm::normalize(fwd_proj)
+        : glm::vec3(0.0f, 0.0f, 1.0f);
     // Right-handed basis: cross(n, forward) yields the +X vector in model space
-    glm::vec3 right = glm::normalize(glm::cross(n, forward));
+    glm::vec3 cross_rf = glm::cross(n, forward);
+    glm::vec3 right = (glm::length(cross_rf) > 0.001f && !std::isnan(cross_rf.x))
+        ? glm::normalize(cross_rf)
+        : glm::vec3(1.0f, 0.0f, 0.0f);
 
     // Construct orthonormal rotation matrix
     glm::mat3 rot_mat;
@@ -199,6 +208,9 @@ glm::quat AberrantAI::calculate_orientation(
     rot_mat[2] = forward;
 
     glm::quat q = glm::quat_cast(rot_mat);
+    if (std::isnan(q.x) || std::isnan(q.y) || std::isnan(q.z) || std::isnan(q.w) || glm::length(q) < 0.001f) {
+        return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    }
     return glm::normalize(q);
 }
 
@@ -208,6 +220,13 @@ glm::quat AberrantAI::slerp_rotation(
     float dt,
     float speed)
 {
+    if (std::isnan(current.x) || std::isnan(current.y) || std::isnan(current.z) || std::isnan(current.w) || glm::length(current) < 0.001f) {
+        return target;
+    }
+    if (std::isnan(target.x) || std::isnan(target.y) || std::isnan(target.z) || std::isnan(target.w) || glm::length(target) < 0.001f) {
+        return current;
+    }
+
     glm::quat t = target;
     // Shortest path slerp
     if (glm::dot(current, t) < 0.0f) {
@@ -215,6 +234,9 @@ glm::quat AberrantAI::slerp_rotation(
     }
     float factor = std::clamp(dt * speed, 0.0f, 1.0f);
     glm::quat result = glm::slerp(current, t, factor);
+    if (std::isnan(result.x) || std::isnan(result.y) || std::isnan(result.z) || std::isnan(result.w) || glm::length(result) < 0.001f) {
+        return target;
+    }
     return glm::normalize(result);
 }
 
@@ -222,7 +244,9 @@ glm::vec3 AberrantAI::compute_surface_snapping_offset(
     StalkerSurfaceState state,
     const glm::vec3& normal)
 {
-    glm::vec3 n = glm::length(normal) > 0.001f ? glm::normalize(normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 n = (glm::length(normal) > 0.001f && !std::isnan(normal.x))
+        ? glm::normalize(normal)
+        : glm::vec3(0.0f, 1.0f, 0.0f);
 
     float clearance = 0.05f; // Floor clearance
     if (state == StalkerSurfaceState::WALL_CLIMBING) {
@@ -634,6 +658,69 @@ bool AberrantAI::resolve_voxel_collision(
     pos.y = std::clamp(pos.y, 4.5f, 26.0f);
     pos.z = std::clamp(pos.z, 4.5f + radius, 67.5f - radius);
 
+    int cx = static_cast<int>(std::floor(pos.x));
+    int cy = static_cast<int>(std::floor(pos.y));
+    int cz = static_cast<int>(std::floor(pos.z));
+
+    // 0. ABSOLUTE PENETRATION RECOVERY:
+    // If the entity is genuinely embedded inside a solid rock wall (both body center and head are in solid blocks),
+    // eject immediately to nearest open air so enemies never remain trapped inside walls.
+    glm::vec3 center_pos = pos + glm::vec3(0.0f, std::max(0.35f, height * 0.5f), 0.0f);
+    glm::vec3 head_pos = pos + glm::vec3(0.0f, std::max(0.65f, height * 0.85f), 0.0f);
+    int center_x = static_cast<int>(std::floor(center_pos.x));
+    int center_y = static_cast<int>(std::floor(center_pos.y));
+    int center_z = static_cast<int>(std::floor(center_pos.z));
+    int head_x = static_cast<int>(std::floor(head_pos.x));
+    int head_y = static_cast<int>(std::floor(head_pos.y));
+    int head_z = static_cast<int>(std::floor(head_pos.z));
+
+    if (world.is_solid(glm::ivec3(center_x, center_y, center_z)) && world.is_solid(glm::ivec3(head_x, head_y, head_z))) {
+        collided = true;
+        bool found_air = false;
+        glm::vec3 best_eject_pos = pos;
+        float best_eject_dist_sq = 1e9f;
+
+        // Check upwards first (most common for wall/ceiling clipping)
+        for (int dy = 1; dy <= 4; ++dy) {
+            int ty = center_y + dy;
+            if (ty < 26 && !world.is_solid(glm::ivec3(center_x, ty, center_z))) {
+                best_eject_pos = glm::vec3(static_cast<float>(center_x) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(center_z) + 0.5f);
+                best_eject_dist_sq = static_cast<float>(dy * dy);
+                found_air = true;
+                break;
+            }
+        }
+
+        if (!found_air) {
+            for (int r = 1; r <= 5 && !found_air; ++r) {
+                for (int dx = -r; dx <= r; ++dx) {
+                    for (int dz = -r; dz <= r; ++dz) {
+                        for (int dy = -1; dy <= 2; ++dy) {
+                            if (std::max(std::abs(dx), std::abs(dz)) != r && std::abs(dy) != r) continue;
+                            int tx = center_x + dx;
+                            int ty = center_y + dy;
+                            int tz = center_z + dz;
+                            if (tx < 5 || tx > 67 || tz < 5 || tz > 67 || ty < 4 || ty > 25) continue;
+                            if (!world.is_solid(glm::ivec3(tx, ty, tz))) {
+                                float dist_sq = static_cast<float>(dx * dx + dy * dy + dz * dz);
+                                if (dist_sq < best_eject_dist_sq) {
+                                    best_eject_dist_sq = dist_sq;
+                                    best_eject_pos = glm::vec3(static_cast<float>(tx) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(tz) + 0.5f);
+                                    found_air = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (found_air) {
+            pos = best_eject_pos;
+            velocity = glm::vec3(0.0f);
+        }
+    }
+
     // Multi-point radial offsets: 4 cardinal + 4 diagonal
     const float d_r = radius * 0.7071f;
     const glm::vec2 offsets[8] = {
@@ -647,11 +734,7 @@ bool AberrantAI::resolve_voxel_collision(
         glm::vec2(-d_r,    -d_r)
     };
 
-    if (surface_state == StalkerSurfaceState::FLOOR) {
-        int cx = static_cast<int>(std::floor(pos.x));
-        int cy = static_cast<int>(std::floor(pos.y));
-        int cz = static_cast<int>(std::floor(pos.z));
-
+    if (surface_state == StalkerSurfaceState::FLOOR || surface_state == StalkerSurfaceState::TRANSITIONING) {
         Voxel current_v = world.get_voxel(cx, cy, cz);
         if (current_v.is_solid()) {
             Voxel above_v = world.get_voxel(cx, cy + 1, cz);
@@ -710,12 +793,9 @@ bool AberrantAI::resolve_voxel_collision(
         }
 
         // Center check
-        int cx = static_cast<int>(std::floor(pos.x));
-        int cy = static_cast<int>(std::floor(pos.y));
-        int cz = static_cast<int>(std::floor(pos.z));
         if (world.is_solid(glm::ivec3(cx, cy, cz))) {
             collided = true;
-            pos += n * 0.25f;
+            pos += n * 0.35f;
         }
 
         // Tangent boundary checks: prevent clipping into adjoining inside corners
@@ -736,9 +816,6 @@ bool AberrantAI::resolve_voxel_collision(
     } else if (surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
         if (velocity.y > 0.0f) velocity.y = 0.0f;
 
-        int cx = static_cast<int>(std::floor(pos.x));
-        int cy = static_cast<int>(std::floor(pos.y));
-        int cz = static_cast<int>(std::floor(pos.z));
         if (world.is_solid(glm::ivec3(cx, cy, cz))) {
             collided = true;
             pos.y = static_cast<float>(cy) - 0.15f;

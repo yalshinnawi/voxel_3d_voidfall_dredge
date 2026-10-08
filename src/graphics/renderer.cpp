@@ -1486,6 +1486,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
     int active_stalker_count = 0;
     for (const auto& s : stalkers) {
         if (s.is_dead()) continue;
+        if (std::isnan(s.position.x) || std::isnan(s.position.y) || std::isnan(s.position.z)) continue;
         active_stalker_count++;
 
         // Pose computation from dynamic animation controller
@@ -1493,8 +1494,18 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
         // Base transform: translate to stalker world position + surface snapping offset,
         // and apply smooth quaternion orientation slerp (supporting floor, vertical wall, and inverted ceiling traversal)
-        glm::mat4 base_model = glm::translate(glm::mat4(1.0f), s.position + s.surface_offset);
-        base_model = base_model * glm::mat4_cast(s.m_currentRotation);
+        glm::vec3 surf_offset = s.surface_offset;
+        if (std::isnan(surf_offset.x) || std::isnan(surf_offset.y) || std::isnan(surf_offset.z)) {
+            surf_offset = glm::vec3(0.0f);
+        }
+        glm::quat rot = s.m_currentRotation;
+        if (std::isnan(rot.x) || std::isnan(rot.y) || std::isnan(rot.z) || std::isnan(rot.w) ||
+            glm::length(glm::vec4(rot.x, rot.y, rot.z, rot.w)) < 0.001f) {
+            rot = glm::angleAxis(s.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        }
+
+        glm::mat4 base_model = glm::translate(glm::mat4(1.0f), s.position + surf_offset);
+        base_model = base_model * glm::mat4_cast(rot);
 
         // State-based body posture modifier
         float crouch_y = pose.carapace_offset_y;
@@ -2101,12 +2112,16 @@ void Renderer::render_burrowers(const std::vector<SeismicBurrower>& burrowers) {
     int active_burrower_count = 0;
     for (const auto& b : burrowers) {
         if (b.is_dead()) continue;
+        if (std::isnan(b.position.x) || std::isnan(b.position.y) || std::isnan(b.position.z)) continue;
         active_burrower_count++;
+
+        float yaw = std::isnan(b.yaw) ? 0.0f : b.yaw;
+        float pitch = std::isnan(b.pitch) ? 0.0f : b.pitch;
 
         // Base transform: translate to burrower world position and rotate to facing yaw + pitch
         glm::mat4 base_model = glm::translate(glm::mat4(1.0f), b.position);
-        base_model = glm::rotate(base_model, b.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-        base_model = glm::rotate(base_model, -b.pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+        base_model = glm::rotate(base_model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        base_model = glm::rotate(base_model, -pitch, glm::vec3(1.0f, 0.0f, 0.0f));
 
         if (b.state == BurrowerState::Stunned) {
             float jitter = std::sin(b.pulse_phase * 40.0f) * 0.12f;

@@ -128,6 +128,47 @@ void World::PopulateFauna() {
     const auto& rooms = m_level_gen->rooms();
     uint32_t next_id = 1;
 
+    auto find_valid_room_spawn = [&](const glm::vec3& approx_pos) -> std::optional<glm::vec3> {
+        int cx = static_cast<int>(std::floor(approx_pos.x));
+        int cy = static_cast<int>(std::floor(approx_pos.y));
+        int cz = static_cast<int>(std::floor(approx_pos.z));
+
+        // Quick check exact position
+        Voxel v_feet = get_voxel(cx, cy, cz);
+        Voxel v_head = get_voxel(cx, cy + 1, cz);
+        Voxel v_below = get_voxel(cx, cy - 1, cz);
+        if (!v_feet.is_solid() && !v_head.is_solid() && v_below.is_solid() && IsSpawnPointSafe(approx_pos, m_playerSpawnPos)) {
+            return approx_pos;
+        }
+
+        // Search in spiral around approx_pos within room
+        for (int r = 1; r <= 6; ++r) {
+            for (int dx = -r; dx <= r; ++dx) {
+                for (int dz = -r; dz <= r; ++dz) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    for (int dy = 2; dy >= -3; --dy) {
+                        int tx = cx + dx;
+                        int ty = cy + dy;
+                        int tz = cz + dz;
+                        if (tx < 5 || tx > 66 || tz < 5 || tz > 66 || ty < 3 || ty > 25) continue;
+                        Voxel f_v = get_voxel(tx, ty, tz);
+                        Voxel h_v = get_voxel(tx, ty + 1, tz);
+                        Voxel b_v = get_voxel(tx, ty - 1, tz);
+                        if (!f_v.is_solid() && !h_v.is_solid() && b_v.is_solid()) {
+                            glm::vec3 candidate(static_cast<float>(tx) + 0.5f,
+                                                static_cast<float>(ty) + 0.1f,
+                                                static_cast<float>(tz) + 0.5f);
+                            if (IsSpawnPointSafe(candidate, m_playerSpawnPos)) {
+                                return candidate;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
     for (size_t i = 1; i < rooms.size(); ++i) { // Room 0 is player insertion arrival bay
         glm::vec3 room_center(
             static_cast<float>(rooms[i].center.x),
@@ -135,27 +176,28 @@ void World::PopulateFauna() {
             static_cast<float>(rooms[i].center.z)
         );
 
-        // Insertion Quarantine Sphere: discard candidate spawn point within 28m
-        if (!IsSpawnPointSafe(room_center, m_playerSpawnPos)) {
+        auto safe_pos = find_valid_room_spawn(room_center);
+        if (!safe_pos) {
             continue;
         }
 
         StalkerRole role = (i % 2 == 0) ? StalkerRole::Melee : StalkerRole::Shooter;
         FaunaEntity e;
         e.id = next_id++;
-        e.pos = room_center;
-        e.position = room_center;
+        e.pos = *safe_pos;
+        e.position = *safe_pos;
         e.state = AIState::ROOSTING;
         e.role = role;
         m_active_entities.push_back(e);
 
         if (m_sector_index >= 2 && (i % 2 == 0)) {
-            glm::vec3 sec_pos = room_center + glm::vec3(3.5f, 0.0f, -3.5f);
-            if (IsSpawnPointSafe(sec_pos, m_playerSpawnPos)) {
+            glm::vec3 sec_candidate = *safe_pos + glm::vec3(3.5f, 0.0f, -3.5f);
+            auto sec_safe = find_valid_room_spawn(sec_candidate);
+            if (sec_safe && glm::distance(*sec_safe, *safe_pos) >= 2.0f) {
                 FaunaEntity e2;
                 e2.id = next_id++;
-                e2.pos = sec_pos;
-                e2.position = sec_pos;
+                e2.pos = *sec_safe;
+                e2.position = *sec_safe;
                 e2.state = AIState::ROOSTING;
                 e2.role = StalkerRole::Melee;
                 m_active_entities.push_back(e2);

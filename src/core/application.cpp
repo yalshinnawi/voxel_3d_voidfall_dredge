@@ -2079,7 +2079,6 @@ void Application::fixed_tick(float dt) {
             } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
                 enemy_stress = 7.0f;
             }
-            m_noise_meter.add_bullet_impact_sound(next_pos, enemy_stress);
             if (m_hazard) {
                 m_hazard->on_weapon_impact(next_pos, enemy_stress);
             }
@@ -2118,7 +2117,6 @@ void Application::fixed_tick(float dt) {
             } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
                 burrower_stress = 9.0f;
             }
-            m_noise_meter.add_bullet_impact_sound(next_pos, burrower_stress);
             if (m_hazard) {
                 m_hazard->on_weapon_impact(next_pos, burrower_stress);
             }

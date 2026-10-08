@@ -658,6 +658,7 @@ void HUD::render_optical_scope_lens(
             if (d > 0.5f && d < 120.0f) {
                 float dot = glm::dot(dir, to_enemy / d);
                 if (dot > 0.9982f) { // Within tight sight cone
+                    if (hit.hit && hit.distance < (d - 0.25f)) continue; // Occluded by solid terrain
                     if (hostile_dist < 0.0f || d < hostile_dist) {
                         hostile_dist = d;
                         hostile_name = "VOID STALKER";
@@ -674,6 +675,7 @@ void HUD::render_optical_scope_lens(
             if (d > 0.5f && d < 140.0f) {
                 float dot = glm::dot(dir, to_enemy / d);
                 if (dot > 0.9975f) {
+                    if (hit.hit && hit.distance < (d - 0.25f)) continue; // Occluded by solid terrain
                     if (hostile_dist < 0.0f || d < hostile_dist) {
                         hostile_dist = d;
                         hostile_name = "SEISMIC BURROWER";
@@ -2372,13 +2374,27 @@ std::vector<EnemyAwarenessMarker> HUD::compute_awareness_markers(
 
             float v_offset = s.scale * 0.85f + 0.35f;
             glm::vec3 head_pos = s.position + glm::vec3(0.0f, v_offset, 0.0f);
+            glm::vec3 torso_pos = s.position + glm::vec3(0.0f, v_offset * 0.5f, 0.0f);
             float dist = glm::distance(cam_pos, head_pos);
             if (dist > 45.0f || dist < 0.3f) continue;
 
+            // Check if enemy is completely encased inside solid rock
+            bool head_in_solid = world.is_solid(glm::ivec3(std::floor(head_pos.x), std::floor(head_pos.y), std::floor(head_pos.z)));
+            bool body_in_solid = world.is_solid(glm::ivec3(std::floor(s.position.x), std::floor(s.position.y), std::floor(s.position.z)));
+            bool fully_in_solid = head_in_solid && body_in_solid;
+
             glm::vec3 to_head = head_pos - cam_pos;
-            glm::vec3 dir = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
-            RaycastHit hit = world.raycast(cam_pos, dir, dist);
-            bool has_los = (!hit.hit || hit.distance >= (dist - 0.25f));
+            glm::vec3 dir_head = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit_head = world.raycast(cam_pos, dir_head, dist);
+            bool los_head = (!hit_head.hit || hit_head.distance >= (dist - 0.25f));
+
+            float dist_torso = glm::distance(cam_pos, torso_pos);
+            glm::vec3 to_torso = torso_pos - cam_pos;
+            glm::vec3 dir_torso = (dist_torso > 0.001f) ? (to_torso / dist_torso) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit_torso = world.raycast(cam_pos, dir_torso, dist_torso);
+            bool los_torso = (!hit_torso.hit || hit_torso.distance >= (dist_torso - 0.25f));
+
+            bool has_los = !fully_in_solid && (los_head || los_torso);
 
             EnemyAwarenessMarker marker;
             marker.world_pos = head_pos;
@@ -2397,13 +2413,26 @@ std::vector<EnemyAwarenessMarker> HUD::compute_awareness_markers(
 
             float v_offset = b.scale * 1.0f + 0.5f;
             glm::vec3 head_pos = b.position + glm::vec3(0.0f, v_offset, 0.0f);
+            glm::vec3 center_pos = b.position + glm::vec3(0.0f, v_offset * 0.5f, 0.0f);
             float dist = glm::distance(cam_pos, head_pos);
             if (dist > 45.0f || dist < 0.3f) continue;
 
+            bool head_in_solid = world.is_solid(glm::ivec3(std::floor(head_pos.x), std::floor(head_pos.y), std::floor(head_pos.z)));
+            bool body_in_solid = world.is_solid(glm::ivec3(std::floor(b.position.x), std::floor(b.position.y), std::floor(b.position.z)));
+            bool fully_in_solid = head_in_solid && body_in_solid;
+
             glm::vec3 to_head = head_pos - cam_pos;
-            glm::vec3 dir = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
-            RaycastHit hit = world.raycast(cam_pos, dir, dist);
-            bool has_los = (!hit.hit || hit.distance >= (dist - 0.25f));
+            glm::vec3 dir_head = (dist > 0.001f) ? (to_head / dist) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit_head = world.raycast(cam_pos, dir_head, dist);
+            bool los_head = (!hit_head.hit || hit_head.distance >= (dist - 0.25f));
+
+            float dist_center = glm::distance(cam_pos, center_pos);
+            glm::vec3 to_center = center_pos - cam_pos;
+            glm::vec3 dir_center = (dist_center > 0.001f) ? (to_center / dist_center) : glm::vec3(0.0f, 1.0f, 0.0f);
+            RaycastHit hit_center = world.raycast(cam_pos, dir_center, dist_center);
+            bool los_center = (!hit_center.hit || hit_center.distance >= (dist_center - 0.25f));
+
+            bool has_los = !fully_in_solid && (los_head || los_center);
 
             EnemyAwarenessMarker marker;
             marker.world_pos = head_pos;
@@ -2434,6 +2463,9 @@ void HUD::render_enemy_awareness_markers(
     float screen_h = static_cast<float>(m_height);
 
     for (const auto& marker : markers) {
+        // Enforce physical line of sight: only visible when player can physically see the enemy
+        if (!marker.has_los) continue;
+
         glm::vec4 clip = proj * view * glm::vec4(marker.world_pos, 1.0f);
         if (clip.w <= 0.1f) continue;
 
@@ -2444,7 +2476,7 @@ void HUD::render_enemy_awareness_markers(
         float sx = (ndc.x * 0.5f + 0.5f) * screen_w;
         float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * screen_h;
 
-        float alpha = marker.has_los ? 1.0f : 0.50f;
+        float alpha = 1.0f;
         float dist_scale = std::clamp(16.0f / std::max(marker.dist, 5.0f), 0.70f, 1.25f);
 
         float pop_scale = 1.0f;

@@ -1168,7 +1168,47 @@ int main() {
         std::cout << " -> Time-sliced pathfinding stagger & spatial hash boid separation verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 23 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Test 24: Gunshots Do Not Stun Enemies & Movement Continuity When Damaged
+    {
+        std::cout << "[Test 24] Testing Gunshots Do Not Stun Enemies & Movement Continuity..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 stalker_pos(16.0f, 18.05f, 22.0f);
+        manager.spawn_melee(stalker_pos);
+
+        glm::vec3 player_pos(16.0f, 18.05f, 14.0f);
+        glm::vec3 shot_dir(0.0f, 0.0f, 1.0f);
+
+        // 24a: Heavy gunshot damage (> 20.0 HP) must NEVER stun enemy or set stun_timer
+        bool hit = manager.damage_nearest(stalker_pos, 2.0f, 25.0f, false, nullptr, nullptr, &player_pos, &shot_dir);
+        CHECK(hit, "Damage nearest must register gunshot hit");
+
+        const auto& hit_s = manager.stalkers()[0];
+        CHECK(hit_s.state != StalkerState::Stunned, "Gunshots must NOT put stalker into Stunned state");
+        CHECK(hit_s.stun_timer == 0.0f, "Gunshots must NOT set stun_timer (must be 0.0s)");
+        CHECK(hit_s.is_pursuing_attacker, "Stalker must engage pursuit of attacker");
+
+        // 24b: Continuous updates - stalker must advance toward player, not freeze
+        glm::vec3 initial_pos = hit_s.position;
+        for (int i = 0; i < 5; ++i) {
+            manager.update(0.05f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+            // Stalker must not be in Stunned or Investigating state
+            CHECK(manager.stalkers()[0].state != StalkerState::Stunned, "Stalker must not enter Stunned state during combat updates");
+            CHECK(manager.stalkers()[0].state != StalkerState::Investigating, "Damaged stalker must pursue attacker and not get distracted into Investigating");
+        }
+        CHECK(glm::distance(manager.stalkers()[0].position, initial_pos) > 0.1f, "Stalker must continue moving forward across ticks when shot");
+
+        // 24c: Repeated gunshots must not freeze or reset lunge velocity
+        manager.stalkers_mut()[0].state = StalkerState::Lunging;
+        manager.stalkers_mut()[0].state_timer = 0.20f;
+        float prev_timer = manager.stalkers()[0].state_timer;
+        manager.damage_nearest(manager.stalkers()[0].position, 2.0f, 15.0f, false, nullptr, nullptr, &player_pos, &shot_dir);
+        CHECK(manager.stalkers()[0].state_timer >= prev_timer, "Subsequent shots while lunging must NOT reset state_timer to 0");
+        CHECK(manager.stalkers()[0].stun_timer == 0.0f, "Repeated shots must never apply stun_timer");
+
+        std::cout << " -> Gunshots non-stun policy & active combat movement continuity verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 24 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

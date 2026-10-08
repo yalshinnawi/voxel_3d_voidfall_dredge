@@ -158,7 +158,8 @@ glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
   std::uniform_real_distribution<float> dist_range(18.0f, 32.0f);
   std::uniform_real_distribution<float> height_dist(-2.0f, 5.0f);
 
-  glm::vec3 fallback_candidate = near + glm::vec3(22.0f, 1.0f, 22.0f);
+  glm::vec3 fallback_candidate = near;
+  bool found_any_valid = false;
 
   for (int attempt = 0; attempt < 25; ++attempt) {
     float angle = angle_dist(rng);
@@ -208,21 +209,45 @@ glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
             adj.material_id != MAT_VOLATILE_SMOKE) {
           glm::vec3 surface_pos =
               glm::vec3(ix + 0.5f, iy + 0.5f, iz + 0.5f) + sfc.normal * 0.35f;
-          bool los =
-              has_line_of_sight(surface_pos + glm::vec3(0.0f, 0.5f, 0.0f),
-                                near + glm::vec3(0.0f, 1.5f, 0.0f), world);
-          if (!los) {
-            return surface_pos;
+          if (!world.is_solid(glm::ivec3(std::floor(surface_pos.x), std::floor(surface_pos.y), std::floor(surface_pos.z)))) {
+            bool los =
+                has_line_of_sight(surface_pos + glm::vec3(0.0f, 0.5f, 0.0f),
+                                  near + glm::vec3(0.0f, 1.5f, 0.0f), world);
+            if (!los) {
+              return surface_pos;
+            }
+            fallback_candidate = surface_pos;
+            found_any_valid = true;
+            break;
           }
-          fallback_candidate = surface_pos;
-          break;
         }
       }
     }
   }
 
-  // Fallback: spawn at distance from player
-  return fallback_candidate;
+  if (found_any_valid) {
+    return fallback_candidate;
+  }
+
+  // Fallback systematic search: never spawn inside solid rock walls
+  for (float r = 18.0f; r <= 32.0f; r += 4.0f) {
+    for (int a = 0; a < 16; ++a) {
+      float ang = a * (glm::two_pi<float>() / 16.0f);
+      int sx = static_cast<int>(std::floor(near.x + std::cos(ang) * r));
+      int sz = static_cast<int>(std::floor(near.z + std::sin(ang) * r));
+      if (sx < 6 || sx > 66 || sz < 6 || sz > 66) continue;
+      for (int sy = static_cast<int>(near.y) + 3; sy >= static_cast<int>(near.y) - 4; --sy) {
+        if (sy < 4 || sy > 25) continue;
+        if (!world.is_solid(glm::ivec3(sx, sy, sz)) &&
+            !world.is_solid(glm::ivec3(sx, sy + 1, sz)) &&
+            world.is_solid(glm::ivec3(sx, sy - 1, sz))) {
+          return glm::vec3(sx + 0.5f, sy + 0.1f, sz + 0.5f);
+        }
+      }
+    }
+  }
+
+  return near + glm::vec3(0.0f, 0.1f, 2.5f);
 }
 
 bool VoidStalkerManager::has_line_of_sight(const glm::vec3 &from,
@@ -398,10 +423,18 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     if (s.surface_transition_timer < 0.2f) {
       s.surface_transition_timer += dt;
       // Smoothly blend contact normal across transition window instead of
-      // snapping
+      // snapping, guarding against opposite-normal (0,0,0) cancellation NaNs
       float blend = std::clamp(s.surface_transition_timer / 0.2f, 0.0f, 1.0f);
-      s.contact_normal = glm::normalize(
-          glm::mix(s.contact_normal, sample.contact_normal, blend));
+      if (glm::dot(s.contact_normal, sample.contact_normal) < -0.85f) {
+        s.contact_normal = sample.contact_normal;
+      } else {
+        glm::vec3 mixed = glm::mix(s.contact_normal, sample.contact_normal, blend);
+        if (glm::length(mixed) > 0.001f && !std::isnan(mixed.x)) {
+          s.contact_normal = glm::normalize(mixed);
+        } else {
+          s.contact_normal = sample.contact_normal;
+        }
+      }
       s.m_targetUpVector = s.contact_normal;
       if (s.surface_transition_timer >= 0.2f) {
         s.surface_state = s.target_surface_state;
@@ -410,9 +443,17 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       }
     } else {
       s.surface_state = s.target_surface_state;
-      s.contact_normal =
-          glm::normalize(glm::mix(s.contact_normal, sample.contact_normal,
-                                  std::clamp(dt * 12.0f, 0.0f, 1.0f)));
+      if (glm::dot(s.contact_normal, sample.contact_normal) < -0.85f) {
+        s.contact_normal = sample.contact_normal;
+      } else {
+        glm::vec3 mixed = glm::mix(s.contact_normal, sample.contact_normal,
+                                   std::clamp(dt * 12.0f, 0.0f, 1.0f));
+        if (glm::length(mixed) > 0.001f && !std::isnan(mixed.x)) {
+          s.contact_normal = glm::normalize(mixed);
+        } else {
+          s.contact_normal = sample.contact_normal;
+        }
+      }
       s.m_targetUpVector = s.contact_normal;
     }
 
@@ -435,12 +476,20 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         orient_fwd, s.contact_normal, fallback_fwd);
     s.m_currentRotation = AberrantAI::slerp_rotation(
         s.m_currentRotation, s.m_targetRotation, dt, 10.0f);
+    if (std::isnan(s.m_currentRotation.x) || std::isnan(s.m_currentRotation.y) ||
+        std::isnan(s.m_currentRotation.z) || std::isnan(s.m_currentRotation.w)) {
+      s.m_currentRotation = glm::angleAxis(s.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+    }
 
     // Surface Snapping Offset smoothly interpolated
     glm::vec3 target_offset = AberrantAI::compute_surface_snapping_offset(
         s.surface_state, s.contact_normal);
     s.surface_offset = glm::mix(s.surface_offset, target_offset,
                                 std::clamp(dt * 8.0f, 0.0f, 1.0f));
+    if (std::isnan(s.surface_offset.x) || std::isnan(s.surface_offset.y) ||
+        std::isnan(s.surface_offset.z)) {
+      s.surface_offset = glm::vec3(0.0f);
+    }
 
     // Ambient Cavern Echo Screeches (subtle, rare & atmospheric - minimum 35s
     // global cooldown)
@@ -1100,6 +1149,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       if (s.just_heard_sound && s.has_sound_target) {
         float dist_sound_to_player =
             glm::distance(s.investigation_target, player_pos);
+        float dist_to_sound = glm::distance(s.position, s.investigation_target);
         bool is_distraction_sound =
             (best_sound &&
              (best_sound->type == SoundEventType::DemolitionBlast ||
@@ -1109,9 +1159,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
               best_sound->intensity >= 16.0f));
 
         // If the distraction occurred away from the player (> 4.5m) and stalker
-        // is not in point-blank melee lunge reach:
-        if (is_distraction_sound && dist_sound_to_player > 4.5f &&
-            (!can_see_player || dist_to_player > 5.0f)) {
+        // is not in point-blank melee lunge reach, and stalker is not already hunting the attacker:
+        if (!s.is_pursuing_attacker && is_distraction_sound && dist_sound_to_player > 4.5f &&
+            dist_to_sound > 2.0f && (!can_see_player || dist_to_player > 5.0f)) {
           s.state = StalkerState::Investigating;
           s.state_timer = 0.0f;
           s.investigation_timer = 5.0f;
@@ -1339,6 +1389,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       if (s.just_heard_sound && s.has_sound_target) {
         float dist_sound_to_player =
             glm::distance(s.investigation_target, player_pos);
+        float dist_to_sound = glm::distance(s.position, s.investigation_target);
         bool is_distraction_sound =
             (best_sound &&
              (best_sound->type == SoundEventType::DemolitionBlast ||
@@ -1347,8 +1398,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
               best_sound->type == SoundEventType::VoxelFracture ||
               best_sound->intensity >= 16.0f));
 
-        if (is_distraction_sound && dist_sound_to_player > 4.5f &&
-            (!can_see_player || dist_to_player > 5.0f)) {
+        if (!s.is_pursuing_attacker && is_distraction_sound && dist_sound_to_player > 4.5f &&
+            dist_to_sound > 2.0f && (!can_see_player || dist_to_player > 5.0f)) {
           s.state = StalkerState::Investigating;
           s.state_timer = 0.0f;
           s.investigation_timer = 5.0f;
@@ -1484,7 +1535,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       float dist_to_target = glm::length(to_lunge);
 
       float lunge_ramp = (s.state_timer < 0.12f)
-                             ? (s.state_timer / 0.12f) * (s.state_timer / 0.12f)
+                             ? std::max(0.40f, (s.state_timer / 0.12f) * (s.state_timer / 0.12f))
                              : 1.0f;
 
       // Once the enemy reaches within MIN_STRIKE_DISTANCE of the player:
@@ -1979,7 +2030,6 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3 &origin, float radius,
     nearest->hit_flash_timer = 0.08f;
 
     if (effective_damage > 20.0f) {
-      nearest->stun_timer = 0.25f; // 0.25s flinch animation
       nearest->velocity += shot_dir * 6.5f;
     } else {
       float knockback_mag =
@@ -2044,16 +2094,20 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3 &origin, float radius,
         // Close range (< 9.0m) -> immediate ENRAGED counter-lunge!
         // Mid-to-long range -> sprint in Stalking state directly at shooter!
         if (dist_to_att <= 9.0f) {
-          nearest->state = StalkerState::Lunging;
-          nearest->state_timer = 0.0f;
-          nearest->just_lunged = true;
+          if (nearest->state != StalkerState::Lunging) {
+            nearest->state = StalkerState::Lunging;
+            nearest->state_timer = 0.0f;
+            nearest->just_lunged = true;
+          }
           VF_LOG_INFO("VoidStalker",
                       "Melee Stalker "
                           << nearest->id << " ENRAGED by player damage (HP="
                           << nearest->hp << ") -> COUNTER-LUNGING!");
         } else {
-          nearest->state = StalkerState::Stalking;
-          nearest->state_timer = 0.0f;
+          if (nearest->state != StalkerState::Stalking) {
+            nearest->state = StalkerState::Stalking;
+            nearest->state_timer = 0.0f;
+          }
           VF_LOG_INFO(
               "VoidStalker",
               "Melee Stalker "

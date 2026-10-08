@@ -743,6 +743,67 @@ void test_acoustic_profile_and_enemy_hearing_detection() {
     std::cout << "  -> Passed: Acoustic Profile emissions, dormant roosting, >30 dB investigation, >70 dB/visual pursuit with screech verified." << std::endl;
 }
 
+// ─── TEST 12: Anti-clipping penetration recovery, orientation sanitization & wall occlusion ───
+void test_anti_clipping_wall_penetration_and_visibility_sanitization() {
+    std::cout << "[TEST 12] Anti-clipping penetration recovery, orientation sanitization & wall occlusion..." << std::endl;
+
+    // 1. Penetration Recovery: An entity completely encased in rock must be ejected to open air
+    World test_world;
+    for (int x = 8; x <= 14; ++x) {
+        for (int y = 8; y <= 14; ++y) {
+            for (int z = 8; z <= 14; ++z) {
+                test_world.set_voxel(x, y, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+            }
+        }
+    }
+    // Carve open air pocket above at y = 13..14
+    for (int x = 9; x <= 13; ++x) {
+        for (int z = 9; z <= 13; ++z) {
+            test_world.set_voxel(x, 13, z, Voxel{MAT_AIR, 0}, false);
+            test_world.set_voxel(x, 14, z, Voxel{MAT_AIR, 0}, false);
+        }
+    }
+
+    glm::vec3 trapped_pos(10.5f, 9.0f, 10.5f); // Deeply embedded in granite (both center y=9.4 and head y=9.8 in rock)
+    glm::vec3 vel(3.0f, 0.0f, 0.0f);
+    bool recovered = AberrantAI::resolve_voxel_collision(
+        trapped_pos, vel, 0.38f, 0.85f, StalkerSurfaceState::FLOOR, glm::vec3(0.0f, 1.0f, 0.0f), test_world);
+    ASSERT_TRUE(recovered);
+    // Entity must be successfully ejected into the open air chamber
+    int end_cx = static_cast<int>(std::floor(trapped_pos.x));
+    int end_cy = static_cast<int>(std::floor(trapped_pos.y));
+    int end_cz = static_cast<int>(std::floor(trapped_pos.z));
+    ASSERT_FALSE(test_world.is_solid(glm::ivec3(end_cx, end_cy, end_cz)));
+    ASSERT_TRUE(vel == glm::vec3(0.0f));
+
+    // 2. Opposite normal orientation sanitization: Zero-vector or anti-parallel normal must NOT produce NaNs
+    glm::vec3 anti_normal(0.0f, -1.0f, 0.0f);
+    glm::vec3 zero_cand(0.0f);
+    glm::quat safe_rot = AberrantAI::calculate_orientation(zero_cand, anti_normal, glm::vec3(0.0f, 0.0f, 1.0f));
+    ASSERT_TRUE(!std::isnan(safe_rot.x) && !std::isnan(safe_rot.y) && !std::isnan(safe_rot.z) && !std::isnan(safe_rot.w));
+    ASSERT_NEAR(glm::length(safe_rot), 1.0f, 0.01f);
+
+    glm::quat slerp_safe = AberrantAI::slerp_rotation(safe_rot, glm::quat(0.0f, 0.0f, 1.0f, 0.0f), 0.05f, 10.0f);
+    ASSERT_TRUE(!std::isnan(slerp_safe.x) && !std::isnan(slerp_safe.y) && !std::isnan(slerp_safe.z) && !std::isnan(slerp_safe.w));
+
+    // 3. Awareness Marker Occlusion: If an enemy is encased inside rock or behind walls, has_los MUST be false
+    HUD hud(1600, 900, /*headless=*/true);
+    std::vector<VoidStalker> encased_stalkers;
+    VoidStalker s_encased;
+    s_encased.position = glm::vec3(10.5f, 9.0f, 10.5f); // Inside solid block
+    s_encased.state = StalkerState::Stalking;
+    s_encased.scale = 1.3f;
+    s_encased.hp = 40.0f;
+    encased_stalkers.push_back(s_encased);
+
+    glm::vec3 player_eye(10.5f, 13.5f, 10.5f); // In open air room above
+    auto markers_encased = hud.compute_awareness_markers(player_eye, test_world, &encased_stalkers, nullptr);
+    ASSERT_EQ(markers_encased.size(), 1);
+    ASSERT_FALSE(markers_encased[0].has_los); // Solid rock blocks awareness marker!
+
+    std::cout << "  -> Passed: penetration ejection out of rock, quaternion NaN sanitization, and solid wall marker occlusion verified." << std::endl;
+}
+
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 int main() {
     std::cout << "============================================================" << std::endl;
@@ -760,9 +821,10 @@ int main() {
     test_viewmodel_reload_state_defaults();
     test_viewmodel_melee_animations_all_weapons();
     test_acoustic_profile_and_enemy_hearing_detection();
+    test_anti_clipping_wall_penetration_and_visibility_sanitization();
 
     std::cout << "============================================================" << std::endl;
-    std::cout << "ALL 11 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "ALL 12 COMBAT & OMNI AI REGRESSION TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "============================================================" << std::endl;
     return 0;
 }
