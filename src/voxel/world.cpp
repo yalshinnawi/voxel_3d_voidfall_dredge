@@ -106,6 +106,7 @@ void World::generate_world(int sector_index, uint32_t seed) {
 
     m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     GenerateSectorStructures(sector_index);
+    detect_natural_floor_steps();
     PopulateFauna();
 
     if (m_enable_background_meshing) {
@@ -296,6 +297,7 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
 
     m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     GenerateSectorStructures(m_sector_index);
+    detect_natural_floor_steps();
     PopulateFauna();
 
     for (const auto& pos : to_mesh) {
@@ -526,6 +528,114 @@ void World::generate_chunk_terrain(Chunk& chunk) {
                     m_aquifer_sources.push_back(glm::ivec3(wx, wy, wz));
                 }
             }
+        }
+    }
+}
+
+Voxel World::get_voxel_unlocked(int world_x, int world_y, int world_z) const {
+    ChunkPos cpos{
+        floor_div(world_x, CHUNK_SIZE),
+        floor_div(world_y, CHUNK_SIZE),
+        floor_div(world_z, CHUNK_SIZE)
+    };
+
+    auto it = m_chunks.find(cpos);
+    if (it == m_chunks.end() || !it->second) {
+        if (m_level_gen) {
+            return m_level_gen->sample_voxel(world_x, world_y, world_z);
+        }
+        return Voxel{MAT_AIR, 0};
+    }
+
+    int lx = floor_mod(world_x, CHUNK_SIZE);
+    int ly = floor_mod(world_y, CHUNK_SIZE);
+    int lz = floor_mod(world_z, CHUNK_SIZE);
+    return it->second->get_voxel(lx, ly, lz);
+}
+
+void World::detect_natural_floor_steps() {
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    if (m_chunks.empty()) return;
+
+    struct RampCandidate {
+        ChunkPos cpos;
+        int lx, ly, lz;
+        VoxelShape shape;
+    };
+    std::vector<RampCandidate> candidates;
+
+    auto is_stone_floor = [](const Voxel& v) {
+        return v.is_solid() && (v.material_id == MAT_FRACTURED_GRANITE ||
+                                v.material_id == MAT_VOLCANIC_BASALT ||
+                                v.material_id == MAT_DREDGE_BEDROCK);
+    };
+
+    for (const auto& [cpos, chunk] : m_chunks) {
+        if (!chunk || chunk->is_empty()) continue;
+        int base_x = cpos.x * CHUNK_SIZE;
+        int base_y = cpos.y * CHUNK_SIZE;
+        int base_z = cpos.z * CHUNK_SIZE;
+
+        for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+            for (int ly = 0; ly < CHUNK_SIZE; ++ly) {
+                int wy = base_y + ly;
+                if (wy <= 3 || wy >= 30) continue;
+
+                for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                    Voxel cur = chunk->get_voxel(lx, ly, lz);
+                    if (!is_stone_floor(cur)) continue;
+
+                    int wx = base_x + lx;
+                    int wz = base_z + lz;
+
+                    // Must have air directly above
+                    Voxel above = get_voxel_unlocked(wx, wy + 1, wz);
+                    if (above.is_solid()) continue;
+
+                    // Detect directional natural floor step where an adjacent solid neighbor rises at Y + 1
+                    bool step_pos_x = get_voxel_unlocked(wx + 1, wy + 1, wz).is_solid() &&
+                                      get_voxel_unlocked(wx + 1, wy, wz).is_solid() &&
+                                      !get_voxel_unlocked(wx + 1, wy + 2, wz).is_solid() &&
+                                      !get_voxel_unlocked(wx - 1, wy + 1, wz).is_solid();
+
+                    bool step_neg_x = get_voxel_unlocked(wx - 1, wy + 1, wz).is_solid() &&
+                                      get_voxel_unlocked(wx - 1, wy, wz).is_solid() &&
+                                      !get_voxel_unlocked(wx - 1, wy + 2, wz).is_solid() &&
+                                      !get_voxel_unlocked(wx + 1, wy + 1, wz).is_solid();
+
+                    bool step_pos_z = get_voxel_unlocked(wx, wy + 1, wz + 1).is_solid() &&
+                                      get_voxel_unlocked(wx, wy, wz + 1).is_solid() &&
+                                      !get_voxel_unlocked(wx, wy + 2, wz + 1).is_solid() &&
+                                      !get_voxel_unlocked(wx, wy + 1, wz - 1).is_solid();
+
+                    bool step_neg_z = get_voxel_unlocked(wx, wy + 1, wz - 1).is_solid() &&
+                                      get_voxel_unlocked(wx, wy, wz - 1).is_solid() &&
+                                      !get_voxel_unlocked(wx, wy + 2, wz - 1).is_solid() &&
+                                      !get_voxel_unlocked(wx, wy + 1, wz + 1).is_solid();
+
+                    int step_count = (step_pos_x ? 1 : 0) + (step_neg_x ? 1 : 0) +
+                                     (step_pos_z ? 1 : 0) + (step_neg_z ? 1 : 0);
+
+                    if (step_count == 1) {
+                        VoxelShape shape = SHAPE_CUBE;
+                        if (step_pos_x) shape = SHAPE_RAMP_POS_X;
+                        else if (step_neg_x) shape = SHAPE_RAMP_NEG_X;
+                        else if (step_pos_z) shape = SHAPE_RAMP_POS_Z;
+                        else if (step_neg_z) shape = SHAPE_RAMP_NEG_Z;
+
+                        candidates.push_back({cpos, lx, ly, lz, shape});
+                    }
+                }
+            }
+        }
+    }
+
+    for (const auto& c : candidates) {
+        auto it = m_chunks.find(c.cpos);
+        if (it != m_chunks.end() && it->second) {
+            Voxel v = it->second->get_voxel(c.lx, c.ly, c.lz);
+            v.set_shape(c.shape);
+            it->second->set_voxel(c.lx, c.ly, c.lz, v);
         }
     }
 }

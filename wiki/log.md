@@ -3,6 +3,45 @@
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
 ## 2026-10-07
+- **Smooth Ramp Traversal Physics & Slope Normal Projection (`src/player/controller.cpp`, `src/player/controller.hpp`)**:
+  - **Step-Up & Ramp Motion**:
+    - In `PlayerController::UpdateMovement(float dt, World& world)`, implemented dynamic footprint and motion-leading voxel shape query beneath the player's feet.
+    - If standing on or approaching a `SHAPE_RAMP_*` block, calculates the exact slope surface height `surf_y = calculate_ramp_surface_y(...)` and slope normal `N = get_ramp_normal(...)`.
+    - Projects planar ground velocity along the $45^\circ$ slope normal tangent condition: $v_y = -(v_x N_x + v_z N_z) / N_y$, matching vertical velocity to slope ascension/descension.
+    - Clamps the player's vertical position smoothly to the slope surface without triggering micro-airborne state transitions or jump-stutter.
+  - **AABB Collision Resolution & Ramp Depenetration Overhaul**:
+    - Updated `resolve_axis_collision` along X and Z axes: ramp blocks are recognized as traversable slopes rather than vertical solid walls when within stepping range (`box_min.y >= surf_y - 0.60f`). Smoothly steps up to `surf_y + half_extents.y` and continues uninterrupted movement.
+    - Overhauled `depenetrate()`: when overlapping a ramp voxel, resolves penetration vertically onto the slope surface instead of erroneously pushing the player horizontally backwards.
+    - Preserved `m_on_ground = true` and `m_isGrounded = true` during ramp climbing in `resolve_voxel_collisions` ground support probe, eliminating airborne fall-gravity interruptions.
+- **Distance-Gated POM & Zero-Cost Procedural Edge Chamfering (`assets/shaders/voxel_pbr.frag`)**:
+  - **Zero-Cost Procedural Edge Chamfering**:
+    - Eliminated razor-sharp digital 90° edges on cubic voxel faces without geometry subdivision.
+    - Evaluated screen-space derivatives along quad boundaries using `edgeDist = min(v_TexCoords, 1.0 - v_TexCoords)`.
+    - Softened normal away from face perpendicular via `smoothstep(0.0, 0.05, minEdge)` and `normalize(mix(normal + dFdx(v_FragPos) * 0.15 + dFdy(v_FragPos) * 0.15, normal, bevelFactor))`, smoothing specular glints along block edges.
+  - **LOD Distance-Gated Parallax Occlusion Mapping (POM)**:
+    - Computed Euclidean camera distance `dist = length(v_FragPos - u_CameraPos)`.
+    - Gated POM raymarch execution strictly to `dist < 7.0f`: performs 8-step raymarch using height map layer from `GL_TEXTURE_2D_ARRAY` (`uNormalArray.a`), smoothly attenuating displacement scale to zero between 5.0m and 7.0m.
+    - For `dist >= 7.0f`, completely bypasses raymarching loops and samples base UVs directly to preserve fillrate across open cavern expanses.
+- **Sloped Greedy Meshing & Diagonal Face Generation (`src/voxel/greedy_mesher.cpp`)**:
+  - **Diagonal Face Generation**:
+    - When meshing voxels with `SHAPE_RAMP_*`, replaced the dual emission of top horizontal (+Y) and lower vertical step quads with a single $45^\circ$ diagonal plane between the lower and upper step edges.
+    - Implemented `GreedyMesher::calculate_diagonal_normal(VoxelShape shape)` calculating $\vec{N} = \text{normalize}(\vec{N}_{\text{base}} + \vec{N}_{\text{side}})$ for all four directional ramp shapes (`POS_X`, `NEG_X`, `POS_Z`, `NEG_Z`).
+    - Maintained counter-clockwise outward winding order across all diagonal quads.
+  - **Greedy Merging on Slopes**:
+    - Greedily merges adjacent, coplanar ramp voxels along the perpendicular axis ($Z$ for X-slopes, $X$ for Z-slopes) into single continuous diagonal strips ($u\_dim = L, v\_dim = 1$), dramatically reducing vertex and triangle count.
+  - **Boundary Culling Invariant**:
+    - Preserved boundary check invariant where ungenerated or missing neighbor chunks are treated as solid granite (`MAT_FRACTURED_GRANITE`), preventing ceiling and border void leaks.
+    - Validated through unit tests in `tests/test_unit_all.cpp`.
+- **Voxel Ramp & Slope Metadata & Procedural Generation Integration**:
+  - **Metadata Encoding (`src/voxel/voxel_types.hpp`, `src/voxel/packed_vertex.hpp`, `src/voxel/chunk.hpp`)**:
+    - Created [src/voxel/voxel_types.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/voxel_types.hpp) defining `VoxelShape` topology enums: `SHAPE_CUBE` (`0x00`), `SHAPE_RAMP_POS_X` (`0x10`), `SHAPE_RAMP_NEG_X` (`0x20`), `SHAPE_RAMP_POS_Z` (`0x30`), and `SHAPE_RAMP_NEG_Z` (`0x40`).
+    - Enforced zero-overhead memory footprint: encoded shape topologies into the upper nibble of `flags_and_damage` (`0xF0`), keeping `sizeof(Voxel) == 2` bytes (16-bit packed).
+    - Preserved lower nibble damage tiers (`0x0F`) and backwards compatibility for anchor/surveyed bit checks (`!is_ramp()`).
+    - Added shape comparison guards in [src/voxel/greedy_mesher.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/greedy_mesher.cpp) to prevent differing voxel shapes from merging into flat coplanar quads.
+  - **Procedural Floor Step Detection (`src/voxel/world.cpp`, `src/voxel/world.hpp`)**:
+    - Added `World::detect_natural_floor_steps()` pass called during level generation (`generate_world` & `set_level_generator`).
+    - Detected natural stone floor steps: checks walkable stone floor voxels (`MAT_FRACTURED_GRANITE`, `MAT_VOLCANIC_BASALT`, `MAT_DREDGE_BEDROCK`) with air above. If an isolated adjacent neighbor step rises at `Y + 1` with open headroom, flags the block with the corresponding directional ramp shape (`SHAPE_RAMP_POS_X`, `NEG_X`, `POS_Z`, `NEG_Z`).
+    - Validated in `tests/test_unit_all.cpp` with dedicated unit test coverage.
 - **Combat Ballistics & Enemy AI Motion Continuity (Gunshot Non-Stun Enforcement)**:
   - **Identified Failure Mode**:
     - When shooting enemies, players observed creatures halting their forward movement as if stunned.

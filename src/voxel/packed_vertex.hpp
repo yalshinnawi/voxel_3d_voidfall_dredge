@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <glm/glm.hpp>
+#include "voxel_types.hpp"
 
 namespace Voidfall {
 
@@ -70,10 +71,10 @@ struct Voxel {
     inline bool is_renderable() const {
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE;
     }
-    inline bool is_anchored() const { return (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0 || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
+    inline bool is_anchored() const { return (!is_ramp() && (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0) || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
     inline uint8_t damage() const { return flags_and_damage & 0x0F; }
     inline void set_damage(uint8_t d) { flags_and_damage = (flags_and_damage & 0xF0) | (d & 0x0F); }
-    inline bool is_highlighted() const { return (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
+    inline bool is_highlighted() const { return !is_ramp() && (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
     inline void set_highlighted(bool h) {
         if (h) flags_and_damage |= VOXEL_FLAG_SURVEYED;
         else   flags_and_damage &= ~VOXEL_FLAG_SURVEYED;
@@ -82,6 +83,35 @@ struct Voxel {
     inline void set_player_placed(bool p) {
         if (p) flags_and_damage |= VOXEL_FLAG_PLAYER_PLACED;
         else   flags_and_damage &= ~VOXEL_FLAG_PLAYER_PLACED;
+    }
+
+    inline VoxelShape shape() const {
+        if (material_id == MAT_DREDGE_BEDROCK ||
+            material_id == MAT_REINFORCED_VAULT_DOOR ||
+            material_id == MAT_AIR ||
+            material_id == MAT_GAS ||
+            material_id == MAT_VOLATILE_SMOKE ||
+            material_id == MAT_THERMITE_SLAG ||
+            material_id == MAT_CRYSTAL_AQUIFER ||
+            material_id == MAT_VOIDITE_CRYSTAL ||
+            material_id == MAT_RADIOACTIVE_ORE ||
+            material_id == MAT_PRISMATIC_CRYSTAL ||
+            material_id == MAT_BIOLUMINESCENT_FLORA ||
+            material_id == MAT_OBSIDIAN_SPIKES) {
+            return SHAPE_CUBE;
+        }
+        uint8_t s = flags_and_damage & VOXEL_SHAPE_MASK;
+        if (s == SHAPE_RAMP_POS_X || s == SHAPE_RAMP_NEG_X ||
+            s == SHAPE_RAMP_POS_Z || s == SHAPE_RAMP_NEG_Z) {
+            return static_cast<VoxelShape>(s);
+        }
+        return SHAPE_CUBE;
+    }
+    inline void set_shape(VoxelShape s) {
+        flags_and_damage = (flags_and_damage & 0x0F) | (static_cast<uint8_t>(s) & VOXEL_SHAPE_MASK);
+    }
+    inline bool is_ramp() const {
+        return is_ramp_shape(shape());
     }
 };
 #pragma pack(pop)

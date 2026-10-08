@@ -77,6 +77,39 @@ void test_voxel_engine() {
     TEST_CHECK((bulkhead.flags_and_damage & VOXEL_FLAG_PLAYER_PLACED) != 0, "Player placed flag must be preserved");
     log_pass("Voxel material properties and flag bitmasks");
 
+    // Voxel Ramp & Slope Metadata Encoding (upper nibble of flags_and_damage)
+    Voxel test_ramp{MAT_VOLCANIC_BASALT, 0};
+    TEST_CHECK(test_ramp.shape() == SHAPE_CUBE, "Default shape must be SHAPE_CUBE");
+    TEST_CHECK(!test_ramp.is_ramp(), "Cube must not be classified as ramp");
+
+    test_ramp.set_damage(7);
+    test_ramp.set_shape(SHAPE_RAMP_POS_X);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_POS_X, "Shape must be SHAPE_RAMP_POS_X");
+    TEST_CHECK(test_ramp.is_ramp(), "SHAPE_RAMP_POS_X must be classified as ramp");
+    TEST_CHECK(test_ramp.damage() == 7, "Lower nibble damage tier must be preserved after set_shape");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x10, "Upper nibble must match 0x10 for POS_X");
+
+    test_ramp.set_shape(SHAPE_RAMP_NEG_X);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_NEG_X, "Shape must be SHAPE_RAMP_NEG_X");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x20, "Upper nibble must match 0x20 for NEG_X");
+
+    test_ramp.set_shape(SHAPE_RAMP_POS_Z);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_POS_Z, "Shape must be SHAPE_RAMP_POS_Z");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x30, "Upper nibble must match 0x30 for POS_Z");
+
+    test_ramp.set_shape(SHAPE_RAMP_NEG_Z);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_NEG_Z, "Shape must be SHAPE_RAMP_NEG_Z");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x40, "Upper nibble must match 0x40 for NEG_Z");
+
+    test_ramp.set_shape(SHAPE_CUBE);
+    TEST_CHECK(test_ramp.shape() == SHAPE_CUBE, "Shape reset must return SHAPE_CUBE");
+    TEST_CHECK(!test_ramp.is_ramp(), "Shape reset must not be ramp");
+    TEST_CHECK(test_ramp.damage() == 7, "Damage must remain intact after shape reset");
+
+    // Static size check
+    static_assert(sizeof(Voxel) == 2, "Voxel struct must remain exactly 16-bit / 2 bytes");
+    log_pass("Voxel Ramp & Slope Metadata Encoding and 16-bit struct integrity");
+
     // World voxel queries and block generation
     World world(4242);
     world.generate_world(1, 4242);
@@ -85,6 +118,47 @@ void test_voxel_engine() {
     TEST_CHECK(query_v.material_id == MAT_FRACTURED_GRANITE, "World get_voxel mismatch");
     TEST_CHECK(world.is_solid(16, 20, 16), "World is_solid query mismatch");
     log_pass("World voxel mutation and procedural topology generation");
+
+    // Procedural Floor Step Ramp Detection
+    World step_world(9999);
+    step_world.generate_world(1, 9999);
+
+    // Create a flat floor and a raised 1-block step at (21, 16, 20) rising toward +X
+    step_world.set_voxel(19, 15, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(19, 16, 20, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(20, 15, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(20, 16, 20, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(21, 15, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(21, 16, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(21, 17, 20, Voxel{MAT_AIR, 0});
+
+    step_world.set_voxel(20, 16, 19, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(20, 16, 21, Voxel{MAT_AIR, 0});
+
+    step_world.detect_natural_floor_steps();
+
+    Voxel ramp_v = step_world.get_voxel(20, 15, 20);
+    TEST_CHECK(ramp_v.shape() == SHAPE_RAMP_POS_X, "Floor block adjacent to +X step must become SHAPE_RAMP_POS_X");
+    TEST_CHECK(ramp_v.is_ramp(), "Block must be classified as ramp");
+
+    // Lower block at (19, 15, 20) has neighbor at +X of same height, remains cube
+    Voxel lower_v = step_world.get_voxel(19, 15, 20);
+    TEST_CHECK(lower_v.shape() == SHAPE_CUBE, "Flat floor block must remain SHAPE_CUBE");
+
+    // Test rising toward -X
+    step_world.set_voxel(23, 15, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(23, 16, 20, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(22, 15, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(22, 16, 20, Voxel{MAT_FRACTURED_GRANITE, 0});
+    step_world.set_voxel(22, 17, 20, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(24, 16, 20, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(23, 16, 19, Voxel{MAT_AIR, 0});
+    step_world.set_voxel(23, 16, 21, Voxel{MAT_AIR, 0});
+
+    step_world.detect_natural_floor_steps();
+    Voxel ramp_neg_x = step_world.get_voxel(23, 15, 20);
+    TEST_CHECK(ramp_neg_x.shape() == SHAPE_RAMP_NEG_X, "Floor block adjacent to -X step must become SHAPE_RAMP_NEG_X");
+    log_pass("Procedural natural floor step detection and directional ramp shape assignment");
 
     // Raycast hit detection
     RaycastHit hit = world.raycast(glm::vec3(16.5f, 25.0f, 16.5f), glm::vec3(0.0f, -1.0f, 0.0f), 10.0f);
@@ -128,6 +202,100 @@ void test_voxel_engine() {
     TEST_CHECK(found_occluded, "Mesh on concave step geometry must contain baked vertex ambient occlusion (ao > 0)");
     TEST_CHECK(found_unoccluded, "Mesh must contain fully exposed unoccluded vertices (ao == 0)");
     log_pass("Vertex Ambient Occlusion calculation, 2-bit packing & greedy mesher baking");
+
+    // Sloped Greedy Meshing & Diagonal Normal Tests
+    float inv_sqrt2 = 1.0f / std::sqrt(2.0f);
+    glm::vec3 n_pos_x = GreedyMesher::calculate_diagonal_normal(SHAPE_RAMP_POS_X);
+    glm::vec3 n_neg_x = GreedyMesher::calculate_diagonal_normal(SHAPE_RAMP_NEG_X);
+    glm::vec3 n_pos_z = GreedyMesher::calculate_diagonal_normal(SHAPE_RAMP_POS_Z);
+    glm::vec3 n_neg_z = GreedyMesher::calculate_diagonal_normal(SHAPE_RAMP_NEG_Z);
+
+    TEST_CHECK(std::abs(glm::length(n_pos_x) - 1.0f) < 0.001f, "POS_X normal must be normalized");
+    TEST_CHECK(std::abs(n_pos_x.x - (-inv_sqrt2)) < 0.001f && std::abs(n_pos_x.y - inv_sqrt2) < 0.001f, "POS_X normal calculation mismatch");
+    TEST_CHECK(std::abs(n_neg_x.x - inv_sqrt2) < 0.001f && std::abs(n_neg_x.y - inv_sqrt2) < 0.001f, "NEG_X normal calculation mismatch");
+    TEST_CHECK(std::abs(n_pos_z.z - (-inv_sqrt2)) < 0.001f && std::abs(n_pos_z.y - inv_sqrt2) < 0.001f, "POS_Z normal calculation mismatch");
+    TEST_CHECK(std::abs(n_neg_z.z - inv_sqrt2) < 0.001f && std::abs(n_neg_z.y - inv_sqrt2) < 0.001f, "NEG_Z normal calculation mismatch");
+
+    // Single Ramp Meshing & Suppression of horizontal/vertical step quads
+    Chunk ramp_chunk(ChunkPos{0, 0, 0});
+    Voxel single_ramp{MAT_VOLCANIC_BASALT, 0};
+    single_ramp.set_shape(SHAPE_RAMP_POS_X);
+    ramp_chunk.set_voxel(10, 10, 10, single_ramp);
+
+    auto single_mesh = GreedyMesher::generate_mesh(ramp_chunk);
+    TEST_CHECK(!single_mesh.empty(), "Greedy mesher must emit geometry for single ramp voxel");
+
+    // Verify diagonal quad coordinates and suppression of horizontal/vertical step quads
+    bool has_diagonal_face = false;
+    bool has_top_horizontal_quad = false;
+    bool has_lower_vertical_quad = false;
+    for (size_t i = 0; i < single_mesh.size(); i += 6) {
+        uint32_t y0 = (single_mesh[i + 0].data0 >> 6u) & 0x3Fu;
+        uint32_t y2 = (single_mesh[i + 2].data0 >> 6u) & 0x3Fu;
+        uint32_t x0 = single_mesh[i + 0].data0 & 0x3Fu;
+        uint32_t x2 = single_mesh[i + 2].data0 & 0x3Fu;
+        if (y0 == 10 && y2 == 11 && x0 == 10 && x2 == 11) {
+            has_diagonal_face = true;
+        }
+        // Top horizontal quad would be at y0 == 11, y2 == 11 spanning x: 10..11
+        if (y0 == 11 && y2 == 11 && x0 != x2) {
+            has_top_horizontal_quad = true;
+        }
+        // Lower vertical side quad would be at x0 == 10, x2 == 10 spanning y: 10..11
+        if (x0 == 10 && x2 == 10 && y0 != y2) {
+            has_lower_vertical_quad = true;
+        }
+    }
+    TEST_CHECK(has_diagonal_face, "Greedy mesher must emit 45-degree diagonal face for SHAPE_RAMP_POS_X");
+    TEST_CHECK(!has_top_horizontal_quad, "Top horizontal quad must be suppressed for ramp");
+    TEST_CHECK(!has_lower_vertical_quad, "Lower step edge vertical quad must be suppressed for ramp");
+
+    // Sloped Greedy Merging along perpendicular axis
+    // Place 4 adjacent ramps along Z (z=10, 11, 12, 13) at (x=15, y=5)
+    Chunk merged_ramp_chunk(ChunkPos{0, 0, 0});
+    for (int z = 10; z < 14; ++z) {
+        Voxel r{MAT_VOLCANIC_BASALT, 0};
+        r.set_shape(SHAPE_RAMP_POS_X);
+        merged_ramp_chunk.set_voxel(15, 5, z, r);
+    }
+    auto merged_mesh = GreedyMesher::generate_mesh(merged_ramp_chunk);
+    int diagonal_quad_count = 0;
+    uint32_t max_u_dim = 0;
+    for (size_t i = 0; i < merged_mesh.size(); i += 6) {
+        uint32_t y0 = (merged_mesh[i + 0].data0 >> 6u) & 0x3Fu;
+        uint32_t y2 = (merged_mesh[i + 2].data0 >> 6u) & 0x3Fu;
+        uint32_t x0 = merged_mesh[i + 0].data0 & 0x3Fu;
+        uint32_t x2 = merged_mesh[i + 2].data0 & 0x3Fu;
+        if (y0 == 5 && y2 == 6 && x0 == 15 && x2 == 16) {
+            diagonal_quad_count++;
+            uint32_t u_dim = merged_mesh[i + 0].data1 & 0x3Fu;
+            if (u_dim > max_u_dim) max_u_dim = u_dim;
+        }
+    }
+    TEST_CHECK(diagonal_quad_count == 1, "4 adjacent coplanar ramps must merge into exactly 1 diagonal strip quad");
+    TEST_CHECK(max_u_dim == 4, "Merged diagonal strip quad must have u_dim == 4");
+
+    // Boundary Culling Invariant: ramp facing boundary with null neighbor getter
+    // treats neighbor chunk as solid granite and suppresses exposed void
+    Chunk boundary_chunk(ChunkPos{0, 0, 0});
+    Voxel boundary_ramp{MAT_VOLCANIC_BASALT, 0};
+    boundary_ramp.set_shape(SHAPE_RAMP_POS_X);
+    boundary_chunk.set_voxel(10, 31, 10, boundary_ramp); // At ceiling y=31
+
+    // With null neighbor getter, y=32 neighbor is treated as solid MAT_GRANITE -> slope is occluded!
+    auto boundary_mesh = GreedyMesher::generate_mesh(boundary_chunk, nullptr);
+    bool boundary_slope_emitted = false;
+    for (size_t i = 0; i < boundary_mesh.size(); i += 6) {
+        uint32_t x0 = boundary_mesh[i + 0].data0 & 0x3Fu;
+        uint32_t x2 = boundary_mesh[i + 2].data0 & 0x3Fu;
+        uint32_t y0 = (boundary_mesh[i + 0].data0 >> 6u) & 0x3Fu;
+        uint32_t y2 = (boundary_mesh[i + 2].data0 >> 6u) & 0x3Fu;
+        if (x0 == 10 && x2 == 11 && y0 == 31 && y2 == 32) {
+            boundary_slope_emitted = true;
+        }
+    }
+    TEST_CHECK(!boundary_slope_emitted, "Boundary check must treat ungenerated neighbor chunks as solid granite and cull ceiling slope");
+    log_pass("Sloped Greedy Meshing, diagonal normal math, perpendicular merging & boundary culling");
 
     // Chunk Mesh GPU Upload Throttling
     TEST_CHECK(World::MAX_CHUNK_UPLOADS_PER_FRAME == 2, "World::MAX_CHUNK_UPLOADS_PER_FRAME must be 2");

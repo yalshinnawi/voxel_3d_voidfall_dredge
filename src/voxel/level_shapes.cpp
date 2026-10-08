@@ -3008,6 +3008,15 @@ void LevelGenerator::sample_bioluminescent_glowworm_grotto(const RoomPlacement& 
         return;
     }
 
+    if (is_doorway_floor(room, dx, dz, y)) {
+        out = Voxel{MAT_VOLCANIC_BASALT, 0};
+        return;
+    }
+    if (is_doorway_air(room, dx, dz, y)) {
+        out = Voxel{MAT_AIR, 0};
+        return;
+    }
+
     // Subterranean reflecting pool at floor level
     if (y == room.floor_y) {
         if (r_horiz <= static_cast<float>(room.half_width) - 3.0f) {
@@ -3055,6 +3064,15 @@ void LevelGenerator::sample_precursor_coolant_reservoir(const RoomPlacement& roo
     float r_wall = compute_room_wall_radius(room, static_cast<float>(dx), static_cast<float>(dz), angle, (pseudo_rand(x, y, z, 208) - 0.5f) * 0.35f);
     if (r_horiz > r_wall) {
         check_doorway_or_solid(room, dx, dz, y, MAT_INDUSTRIAL_BULKHEAD, out);
+        return;
+    }
+
+    if (is_doorway_floor(room, dx, dz, y)) {
+        out = Voxel{MAT_TITANIUM, 0};
+        return;
+    }
+    if (is_doorway_air(room, dx, dz, y)) {
+        out = Voxel{MAT_AIR, 0};
         return;
     }
 

@@ -80,6 +80,7 @@ public:
 
     void PopulateFauna();
     void GenerateSectorStructures(int sector_index);
+    void detect_natural_floor_steps();
 
     const std::vector<FaunaEntity>& GetActiveEntities() const { return m_active_entities; }
     std::vector<FaunaEntity>& GetActiveEntities() { return m_active_entities; }
@@ -234,6 +235,7 @@ public:
 
 private:
     void generate_chunk_terrain(Chunk& chunk);
+    Voxel get_voxel_unlocked(int world_x, int world_y, int world_z) const;
     float sample_cavern_noise(float x, float y, float z) const;
 
     // Worker thread meshing queue

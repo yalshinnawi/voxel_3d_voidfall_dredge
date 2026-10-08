@@ -41,6 +41,12 @@ public:
         bool corner_solid
     );
 
+    // Calculates the normalized diagonal normal for a ramp shape:
+    // N = normalize(N_base + N_side)
+    static glm::vec3 calculate_diagonal_normal(VoxelShape shape);
+    static glm::vec3 get_diagonal_normal(VoxelShape shape) { return calculate_diagonal_normal(shape); }
+    static glm::vec3 calculate_ramp_normal(VoxelShape shape) { return calculate_diagonal_normal(shape); }
+
 private:
     static Voxel sample_voxel(
         const Chunk& chunk,

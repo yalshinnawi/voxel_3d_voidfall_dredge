@@ -568,6 +568,9 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
+    // Step-Up & Ramp Motion: Query ramp under feet and adjust ground projection vector
+    UpdateMovement(dt, world);
+
     // 3. Subterranean Voxel Collision Resolution (AABB vs Voxel Grid)
     resolve_voxel_collisions(world, m_position, m_velocity, dt);
 
@@ -799,6 +802,36 @@ void PlayerController::PlaceBulkhead(World& world, const glm::ivec3& place_pos) 
     place_bulkhead(world, place_pos);
 }
 
+static inline float calculate_ramp_surface_y(VoxelShape shape, int bx, int by, int bz, float px, float pz) {
+    float u = glm::clamp(px - static_cast<float>(bx), 0.0f, 1.0f);
+    float w = glm::clamp(pz - static_cast<float>(bz), 0.0f, 1.0f);
+    float local_h = 0.0f;
+    switch (shape) {
+        case SHAPE_RAMP_POS_X: local_h = u; break;          // Slope rising toward +X
+        case SHAPE_RAMP_NEG_X: local_h = 1.0f - u; break;   // Slope rising toward -X
+        case SHAPE_RAMP_POS_Z: local_h = w; break;          // Slope rising toward +Z
+        case SHAPE_RAMP_NEG_Z: local_h = 1.0f - w; break;   // Slope rising toward -Z
+        default: local_h = 1.0f; break;
+    }
+    return static_cast<float>(by) + local_h;
+}
+
+static inline glm::vec3 get_ramp_normal(VoxelShape shape) {
+    constexpr float INV_SQRT2 = 0.7071067811865475f;
+    switch (shape) {
+        case SHAPE_RAMP_POS_X:
+            return glm::vec3(-INV_SQRT2, INV_SQRT2, 0.0f);
+        case SHAPE_RAMP_NEG_X:
+            return glm::vec3(INV_SQRT2, INV_SQRT2, 0.0f);
+        case SHAPE_RAMP_POS_Z:
+            return glm::vec3(0.0f, INV_SQRT2, -INV_SQRT2);
+        case SHAPE_RAMP_NEG_Z:
+            return glm::vec3(0.0f, INV_SQRT2, INV_SQRT2);
+        default:
+            return glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+}
+
 void PlayerController::clamp_to_surface(const World& world) {
     // Search downwards starting from current y position down to 0 for immediate walkable floor
     float h_y = half_extents().y;
@@ -884,8 +917,89 @@ void PlayerController::Update(float dt) {
 
 void PlayerController::Update(float dt, World& world) {
     m_current_world = &world;
+    UpdateMovement(dt, world);
     UpdatePhysics(dt, world);
     StealthSystem::instance().Update(dt, m_is_crouching);
+}
+
+void PlayerController::UpdateMovement(float dt) {
+    if (m_current_world) {
+        UpdateMovement(dt, *m_current_world);
+    }
+}
+
+void PlayerController::UpdateMovement(float dt, World& world) {
+    m_current_world = &world;
+    float h_y = half_extents().y;
+    float foot_y = m_position.y - h_y;
+
+    int bx = static_cast<int>(std::floor(m_position.x));
+    int bz = static_cast<int>(std::floor(m_position.z));
+    int by_foot = static_cast<int>(std::floor(foot_y));
+
+    // 1. Query the shape flag of the voxel directly beneath the player's feet
+    VoxelShape shape = SHAPE_CUBE;
+    int ramp_bx = bx;
+    int ramp_by = by_foot;
+    int ramp_bz = bz;
+
+    // Check voxel at feet level and voxel immediately below feet at player center
+    Voxel v_curr = world.get_voxel(bx, by_foot, bz);
+    Voxel v_below = world.get_voxel(bx, by_foot - 1, bz);
+
+    if (v_curr.is_ramp()) {
+        shape = v_curr.shape();
+        ramp_by = by_foot;
+    } else if (v_below.is_ramp()) {
+        shape = v_below.shape();
+        ramp_by = by_foot - 1;
+    } else {
+        // Also check footprint along movement direction or foot extents
+        int check_bx = bx;
+        int check_bz = bz;
+        if (m_velocity.x > 0.1f) check_bx = static_cast<int>(std::floor(m_position.x + half_extents().x));
+        else if (m_velocity.x < -0.1f) check_bx = static_cast<int>(std::floor(m_position.x - half_extents().x));
+
+        if (m_velocity.z > 0.1f) check_bz = static_cast<int>(std::floor(m_position.z + half_extents().z));
+        else if (m_velocity.z < -0.1f) check_bz = static_cast<int>(std::floor(m_position.z - half_extents().z));
+
+        Voxel v_lead_curr = world.get_voxel(check_bx, by_foot, check_bz);
+        Voxel v_lead_below = world.get_voxel(check_bx, by_foot - 1, check_bz);
+        if (v_lead_curr.is_ramp()) {
+            shape = v_lead_curr.shape();
+            ramp_bx = check_bx;
+            ramp_by = by_foot;
+            ramp_bz = check_bz;
+        } else if (v_lead_below.is_ramp()) {
+            shape = v_lead_below.shape();
+            ramp_bx = check_bx;
+            ramp_by = by_foot - 1;
+            ramp_bz = check_bz;
+        }
+    }
+
+    // 2. If standing on a SHAPE_RAMP_* block, adjust ground projection vector along the 45° slope normal
+    if (is_ramp_shape(shape)) {
+        float surf_y = calculate_ramp_surface_y(shape, ramp_bx, ramp_by, ramp_bz, m_position.x, m_position.z);
+        float diff = foot_y - surf_y;
+
+        // Player is considered standing on the ramp if feet are close to the slope surface
+        bool jumping = (m_current_buttons & BTN_JUMP) != 0 || m_velocity.y > 6.0f;
+        if (!jumping && diff >= -0.35f && diff <= 0.45f) {
+            // Allow continuous walking without triggering micro-airborne state transitions or jump-stutter
+            m_position.y = surf_y + h_y;
+            m_on_ground = true;
+            m_isGrounded = true;
+
+            glm::vec3 normal = get_ramp_normal(shape);
+
+            // Adjust ground projection vector along the 45° slope normal
+            // Tangent condition: V . N = 0 => Vy = -(Vx * Nx + Vz * Nz) / Ny
+            if (normal.y > 0.001f) {
+                m_velocity.y = -(m_velocity.x * normal.x + m_velocity.z * normal.z) / normal.y;
+            }
+        }
+    }
 }
 
 void PlayerController::ResolveAxisCollision(int axis, const glm::vec3& half_extents) {
@@ -915,6 +1029,13 @@ bool PlayerController::is_penetrating_solid(const World& world) const {
         for (int x = min_x; x <= max_x; ++x) {
             for (int z = min_z; z <= max_z; ++z) {
                 if (world.is_solid(glm::ivec3(x, y, z))) {
+                    Voxel vox = world.get_voxel(x, y, z);
+                    if (vox.is_ramp()) {
+                        float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, z, m_position.x, m_position.z);
+                        if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                    }
                     return true;
                 }
             }
@@ -960,6 +1081,25 @@ void PlayerController::depenetrate(const glm::vec3& half_extents, World& world) 
         for (int x = min_x; x <= max_x; ++x) {
             for (int z = min_z; z <= max_z; ++z) {
                 if (world.is_solid(glm::ivec3(x, y, z))) {
+                    Voxel vox = world.get_voxel(x, y, z);
+                    if (vox.is_ramp()) {
+                        float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, z, m_position.x, m_position.z);
+                        if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                        if (box_min.y >= surf_y - 0.60f) {
+                            m_position.y = surf_y + half_extents.y;
+                            if (m_velocity.y < 0.0f) {
+                                m_velocity.y = 0.0f;
+                            }
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            box_min = m_position - half_extents;
+                            box_max = m_position + half_extents;
+                            continue;
+                        }
+                    }
+
                     float push_px = (static_cast<float>(x + 1) - box_min.x);
                     float push_nx = (box_max.x - static_cast<float>(x));
                     float push_py = (static_cast<float>(y + 1) - box_min.y);
@@ -1019,7 +1159,20 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool landed = false;
             for (int x = min_bx; x <= max_bx; ++x) {
                 for (int z = min_bz; z <= max_bz; ++z) {
-                    if (world.is_solid(glm::ivec3(x, check_y, z))) {
+                    Voxel vox = world.get_voxel(x, check_y, z);
+                    if (vox.is_solid()) {
+                        if (vox.is_ramp()) {
+                            float surf_y = calculate_ramp_surface_y(vox.shape(), x, check_y, z, m_position.x, m_position.z);
+                            if (box_min.y <= surf_y + 0.05f) {
+                                m_position.y = surf_y + half_extents.y;
+                                m_velocity.y = 0.0f;
+                                m_on_ground = true;
+                                m_isGrounded = true;
+                                landed = true;
+                                break;
+                            }
+                            continue;
+                        }
                         float impact_speed = -m_velocity.y;
                         if (impact_speed > 0.0f) apply_fall_impact(impact_speed);
                         float target_floor = static_cast<float>(check_y + 1);
@@ -1038,7 +1191,19 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                 int floor_below = static_cast<int>(std::floor(box_min.y - 0.02f));
                 for (int x = min_bx; x <= max_bx; ++x) {
                     for (int z = min_bz; z <= max_bz; ++z) {
-                        if (world.is_solid(glm::ivec3(x, floor_below, z))) {
+                        Voxel vox = world.get_voxel(x, floor_below, z);
+                        if (vox.is_solid()) {
+                            if (vox.is_ramp()) {
+                                float surf_y = calculate_ramp_surface_y(vox.shape(), x, floor_below, z, m_position.x, m_position.z);
+                                if (box_min.y <= surf_y + 0.05f) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_velocity.y = 0.0f;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    return;
+                                }
+                                continue;
+                            }
                             if (box_min.y <= static_cast<float>(floor_below + 1) + 0.05f) {
                                 m_position.y = static_cast<float>(floor_below + 1) + half_extents.y;
                                 m_velocity.y = 0.0f;
@@ -1096,7 +1261,19 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool only_step = true;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
-                    if (world.is_solid(glm::ivec3(check_x, y, z))) {
+                    Voxel vox = world.get_voxel(check_x, y, z);
+                    if (vox.is_solid()) {
+                        if (vox.is_ramp()) {
+                            float surf_y = calculate_ramp_surface_y(vox.shape(), check_x, y, z, m_position.x, m_position.z);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                }
+                                continue;
+                            }
+                        }
                         has_collision = true;
                         if (y > min_wall_y) {
                             only_step = false;
@@ -1144,7 +1321,19 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool only_step = true;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
-                    if (world.is_solid(glm::ivec3(check_x, y, z))) {
+                    Voxel vox = world.get_voxel(check_x, y, z);
+                    if (vox.is_solid()) {
+                        if (vox.is_ramp()) {
+                            float surf_y = calculate_ramp_surface_y(vox.shape(), check_x, y, z, m_position.x, m_position.z);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                }
+                                continue;
+                            }
+                        }
                         has_collision = true;
                         if (y > min_wall_y) {
                             only_step = false;
@@ -1220,7 +1409,19 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool only_step = true;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
-                    if (world.is_solid(glm::ivec3(x, y, check_z))) {
+                    Voxel vox = world.get_voxel(x, y, check_z);
+                    if (vox.is_solid()) {
+                        if (vox.is_ramp()) {
+                            float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, check_z, m_position.x, m_position.z);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                }
+                                continue;
+                            }
+                        }
                         has_collision = true;
                         if (y > min_wall_y) {
                             only_step = false;
@@ -1268,7 +1469,19 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             bool only_step = true;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
-                    if (world.is_solid(glm::ivec3(x, y, check_z))) {
+                    Voxel vox = world.get_voxel(x, y, check_z);
+                    if (vox.is_solid()) {
+                        if (vox.is_ramp()) {
+                            float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, check_z, m_position.x, m_position.z);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                }
+                                continue;
+                            }
+                        }
                         has_collision = true;
                         if (y > min_wall_y) {
                             only_step = false;
@@ -1342,8 +1555,9 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
     }
 
     // Ground support probe: ensure m_on_ground stays true while standing or walking on floor
-    if (m_velocity.y <= 0.05f) {
-        int ground_y = static_cast<int>(std::floor(m_position.y - half_extents.y - 0.05f));
+    if (m_velocity.y <= 0.05f || m_on_ground) {
+        float foot_y = m_position.y - half_extents.y;
+        int ground_y = static_cast<int>(std::floor(foot_y - 0.05f));
         int min_x = static_cast<int>(std::floor(m_position.x - 0.28f));
         int max_x = static_cast<int>(std::floor(m_position.x + 0.28f));
         int min_z = static_cast<int>(std::floor(m_position.z - 0.28f));
@@ -1354,11 +1568,14 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
                 if (world.is_solid(glm::ivec3(x, ground_y, z))) {
                     m_on_ground = true;
                     m_isGrounded = true;
-                    if (m_velocity.y < 0.0f) {
-                        apply_fall_impact(-m_velocity.y);
-                        m_velocity.y = 0.0f;
+                    Voxel vox = world.get_voxel(x, ground_y, z);
+                    if (!vox.is_ramp()) {
+                        if (m_velocity.y < 0.0f) {
+                            apply_fall_impact(-m_velocity.y);
+                            m_velocity.y = 0.0f;
+                        }
+                        m_position.y = static_cast<float>(ground_y + 1) + half_extents.y;
                     }
-                    m_position.y = static_cast<float>(ground_y + 1) + half_extents.y;
                     break;
                 }
             }

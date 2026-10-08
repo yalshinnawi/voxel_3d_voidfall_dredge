@@ -166,18 +166,19 @@ void main() {
         baseUV = fract(baseUV + waveOffset);
     }
 
-    // Distance-Gated Parallax Occlusion Mapping (POM)
+    // LOD Distance-Gated Parallax Occlusion Mapping (POM)
     vec3 v_FragPos = vWorldPos;
-    float camDist = length(v_FragPos - uCameraPos);
+    vec3 u_CameraPos = uCameraPos;
+    float dist = length(v_FragPos - u_CameraPos);
 
     vec2 quadUV;
-    if (camDist < 8.0) {
-        // Blend POM depth scale smoothly to zero between 6.0m and 8.0m
-        float pomFade = smoothstep(8.0, 6.0, camDist);
+    if (dist < 7.0f) {
+        // Attenuate POM displacement scale smoothly to zero between 5.0m and 7.0m
+        float pomFade = smoothstep(7.0, 5.0, dist);
         float depthScale = 0.04 * pomFade;
 
-        // Perform 6-step Parallax Occlusion Mapping (POM) raymarch using displacement height channel
-        const float numSteps = 6.0;
+        // Execute an 8-step POM raymarch using the height map layer from GL_TEXTURE_2D_ARRAY
+        const float numSteps = 8.0;
         float stepSize = 1.0 / numSteps;
         vec2 p = (V_tangent.xy / max(abs(V_tangent.z), 0.25)) * depthScale;
         vec2 deltaUV = p / numSteps;
@@ -191,7 +192,7 @@ void main() {
         float prevLayerDepth = currentLayerDepth;
         float prevDepthMapValue = currentDepthMapValue;
 
-        for (int step = 0; step < 6; ++step) {
+        for (int step = 0; step < 8; ++step) {
             if (currentLayerDepth >= currentDepthMapValue) {
                 break;
             }
@@ -212,7 +213,7 @@ void main() {
         float weight = denom > 0.0001 ? clamp(beforeDepth / denom, 0.0, 1.0) : 0.0;
         quadUV = mix(prevUV, currUV, weight);
     } else {
-        // Skip POM raymarching entirely and use base quad UVs for normal map sampling
+        // Completely bypass raymarching loops. Directly sample the base UVs for tangent normal and roughness calculations to protect GPU fillrate across open cavern expanses.
         quadUV = baseUV;
     }
 
@@ -292,6 +293,20 @@ void main() {
     if (vDamage > 0.05) {
         albedo = mix(albedo, vec3(0.08, 0.07, 0.06), vDamage * 0.7);
     }
+
+    // Zero-Cost Procedural Edge Chamfering:
+    // To eliminate the razor-sharp digital 90° look on cubic faces without adding extra geometry:
+    vec3 normal = N;
+    // Chamfer outer edges based on UV proximity
+    vec2 v_TexCoords = fract(vUV);
+    vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
+    float minEdge = min(edgeDist.x, edgeDist.y);
+    if (minEdge < 0.05) {
+        float bevelFactor = smoothstep(0.0, 0.05, minEdge);
+        // Soften normal away from face perpendicular
+        normal = normalize(mix(normal + dFdx(v_FragPos) * 0.15 + dFdy(v_FragPos) * 0.15, normal, bevelFactor));
+    }
+    N = normal;
 
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);

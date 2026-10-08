@@ -1,5 +1,6 @@
 #pragma once
 #include "packed_vertex.hpp"
+#include "voxel_types.hpp"
 #include <vector>
 #include <memory>
 #include <atomic>

@@ -44,6 +44,10 @@ public:
     void update(float dt) { Update(dt); }
     void Update(float dt, World& world);
     void update(float dt, World& world) { Update(dt, world); }
+    void UpdateMovement(float dt);
+    void UpdateMovement(float dt, World& world);
+    void update_movement(float dt) { UpdateMovement(dt); }
+    void update_movement(float dt, World& world) { UpdateMovement(dt, world); }
 
     void ResolveAxisCollision(int axis, const glm::vec3& half_extents);
     void ResolveAxisCollision(int axis, const glm::vec3& half_extents, World& world);

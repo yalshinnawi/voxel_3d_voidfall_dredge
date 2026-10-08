@@ -61,6 +61,28 @@ Voxel GreedyMesher::sample_voxel(
     return Voxel{MAT_FRACTURED_GRANITE, 0};
 }
 
+glm::vec3 GreedyMesher::calculate_diagonal_normal(VoxelShape shape) {
+    glm::vec3 n_base(0.0f, 1.0f, 0.0f);
+    glm::vec3 n_side(0.0f);
+    switch (shape) {
+        case SHAPE_RAMP_POS_X:
+            n_side = glm::vec3(-1.0f, 0.0f, 0.0f);
+            break;
+        case SHAPE_RAMP_NEG_X:
+            n_side = glm::vec3( 1.0f, 0.0f, 0.0f);
+            break;
+        case SHAPE_RAMP_POS_Z:
+            n_side = glm::vec3( 0.0f, 0.0f, -1.0f);
+            break;
+        case SHAPE_RAMP_NEG_Z:
+            n_side = glm::vec3( 0.0f, 0.0f,  1.0f);
+            break;
+        default:
+            return n_base;
+    }
+    return glm::normalize(n_base + n_side);
+}
+
 inline bool is_face_occluded(Voxel current, Voxel neighbor) {
     if (!neighbor.is_renderable()) {
         return false;
@@ -83,7 +105,20 @@ bool GreedyMesher::is_face_visible(
     if (!current.is_renderable()) {
         return false;
     }
+    if (current.is_ramp()) {
+        // Top horizontal face is replaced by diagonal slope plane
+        if (ny > y) return false;
+        // Suppress lower step edge vertical face
+        VoxelShape s = current.shape();
+        if (s == SHAPE_RAMP_POS_X && nx < x) return false;
+        if (s == SHAPE_RAMP_NEG_X && nx > x) return false;
+        if (s == SHAPE_RAMP_POS_Z && nz < z) return false;
+        if (s == SHAPE_RAMP_NEG_Z && nz > z) return false;
+    }
     Voxel neighbor = sample_voxel(chunk, get_neighbor, nx, ny, nz);
+    if (current.is_ramp() && neighbor.shape() == current.shape()) {
+        return false;
+    }
     return !is_face_occluded(current, neighbor);
 }
 
@@ -147,12 +182,30 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                             continue;
                         }
 
+                        if (current.is_ramp()) {
+                            // Suppress top horizontal quad (+Y) - replaced by diagonal plane
+                            if (d == 1 && face_dir == 0) {
+                                continue;
+                            }
+                            // Suppress vertical side quad at the lower step edge
+                            VoxelShape s = current.shape();
+                            if (s == SHAPE_RAMP_POS_X && d == 0 && face_dir == 1) continue; // -X
+                            if (s == SHAPE_RAMP_NEG_X && d == 0 && face_dir == 0) continue; // +X
+                            if (s == SHAPE_RAMP_POS_Z && d == 2 && face_dir == 1) continue; // -Z
+                            if (s == SHAPE_RAMP_NEG_Z && d == 2 && face_dir == 0) continue; // +Z
+                        }
+
                         int nx = x[0] + q[0];
                         int ny = x[1] + q[1];
                         int nz = x[2] + q[2];
                         Voxel neighbor = Chunk::in_bounds(nx, ny, nz)
                             ? chunk.get_voxel(nx, ny, nz)
                             : sample_voxel(chunk, get_neighbor, nx, ny, nz);
+
+                        // Adjacent coplanar ramps of the same shape along perpendicular axis occlude each other
+                        if (current.is_ramp() && neighbor.shape() == current.shape()) {
+                            continue;
+                        }
 
                         if (is_face_occluded(current, neighbor)) {
                             continue;
@@ -205,6 +258,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                             const FaceQuad& next = mask[next_idx];
                             if (!next.visible ||
                                 next.voxel.material_id != root.voxel.material_id ||
+                                next.voxel.shape() != root.voxel.shape() ||
                                 next.voxel.damage() != root.voxel.damage() ||
                                 next.ao[0] != root.ao[0] || next.ao[1] != root.ao[1] ||
                                 next.ao[2] != root.ao[2] || next.ao[3] != root.ao[3]) {
@@ -221,6 +275,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                                 const FaceQuad& next = mask[next_idx];
                                 if (!next.visible ||
                                     next.voxel.material_id != root.voxel.material_id ||
+                                    next.voxel.shape() != root.voxel.shape() ||
                                     next.voxel.damage() != root.voxel.damage() ||
                                     next.ao[0] != root.ao[0] || next.ao[1] != root.ao[1] ||
                                     next.ao[2] != root.ao[2] || next.ao[3] != root.ao[3]) {
@@ -331,6 +386,177 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         i += width;
                     }
                 }
+            }
+        }
+    }
+
+    // 3. Sloped Greedy Meshing for voxels with SHAPE_RAMP_*
+    // Pass A: Slopes along X (SHAPE_RAMP_POS_X, SHAPE_RAMP_NEG_X) - Perpendicular axis is Z
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int x = 0; x < CHUNK_SIZE; ++x) {
+            for (int z = 0; z < CHUNK_SIZE; ) {
+                Voxel cur = chunk.get_voxel(x, y, z);
+                VoxelShape s = cur.shape();
+                if (s != SHAPE_RAMP_POS_X && s != SHAPE_RAMP_NEG_X) {
+                    ++z;
+                    continue;
+                }
+
+                // Check headroom / visibility (solid block directly above occludes the slope)
+                Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                if (above.is_solid()) {
+                    ++z;
+                    continue;
+                }
+
+                // Greedy merge adjacent coplanar ramp voxels along perpendicular axis Z
+                int width = 1;
+                while (z + width < CHUNK_SIZE) {
+                    Voxel next_v = chunk.get_voxel(x, y, z + width);
+                    if (next_v.shape() != s ||
+                        next_v.material_id != cur.material_id ||
+                        next_v.damage() != cur.damage()) {
+                        break;
+                    }
+                    Voxel next_above = sample_voxel(chunk, get_neighbor, x, y + 1, z + width);
+                    if (next_above.is_solid()) {
+                        break;
+                    }
+                    ++width;
+                }
+
+                // Calculate diagonal normal (N = normalize(N_base + N_side))
+                glm::vec3 diag_normal = calculate_diagonal_normal(s);
+                (void)diag_normal;
+
+                uint32_t mat_id = cur.material_id;
+                uint32_t damage = cur.damage();
+                uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
+                                    (mat_id == MAT_THERMITE_SLAG) ? 255 :
+                                    (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
+                                    (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
+                                    (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
+                                    (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
+                                    (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
+                uint32_t aux = cur.is_highlighted() ? 1 : 0;
+
+                // Ambient Occlusion along strip endpoints
+                bool s_z_start_neg = sample_voxel(chunk, get_neighbor, x, y + 1, z - 1).is_solid();
+                bool s_z_end_pos   = sample_voxel(chunk, get_neighbor, x, y + 1, z + width).is_solid();
+                uint8_t ao_start = s_z_start_neg ? 1 : 0;
+                uint8_t ao_end   = s_z_end_pos ? 1 : 0;
+
+                // Base normal index 2 (+Y) maintains shader array bounds and lighting
+                uint32_t norm_idx = 2;
+
+                PackedVoxelVertex v0, v1, v2, v3;
+                if (s == SHAPE_RAMP_POS_X) {
+                    // Lower edge at X = x, Y = y; Upper edge at X = x + 1, Y = y + 1
+                    v0 = PackedVoxelVertex::encode(x,     y,     z,         norm_idx, ao_start, mat_id, width, 1, 0, damage, emissive, aux);
+                    v1 = PackedVoxelVertex::encode(x,     y,     z + width, norm_idx, ao_end,   mat_id, width, 1, 1, damage, emissive, aux);
+                    v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + width, norm_idx, ao_end,   mat_id, width, 1, 2, damage, emissive, aux);
+                    v3 = PackedVoxelVertex::encode(x + 1, y + 1, z,         norm_idx, ao_start, mat_id, width, 1, 3, damage, emissive, aux);
+                } else { // SHAPE_RAMP_NEG_X
+                    // Lower edge at X = x + 1, Y = y; Upper edge at X = x, Y = y + 1
+                    v0 = PackedVoxelVertex::encode(x + 1, y,     z + width, norm_idx, ao_end,   mat_id, width, 1, 0, damage, emissive, aux);
+                    v1 = PackedVoxelVertex::encode(x + 1, y,     z,         norm_idx, ao_start, mat_id, width, 1, 1, damage, emissive, aux);
+                    v2 = PackedVoxelVertex::encode(x,     y + 1, z,         norm_idx, ao_start, mat_id, width, 1, 2, damage, emissive, aux);
+                    v3 = PackedVoxelVertex::encode(x,     y + 1, z + width, norm_idx, ao_end,   mat_id, width, 1, 3, damage, emissive, aux);
+                }
+
+                vertices.push_back(v0);
+                vertices.push_back(v1);
+                vertices.push_back(v2);
+
+                vertices.push_back(v0);
+                vertices.push_back(v2);
+                vertices.push_back(v3);
+
+                z += width;
+            }
+        }
+    }
+
+    // Pass B: Slopes along Z (SHAPE_RAMP_POS_Z, SHAPE_RAMP_NEG_Z) - Perpendicular axis is X
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            for (int x = 0; x < CHUNK_SIZE; ) {
+                Voxel cur = chunk.get_voxel(x, y, z);
+                VoxelShape s = cur.shape();
+                if (s != SHAPE_RAMP_POS_Z && s != SHAPE_RAMP_NEG_Z) {
+                    ++x;
+                    continue;
+                }
+
+                // Check headroom / visibility
+                Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                if (above.is_solid()) {
+                    ++x;
+                    continue;
+                }
+
+                // Greedy merge adjacent coplanar ramp voxels along perpendicular axis X
+                int width = 1;
+                while (x + width < CHUNK_SIZE) {
+                    Voxel next_v = chunk.get_voxel(x + width, y, z);
+                    if (next_v.shape() != s ||
+                        next_v.material_id != cur.material_id ||
+                        next_v.damage() != cur.damage()) {
+                        break;
+                    }
+                    Voxel next_above = sample_voxel(chunk, get_neighbor, x + width, y + 1, z);
+                    if (next_above.is_solid()) {
+                        break;
+                    }
+                    ++width;
+                }
+
+                // Calculate diagonal normal (N = normalize(N_base + N_side))
+                glm::vec3 diag_normal = calculate_diagonal_normal(s);
+                (void)diag_normal;
+
+                uint32_t mat_id = cur.material_id;
+                uint32_t damage = cur.damage();
+                uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
+                                    (mat_id == MAT_THERMITE_SLAG) ? 255 :
+                                    (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
+                                    (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
+                                    (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
+                                    (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
+                                    (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
+                uint32_t aux = cur.is_highlighted() ? 1 : 0;
+
+                bool s_x_start_neg = sample_voxel(chunk, get_neighbor, x - 1, y + 1, z).is_solid();
+                bool s_x_end_pos   = sample_voxel(chunk, get_neighbor, x + width, y + 1, z).is_solid();
+                uint8_t ao_start = s_x_start_neg ? 1 : 0;
+                uint8_t ao_end   = s_x_end_pos ? 1 : 0;
+
+                uint32_t norm_idx = 2;
+
+                PackedVoxelVertex v0, v1, v2, v3;
+                if (s == SHAPE_RAMP_POS_Z) {
+                    // Lower edge at Z = z, Y = y; Upper edge at Z = z + 1, Y = y + 1
+                    v0 = PackedVoxelVertex::encode(x + width, y,     z,     norm_idx, ao_end,   mat_id, width, 1, 0, damage, emissive, aux);
+                    v1 = PackedVoxelVertex::encode(x,         y,     z,     norm_idx, ao_start, mat_id, width, 1, 1, damage, emissive, aux);
+                    v2 = PackedVoxelVertex::encode(x,         y + 1, z + 1, norm_idx, ao_start, mat_id, width, 1, 2, damage, emissive, aux);
+                    v3 = PackedVoxelVertex::encode(x + width, y + 1, z + 1, norm_idx, ao_end,   mat_id, width, 1, 3, damage, emissive, aux);
+                } else { // SHAPE_RAMP_NEG_Z
+                    // Lower edge at Z = z + 1, Y = y; Upper edge at Z = z, Y = y + 1
+                    v0 = PackedVoxelVertex::encode(x,         y,     z + 1, norm_idx, ao_start, mat_id, width, 1, 0, damage, emissive, aux);
+                    v1 = PackedVoxelVertex::encode(x + width, y,     z + 1, norm_idx, ao_end,   mat_id, width, 1, 1, damage, emissive, aux);
+                    v2 = PackedVoxelVertex::encode(x + width, y + 1, z,     norm_idx, ao_end,   mat_id, width, 1, 2, damage, emissive, aux);
+                    v3 = PackedVoxelVertex::encode(x,         y + 1, z,     norm_idx, ao_start, mat_id, width, 1, 3, damage, emissive, aux);
+                }
+
+                vertices.push_back(v0);
+                vertices.push_back(v1);
+                vertices.push_back(v2);
+
+                vertices.push_back(v0);
+                vertices.push_back(v2);
+                vertices.push_back(v3);
+
+                x += width;
             }
         }
     }
