@@ -79,7 +79,7 @@ struct Voxel {
         else   flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
     }
     inline uint8_t fluid_level() const {
-        return flags_and_damage & VOXEL_FLUID_LEVEL_MASK;
+        return static_cast<uint8_t>(GetFluidLevel(flags_and_damage));
     }
     inline void set_fluid_level(uint8_t lvl) {
         flags_and_damage = (flags_and_damage & ~VOXEL_FLUID_LEVEL_MASK) | (lvl & VOXEL_FLUID_LEVEL_MASK);

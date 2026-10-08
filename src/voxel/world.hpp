@@ -102,7 +102,11 @@ public:
     Chunk* get_chunk(const ChunkPos& pos);
     const Chunk* get_chunk(const ChunkPos& pos) const;
 
+    Chunk* GetChunkFromBlockPos(const glm::ivec3& blockPos);
+    const Chunk* GetChunkFromBlockPos(const glm::ivec3& blockPos) const;
+
     Chunk* get_or_create_chunk(const ChunkPos& pos);
+    void OnChunkGenerated(Chunk* chunk);
 
     Voxel get_voxel(int world_x, int world_y, int world_z) const;
     bool set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_neighbors = true);
@@ -255,6 +259,7 @@ public:
 
     void WakeFluid(const glm::ivec3& pos);
     void wake_fluid(const glm::ivec3& pos) { WakeFluid(pos); }
+    void PushActiveFluid(const glm::ivec3& pos) { WakeFluid(pos); }
     void check_wake_fluid_around(const glm::ivec3& pos);
 
     uint8_t GetBlockMaterial(const glm::ivec3& pos) const;
@@ -268,6 +273,8 @@ public:
 
     void SimulateFluidCell(const glm::ivec3& pos);
     void SimulateFluidCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
+    bool SimulateAirCell(const glm::ivec3& pos);
+    bool SimulateAirCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
 
     size_t active_fluid_count() const { return m_activeFluids.size(); }
     size_t ActiveFluidCount() const { return active_fluid_count(); }

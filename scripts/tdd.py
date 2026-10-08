@@ -84,6 +84,11 @@ TESTS = {
         "target": "test_fluid_simulation",
         "exe": f"test_fluid_simulation{EXE_EXT}",
         "name": "Cellular Automaton Fluid Sim, Sub-Block Waterlogging & Slope Conformance (7 modules)"
+    },
+    "permeation": {
+        "target": "test_fluid_permeation",
+        "exe": f"test_fluid_permeation{EXE_EXT}",
+        "name": "Liquid Permeation, Ledge Cascades, Infilling & Cross-Chunk Meshing (5 modules)"
     }
 }
 

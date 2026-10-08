@@ -15,7 +15,7 @@ class FluidSim {
 public:
     static constexpr float TICK_RATE = 12.0f;
     static constexpr float STEP_DT = 1.0f / TICK_RATE; // ~0.08333f (12 Hz)
-    static constexpr int MAX_FLUID_STEPS_PER_TICK = 192;
+    static constexpr int MAX_FLUID_STEPS_PER_TICK = 256;
 
     static inline World* s_activeWorld{nullptr};
     static void SetActiveWorld(World* w) { s_activeWorld = w; }
@@ -38,6 +38,10 @@ public:
     // Cellular Automaton flow evaluation for an active cell
     static void SimulateFluidCell(World& world, const glm::ivec3& pos);
     static void SimulateFluidCell(World& world, const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
+
+    // Pool Infilling evaluation for an air cell (converts to source if >= 2 adjacent sources)
+    static bool SimulateAirCell(World& world, const glm::ivec3& pos);
+    static bool SimulateAirCell(World& world, const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
 
     static void Update(World& world, float dt);
     static void Update(float dt);

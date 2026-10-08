@@ -11,6 +11,12 @@ constexpr uint8_t VOXEL_FLUID_LEVEL_MASK   = 0x07; // Bits 0, 1, 2: fluid level 
 constexpr uint8_t VOXEL_FLUID_LEVEL_SOURCE = 5;
 constexpr uint8_t VOXEL_FLUID_LEVEL_MIN    = 1;
 
+inline int GetFluidLevel(uint8_t flags) {
+    int lvl = flags & VOXEL_FLUID_LEVEL_MASK;
+    // Default uninitialized world-gen water (0) to maximum source level (5)
+    return (lvl == 0) ? 5 : lvl;
+}
+
 enum VoxelShape : uint8_t {
     SHAPE_CUBE            = 0x00, // Standard 1x1x1 cube
     SHAPE_SLAB_BOTTOM     = 0x08, // 0.5m bottom slab (Y: [0.0, 0.5])

@@ -7,72 +7,72 @@ Lightweight Previews Dir:     screenshots/previews/
 
 PHASE BREAKDOWN:
   [1] MAIN MENU
-      Timestamp:  2026-10-08 13:41:55
+      Timestamp:  2026-10-08 15:02:18
       Master PNG: screenshots/01_main_menu.png (1600x900)
-      Preview:    screenshots/previews/01_main_menu_20261008_134155.jpg
-      Luminance:  0.099 | Non-Black: 100.000%
+      Preview:    screenshots/previews/01_main_menu_20261008_150218.jpg
+      Luminance:  0.100 | Non-Black: 100.000%
       Evaluation: PASS
 
   [2] LEVEL SELECT
-      Timestamp:  2026-10-08 13:41:55
+      Timestamp:  2026-10-08 15:02:18
       Master PNG: screenshots/02_level_select.png (1600x900)
-      Preview:    screenshots/previews/02_level_select_20261008_134155.jpg
+      Preview:    screenshots/previews/02_level_select_20261008_150218.jpg
       Luminance:  0.109 | Non-Black: 100.000%
       Evaluation: PASS
 
   [3] CHAR SELECT
-      Timestamp:  2026-10-08 13:41:55
+      Timestamp:  2026-10-08 15:02:18
       Master PNG: screenshots/03_character_select.png (1600x900)
-      Preview:    screenshots/previews/03_character_select_20261008_134155.jpg
+      Preview:    screenshots/previews/03_character_select_20261008_150218.jpg
       Luminance:  0.116 | Non-Black: 100.000%
       Evaluation: PASS
 
   [4] UPGRADES TERMINAL
-      Timestamp:  2026-10-08 13:41:55
+      Timestamp:  2026-10-08 15:02:18
       Master PNG: screenshots/04_upgrades_terminal.png (1600x900)
-      Preview:    screenshots/previews/04_upgrades_terminal_20261008_134155.jpg
+      Preview:    screenshots/previews/04_upgrades_terminal_20261008_150218.jpg
       Luminance:  0.102 | Non-Black: 100.000%
       Evaluation: PASS
 
   [5] GAMEPLAY CAVERN
-      Timestamp:  2026-10-08 13:41:56
+      Timestamp:  2026-10-08 15:02:18
       Master PNG: screenshots/05_gameplay_cavern.png (1600x900)
-      Preview:    screenshots/previews/05_gameplay_cavern_20261008_134156.jpg
-      Luminance:  0.084 | Non-Black: 84.363%
+      Preview:    screenshots/previews/05_gameplay_cavern_20261008_150218.jpg
+      Luminance:  0.093 | Non-Black: 89.785%
       Evaluation: PASS
 
   [6] DRILL CRACKS
-      Timestamp:  2026-10-08 13:41:56
+      Timestamp:  2026-10-08 15:02:19
       Master PNG: screenshots/06_drilling_cracks.png (1600x900)
-      Preview:    screenshots/previews/06_drilling_cracks_20261008_134156.jpg
-      Luminance:  0.178 | Non-Black: 100.000%
+      Preview:    screenshots/previews/06_drilling_cracks_20261008_150219.jpg
+      Luminance:  0.191 | Non-Black: 100.000%
       Evaluation: PASS
 
   [7] ABILITIES & LOOT
-      Timestamp:  2026-10-08 13:41:56
+      Timestamp:  2026-10-08 15:02:19
       Master PNG: screenshots/07_abilities_loot.png (1600x900)
-      Preview:    screenshots/previews/07_abilities_loot_20261008_134156.jpg
-      Luminance:  0.325 | Non-Black: 99.859%
+      Preview:    screenshots/previews/07_abilities_loot_20261008_150219.jpg
+      Luminance:  0.319 | Non-Black: 97.972%
       Evaluation: PASS
 
   [8] ESC MENU
-      Timestamp:  2026-10-08 13:41:57
+      Timestamp:  2026-10-08 15:02:19
       Master PNG: screenshots/08_esc_menu.png (1600x900)
-      Preview:    screenshots/previews/08_esc_menu_20261008_134157.jpg
-      Luminance:  0.069 | Non-Black: 100.000%
+      Preview:    screenshots/previews/08_esc_menu_20261008_150219.jpg
+      Luminance:  0.068 | Non-Black: 100.000%
       Evaluation: PASS
 
   [9] EXTRACTION BEACON
-      Timestamp:  2026-10-08 13:41:57
+      Timestamp:  2026-10-08 15:02:20
       Master PNG: screenshots/09_extraction_beacon.png (1600x900)
-      Preview:    screenshots/previews/09_extraction_beacon_20261008_134157.jpg
-      Luminance:  0.230 | Non-Black: 100.000%
+      Preview:    screenshots/previews/09_extraction_beacon_20261008_150220.jpg
+      Luminance:  0.222 | Non-Black: 100.000%
       Evaluation: PASS
 
   [10] MISSION DEBRIEF
-      Timestamp:  2026-10-08 13:41:57
+      Timestamp:  2026-10-08 15:02:20
       Master PNG: screenshots/10_mission_debrief.png (1600x900)
-      Preview:    screenshots/previews/10_mission_debrief_20261008_134157.jpg
+      Preview:    screenshots/previews/10_mission_debrief_20261008_150220.jpg
       Luminance:  0.099 | Non-Black: 100.000%
       Evaluation: PASS
 
