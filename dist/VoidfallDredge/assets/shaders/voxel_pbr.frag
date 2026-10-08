@@ -100,6 +100,8 @@ const uint MAT_STONE               = 8u; // Dredge Bedrock / Precursor Stone
 const uint MAT_DREDGE_BEDROCK      = 8u;
 const uint MAT_WATER               = 11u;
 const uint MAT_CRYSTAL_AQUIFER     = 11u;
+const uint MAT_COOLANT             = 11u;
+const uint MAT_ACID                = 6u;
 const uint MAT_FLORA               = 12u;
 const uint MAT_BIOLUMINESCENT_FLORA = 12u;
 const uint MAT_PRISMATIC_CRYSTAL   = 13u;
@@ -181,24 +183,33 @@ void main() {
     // Tangent-space view ray (used for parallax crystal depth & internal refraction)
     vec3 V_tangent = transpose(TBN) * V;
 
+    vec3 v_FragPos = vWorldPos;
+    uint v_MaterialID = vTexLayer;
+    bool isLiquid = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT);
+
     vec2 baseUV = fract(vUV);
+    // World-Space UV Mapping for Liquids:
+    // For liquid top surfaces, calculate texture UVs using world-space horizontal coordinates rather than quad-local [0, 1] UVs
+    if (isLiquid && geoN.y > 0.4) {
+        vec2 fluidUV = v_FragPos.xz * 0.25; // Continuous world scale across all blocks
+        baseUV = fluidUV;
+    }
 
     // Dynamic material UV animations
-    if (vTexLayer == 6u) { // Thermite Slag molten magma convection flow
+    if (vTexLayer == MAT_ACID || vTexLayer == MAT_THERMITE_SLAG) { // Thermite Slag molten magma / acid convection flow
         vec2 flowOffset = vec2(sin(uTime * 0.35 + vWorldPos.x * 0.15), cos(uTime * 0.28 + vWorldPos.z * 0.15)) * 0.05;
-        baseUV = fract(baseUV + flowOffset);
-    } else if (vTexLayer == 11u) { // Crystal Aquifer water ripples
+        baseUV = baseUV + flowOffset;
+    } else if (vTexLayer == MAT_WATER || vTexLayer == MAT_COOLANT) { // Crystal Aquifer water ripples
         vec2 waveOffset = vec2(sin(uTime * 0.60 + vWorldPos.x * 0.35), cos(uTime * 0.50 + vWorldPos.z * 0.35)) * 0.03;
-        baseUV = fract(baseUV + waveOffset);
+        baseUV = baseUV + waveOffset;
     }
 
     // LOD Distance-Gated Parallax Occlusion Mapping (POM)
-    vec3 v_FragPos = vWorldPos;
     vec3 u_CameraPos = uCameraPos;
     float camDist = length(v_FragPos - u_CameraPos);
 
     vec2 quadUV;
-    if (camDist < 7.0f) {
+    if (!isLiquid && camDist < 7.0f) {
         // Fade displacement scale linearly to zero between 5.0m and 7.0m
         float pomFade = clamp((7.0 - camDist) / 2.0, 0.0, 1.0);
         float depthScale = 0.04 * pomFade;
@@ -329,15 +340,17 @@ void main() {
     // Chamfer outer edges based on UV proximity
     vec2 v_TexCoords = fract(vUV);
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
-    float minEdge = min(edgeDist.x, edgeDist.y);
-    if (minEdge < 0.04) {
+    vec3 v_Normal = vNormal;
+    // Do NOT bevel edges of liquids (prevents the scalloped "separate tile" look)
+    bool isLiquidMat = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT);
+    if (!isLiquidMat && minEdge < 0.04) {
         float bevel = smoothstep(0.0, 0.04, minEdge);
-        vec3 bevelNormal = normalize(vNormal + dFdx(v_FragPos) * 0.12 + dFdy(v_FragPos) * 0.12);
+        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.12 + dFdy(v_FragPos) * 0.12);
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
     // Low-amplitude continuous grain so natural stone remains matte without looking like static noise
-    if (vTexLayer != MAT_WATER) {
+    if (!isLiquidMat) {
         normal = normalize(normal + sin(v_FragPos * 16.0) * 0.04);
     }
     N = normal;

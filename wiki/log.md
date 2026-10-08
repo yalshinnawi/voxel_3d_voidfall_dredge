@@ -14,11 +14,14 @@ Chronological ledger of balance iterations, mechanics additions, and architectur
     - Wake-up hooks integrated in `World::DestroyBlock` and `World::set_voxel`: whenever a block is broken or becomes `MAT_AIR`, orthogonal neighbors are inspected and wake adjacent fluids automatically into the active queue.
     - Fixed-rate 12 Hz simulation tick with `MAX_FLUID_STEPS_PER_TICK = 192` prevents frame spikes during large cavern reservoir breaches.
     - Automaton rules: pure downward gravity without lateral spreading while falling, horizontal spreading with linear level decay ($L - 1$) terminating at $L = 1$, and sub-block ramp/slab waterlogging with downhill cascade.
-  - **Greedy Mesher Slope & Sub-Block Conformance (`src/voxel/greedy_mesher.cpp`, `assets/shaders/voxel_pbr.vert`)**:
     - Dedicated `MeshLiquidPass` handling pure liquids, waterlogged slabs, and waterlogged ramps with neighbor face culling against identical fluids.
+    - Greedily merges coplanar horizontal top faces of liquid blocks (both pure liquid and waterlogged bottom slabs) into rectangular strips to minimize vertex count.
     - Waterlogged slabs (`SHAPE_SLAB_BOTTOM` + `VOXEL_FLAG_WATERLOGGED`) render a top liquid plane at $Y = 0.5\text{m}$.
     - Waterlogged ramps (`SHAPE_RAMP_*` + `VOXEL_FLAG_WATERLOGGED`) render a $45^\circ$ diagonal liquid plane offset by $+0.04\text{m}$ (via vertex bit 27 `water_offset` unpacked in vertex shader) to eliminate Z-fighting against the underlying rock ramp geometry.
     - Vertical sealing quads eliminate air voids adjacent to ramp boundaries.
+  - **Seamless Liquid Texturing & Shader Exemption (`assets/shaders/voxel_pbr.frag`)**:
+    - Exempted liquids (`MAT_WATER`, `MAT_ACID`, `MAT_COOLANT`) from procedural edge chamfering and rock surface noise grain, eliminating scalloped block tiles.
+    - Continuous horizontal world-space UV mapping for liquid top surfaces (`fluidUV = v_FragPos.xz * 0.25`) seamlessly animates caustics, wave ripples, and magma convection across block boundaries.
   - **Engine Performance & Meshing Guardrails (`src/voxel/world.cpp`)**:
     - Chunks modified during fluid ticks are gathered in `m_fluidDirtyChunks` and marked dirty at tick completion to avoid duplicate re-meshing requests.
     - Enforced `MAX_CHUNK_UPLOADS_PER_FRAME = 2` GPU upload budget to guarantee smooth 60+ FPS pacing.

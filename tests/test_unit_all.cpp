@@ -2340,6 +2340,15 @@ void test_cellular_fluid_simulation() {
     res_world.update_fluids(0.085f);
     Voxel breach_vox = res_world.get_voxel(17, 10, 16);
     TEST_CHECK(IsLiquid(breach_vox.material_id), "Liquid must flood excavated cavity");
+
+    // Also test SetBlock(pos, MAT_AIR) wakes up fluids
+    res_world.m_activeFluids.clear();
+    res_world.m_activeFluidSet.clear();
+    TEST_CHECK(res_world.ActiveFluidCount() == 0, "Dormant reservoir must have 0 active fluids");
+    res_world.SetBlock(glm::ivec3(15, 10, 16), MAT_AIR);
+    TEST_CHECK(res_world.ActiveFluidCount() >= 1, "SetBlock(MAT_AIR) must wake dormant reservoir");
+    res_world.update_fluids(0.085f);
+    TEST_CHECK(IsLiquid(res_world.get_voxel(15, 10, 16).material_id), "Liquid must flood SetBlock excavated cavity");
     log_pass("Zero-CPU Dormant Reservoir Sleep & Excavation Breach Wake-Up");
 
     // 6. Greedy Mesher Slope Conformance & Bit 27 Vertex Offset

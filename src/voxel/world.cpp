@@ -433,7 +433,11 @@ bool World::set_block_with_flags(const glm::ivec3& pos, uint8_t mat, uint8_t fla
 }
 
 bool World::SetBlock(int x, int y, int z, uint8_t mat, uint8_t flags) {
-    return set_voxel(x, y, z, Voxel{mat, flags}, true);
+    bool res = set_voxel(x, y, z, Voxel{mat, flags}, true);
+    if (mat == MAT_AIR) {
+        check_wake_fluid_around(glm::ivec3(x, y, z));
+    }
+    return res;
 }
 
 bool World::SetBlock(const glm::ivec3& pos, uint8_t mat, uint8_t flags) {
@@ -1383,6 +1387,7 @@ bool World::break_voxel(int world_x, int world_y, int world_z) {
 
     // Set destroyed voxel to air
     set_voxel(world_x, world_y, world_z, Voxel{MAT_AIR, 0}, true);
+    check_wake_fluid_around(glm::ivec3(world_x, world_y, world_z));
 
     // If it borders a hanging ceiling overhang or stalactite, perform bounded BFS
     if (borders_hanging_overhang_or_stalactite(world_x, world_y, world_z)) {

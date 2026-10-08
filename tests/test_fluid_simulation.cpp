@@ -284,11 +284,22 @@ void test_reservoir_breach_and_zero_cpu_sleep() {
   // Breaking the adjacent wall MUST wake the fluid!
   ASSERT_GE(world.ActiveFluidCount(), 1);
 
-  // Run ticks: water must naturally flow out into the breached cavity at (17,
-  // 10, 16)
+  // Run ticks: water must naturally flow out into the breached cavity at (17, 10, 16)
   world.update_fluids(0.085f);
   Voxel breach_vox = world.get_voxel(17, 10, 16);
   ASSERT_TRUE(IsLiquid(breach_vox.material_id));
+
+  // Drain and test SetBlock(pos, MAT_AIR) also wakes adjacent fluid
+  world.m_activeFluids.clear();
+  world.m_activeFluidSet.clear();
+  ASSERT_EQ(world.ActiveFluidCount(), 0);
+
+  world.SetBlock(glm::ivec3(15, 10, 16), MAT_AIR);
+  ASSERT_GE(world.ActiveFluidCount(), 1);
+
+  world.update_fluids(0.085f);
+  Voxel west_breach = world.get_voxel(15, 10, 16);
+  ASSERT_TRUE(IsLiquid(west_breach.material_id));
 
   std::cout << "  -> PASSED" << std::endl;
 }
@@ -348,6 +359,52 @@ void test_greedy_mesher_liquid_conformance() {
 
   ASSERT_TRUE(found_ramp_liquid_plane);
   ASSERT_TRUE(found_slab_liquid_plane);
+
+  // Verify greedy rectangular strip merging for liquid pools:
+  Chunk pool_chunk(ChunkPos{0, 0, 0});
+  for (int x = 2; x <= 4; ++x) {
+    for (int z = 2; z <= 4; ++z) {
+      pool_chunk.set_voxel(x, 5, z, Voxel{MAT_WATER, 5});
+    }
+  }
+  auto pool_mesh = GreedyMesher::generate_mesh(pool_chunk, nullptr);
+  int top_quad_count = 0;
+  int merged_3x3_quads = 0;
+  for (const auto &v : pool_mesh) {
+    uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+    uint32_t norm = (v.data0 >> 18u) & 0x7u;
+    uint32_t u_dim = v.data1 & 0x3Fu;
+    uint32_t v_dim = (v.data1 >> 6u) & 0x3Fu;
+    uint32_t corner_idx = (v.data1 >> 12u) & 0x3u;
+    if (layer == MAT_WATER && norm == 2) {
+      if (corner_idx == 1) {
+        top_quad_count++;
+        if (u_dim == 3 && v_dim == 3) {
+          merged_3x3_quads++;
+        }
+      }
+    }
+  }
+  ASSERT_EQ(top_quad_count, 1);
+  ASSERT_EQ(merged_3x3_quads, 1);
+
+  // Verify pure liquid block adjacent to SHAPE_RAMP_* emits vertical side quad sealing against ramp:
+  Chunk ramp_seal_chunk(ChunkPos{0, 0, 0});
+  ramp_seal_chunk.set_voxel(5, 5, 5, Voxel{MAT_WATER, 5});
+  ramp_seal_chunk.set_voxel(6, 5, 5, Voxel{MAT_FRACTURED_GRANITE, 0});
+  ramp_seal_chunk.SetShape(6, 5, 5, SHAPE_RAMP_EAST);
+  auto seal_mesh = GreedyMesher::generate_mesh(ramp_seal_chunk, nullptr);
+  bool found_sealing_quad = false;
+  for (const auto &v : seal_mesh) {
+    uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+    uint32_t norm = (v.data0 >> 18u) & 0x7u;
+    // Side face +X (norm = 0) facing ramp at (6, 5, 5)
+    if (layer == MAT_WATER && norm == 0) {
+      found_sealing_quad = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found_sealing_quad);
 
   std::cout << "  -> PASSED" << std::endl;
 }
