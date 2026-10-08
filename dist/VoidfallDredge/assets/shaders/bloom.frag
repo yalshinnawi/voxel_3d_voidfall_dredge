@@ -19,5 +19,19 @@ void main() {
     sum += texture(uImage, vUV + vec2(-offset.x,  offset.y)).rgb;
     sum += texture(uImage, vUV + vec2( offset.x,  offset.y)).rgb;
 
-    FragColor = vec4(sum * 0.25, 1.0);
+    vec3 blurred = sum * 0.25;
+
+    // Pass 0 (initial downsample extraction pass) safety cutoff:
+    // Enforce 1.8-2.2 threshold so standard specular reflections and ambient
+    // clear colors never enter the bloom blur chain.
+    if (uOffset == 0.0) {
+        float lum = dot(blurred, vec3(0.2126, 0.7152, 0.0722));
+        float peak = max(blurred.r, max(blurred.g, blurred.b));
+        if (lum < 1.8 && peak < 1.8) {
+            FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+    }
+
+    FragColor = vec4(blurred, 1.0);
 }

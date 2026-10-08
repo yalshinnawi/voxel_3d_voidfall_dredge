@@ -5,7 +5,8 @@ in vec4 vColor;
 in vec4 vMaterial; // x=metallic, y=roughness, z=emissive, w=ao
 in vec3 vFragPos;
 
-out vec4 FragColor;
+layout (location = 0) out vec4 FragColor;
+layout (location = 1) out vec4 BrightColor;
 
 uniform float uEmissive;
 
@@ -33,8 +34,8 @@ void main() {
     vec3 albedo = vColor.rgb;
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     
-    // Ambient with subtle cave hue
-    vec3 ambient = vec3(0.18, 0.20, 0.25) * albedo * ao;
+    // Ambient with subtle suit-visor reflectance
+    vec3 ambient = vec3(0.05, 0.06, 0.08) * albedo * ao;
     vec3 diffuse = (diff1 * 0.65 + diff2 + diff_head) * albedo * (1.0 - metallic) * ao;
     
     // Specular highlight: GGX / Blinn-Phong microfacet response
@@ -61,6 +62,24 @@ void main() {
         emissive += thermalGlow;
     }
     
+    // For transparent optical glass lenses, suppress diffuse/ambient body scatter to keep target view crystal-clear
+    if (vColor.a < 0.20) {
+        ambient *= 0.15;
+        diffuse *= 0.15;
+    }
+
     vec3 finalCol = ambient + diffuse + specular + emissive;
     FragColor = vec4(finalCol, vColor.a);
+
+    // Bloom extraction: only genuine incandescent drill bit friction / thermal glow casts bloom.
+    // Metal casing specular highlights are suppressed by the 2.0 cutoff.
+    float vmLum = dot(finalCol, vec3(0.2126, 0.7152, 0.0722));
+    float vmEmissive = max(emissive.r, max(emissive.g, emissive.b));
+    const float BLOOM_CUTOFF = 2.0;
+
+    if (vmLum > BLOOM_CUTOFF || vmEmissive > 1.8) {
+        BrightColor = vec4(finalCol, 1.0);
+    } else {
+        BrightColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
 }

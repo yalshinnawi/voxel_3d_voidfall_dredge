@@ -15,8 +15,11 @@ uniform int uSonarActive;
 
 out vec3 vWorldPos;
 out vec3 vNormal;
+out vec3 vTangent;
+out vec3 vBitangent;
 out vec2 vUV;
 flat out uint vTexLayer;
+flat out uint vAOIndex;
 out float vAO;
 out float vEmissive;
 out float vDamage;
@@ -31,6 +34,24 @@ const vec3 NORMALS[6] = vec3[6](
     vec3( 0.0,  0.0, -1.0)  // -Z
 );
 
+const vec3 TANGENTS[6] = vec3[6](
+    vec3( 0.0,  0.0, -1.0), // +X
+    vec3( 0.0,  0.0,  1.0), // -X
+    vec3( 1.0,  0.0,  0.0), // +Y
+    vec3( 1.0,  0.0,  0.0), // -Y
+    vec3( 1.0,  0.0,  0.0), // +Z
+    vec3(-1.0,  0.0,  0.0)  // -Z
+);
+
+const vec3 BITANGENTS[6] = vec3[6](
+    vec3( 0.0,  1.0,  0.0), // +X
+    vec3( 0.0,  1.0,  0.0), // -X
+    vec3( 0.0,  0.0, -1.0), // +Y
+    vec3( 0.0,  0.0,  1.0), // -Y
+    vec3( 0.0,  1.0,  0.0), // +Z
+    vec3( 0.0,  1.0,  0.0)  // -Z
+);
+
 void main() {
     uint d0 = aPackedData.x;
     uint d1 = aPackedData.y;
@@ -41,7 +62,7 @@ void main() {
     float localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5;
     float localZ = float((d0 >> 12u) & 0x3Fu);
     uint normIdx = (d0 >> 18u) & 0x7u;
-    float aoRaw  = float((d0 >> 21u) & 0x3u);
+    uint aoIdx   = (d0 >> 21u) & 0x3u;
     vTexLayer    = (d0 >> 23u) & 0xFFu;
     uint auxBits = (d0 >> 31u) & 0x1u;
 
@@ -52,14 +73,18 @@ void main() {
     vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
     vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
 
-    // Baked Ambient Occlusion curve: 0..3 scaled to 0.15..1.0
-    // Quadratic curve for dramatic deep crevice shadows
-    vAO = mix(0.12, 1.0, pow(aoRaw / 3.0, 1.4));
+    // Baked Ambient Occlusion multipliers: ao=0 -> 1.0, ao=1 -> 0.72, ao=2 -> 0.45, ao=3 -> 0.20
+    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    vAOIndex = aoIdx;
+    vAO = aoTable[aoIdx];
 
     vec3 localPos = vec3(localX, localY, localZ);
     vec4 worldPos4 = uModel * vec4(localPos + uChunkWorldPos, 1.0);
     vWorldPos = worldPos4.xyz;
-    vNormal = normalize(mat3(uModel) * NORMALS[normIdx]);
+    mat3 normalMat = mat3(uModel);
+    vNormal = normalize(normalMat * NORMALS[normIdx]);
+    vTangent = normalize(normalMat * TANGENTS[normIdx]);
+    vBitangent = normalize(normalMat * BITANGENTS[normIdx]);
 
     // Texture UVs repeating across greedy meshed quad
     vec2 cornerUV = vec2(0.0);

@@ -81,35 +81,61 @@ uniform PointLight uPointLights[MAX_POINT_LIGHTS];
 uniform float uTime;
 uniform int uSector;
 
+// Standard Material Tiers
+const uint MAT_AIR                 = 0u;
+const uint MAT_GRANITE             = 1u;
+const uint MAT_FRACTURED_GRANITE   = 1u;
+const uint MAT_BASALT              = 2u;
+const uint MAT_VOLCANIC_BASALT     = 2u;
+const uint MAT_VOIDITE             = 3u;
+const uint MAT_VOIDITE_CRYSTAL     = 3u;
+const uint MAT_BULKHEAD            = 4u;
+const uint MAT_INDUSTRIAL_BULKHEAD = 4u;
+const uint MAT_VAULT_DOOR          = 5u;
+const uint MAT_REINFORCED_VAULT_DOOR = 5u;
+const uint MAT_THERMITE_SLAG       = 6u;
+const uint MAT_RADIOACTIVE         = 7u;
+const uint MAT_RADIOACTIVE_ORE     = 7u;
+const uint MAT_STONE               = 8u; // Dredge Bedrock / Precursor Stone
+const uint MAT_DREDGE_BEDROCK      = 8u;
+const uint MAT_WATER               = 11u;
+const uint MAT_CRYSTAL_AQUIFER     = 11u;
+const uint MAT_FLORA               = 12u;
+const uint MAT_BIOLUMINESCENT_FLORA = 12u;
+const uint MAT_PRISMATIC_CRYSTAL   = 13u;
+const uint MAT_PRECURSOR_GLASS     = 13u;
+const uint MAT_OBSIDIAN            = 14u;
+const uint MAT_OBSIDIAN_SPIKES     = 14u;
+
 // Material tier base colors fallback
 vec3 get_material_albedo(uint layer) {
     switch (layer) {
-        case 1u: return vec3(0.24, 0.22, 0.21); // Fractured Granite
-        case 2u: return vec3(0.12, 0.12, 0.14); // Volcanic Basalt
-        case 3u: return vec3(0.48, 0.12, 0.72); // Voidite Crystal
-        case 4u: return vec3(0.35, 0.38, 0.42); // Industrial Bulkhead
-        case 5u: return vec3(0.55, 0.45, 0.20); // Reinforced Vault Door
-        case 6u: return vec3(0.85, 0.35, 0.05); // Thermite Slag
-        case 7u: return vec3(0.15, 0.65, 0.25); // Radioactive Ore
-        case 8u: return vec3(0.06, 0.06, 0.08); // Dredge Bedrock
-        case 11u: return vec3(0.12, 0.60, 0.85); // Crystal Aquifer Water
-        case 12u: return vec3(0.20, 0.85, 0.35); // Bioluminescent Flora
-        case 13u: return vec3(0.82, 0.38, 0.95); // Prismatic Crystal
-        case 14u: return vec3(0.22, 0.05, 0.08); // Crystalline Obsidian Spikes
+        case MAT_GRANITE: return vec3(0.24, 0.22, 0.21); // Fractured Granite
+        case MAT_BASALT: return vec3(0.12, 0.12, 0.14); // Volcanic Basalt
+        case MAT_VOIDITE: return vec3(0.48, 0.12, 0.72); // Voidite Crystal
+        case MAT_BULKHEAD: return vec3(0.35, 0.38, 0.42); // Industrial Bulkhead
+        case MAT_VAULT_DOOR: return vec3(0.55, 0.45, 0.20); // Reinforced Vault Door
+        case MAT_THERMITE_SLAG: return vec3(0.85, 0.35, 0.05); // Thermite Slag
+        case MAT_RADIOACTIVE: return vec3(0.15, 0.65, 0.25); // Radioactive Ore
+        case MAT_STONE: return vec3(0.06, 0.06, 0.08); // Dredge Bedrock
+        case MAT_WATER: return vec3(0.12, 0.60, 0.85); // Crystal Aquifer Water
+        case MAT_FLORA: return vec3(0.20, 0.85, 0.35); // Bioluminescent Flora
+        case MAT_PRISMATIC_CRYSTAL: return vec3(0.82, 0.38, 0.95); // Prismatic Crystal
+        case MAT_OBSIDIAN: return vec3(0.22, 0.05, 0.08); // Crystalline Obsidian Spikes
         default: return vec3(0.30, 0.30, 0.30);
     }
 }
 
 vec2 get_material_rough_metal(uint layer) {
     switch (layer) {
-        case 3u: return vec2(0.15, 0.20); // Voidite crystal (polished gemstone)
-        case 4u: return vec2(0.35, 0.88); // Industrial bulkhead (metallic)
-        case 5u: return vec2(0.25, 0.92); // Vault door (polished metal)
-        case 6u: return vec2(0.65, 0.30); // Molten slag
-        case 11u: return vec2(0.06, 0.15); // Water / puddle (fluid polish)
-        case 12u: return vec2(0.65, 0.05); // Flora (soft moss)
-        case 13u: return vec2(0.15, 0.35); // Prismatic crystal (faceted diamond)
-        case 14u: return vec2(0.15, 0.45); // Obsidian spikes (glossy mineral glass)
+        case MAT_VOIDITE: return vec2(0.15, 0.20); // Voidite crystal (polished gemstone)
+        case MAT_BULKHEAD: return vec2(0.45, 0.88); // Industrial bulkhead (metallic satin)
+        case MAT_VAULT_DOOR: return vec2(0.25, 0.92); // Vault door (polished metal)
+        case MAT_THERMITE_SLAG: return vec2(0.65, 0.30); // Molten slag
+        case MAT_WATER: return vec2(0.06, 0.15); // Water / puddle (fluid polish)
+        case MAT_FLORA: return vec2(0.65, 0.05); // Flora (soft moss)
+        case MAT_PRISMATIC_CRYSTAL: return vec2(0.15, 0.35); // Prismatic crystal (faceted diamond)
+        case MAT_OBSIDIAN: return vec2(0.15, 0.45); // Obsidian spikes (glossy mineral glass)
         default: return vec2(0.85, 0.05); // Rock / granite / basalt
     }
 }
@@ -245,7 +271,10 @@ void main() {
             vec3 interiorEmissive = texture(uEmissiveArray, interiorTexCoord).rgb;
 
             // Blend surface facets with interior crystal nucleus - calibrated for radiant gemstone glow
-            emissive = (surfaceEmissive * 0.55 + interiorEmissive * 0.45) * (vEmissive * 1.1 + 0.35);
+            emissive = (surfaceEmissive * 0.55 + interiorEmissive * 0.45) * (vEmissive * 3.5 + 0.8);
+        } else if (vTexLayer == 6u) {
+            // Thermite Slag molten core radiant boost for genuine volcanic bloom
+            emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 5.0 + 1.5);
         } else {
             emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 2.2 + 0.3);
         }
@@ -306,26 +335,31 @@ void main() {
         vec3 bevelNormal = normalize(vNormal + dFdx(v_FragPos) * 0.12 + dFdy(v_FragPos) * 0.12);
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
+
+    // Perturb planar quads with high-frequency micro-grain
+    if (vTexLayer != MAT_WATER) {
+        float microNoise = fract(sin(dot(v_FragPos.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+        normal = normalize(normal + (microNoise - 0.5) * 0.12);
+    }
     N = normal;
 
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
 
-    // Identify material categories for roughness scaling
-    bool isPuddle = (vTexLayer == 11u);
-    bool isPolishedMetal = (metallic > 0.5) && (vTexLayer == 4u || vTexLayer == 5u || metallic >= 0.7);
-    bool isStone = (vTexLayer == 1u || vTexLayer == 2u || vTexLayer == 7u || vTexLayer == 8u) ||
-                   (!isPuddle && !isPolishedMetal && vTexLayer != 3u && vTexLayer != 6u &&
-                    vTexLayer != 12u && vTexLayer != 13u && vTexLayer != 14u);
+    uint matType = vTexLayer;
 
-    // Restrict low roughness (< 0.15) strictly to puddles and polished metals
-    if (!isPuddle && !isPolishedMetal) {
-        roughness = max(roughness, 0.15);
+    // Reserve low roughness values (< 0.20) strictly for wet puddle pools and polished Precursor glass
+    bool isPuddle = (matType == MAT_WATER);
+    bool isPrecursorGlass = (matType == MAT_PRISMATIC_CRYSTAL || matType == MAT_PRECURSOR_GLASS || matType == MAT_VOIDITE || matType == MAT_OBSIDIAN);
+    if (!isPuddle && !isPrecursorGlass) {
+        roughness = max(roughness, 0.20);
     }
 
-    // Clamp stone minimum roughness to 0.45 to prevent cavern walls from looking like polished plastic
-    if (isStone) {
-        roughness = max(roughness, 0.45);
+    // Clamp roughness so stone and unpolished metal remain matte
+    if (matType == MAT_STONE || matType == MAT_BASALT || matType == MAT_GRANITE) {
+        roughness = max(roughness, 0.75); // Natural rock should be diffuse and matte
+    } else if (matType == MAT_BULKHEAD) {
+        roughness = max(roughness, 0.45); // Industrial plating: dull satin sheen, not chrome
     }
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
@@ -361,11 +395,14 @@ void main() {
                 vec3 F = fresnel_schlick(max(dot(H_mid, V), 0.0), F0);
 
                 float denom = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
-                vec3 specular = (vec3(NDF_R, NDF_G, NDF_B) * G * F) / denom;
+                vec3 specularColor = (vec3(NDF_R, NDF_G, NDF_B) * G * F) / denom;
 
                 vec3 kS = F;
                 vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-                Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+
+                // Attenuate specular intensity specifically for the suit headlamp
+                vec3 headlampSpecular = specularColor * 0.25; // Scale down headlamp specular contribution
+                Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
 
                 // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
                 vec2 sparkleCoord = floor(vUV * 64.0);
@@ -389,9 +426,11 @@ void main() {
 
                 vec3 numerator = NDF * G * F;
                 float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
-                vec3 specular = numerator / denominator;
+                vec3 specularColor = numerator / denominator;
 
-                Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+                // Attenuate specular intensity specifically for the suit headlamp
+                vec3 headlampSpecular = specularColor * 0.25; // Scale down headlamp specular contribution
+                Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
             }
         }
     }
@@ -519,8 +558,14 @@ void main() {
     FragColor = vec4(finalColor, 1.0);
 
     // 6. Thresholded Bright Extraction for HDR Bloom
+    // Bloom luminance cutoff threshold raised from 1.0 to 2.0 (1.8-2.2 range).
+    // Prevents standard specular reflections from entering the bloom blur:
+    // only genuine emissive elements (Voidite crystals, molten slag, flare cores) cast bloom.
     float luminance = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
-    if (luminance > 1.2 || length(emissive) > 0.5 || vSonarIntensity > 0.5) {
+    float emissivePeak = max(emissive.r, max(emissive.g, emissive.b));
+    const float BLOOM_CUTOFF = 2.0;
+
+    if (luminance > BLOOM_CUTOFF || emissivePeak > 1.8) {
         BrightColor = vec4(finalColor, 1.0);
     } else {
         BrightColor = vec4(0.0, 0.0, 0.0, 1.0);

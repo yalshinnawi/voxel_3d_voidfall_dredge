@@ -147,13 +147,15 @@ void main() {
         scene = scene * clamp(1.0 - fog.a * 0.4, 0.2, 1.0) + fog.rgb;
     }
 
-    // Additive Bloom
+    // Additive Bloom: adds diffused glow from genuine emissive elements (Voidite crystals, molten slag, flares).
+    // Standard specular peaks are excluded from the bloom buffer via the 1.8-2.2 luminance cutoff threshold.
     scene += bloom * uBloomIntensity;
 
     // Subterranean Exposure
     vec3 hdr = scene * uExposure;
 
-    // ACES tonemapping
+    // ACES Filmic Tonemapping: compresses specular peaks smoothly along the S-curve shoulder,
+    // preventing bright surfaces from blowing out into flat white glare.
     vec3 ldr = aces_filmic(hdr);
 
     // Visor Vignette

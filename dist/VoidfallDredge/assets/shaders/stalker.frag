@@ -5,7 +5,8 @@ in vec3 vNormal;
 in vec4 vColor;
 in vec4 vMaterial; // x=metallic, y=roughness, z=emissive, w=ao
 
-out vec4 FragColor;
+layout (location = 0) out vec4 FragColor;
+layout (location = 1) out vec4 BrightColor;
 
 uniform vec3 uCamPos;
 uniform vec3 uHeadlampPos;
@@ -56,8 +57,8 @@ void main() {
     float baseEmissive = vMaterial.z;
     float ao = clamp(vMaterial.w, 0.15, 1.0);
 
-    // Cavern subterranean ambient light
-    vec3 ambient = vec3(0.06, 0.07, 0.10) * vColor.rgb * ao;
+    // Cavern subterranean ambient light (pitch-black shadow until lit by headlamp/flares)
+    vec3 ambient = vec3(0.014, 0.017, 0.024) * vColor.rgb * ao;
 
     // Headlamp spotlight calculation
     vec3 headlampLight = vec3(0.0);
@@ -115,4 +116,16 @@ void main() {
 
     vec3 finalColor = ambient + headlampLight + rimLight + emissive + dissolveRim;
     FragColor = vec4(finalColor, vColor.a);
+
+    // Bloom extraction: only genuine emissive elements (eyes, void core, hit flash, dissolve rim) cast bloom.
+    // Standard chitinous armor specular highlights are suppressed by the 2.0 cutoff.
+    float stalkerLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
+    float stalkerEmissive = max(emissive.r, max(emissive.g, emissive.b));
+    const float BLOOM_CUTOFF = 2.0;
+
+    if (stalkerLum > BLOOM_CUTOFF || stalkerEmissive > 1.8 || length(dissolveRim) > 1.0) {
+        BrightColor = vec4(finalColor, 1.0);
+    } else {
+        BrightColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
 }

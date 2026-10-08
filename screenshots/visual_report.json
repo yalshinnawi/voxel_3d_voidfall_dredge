@@ -6,21 +6,21 @@
     {
       "slot": 0,
       "phase_id": "MAIN MENU",
-      "timestamp": "2026-10-07 20:56:53",
+      "timestamp": "2026-10-08 11:30:29",
       "master_file": "screenshots/01_main_menu.png",
-      "preview_file": "screenshots/previews/01_main_menu_20261007_205653.jpg",
-      "mean_luminance": 0.114198,
-      "non_black_ratio": 1,
+      "preview_file": "screenshots/previews/01_main_menu_20261008_113029.jpg",
+      "mean_luminance": 0.0975919,
+      "non_black_ratio": 0.999824,
       "is_healthy": true,
       "status": "PASS"
     },
     {
       "slot": 1,
       "phase_id": "LEVEL SELECT",
-      "timestamp": "2026-10-07 20:56:54",
+      "timestamp": "2026-10-08 11:30:30",
       "master_file": "screenshots/02_level_select.png",
-      "preview_file": "screenshots/previews/02_level_select_20261007_205654.jpg",
-      "mean_luminance": 0.109919,
+      "preview_file": "screenshots/previews/02_level_select_20261008_113030.jpg",
+      "mean_luminance": 0.108645,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -28,10 +28,10 @@
     {
       "slot": 2,
       "phase_id": "CHAR SELECT",
-      "timestamp": "2026-10-07 20:56:54",
+      "timestamp": "2026-10-08 11:30:30",
       "master_file": "screenshots/03_character_select.png",
-      "preview_file": "screenshots/previews/03_character_select_20261007_205654.jpg",
-      "mean_luminance": 0.116269,
+      "preview_file": "screenshots/previews/03_character_select_20261008_113030.jpg",
+      "mean_luminance": 0.115721,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -39,10 +39,10 @@
     {
       "slot": 3,
       "phase_id": "UPGRADES TERMINAL",
-      "timestamp": "2026-10-07 20:56:54",
+      "timestamp": "2026-10-08 11:30:30",
       "master_file": "screenshots/04_upgrades_terminal.png",
-      "preview_file": "screenshots/previews/04_upgrades_terminal_20261007_205654.jpg",
-      "mean_luminance": 0.102549,
+      "preview_file": "screenshots/previews/04_upgrades_terminal_20261008_113030.jpg",
+      "mean_luminance": 0.10177,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -50,10 +50,10 @@
     {
       "slot": 4,
       "phase_id": "GAMEPLAY CAVERN",
-      "timestamp": "2026-10-07 20:56:54",
+      "timestamp": "2026-10-08 11:30:30",
       "master_file": "screenshots/05_gameplay_cavern.png",
-      "preview_file": "screenshots/previews/05_gameplay_cavern_20261007_205654.jpg",
-      "mean_luminance": 0.232696,
+      "preview_file": "screenshots/previews/05_gameplay_cavern_20261008_113030.jpg",
+      "mean_luminance": 0.221869,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -61,10 +61,10 @@
     {
       "slot": 5,
       "phase_id": "DRILL CRACKS",
-      "timestamp": "2026-10-07 20:56:55",
+      "timestamp": "2026-10-08 11:30:31",
       "master_file": "screenshots/06_drilling_cracks.png",
-      "preview_file": "screenshots/previews/06_drilling_cracks_20261007_205655.jpg",
-      "mean_luminance": 0.225703,
+      "preview_file": "screenshots/previews/06_drilling_cracks_20261008_113031.jpg",
+      "mean_luminance": 0.223035,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -72,10 +72,10 @@
     {
       "slot": 6,
       "phase_id": "ABILITIES & LOOT",
-      "timestamp": "2026-10-07 20:56:55",
+      "timestamp": "2026-10-08 11:30:31",
       "master_file": "screenshots/07_abilities_loot.png",
-      "preview_file": "screenshots/previews/07_abilities_loot_20261007_205655.jpg",
-      "mean_luminance": 0.350943,
+      "preview_file": "screenshots/previews/07_abilities_loot_20261008_113031.jpg",
+      "mean_luminance": 0.339949,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -83,10 +83,10 @@
     {
       "slot": 7,
       "phase_id": "ESC MENU",
-      "timestamp": "2026-10-07 20:56:55",
+      "timestamp": "2026-10-08 11:30:31",
       "master_file": "screenshots/08_esc_menu.png",
-      "preview_file": "screenshots/previews/08_esc_menu_20261007_205655.jpg",
-      "mean_luminance": 0.0697483,
+      "preview_file": "screenshots/previews/08_esc_menu_20261008_113031.jpg",
+      "mean_luminance": 0.0689078,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -94,10 +94,10 @@
     {
       "slot": 8,
       "phase_id": "EXTRACTION BEACON",
-      "timestamp": "2026-10-07 20:56:56",
+      "timestamp": "2026-10-08 11:30:32",
       "master_file": "screenshots/09_extraction_beacon.png",
-      "preview_file": "screenshots/previews/09_extraction_beacon_20261007_205656.jpg",
-      "mean_luminance": 0.274338,
+      "preview_file": "screenshots/previews/09_extraction_beacon_20261008_113032.jpg",
+      "mean_luminance": 0.25562,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"
@@ -105,10 +105,10 @@
     {
       "slot": 9,
       "phase_id": "MISSION DEBRIEF",
-      "timestamp": "2026-10-07 20:56:56",
+      "timestamp": "2026-10-08 11:30:32",
       "master_file": "screenshots/10_mission_debrief.png",
-      "preview_file": "screenshots/previews/10_mission_debrief_20261007_205656.jpg",
-      "mean_luminance": 0.098629,
+      "preview_file": "screenshots/previews/10_mission_debrief_20261008_113032.jpg",
+      "mean_luminance": 0.0988867,
       "non_black_ratio": 1,
       "is_healthy": true,
       "status": "PASS"

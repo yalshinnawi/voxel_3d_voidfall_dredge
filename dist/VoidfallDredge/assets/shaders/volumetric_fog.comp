@@ -142,8 +142,8 @@ void main() {
             }
         }
 
-        // 3. Ambient subterranean mist
-        inscatter += hazeColor * density * transmittance * stepSize * 0.15;
+        // 3. Ambient subterranean mist (subtle presence without washing out cavern shadows)
+        inscatter += hazeColor * density * transmittance * stepSize * 0.035;
 
         // Beer-Lambert transmittance extinction
         transmittance *= exp(-density * stepSize * 0.8);
