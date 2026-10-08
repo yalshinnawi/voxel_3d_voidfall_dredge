@@ -14,6 +14,12 @@ public:
         const Chunk& chunk,
         const NeighborChunkGetter& get_neighbor = nullptr
     );
+    static std::vector<PackedVoxelVertex> MeshChunk(
+        const Chunk& chunk,
+        const NeighborChunkGetter& get_neighbor = nullptr
+    ) {
+        return generate_mesh(chunk, get_neighbor);
+    }
 
     // Queries face visibility between adjacent voxels.
     // If neighbor chunk is unloaded, treats boundary block as SOLID (MAT_GRANITE) to prevent void leaks.

@@ -74,6 +74,11 @@ TESTS = {
         "target": "test_load_and_stress",
         "exe": f"test_load_and_stress{EXE_EXT}",
         "name": "Load, Stress & Late-Round Pacing / Anti-Clipping (5 modules)"
+    },
+    "voxel_geometry": {
+        "target": "test_voxel_geometry",
+        "exe": f"test_voxel_geometry{EXE_EXT}",
+        "name": "Watertight Voxel Geometry, Topo Smoothing & Ramp Traversal (5 modules)"
     }
 }
 

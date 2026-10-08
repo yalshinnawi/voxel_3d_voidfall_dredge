@@ -48,7 +48,6 @@ constexpr uint8_t MAT_PRECURSOR_STONE = MAT_DREDGE_BEDROCK;
 constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;
 constexpr uint8_t VOXEL_FLAG_EMISSIVE      = 0x20;
 constexpr uint8_t VOXEL_FLAG_SURVEYED      = 0x40;
-constexpr uint8_t VOXEL_FLAG_PLAYER_PLACED = 0x80;
 
 // 16-bit packed voxel state
 #pragma pack(push, 1)
@@ -72,8 +71,8 @@ struct Voxel {
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE;
     }
     inline bool is_anchored() const { return (!is_ramp() && (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0) || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
-    inline uint8_t damage() const { return flags_and_damage & 0x0F; }
-    inline void set_damage(uint8_t d) { flags_and_damage = (flags_and_damage & 0xF0) | (d & 0x0F); }
+    inline uint8_t damage() const { return flags_and_damage & VOXEL_DAMAGE_MASK; }
+    inline void set_damage(uint8_t d) { flags_and_damage = (flags_and_damage & ~VOXEL_DAMAGE_MASK) | (d & VOXEL_DAMAGE_MASK); }
     inline bool is_highlighted() const { return !is_ramp() && (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
     inline void set_highlighted(bool h) {
         if (h) flags_and_damage |= VOXEL_FLAG_SURVEYED;
@@ -100,18 +99,19 @@ struct Voxel {
             material_id == MAT_OBSIDIAN_SPIKES) {
             return SHAPE_CUBE;
         }
-        uint8_t s = flags_and_damage & VOXEL_SHAPE_MASK;
-        if (s == SHAPE_RAMP_POS_X || s == SHAPE_RAMP_NEG_X ||
-            s == SHAPE_RAMP_POS_Z || s == SHAPE_RAMP_NEG_Z) {
-            return static_cast<VoxelShape>(s);
-        }
-        return SHAPE_CUBE;
+        return static_cast<VoxelShape>(flags_and_damage & VOXEL_SHAPE_MASK);
     }
     inline void set_shape(VoxelShape s) {
-        flags_and_damage = (flags_and_damage & 0x0F) | (static_cast<uint8_t>(s) & VOXEL_SHAPE_MASK);
+        flags_and_damage = (flags_and_damage & ~VOXEL_SHAPE_MASK) | (static_cast<uint8_t>(s) & VOXEL_SHAPE_MASK);
     }
     inline bool is_ramp() const {
         return is_ramp_shape(shape());
+    }
+    inline bool is_slab() const {
+        return is_slab_shape(shape());
+    }
+    inline bool is_corner() const {
+        return is_corner_shape(shape());
     }
 };
 #pragma pack(pop)
@@ -136,14 +136,16 @@ struct PackedVoxelVertex {
     // [12..13] corner_idx (2 bits: 0..3 quad corner)
     // [14..17] damage_tier (4 bits: 0..15 crack overlay)
     // [18..25] emission_intensity (8 bits: 0..255)
-    // [26..31] reserved / extra
+    // [26]     sub_y_half (1 bit: 0 or 1, offsets Y by -0.5 for half-slabs)
+    // [27..31] reserved / extra
     uint32_t data1;
 
     static inline PackedVoxelVertex encode(
         uint32_t x, uint32_t y, uint32_t z,
         uint32_t normal_idx, uint32_t ao, uint32_t tex_layer,
         uint32_t u_dim, uint32_t v_dim, uint32_t corner_idx,
-        uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0
+        uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0,
+        uint32_t sub_y_half = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
@@ -158,8 +160,16 @@ struct PackedVoxelVertex {
                   ((v_dim & 0x3Fu) << 6) |
                   ((corner_idx & 0x3u) << 12) |
                   ((damage & 0xFu) << 14) |
-                  ((emission & 0xFFu) << 18);
+                  ((emission & 0xFFu) << 18) |
+                  ((sub_y_half & 0x1u) << 26);
         return v;
+    }
+
+    inline glm::vec3 position() const {
+        float px = static_cast<float>(data0 & 0x3Fu);
+        float py = static_cast<float>((data0 >> 6) & 0x3Fu) - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f);
+        float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
+        return glm::vec3(px, py, pz);
     }
 };
 #pragma pack(pop)

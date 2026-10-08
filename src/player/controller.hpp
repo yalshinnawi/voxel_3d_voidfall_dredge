@@ -285,6 +285,9 @@ public:
     PlayerInputPacket build_input_packet(uint32_t tick, float dt) const;
 
     uint16_t current_buttons() const { return m_current_buttons; }
+    void set_buttons(uint16_t buttons) { m_current_buttons = buttons; }
+    void add_button(uint16_t b) { m_current_buttons |= b; }
+    void remove_button(uint16_t b) { m_current_buttons &= ~b; }
 
     // Callbacks for gameplay actions
     using BlockBreakCallback = std::function<void(int x, int y, int z, const glm::ivec3& normal, uint8_t mat, uint8_t flags)>;

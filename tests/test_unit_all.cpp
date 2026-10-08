@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <cmath>
 #include <cstdlib>
 #include <vector>
@@ -77,38 +78,54 @@ void test_voxel_engine() {
     TEST_CHECK((bulkhead.flags_and_damage & VOXEL_FLAG_PLAYER_PLACED) != 0, "Player placed flag must be preserved");
     log_pass("Voxel material properties and flag bitmasks");
 
-    // Voxel Ramp & Slope Metadata Encoding (upper nibble of flags_and_damage)
+    // Voxel Shape Metadata Encoding (bits 6:3 of flags_and_damage)
     Voxel test_ramp{MAT_VOLCANIC_BASALT, 0};
     TEST_CHECK(test_ramp.shape() == SHAPE_CUBE, "Default shape must be SHAPE_CUBE");
     TEST_CHECK(!test_ramp.is_ramp(), "Cube must not be classified as ramp");
 
     test_ramp.set_damage(7);
-    test_ramp.set_shape(SHAPE_RAMP_POS_X);
-    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_POS_X, "Shape must be SHAPE_RAMP_POS_X");
-    TEST_CHECK(test_ramp.is_ramp(), "SHAPE_RAMP_POS_X must be classified as ramp");
-    TEST_CHECK(test_ramp.damage() == 7, "Lower nibble damage tier must be preserved after set_shape");
-    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x10, "Upper nibble must match 0x10 for POS_X");
+    test_ramp.set_shape(SHAPE_RAMP_EAST);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_EAST, "Shape must be SHAPE_RAMP_EAST");
+    TEST_CHECK(test_ramp.is_ramp(), "SHAPE_RAMP_EAST must be classified as ramp");
+    TEST_CHECK(test_ramp.damage() == 7, "Bits 0..2 damage tier must be preserved after set_shape");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x28, "Bits 6:3 must match 0x28 for EAST");
 
-    test_ramp.set_shape(SHAPE_RAMP_NEG_X);
-    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_NEG_X, "Shape must be SHAPE_RAMP_NEG_X");
-    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x20, "Upper nibble must match 0x20 for NEG_X");
+    test_ramp.set_shape(SHAPE_RAMP_WEST);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_WEST, "Shape must be SHAPE_RAMP_WEST");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x30, "Bits 6:3 must match 0x30 for WEST");
 
-    test_ramp.set_shape(SHAPE_RAMP_POS_Z);
-    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_POS_Z, "Shape must be SHAPE_RAMP_POS_Z");
-    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x30, "Upper nibble must match 0x30 for POS_Z");
+    test_ramp.set_shape(SHAPE_RAMP_SOUTH);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_SOUTH, "Shape must be SHAPE_RAMP_SOUTH");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x20, "Bits 6:3 must match 0x20 for SOUTH");
 
-    test_ramp.set_shape(SHAPE_RAMP_NEG_Z);
-    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_NEG_Z, "Shape must be SHAPE_RAMP_NEG_Z");
-    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x40, "Upper nibble must match 0x40 for NEG_Z");
+    test_ramp.set_shape(SHAPE_RAMP_NORTH);
+    TEST_CHECK(test_ramp.shape() == SHAPE_RAMP_NORTH, "Shape must be SHAPE_RAMP_NORTH");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x18, "Bits 6:3 must match 0x18 for NORTH");
+
+    test_ramp.set_shape(SHAPE_SLAB_BOTTOM);
+    TEST_CHECK(test_ramp.shape() == SHAPE_SLAB_BOTTOM, "Shape must be SHAPE_SLAB_BOTTOM");
+    TEST_CHECK(test_ramp.is_slab(), "Shape must be classified as slab");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x08, "Bits 6:3 must match 0x08 for SLAB_BOTTOM");
+
+    test_ramp.set_shape(SHAPE_SLAB_TOP);
+    TEST_CHECK(test_ramp.shape() == SHAPE_SLAB_TOP, "Shape must be SHAPE_SLAB_TOP");
+    TEST_CHECK(test_ramp.is_slab(), "Shape must be classified as slab");
+    TEST_CHECK((test_ramp.flags_and_damage & VOXEL_SHAPE_MASK) == 0x10, "Bits 6:3 must match 0x10 for SLAB_TOP");
+
+    test_ramp.set_player_placed(true);
+    TEST_CHECK(test_ramp.is_player_placed(), "Player placed flag (0x80) must be preserved alongside shape");
+    TEST_CHECK(test_ramp.damage() == 7, "Damage tier (0x07) must remain intact");
 
     test_ramp.set_shape(SHAPE_CUBE);
     TEST_CHECK(test_ramp.shape() == SHAPE_CUBE, "Shape reset must return SHAPE_CUBE");
     TEST_CHECK(!test_ramp.is_ramp(), "Shape reset must not be ramp");
+    TEST_CHECK(!test_ramp.is_slab(), "Shape reset must not be slab");
     TEST_CHECK(test_ramp.damage() == 7, "Damage must remain intact after shape reset");
+    TEST_CHECK(test_ramp.is_player_placed(), "Player placed flag must remain intact");
 
     // Static size check
     static_assert(sizeof(Voxel) == 2, "Voxel struct must remain exactly 16-bit / 2 bytes");
-    log_pass("Voxel Ramp & Slope Metadata Encoding and 16-bit struct integrity");
+    log_pass("Voxel Multi-Shape Metadata Encoding (bits 6:3), damage (bits 2:0) & player flag (bit 7)");
 
     // World voxel queries and block generation
     World world(4242);
@@ -1029,15 +1046,18 @@ void test_seismic_tremor_and_falling_blocks() {
     // 6. Dynamic Debris Capping & Oldest Entity Recycling
     TEST_CHECK(World::MAX_ACTIVE_DEBRIS == 36, "World::MAX_ACTIVE_DEBRIS hard cap must be 36");
     TEST_CHECK(EntityManager::MAX_ACTIVE_DEBRIS == 36, "EntityManager::MAX_ACTIVE_DEBRIS must match 36");
+    TEST_CHECK(DynamicDebris::MAX_ACTIVE_DEBRIS == 36, "DynamicDebris::MAX_ACTIVE_DEBRIS must match 36");
     world.clear_debris();
     TEST_CHECK(world.active_debris_count() == 0, "Debris count must be 0 after clear");
     TEST_CHECK(EntityManager::active_debris_count == 0, "EntityManager active debris must match 0");
+    TEST_CHECK(DynamicDebris::active_debris_count() == 0, "DynamicDebris active debris must match 0");
     for (uint32_t i = 1; i <= 50; ++i) {
         world.spawn_tremor_debris(glm::vec3(10.0f, 20.0f, 10.0f));
     }
     TEST_CHECK(world.debris().size() == 36, "Debris count must be capped at MAX_ACTIVE_DEBRIS (36)");
     TEST_CHECK(world.active_debris_count() == 36, "Active debris count must match MAX_ACTIVE_DEBRIS (36)");
     TEST_CHECK(EntityManager::active_debris_count == 36, "EntityManager count must match 36");
+    TEST_CHECK(DynamicDebris::active_debris_count() == 36, "DynamicDebris count must match 36");
     // The oldest entities (1 to 14) were recycled; front debris should have id == 15
     TEST_CHECK(world.debris().front().id() == 15, "Oldest active debris must be recycled when cap is exceeded");
     TEST_CHECK(world.debris().back().id() == 50, "Newest debris must be present at back of collection");
@@ -1064,6 +1084,17 @@ void test_seismic_tremor_and_falling_blocks() {
     TEST_CHECK(world.get_voxel(cap_rx, cap_ry, cap_rz).material_id == MAT_VOLCANIC_BASALT,
                "Re-voxelized block must retain debris material");
     log_pass("Global Entity Cap (MAX_ACTIVE_DEBRIS = 36) & Oldest Entity Recycling / Re-voxelization");
+
+    // 6.1 Volumetric Fog Compute Shader Performance Safeguard Invariant
+    std::ifstream fog_shader("assets/shaders/volumetric_fog.comp");
+    if (!fog_shader.is_open()) {
+        fog_shader.open("../assets/shaders/volumetric_fog.comp");
+    }
+    TEST_CHECK(fog_shader.is_open(), "volumetric_fog.comp shader file must exist and be readable");
+    std::string fog_content((std::istreambuf_iterator<char>(fog_shader)), std::istreambuf_iterator<char>());
+    TEST_CHECK(fog_content.find("maxMarchDistance = min(linearDepth, 40.0);") != std::string::npos,
+               "volumetric_fog.comp must maintain maxMarchDistance = min(linearDepth, 40.0)");
+    log_pass("Volumetric Fog Compute Shader Performance Safeguard (maxMarchDistance <= 40.0m)");
 
     // 7. Debris Sleeping & Static Merging into Static Voxels
     int sleep_x = 24;

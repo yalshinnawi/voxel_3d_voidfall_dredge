@@ -169,16 +169,16 @@ void main() {
     // LOD Distance-Gated Parallax Occlusion Mapping (POM)
     vec3 v_FragPos = vWorldPos;
     vec3 u_CameraPos = uCameraPos;
-    float dist = length(v_FragPos - u_CameraPos);
+    float camDist = length(v_FragPos - u_CameraPos);
 
     vec2 quadUV;
-    if (dist < 7.0f) {
-        // Attenuate POM displacement scale smoothly to zero between 5.0m and 7.0m
-        float pomFade = smoothstep(7.0, 5.0, dist);
+    if (camDist < 7.0f) {
+        // Fade displacement scale linearly to zero between 5.0m and 7.0m
+        float pomFade = clamp((7.0 - camDist) / 2.0, 0.0, 1.0);
         float depthScale = 0.04 * pomFade;
 
-        // Execute an 8-step POM raymarch using the height map layer from GL_TEXTURE_2D_ARRAY
-        const float numSteps = 8.0;
+        // Execute a 6-step POM raymarch using the height channel from GL_TEXTURE_2D_ARRAY
+        const float numSteps = 6.0;
         float stepSize = 1.0 / numSteps;
         vec2 p = (V_tangent.xy / max(abs(V_tangent.z), 0.25)) * depthScale;
         vec2 deltaUV = p / numSteps;
@@ -192,7 +192,7 @@ void main() {
         float prevLayerDepth = currentLayerDepth;
         float prevDepthMapValue = currentDepthMapValue;
 
-        for (int step = 0; step < 8; ++step) {
+        for (int step = 0; step < 6; ++step) {
             if (currentLayerDepth >= currentDepthMapValue) {
                 break;
             }
@@ -213,7 +213,7 @@ void main() {
         float weight = denom > 0.0001 ? clamp(beforeDepth / denom, 0.0, 1.0) : 0.0;
         quadUV = mix(prevUV, currUV, weight);
     } else {
-        // Completely bypass raymarching loops. Directly sample the base UVs for tangent normal and roughness calculations to protect GPU fillrate across open cavern expanses.
+        // Completely bypass raymarching loops. Sample base UVs directly for normal and roughness calculations to protect GPU fillrate across open caverns.
         quadUV = baseUV;
     }
 
@@ -301,10 +301,10 @@ void main() {
     vec2 v_TexCoords = fract(vUV);
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
     float minEdge = min(edgeDist.x, edgeDist.y);
-    if (minEdge < 0.05) {
-        float bevelFactor = smoothstep(0.0, 0.05, minEdge);
-        // Soften normal away from face perpendicular
-        normal = normalize(mix(normal + dFdx(v_FragPos) * 0.15 + dFdy(v_FragPos) * 0.15, normal, bevelFactor));
+    if (minEdge < 0.04) {
+        float bevel = smoothstep(0.0, 0.04, minEdge);
+        vec3 bevelNormal = normalize(vNormal + dFdx(v_FragPos) * 0.12 + dFdy(v_FragPos) * 0.12);
+        normal = normalize(mix(bevelNormal, normal, bevel));
     }
     N = normal;
 

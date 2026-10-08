@@ -81,6 +81,8 @@ public:
     void PopulateFauna();
     void GenerateSectorStructures(int sector_index);
     void detect_natural_floor_steps();
+    void ApplyTopologicalShapes(Chunk& chunk);
+    void apply_topological_shapes(Chunk& chunk) { ApplyTopologicalShapes(chunk); }
 
     const std::vector<FaunaEntity>& GetActiveEntities() const { return m_active_entities; }
     std::vector<FaunaEntity>& GetActiveEntities() { return m_active_entities; }

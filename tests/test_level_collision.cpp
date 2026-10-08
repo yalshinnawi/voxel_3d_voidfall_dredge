@@ -984,13 +984,13 @@ void test_flight_carving_and_mesh_integrity() {
 
             // Generate greedy mesh with full neighbor context
             std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, neighbor_getter);
-            TEST_CHECK(mesh.size() % 6 == 0, "Greedy mesher must emit full 6-vertex quad pairs (2 triangles)");
+            TEST_CHECK(mesh.size() % 3 == 0, "Greedy mesher must emit complete triangles (mesh.size() % 3 == 0)");
 
-            size_t num_quads = mesh.size() / 6;
-            for (size_t q = 0; q < num_quads; ++q) {
-                // Verify all 6 vertices of the quad
-                for (size_t v_idx = 0; v_idx < 6; ++v_idx) {
-                    const auto& v = mesh[q * 6 + v_idx];
+            size_t num_tris = mesh.size() / 3;
+            for (size_t t = 0; t < num_tris; ++t) {
+                // Verify all 3 vertices of each triangle
+                for (size_t v_idx = 0; v_idx < 3; ++v_idx) {
+                    const auto& v = mesh[t * 3 + v_idx];
 
                     // Unpack 6-bit coordinates
                     uint32_t lx = (v.data0 & 0x3Fu);
@@ -1025,13 +1025,13 @@ void test_flight_carving_and_mesh_integrity() {
                 }
 
                 // Check for non-degenerate triangles (no zero area)
-                const auto& v0 = mesh[q * 6 + 0];
-                const auto& v1 = mesh[q * 6 + 1];
-                const auto& v2 = mesh[q * 6 + 2];
+                const auto& v0 = mesh[t * 3 + 0];
+                const auto& v1 = mesh[t * 3 + 1];
+                const auto& v2 = mesh[t * 3 + 2];
 
-                glm::vec3 p0(v0.data0 & 0x3Fu, (v0.data0 >> 6u) & 0x3Fu, (v0.data0 >> 12u) & 0x3Fu);
-                glm::vec3 p1(v1.data0 & 0x3Fu, (v1.data0 >> 6u) & 0x3Fu, (v1.data0 >> 12u) & 0x3Fu);
-                glm::vec3 p2(v2.data0 & 0x3Fu, (v2.data0 >> 6u) & 0x3Fu, (v2.data0 >> 12u) & 0x3Fu);
+                glm::vec3 p0 = v0.position();
+                glm::vec3 p1 = v1.position();
+                glm::vec3 p2 = v2.position();
 
                 float tri_area = glm::length(glm::cross(p1 - p0, p2 - p0)) * 0.5f;
                 TEST_CHECK(tri_area > 0.001f, "Degenerate zero-area triangle detected in greedy mesh quad!");

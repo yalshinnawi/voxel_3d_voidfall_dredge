@@ -640,19 +640,26 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
-    if (m_position.y <= 1.8f) {
-        take_damage(35.0f, DamageSource::VoidSingularity);
-        add_trauma(0.60f);
-        if (m_health > 0.0f) {
-            m_position.y = 6.5f;
-            m_velocity = glm::vec3(0.0f, 4.0f, 0.0f);
-            if (m_on_warning) {
-                m_on_warning("VOID RIFT: GRAVITATIONAL REPULSION (-35 HP)");
-            }
-        } else {
-            m_velocity = glm::vec3(0.0f, -8.0f, 0.0f);
-            if (m_on_warning) {
-                m_on_warning("VITAL SIGNS LOST: DELVER CONSUMED BY VOID SINGULARITY");
+    if (m_position.y <= 1.8f && !m_on_ground) {
+        float foot_y = m_position.y - half_extents().y;
+        int check_bx = static_cast<int>(std::floor(m_position.x));
+        int check_bz = static_cast<int>(std::floor(m_position.z));
+        int check_by = static_cast<int>(std::floor(foot_y));
+        if (!world.is_solid(glm::ivec3(check_bx, check_by, check_bz)) &&
+            !world.is_solid(glm::ivec3(check_bx, check_by - 1, check_bz))) {
+            take_damage(35.0f, DamageSource::VoidSingularity);
+            add_trauma(0.60f);
+            if (m_health > 0.0f) {
+                m_position.y = 6.5f;
+                m_velocity = glm::vec3(0.0f, 4.0f, 0.0f);
+                if (m_on_warning) {
+                    m_on_warning("VOID RIFT: GRAVITATIONAL REPULSION (-35 HP)");
+                }
+            } else {
+                m_velocity = glm::vec3(0.0f, -8.0f, 0.0f);
+                if (m_on_warning) {
+                    m_on_warning("VITAL SIGNS LOST: DELVER CONSUMED BY VOID SINGULARITY");
+                }
             }
         }
     }
@@ -943,11 +950,15 @@ void PlayerController::UpdateMovement(float dt, World& world) {
     int ramp_by = by_foot;
     int ramp_bz = bz;
 
-    // Check voxel at feet level and voxel immediately below feet at player center
+    // Check voxel at feet level and voxel immediately below/above feet at player center
     Voxel v_curr = world.get_voxel(bx, by_foot, bz);
     Voxel v_below = world.get_voxel(bx, by_foot - 1, bz);
+    Voxel v_above = world.get_voxel(bx, by_foot + 1, bz);
 
-    if (v_curr.is_ramp()) {
+    if (v_above.is_ramp()) {
+        shape = v_above.shape();
+        ramp_by = by_foot + 1;
+    } else if (v_curr.is_ramp()) {
         shape = v_curr.shape();
         ramp_by = by_foot;
     } else if (v_below.is_ramp()) {
@@ -963,9 +974,15 @@ void PlayerController::UpdateMovement(float dt, World& world) {
         if (m_velocity.z > 0.1f) check_bz = static_cast<int>(std::floor(m_position.z + half_extents().z));
         else if (m_velocity.z < -0.1f) check_bz = static_cast<int>(std::floor(m_position.z - half_extents().z));
 
+        Voxel v_lead_above = world.get_voxel(check_bx, by_foot + 1, check_bz);
         Voxel v_lead_curr = world.get_voxel(check_bx, by_foot, check_bz);
         Voxel v_lead_below = world.get_voxel(check_bx, by_foot - 1, check_bz);
-        if (v_lead_curr.is_ramp()) {
+        if (v_lead_above.is_ramp()) {
+            shape = v_lead_above.shape();
+            ramp_bx = check_bx;
+            ramp_by = by_foot + 1;
+            ramp_bz = check_bz;
+        } else if (v_lead_curr.is_ramp()) {
             shape = v_lead_curr.shape();
             ramp_bx = check_bx;
             ramp_by = by_foot;
@@ -986,18 +1003,25 @@ void PlayerController::UpdateMovement(float dt, World& world) {
         // Player is considered standing on the ramp if feet are close to the slope surface
         bool jumping = (m_current_buttons & BTN_JUMP) != 0 || m_velocity.y > 6.0f;
         if (!jumping && diff >= -0.35f && diff <= 0.45f) {
-            // Allow continuous walking without triggering micro-airborne state transitions or jump-stutter
+            // Elevate player smoothly to surface
             m_position.y = surf_y + h_y;
             m_on_ground = true;
             m_isGrounded = true;
 
             glm::vec3 normal = get_ramp_normal(shape);
 
-            // Adjust ground projection vector along the 45° slope normal
-            // Tangent condition: V . N = 0 => Vy = -(Vx * Nx + Vz * Nz) / Ny
-            if (normal.y > 0.001f) {
+            // Project horizontal velocity along the 45° slope tangent:
+            // v_slope = v - (v . n_ramp) * n_ramp
+            glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, normal) * normal;
+            if (v_slope.y >= 0.0f) {
+                m_velocity.y = v_slope.y;
+            } else if (normal.y > 0.001f) {
                 m_velocity.y = -(m_velocity.x * normal.x + m_velocity.z * normal.z) / normal.y;
             }
+        }
+    } else if (m_on_ground && !(m_current_buttons & BTN_JUMP)) {
+        if (m_velocity.y > 0.0f) {
+            m_velocity.y = 0.0f;
         }
     }
 }
@@ -1033,6 +1057,15 @@ bool PlayerController::is_penetrating_solid(const World& world) const {
                     if (vox.is_ramp()) {
                         float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, z, m_position.x, m_position.z);
                         if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                        float surf_y = static_cast<float>(y) + 0.5f;
+                        if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                        if (box_max.y <= static_cast<float>(y) + 0.5f || box_min.y >= static_cast<float>(y + 1) - 0.02f) {
                             continue;
                         }
                     }
@@ -1085,6 +1118,38 @@ void PlayerController::depenetrate(const glm::vec3& half_extents, World& world) 
                     if (vox.is_ramp()) {
                         float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, z, m_position.x, m_position.z);
                         if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                        if (box_min.y >= surf_y - 0.60f) {
+                            m_position.y = surf_y + half_extents.y;
+                            if (m_velocity.y < 0.0f) {
+                                m_velocity.y = 0.0f;
+                            }
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            box_min = m_position - half_extents;
+                            box_max = m_position + half_extents;
+                            continue;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                        float surf_y = static_cast<float>(y) + 0.5f;
+                        if (box_min.y >= surf_y - 0.02f) {
+                            continue;
+                        }
+                        if (box_min.y >= surf_y - 0.60f) {
+                            m_position.y = surf_y + half_extents.y;
+                            if (m_velocity.y < 0.0f) {
+                                m_velocity.y = 0.0f;
+                            }
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            box_min = m_position - half_extents;
+                            box_max = m_position + half_extents;
+                            continue;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                        float surf_y = static_cast<float>(y + 1);
+                        if (box_min.y >= surf_y - 0.02f || box_max.y <= static_cast<float>(y) + 0.5f) {
                             continue;
                         }
                         if (box_min.y >= surf_y - 0.60f) {
@@ -1154,73 +1219,96 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
     int max_bz = static_cast<int>(std::floor(box_max.z - 0.002f));
 
     if (axis == 1) { // 1. Y Axis (Gravity, jumping, floors, ceilings)
-        if (m_velocity.y <= 0.0f) {
-            int check_y = static_cast<int>(std::floor(box_min.y));
-            bool landed = false;
+        bool handled_floor = false;
+        int check_y_start = static_cast<int>(std::floor(box_min.y + 0.15f));
+        int check_y_end = static_cast<int>(std::floor(box_min.y - 0.15f));
+
+        for (int check_y = check_y_start; check_y >= check_y_end; --check_y) {
             for (int x = min_bx; x <= max_bx; ++x) {
                 for (int z = min_bz; z <= max_bz; ++z) {
                     Voxel vox = world.get_voxel(x, check_y, z);
-                    if (vox.is_solid()) {
-                        if (vox.is_ramp()) {
-                            float surf_y = calculate_ramp_surface_y(vox.shape(), x, check_y, z, m_position.x, m_position.z);
-                            if (box_min.y <= surf_y + 0.05f) {
-                                m_position.y = surf_y + half_extents.y;
+                    if (!vox.is_solid()) continue;
+
+                    if (vox.is_ramp()) {
+                        float surf_y = calculate_ramp_surface_y(vox.shape(), x, check_y, z, m_position.x, m_position.z);
+                        if (box_min.y <= surf_y + 0.12f && box_min.y >= surf_y - 0.45f) {
+                            m_position.y = surf_y + half_extents.y;
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            glm::vec3 n = get_ramp_normal(vox.shape());
+                            glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, n) * n;
+                            if (v_slope.y >= 0.0f) {
+                                m_velocity.y = v_slope.y;
+                            } else {
                                 m_velocity.y = 0.0f;
-                                m_on_ground = true;
-                                m_isGrounded = true;
-                                landed = true;
-                                break;
+                            }
+                            handled_floor = true;
+                            break;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                        float surf_y = static_cast<float>(check_y) + 0.5f;
+                        if (box_min.y <= surf_y + 0.12f && box_min.y >= surf_y - 0.45f) {
+                            m_position.y = surf_y + half_extents.y;
+                            if (m_velocity.y < 0.0f) m_velocity.y = 0.0f;
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            handled_floor = true;
+                            break;
+                        }
+                    } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                        float surf_y = static_cast<float>(check_y + 1);
+                        if (box_min.y <= surf_y + 0.12f && box_min.y >= surf_y - 0.45f) {
+                            m_position.y = surf_y + half_extents.y;
+                            if (m_velocity.y < 0.0f) m_velocity.y = 0.0f;
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            handled_floor = true;
+                            break;
+                        }
+                    } else if (vox.shape() == SHAPE_CUBE && m_velocity.y <= 0.05f) {
+                        float surf_y = static_cast<float>(check_y + 1);
+                        if (box_min.y <= surf_y + 0.12f && box_min.y >= surf_y - 0.45f) {
+                            float impact_speed = -m_velocity.y;
+                            if (impact_speed > 0.0f) apply_fall_impact(impact_speed);
+                            m_position.y = surf_y + half_extents.y;
+                            m_velocity.y = 0.0f;
+                            m_on_ground = true;
+                            m_isGrounded = true;
+                            handled_floor = true;
+                            break;
+                        }
+                    }
+                }
+                if (handled_floor) break;
+            }
+            if (handled_floor) break;
+        }
+
+        if (!handled_floor && m_velocity.y > 0.0f) {
+            int check_ceil_y = static_cast<int>(std::floor(box_max.y));
+            for (int x = min_bx; x <= max_bx; ++x) {
+                for (int z = min_bz; z <= max_bz; ++z) {
+                    if (world.is_solid(glm::ivec3(x, check_ceil_y, z))) {
+                        Voxel vox = world.get_voxel(x, check_ceil_y, z);
+                        if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                            if (box_max.y >= static_cast<float>(check_ceil_y)) {
+                                float target_ceiling = static_cast<float>(check_ceil_y);
+                                m_position.y = target_ceiling - half_extents.y - 0.001f;
+                                m_velocity.y = 0.0f;
+                                return;
                             }
                             continue;
                         }
-                        float impact_speed = -m_velocity.y;
-                        if (impact_speed > 0.0f) apply_fall_impact(impact_speed);
-                        float target_floor = static_cast<float>(check_y + 1);
-                        m_position.y = target_floor + half_extents.y;
-                        m_velocity.y = 0.0f;
-                        m_on_ground = true;
-                        m_isGrounded = true;
-                        landed = true;
-                        break;
-                    }
-                }
-                if (landed) break;
-            }
-            if (!landed) {
-                // If resting right on top of a solid floor block (within 0.05 margin)
-                int floor_below = static_cast<int>(std::floor(box_min.y - 0.02f));
-                for (int x = min_bx; x <= max_bx; ++x) {
-                    for (int z = min_bz; z <= max_bz; ++z) {
-                        Voxel vox = world.get_voxel(x, floor_below, z);
-                        if (vox.is_solid()) {
-                            if (vox.is_ramp()) {
-                                float surf_y = calculate_ramp_surface_y(vox.shape(), x, floor_below, z, m_position.x, m_position.z);
-                                if (box_min.y <= surf_y + 0.05f) {
-                                    m_position.y = surf_y + half_extents.y;
-                                    m_velocity.y = 0.0f;
-                                    m_on_ground = true;
-                                    m_isGrounded = true;
-                                    return;
-                                }
-                                continue;
-                            }
-                            if (box_min.y <= static_cast<float>(floor_below + 1) + 0.05f) {
-                                m_position.y = static_cast<float>(floor_below + 1) + half_extents.y;
+                        if (vox.shape() == SHAPE_SLAB_TOP) {
+                            if (box_max.y >= static_cast<float>(check_ceil_y) + 0.5f) {
+                                float target_ceiling = static_cast<float>(check_ceil_y) + 0.5f;
+                                m_position.y = target_ceiling - half_extents.y - 0.001f;
                                 m_velocity.y = 0.0f;
-                                m_on_ground = true;
-                                m_isGrounded = true;
                                 return;
                             }
+                            continue;
                         }
-                    }
-                }
-            }
-        } else if (m_velocity.y > 0.0f) {
-            int check_y = static_cast<int>(std::floor(box_max.y));
-            for (int x = min_bx; x <= max_bx; ++x) {
-                for (int z = min_bz; z <= max_bz; ++z) {
-                    if (world.is_solid(glm::ivec3(x, check_y, z))) {
-                        float target_ceiling = static_cast<float>(check_y);
+                        float target_ceiling = static_cast<float>(check_ceil_y);
                         m_position.y = target_ceiling - half_extents.y - 0.001f;
                         m_velocity.y = 0.0f;
                         return;
@@ -1258,7 +1346,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         if (m_velocity.x > 0.0f) {
             int check_x = static_cast<int>(std::floor(box_max.x));
             bool has_collision = false;
-            bool only_step = true;
+            int highest_solid_y = -1;
+            float step_surf_y = 0.0f;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
                     Voxel vox = world.get_voxel(check_x, y, z);
@@ -1266,27 +1355,84 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                         if (vox.is_ramp()) {
                             float surf_y = calculate_ramp_surface_y(vox.shape(), check_x, y, z, m_position.x, m_position.z);
                             if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y <= surf_y + 0.08f) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    glm::vec3 n = get_ramp_normal(vox.shape());
+                                    glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, n) * n;
+                                    if (v_slope.y >= 0.0f) {
+                                        m_velocity.y = v_slope.y;
+                                    }
+                                }
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                            float surf_y = static_cast<float>(y) + 0.5f;
+                            if (box_min.y >= surf_y - 0.60f) {
                                 if (box_min.y < surf_y) {
                                     m_position.y = surf_y + half_extents.y;
                                     m_on_ground = true;
                                     m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
                                 }
                                 continue;
                             }
+                        } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                            float surf_y = static_cast<float>(y + 1);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                }
+                                continue;
+                            }
+                            if (box_max.y < static_cast<float>(y) + 0.5f) {
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_CUBE) {
+                            Voxel v_above = world.get_voxel(check_x, y + 1, z);
+                            if (v_above.is_ramp()) {
+                                float ramp_s = calculate_ramp_surface_y(v_above.shape(), check_x, y + 1, z, m_position.x, m_position.z);
+                                if (box_min.y >= static_cast<float>(y + 1) - 0.60f) {
+                                    m_position.y = std::max(m_position.y, ramp_s + half_extents.y);
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    continue;
+                                }
+                            } else if (!v_above.is_solid()) {
+                                float top_s = static_cast<float>(y + 1);
+                                if (box_min.y >= top_s - 0.60f) {
+                                    m_position.y = top_s + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                    continue;
+                                }
+                            }
                         }
                         has_collision = true;
-                        if (y > min_wall_y) {
-                            only_step = false;
+                        if (y > highest_solid_y) {
+                            highest_solid_y = y;
+                            if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                                step_surf_y = static_cast<float>(y) + 0.5f;
+                            } else {
+                                step_surf_y = static_cast<float>(y + 1);
+                            }
                         }
                     }
                 }
             }
             if (has_collision) {
-                bool can_step = m_on_ground && only_step;
+                float step_height = step_surf_y - box_min.y;
+                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                                (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
-                        if (world.is_solid(glm::ivec3(check_x, min_wall_y + 1, z)) ||
-                            world.is_solid(glm::ivec3(check_x, min_wall_y + 2, z))) {
+                        if (world.is_solid(glm::ivec3(check_x, highest_solid_y + 1, z)) ||
+                            world.is_solid(glm::ivec3(check_x, highest_solid_y + 2, z))) {
                             can_step = false;
                             break;
                         }
@@ -1304,9 +1450,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     }
                 }
                 if (can_step) {
-                    m_position.y += 1.0f;
+                    m_position.y = step_surf_y + half_extents.y;
                     m_on_ground = true;
                     m_isGrounded = true;
+                    m_velocity.y = 0.0f;
                 } else if (try_mantle_x(check_x)) {
                     // Mantled successfully over ledge
                 } else {
@@ -1318,7 +1465,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         } else if (m_velocity.x < 0.0f) {
             int check_x = static_cast<int>(std::floor(box_min.x));
             bool has_collision = false;
-            bool only_step = true;
+            int highest_solid_y = -1;
+            float step_surf_y = 0.0f;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int z = min_bz; z <= max_bz; ++z) {
                     Voxel vox = world.get_voxel(check_x, y, z);
@@ -1326,27 +1474,84 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                         if (vox.is_ramp()) {
                             float surf_y = calculate_ramp_surface_y(vox.shape(), check_x, y, z, m_position.x, m_position.z);
                             if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y <= surf_y + 0.08f) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    glm::vec3 n = get_ramp_normal(vox.shape());
+                                    glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, n) * n;
+                                    if (v_slope.y >= 0.0f) {
+                                        m_velocity.y = v_slope.y;
+                                    }
+                                }
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                            float surf_y = static_cast<float>(y) + 0.5f;
+                            if (box_min.y >= surf_y - 0.60f) {
                                 if (box_min.y < surf_y) {
                                     m_position.y = surf_y + half_extents.y;
                                     m_on_ground = true;
                                     m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
                                 }
                                 continue;
                             }
+                        } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                            float surf_y = static_cast<float>(y + 1);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                }
+                                continue;
+                            }
+                            if (box_max.y < static_cast<float>(y) + 0.5f) {
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_CUBE) {
+                            Voxel v_above = world.get_voxel(check_x, y + 1, z);
+                            if (v_above.is_ramp()) {
+                                float ramp_s = calculate_ramp_surface_y(v_above.shape(), check_x, y + 1, z, m_position.x, m_position.z);
+                                if (box_min.y >= static_cast<float>(y + 1) - 0.60f) {
+                                    m_position.y = std::max(m_position.y, ramp_s + half_extents.y);
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    continue;
+                                }
+                            } else if (!v_above.is_solid()) {
+                                float top_s = static_cast<float>(y + 1);
+                                if (box_min.y >= top_s - 0.60f) {
+                                    m_position.y = top_s + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                    continue;
+                                }
+                            }
                         }
                         has_collision = true;
-                        if (y > min_wall_y) {
-                            only_step = false;
+                        if (y > highest_solid_y) {
+                            highest_solid_y = y;
+                            if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                                step_surf_y = static_cast<float>(y) + 0.5f;
+                            } else {
+                                step_surf_y = static_cast<float>(y + 1);
+                            }
                         }
                     }
                 }
             }
             if (has_collision) {
-                bool can_step = m_on_ground && only_step;
+                float step_height = step_surf_y - box_min.y;
+                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                                (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
-                        if (world.is_solid(glm::ivec3(check_x, min_wall_y + 1, z)) ||
-                            world.is_solid(glm::ivec3(check_x, min_wall_y + 2, z))) {
+                        if (world.is_solid(glm::ivec3(check_x, highest_solid_y + 1, z)) ||
+                            world.is_solid(glm::ivec3(check_x, highest_solid_y + 2, z))) {
                             can_step = false;
                             break;
                         }
@@ -1364,9 +1569,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     }
                 }
                 if (can_step) {
-                    m_position.y += 1.0f;
+                    m_position.y = step_surf_y + half_extents.y;
                     m_on_ground = true;
                     m_isGrounded = true;
+                    m_velocity.y = 0.0f;
                 } else if (try_mantle_x(check_x)) {
                     // Mantled successfully over ledge
                 } else {
@@ -1406,7 +1612,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         if (m_velocity.z > 0.0f) {
             int check_z = static_cast<int>(std::floor(box_max.z));
             bool has_collision = false;
-            bool only_step = true;
+            int highest_solid_y = -1;
+            float step_surf_y = 0.0f;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
                     Voxel vox = world.get_voxel(x, y, check_z);
@@ -1414,27 +1621,84 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                         if (vox.is_ramp()) {
                             float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, check_z, m_position.x, m_position.z);
                             if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y <= surf_y + 0.08f) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    glm::vec3 n = get_ramp_normal(vox.shape());
+                                    glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, n) * n;
+                                    if (v_slope.y >= 0.0f) {
+                                        m_velocity.y = v_slope.y;
+                                    }
+                                }
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                            float surf_y = static_cast<float>(y) + 0.5f;
+                            if (box_min.y >= surf_y - 0.60f) {
                                 if (box_min.y < surf_y) {
                                     m_position.y = surf_y + half_extents.y;
                                     m_on_ground = true;
                                     m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
                                 }
                                 continue;
                             }
+                        } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                            float surf_y = static_cast<float>(y + 1);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                }
+                                continue;
+                            }
+                            if (box_max.y < static_cast<float>(y) + 0.5f) {
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_CUBE) {
+                            Voxel v_above = world.get_voxel(x, y + 1, check_z);
+                            if (v_above.is_ramp()) {
+                                float ramp_s = calculate_ramp_surface_y(v_above.shape(), x, y + 1, check_z, m_position.x, m_position.z);
+                                if (box_min.y >= static_cast<float>(y + 1) - 0.60f) {
+                                    m_position.y = std::max(m_position.y, ramp_s + half_extents.y);
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    continue;
+                                }
+                            } else if (!v_above.is_solid()) {
+                                float top_s = static_cast<float>(y + 1);
+                                if (box_min.y >= top_s - 0.60f) {
+                                    m_position.y = top_s + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                    continue;
+                                }
+                            }
                         }
                         has_collision = true;
-                        if (y > min_wall_y) {
-                            only_step = false;
+                        if (y > highest_solid_y) {
+                            highest_solid_y = y;
+                            if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                                step_surf_y = static_cast<float>(y) + 0.5f;
+                            } else {
+                                step_surf_y = static_cast<float>(y + 1);
+                            }
                         }
                     }
                 }
             }
             if (has_collision) {
-                bool can_step = m_on_ground && only_step;
+                float step_height = step_surf_y - box_min.y;
+                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                                (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
-                        if (world.is_solid(glm::ivec3(x, min_wall_y + 1, check_z)) ||
-                            world.is_solid(glm::ivec3(x, min_wall_y + 2, check_z))) {
+                        if (world.is_solid(glm::ivec3(x, highest_solid_y + 1, check_z)) ||
+                            world.is_solid(glm::ivec3(x, highest_solid_y + 2, check_z))) {
                             can_step = false;
                             break;
                         }
@@ -1452,9 +1716,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     }
                 }
                 if (can_step) {
-                    m_position.y += 1.0f;
+                    m_position.y = step_surf_y + half_extents.y;
                     m_on_ground = true;
                     m_isGrounded = true;
+                    m_velocity.y = 0.0f;
                 } else if (try_mantle_z(check_z)) {
                     // Mantled successfully over ledge
                 } else {
@@ -1466,7 +1731,8 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
         } else if (m_velocity.z < 0.0f) {
             int check_z = static_cast<int>(std::floor(box_min.z));
             bool has_collision = false;
-            bool only_step = true;
+            int highest_solid_y = -1;
+            float step_surf_y = 0.0f;
             for (int y = min_wall_y; y <= max_by; ++y) {
                 for (int x = min_bx; x <= max_bx; ++x) {
                     Voxel vox = world.get_voxel(x, y, check_z);
@@ -1474,27 +1740,84 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                         if (vox.is_ramp()) {
                             float surf_y = calculate_ramp_surface_y(vox.shape(), x, y, check_z, m_position.x, m_position.z);
                             if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y <= surf_y + 0.08f) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    glm::vec3 n = get_ramp_normal(vox.shape());
+                                    glm::vec3 v_slope = m_velocity - glm::dot(m_velocity, n) * n;
+                                    if (v_slope.y >= 0.0f) {
+                                        m_velocity.y = v_slope.y;
+                                    }
+                                }
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                            float surf_y = static_cast<float>(y) + 0.5f;
+                            if (box_min.y >= surf_y - 0.60f) {
                                 if (box_min.y < surf_y) {
                                     m_position.y = surf_y + half_extents.y;
                                     m_on_ground = true;
                                     m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
                                 }
                                 continue;
                             }
+                        } else if (vox.shape() == SHAPE_SLAB_TOP) {
+                            float surf_y = static_cast<float>(y + 1);
+                            if (box_min.y >= surf_y - 0.60f) {
+                                if (box_min.y < surf_y) {
+                                    m_position.y = surf_y + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                }
+                                continue;
+                            }
+                            if (box_max.y < static_cast<float>(y) + 0.5f) {
+                                continue;
+                            }
+                        } else if (vox.shape() == SHAPE_CUBE) {
+                            Voxel v_above = world.get_voxel(x, y + 1, check_z);
+                            if (v_above.is_ramp()) {
+                                float ramp_s = calculate_ramp_surface_y(v_above.shape(), x, y + 1, check_z, m_position.x, m_position.z);
+                                if (box_min.y >= static_cast<float>(y + 1) - 0.60f) {
+                                    m_position.y = std::max(m_position.y, ramp_s + half_extents.y);
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    continue;
+                                }
+                            } else if (!v_above.is_solid()) {
+                                float top_s = static_cast<float>(y + 1);
+                                if (box_min.y >= top_s - 0.60f) {
+                                    m_position.y = top_s + half_extents.y;
+                                    m_on_ground = true;
+                                    m_isGrounded = true;
+                                    m_velocity.y = 0.0f;
+                                    continue;
+                                }
+                            }
                         }
                         has_collision = true;
-                        if (y > min_wall_y) {
-                            only_step = false;
+                        if (y > highest_solid_y) {
+                            highest_solid_y = y;
+                            if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                                step_surf_y = static_cast<float>(y) + 0.5f;
+                            } else {
+                                step_surf_y = static_cast<float>(y + 1);
+                            }
                         }
                     }
                 }
             }
             if (has_collision) {
-                bool can_step = m_on_ground && only_step;
+                float step_height = step_surf_y - box_min.y;
+                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                                (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
-                        if (world.is_solid(glm::ivec3(x, min_wall_y + 1, check_z)) ||
-                            world.is_solid(glm::ivec3(x, min_wall_y + 2, check_z))) {
+                        if (world.is_solid(glm::ivec3(x, highest_solid_y + 1, check_z)) ||
+                            world.is_solid(glm::ivec3(x, highest_solid_y + 2, check_z))) {
                             can_step = false;
                             break;
                         }
@@ -1512,9 +1835,10 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
                     }
                 }
                 if (can_step) {
-                    m_position.y += 1.0f;
+                    m_position.y = step_surf_y + half_extents.y;
                     m_on_ground = true;
                     m_isGrounded = true;
+                    m_velocity.y = 0.0f;
                 } else if (try_mantle_z(check_z)) {
                     // Mantled successfully over ledge
                 } else {
@@ -1554,33 +1878,42 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
         depenetrate(half_extents, world);
     }
 
-    // Ground support probe: ensure m_on_ground stays true while standing or walking on floor
-    if (m_velocity.y <= 0.05f || m_on_ground) {
-        float foot_y = m_position.y - half_extents.y;
-        int ground_y = static_cast<int>(std::floor(foot_y - 0.05f));
-        int min_x = static_cast<int>(std::floor(m_position.x - 0.28f));
-        int max_x = static_cast<int>(std::floor(m_position.x + 0.28f));
-        int min_z = static_cast<int>(std::floor(m_position.z - 0.28f));
-        int max_z = static_cast<int>(std::floor(m_position.z + 0.28f));
+    // Ground support probe: ensure m_on_ground stays true while standing, walking, or ascending on floor/ramp
+    float foot_y = m_position.y - half_extents.y;
+    int ground_y_high = static_cast<int>(std::floor(foot_y + 0.15f));
+    int ground_y_low  = static_cast<int>(std::floor(foot_y - 0.15f));
+    int min_x = static_cast<int>(std::floor(m_position.x - 0.28f));
+    int max_x = static_cast<int>(std::floor(m_position.x + 0.28f));
+    int min_z = static_cast<int>(std::floor(m_position.z - 0.28f));
+    int max_z = static_cast<int>(std::floor(m_position.z + 0.28f));
 
+    for (int gy = ground_y_high; gy >= ground_y_low; --gy) {
         for (int x = min_x; x <= max_x; ++x) {
             for (int z = min_z; z <= max_z; ++z) {
-                if (world.is_solid(glm::ivec3(x, ground_y, z))) {
-                    m_on_ground = true;
-                    m_isGrounded = true;
-                    Voxel vox = world.get_voxel(x, ground_y, z);
-                    if (!vox.is_ramp()) {
-                        if (m_velocity.y < 0.0f) {
+                if (world.is_solid(glm::ivec3(x, gy, z))) {
+                    Voxel vox = world.get_voxel(x, gy, z);
+                    float surf_y = static_cast<float>(gy + 1);
+                    if (vox.is_ramp()) {
+                        surf_y = calculate_ramp_surface_y(vox.shape(), x, gy, z, m_position.x, m_position.z);
+                    } else if (vox.shape() == SHAPE_SLAB_BOTTOM) {
+                        surf_y = static_cast<float>(gy) + 0.5f;
+                    }
+
+                    if (std::abs(foot_y - surf_y) <= 0.18f || (foot_y >= surf_y - 0.18f && foot_y <= surf_y + 0.05f)) {
+                        m_on_ground = true;
+                        m_isGrounded = true;
+                        if (!vox.is_ramp() && m_velocity.y < 0.0f) {
                             apply_fall_impact(-m_velocity.y);
                             m_velocity.y = 0.0f;
+                            m_position.y = surf_y + half_extents.y;
                         }
-                        m_position.y = static_cast<float>(ground_y + 1) + half_extents.y;
+                        break;
                     }
-                    break;
                 }
             }
             if (m_on_ground) break;
         }
+        if (m_on_ground) break;
     }
 
     pos = m_position;

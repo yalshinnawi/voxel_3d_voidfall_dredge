@@ -5,6 +5,16 @@
 
 namespace Voidfall {
 
+static_assert(DynamicDebris::MAX_ACTIVE_DEBRIS == 36, "Active dynamic debris count must be capped at 36");
+
+size_t DynamicDebris::active_debris_count() {
+    return EntityManager::active_debris_count;
+}
+
+size_t DynamicDebris::active_count() {
+    return EntityManager::active_debris_count;
+}
+
 DynamicDebris::DynamicDebris(
     uint32_t id,
     const glm::vec3& position,

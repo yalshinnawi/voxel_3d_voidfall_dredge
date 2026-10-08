@@ -106,7 +106,11 @@ void World::generate_world(int sector_index, uint32_t seed) {
 
     m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     GenerateSectorStructures(sector_index);
-    detect_natural_floor_steps();
+    for (auto& [cpos, chunk] : m_chunks) {
+        if (chunk) {
+            ApplyTopologicalShapes(*chunk);
+        }
+    }
     PopulateFauna();
 
     if (m_enable_background_meshing) {
@@ -297,7 +301,11 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
 
     m_playerSpawnPos = (m_level_gen) ? m_level_gen->spawn_position() : glm::vec3(16.0f, 5.1f, 16.0f);
     GenerateSectorStructures(m_sector_index);
-    detect_natural_floor_steps();
+    for (auto& [cpos, chunk] : m_chunks) {
+        if (chunk) {
+            ApplyTopologicalShapes(*chunk);
+        }
+    }
     PopulateFauna();
 
     for (const auto& pos : to_mesh) {
@@ -551,6 +559,171 @@ Voxel World::get_voxel_unlocked(int world_x, int world_y, int world_z) const {
     int ly = floor_mod(world_y, CHUNK_SIZE);
     int lz = floor_mod(world_z, CHUNK_SIZE);
     return it->second->get_voxel(lx, ly, lz);
+}
+
+void World::ApplyTopologicalShapes(Chunk& chunk) {
+    if (chunk.is_empty()) return;
+    ChunkPos cpos = chunk.get_pos();
+    int base_x = cpos.x * CHUNK_SIZE;
+    int base_y = cpos.y * CHUNK_SIZE;
+    int base_z = cpos.z * CHUNK_SIZE;
+
+    auto get_vox = [&](int lx, int ly, int lz) -> Voxel {
+        if (lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+            return chunk.get_voxel(lx, ly, lz);
+        }
+        int wx = base_x + lx;
+        int wy = base_y + ly;
+        int wz = base_z + lz;
+        if (wy < 0) {
+            return Voxel{MAT_DREDGE_BEDROCK, 0};
+        }
+        return get_voxel_unlocked(wx, wy, wz);
+    };
+
+    auto is_stone_floor = [](const Voxel& v) {
+        return v.is_solid() && (v.material_id == MAT_FRACTURED_GRANITE ||
+                                v.material_id == MAT_VOLCANIC_BASALT ||
+                                v.material_id == MAT_DREDGE_BEDROCK ||
+                                v.material_id == MAT_PRECURSOR_STONE);
+    };
+
+    // Pass 1: Floor Step & Terracing Shape Assignment
+    for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+        for (int ly = 0; ly < CHUNK_SIZE; ++ly) {
+            for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                Voxel cur = chunk.get_voxel(lx, ly, lz);
+                if (!is_stone_floor(cur)) continue;
+
+                Voxel above = get_vox(lx, ly + 1, lz);
+                if (above.is_solid()) continue; // Must have air above
+
+                Voxel below = get_vox(lx, ly - 1, lz);
+                if (!below.is_solid() || below.shape() != SHAPE_CUBE) continue; // Solid Base Support
+
+                // Step candidate checks along each horizontal direction
+                // East (+X):
+                bool step_east = get_vox(lx + 1, ly, lz).is_solid() && get_vox(lx + 1, ly, lz).shape() == SHAPE_CUBE &&
+                                 !get_vox(lx + 1, ly + 1, lz).is_solid() &&
+                                 !get_vox(lx - 1, ly, lz).is_solid() &&
+                                 get_vox(lx - 1, ly - 1, lz).is_solid() &&
+                                 !get_vox(lx, ly + 1, lz).is_solid();
+
+                // West (-X):
+                bool step_west = get_vox(lx - 1, ly, lz).is_solid() && get_vox(lx - 1, ly, lz).shape() == SHAPE_CUBE &&
+                                 !get_vox(lx - 1, ly + 1, lz).is_solid() &&
+                                 !get_vox(lx + 1, ly, lz).is_solid() &&
+                                 get_vox(lx + 1, ly - 1, lz).is_solid() &&
+                                 !get_vox(lx, ly + 1, lz).is_solid();
+
+                // South (+Z):
+                bool step_south = get_vox(lx, ly, lz + 1).is_solid() && get_vox(lx, ly, lz + 1).shape() == SHAPE_CUBE &&
+                                  !get_vox(lx, ly + 1, lz + 1).is_solid() &&
+                                  !get_vox(lx, ly, lz - 1).is_solid() &&
+                                  get_vox(lx, ly - 1, lz - 1).is_solid() &&
+                                  !get_vox(lx, ly + 1, lz).is_solid();
+
+                // North (-Z):
+                bool step_north = get_vox(lx, ly, lz - 1).is_solid() && get_vox(lx, ly, lz - 1).shape() == SHAPE_CUBE &&
+                                  !get_vox(lx, ly + 1, lz - 1).is_solid() &&
+                                  !get_vox(lx, ly, lz + 1).is_solid() &&
+                                  get_vox(lx, ly - 1, lz + 1).is_solid() &&
+                                  !get_vox(lx, ly + 1, lz).is_solid();
+
+                int step_count = (step_east ? 1 : 0) + (step_west ? 1 : 0) +
+                                 (step_south ? 1 : 0) + (step_north ? 1 : 0);
+
+                if (cur.shape() == SHAPE_CUBE) {
+                    if (step_count == 1) {
+                        if (step_east) cur.set_shape(SHAPE_RAMP_EAST);
+                        else if (step_west) cur.set_shape(SHAPE_RAMP_WEST);
+                        else if (step_south) cur.set_shape(SHAPE_RAMP_SOUTH);
+                        else if (step_north) cur.set_shape(SHAPE_RAMP_NORTH);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                    } else if (step_count > 1) {
+                        // Terracing via half-slabs on multi-step perimeter edges
+                        cur.set_shape(SHAPE_SLAB_BOTTOM);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 2: Strict Invariant Enforcement & Smoothing Pass
+    for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+        for (int ly = 0; ly < CHUNK_SIZE; ++ly) {
+            for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                Voxel cur = chunk.get_voxel(lx, ly, lz);
+                if (!cur.is_solid()) continue;
+
+                // 1. Solid Base Support:
+                // A ground slope or slab may ONLY exist if (x, y-1, z) is a solid, non-sloped cube (SHAPE_CUBE).
+                if (cur.is_ramp() || cur.is_slab()) {
+                    Voxel below = get_vox(lx, ly - 1, lz);
+                    if (!below.is_solid() || below.shape() != SHAPE_CUBE) {
+                        cur.set_shape(SHAPE_CUBE);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        continue;
+                    }
+                }
+
+                // 2. Headroom Check:
+                if (cur.is_ramp()) {
+                    Voxel above = get_vox(lx, ly + 1, lz);
+                    if (above.is_solid()) {
+                        cur.set_shape(SHAPE_CUBE);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        continue;
+                    }
+                }
+
+                // 3. No Opposing Sawtooth Peaks:
+                // Never generate opposing ramps in adjacent cells
+                if (cur.shape() == SHAPE_RAMP_EAST) {
+                    Voxel east_n = get_vox(lx + 1, ly, lz);
+                    if (east_n.shape() == SHAPE_RAMP_WEST) {
+                        cur.set_shape(SHAPE_SLAB_BOTTOM);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        if (lx + 1 < CHUNK_SIZE) {
+                            east_n.set_shape(SHAPE_SLAB_BOTTOM);
+                            chunk.set_voxel(lx + 1, ly, lz, east_n);
+                        }
+                    }
+                } else if (cur.shape() == SHAPE_RAMP_WEST) {
+                    Voxel west_n = get_vox(lx - 1, ly, lz);
+                    if (west_n.shape() == SHAPE_RAMP_EAST) {
+                        cur.set_shape(SHAPE_SLAB_BOTTOM);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        if (lx - 1 >= 0) {
+                            west_n.set_shape(SHAPE_SLAB_BOTTOM);
+                            chunk.set_voxel(lx - 1, ly, lz, west_n);
+                        }
+                    }
+                } else if (cur.shape() == SHAPE_RAMP_SOUTH) {
+                    Voxel south_n = get_vox(lx, ly, lz + 1);
+                    if (south_n.shape() == SHAPE_RAMP_NORTH) {
+                        cur.set_shape(SHAPE_SLAB_BOTTOM);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        if (lz + 1 < CHUNK_SIZE) {
+                            south_n.set_shape(SHAPE_SLAB_BOTTOM);
+                            chunk.set_voxel(lx, ly, lz + 1, south_n);
+                        }
+                    }
+                } else if (cur.shape() == SHAPE_RAMP_NORTH) {
+                    Voxel north_n = get_vox(lx, ly, lz - 1);
+                    if (north_n.shape() == SHAPE_RAMP_SOUTH) {
+                        cur.set_shape(SHAPE_SLAB_BOTTOM);
+                        chunk.set_voxel(lx, ly, lz, cur);
+                        if (lz - 1 >= 0) {
+                            north_n.set_shape(SHAPE_SLAB_BOTTOM);
+                            chunk.set_voxel(lx, ly, lz - 1, north_n);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void World::detect_natural_floor_steps() {
@@ -864,9 +1037,12 @@ size_t World::upload_mesh_queue(size_t max_uploads) {
     return uploadsDone;
 }
 
+static_assert(World::MAX_CHUNK_UPLOADS_PER_FRAME == 2, "World::MAX_CHUNK_UPLOADS_PER_FRAME must be 2");
+static_assert(World::MAX_ACTIVE_DEBRIS == 36, "World::MAX_ACTIVE_DEBRIS must be 36");
+static_assert(EntityManager::MAX_ACTIVE_DEBRIS == 36, "EntityManager::MAX_ACTIVE_DEBRIS must be 36");
+
 void World::update() {
-    constexpr int MAX_CHUNK_UPLOADS_PER_FRAME = 2;
-    int uploadsDone = 0;
+    size_t uploadsDone = 0;
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
         while (!m_pendingUploads.empty() && uploadsDone < MAX_CHUNK_UPLOADS_PER_FRAME) {
@@ -884,8 +1060,7 @@ void World::update() {
 
 void World::update(const glm::vec3& viewer_pos, int render_distance) {
     // Amortize OpenGL driver overhead: upload at most MAX_CHUNK_UPLOADS_PER_FRAME buffers per frame
-    constexpr int MAX_CHUNK_UPLOADS_PER_FRAME = 2;
-    int uploadsDone = 0;
+    size_t uploadsDone = 0;
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
         while (!m_pendingUploads.empty() && uploadsDone < MAX_CHUNK_UPLOADS_PER_FRAME) {

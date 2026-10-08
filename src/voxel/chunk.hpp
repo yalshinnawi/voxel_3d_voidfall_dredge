@@ -75,6 +75,33 @@ public:
 
     void set_voxel(int x, int y, int z, Voxel v);
 
+    inline uint8_t GetFlags(int x, int y, int z) const {
+        if (!in_bounds(x, y, z)) return 0;
+        return m_voxels[to_index(x, y, z)].flags_and_damage;
+    }
+
+    inline void SetFlags(int x, int y, int z, uint8_t flags) {
+        if (!in_bounds(x, y, z)) return;
+        m_voxels[to_index(x, y, z)].flags_and_damage = flags;
+        mark_mesh_dirty();
+        mark_structural_dirty();
+    }
+
+    inline uint8_t get_flags(int x, int y, int z) const { return GetFlags(x, y, z); }
+    inline void set_flags(int x, int y, int z, uint8_t flags) { SetFlags(x, y, z, flags); }
+
+    inline VoxelShape GetShape(int x, int y, int z) const {
+        return static_cast<VoxelShape>(GetFlags(x, y, z) & VOXEL_SHAPE_MASK);
+    }
+
+    inline void SetShape(int x, int y, int z, VoxelShape shape) {
+        uint8_t current = GetFlags(x, y, z);
+        SetFlags(x, y, z, (current & ~VOXEL_SHAPE_MASK) | static_cast<uint8_t>(shape));
+    }
+
+    inline VoxelShape get_shape(int x, int y, int z) const { return GetShape(x, y, z); }
+    inline void set_shape(int x, int y, int z, VoxelShape shape) { SetShape(x, y, z, shape); }
+
     inline Voxel get_voxel_idx(size_t idx) const {
         if (idx < m_voxels.size()) {
             return m_voxels[idx];

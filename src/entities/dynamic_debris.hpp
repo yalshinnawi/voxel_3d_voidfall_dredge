@@ -14,6 +14,10 @@ struct DebrisBlock {
 
 class DynamicDebris {
 public:
+    static constexpr size_t MAX_ACTIVE_DEBRIS = 36;
+    static size_t active_debris_count();
+    static size_t active_count();
+
     DynamicDebris(
         uint32_t id,
         const glm::vec3& position,

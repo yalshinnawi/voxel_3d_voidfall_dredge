@@ -1,5 +1,6 @@
 #include "greedy_mesher.hpp"
 #include <array>
+#include <algorithm>
 
 namespace Voidfall {
 
@@ -57,7 +58,7 @@ Voxel GreedyMesher::sample_voxel(
         return neighbor->get_voxel(nx, ny, nz);
     }
 
-    // Treat unloaded neighbor boundaries as solid granite to prevent void leaks and seam culling
+    // Treat unloaded neighbor boundaries as solid granite (SHAPE_CUBE) to prevent void leaks and seam culling
     return Voxel{MAT_FRACTURED_GRANITE, 0};
 }
 
@@ -65,16 +66,16 @@ glm::vec3 GreedyMesher::calculate_diagonal_normal(VoxelShape shape) {
     glm::vec3 n_base(0.0f, 1.0f, 0.0f);
     glm::vec3 n_side(0.0f);
     switch (shape) {
-        case SHAPE_RAMP_POS_X:
+        case SHAPE_RAMP_EAST: // POS_X
             n_side = glm::vec3(-1.0f, 0.0f, 0.0f);
             break;
-        case SHAPE_RAMP_NEG_X:
+        case SHAPE_RAMP_WEST: // NEG_X
             n_side = glm::vec3( 1.0f, 0.0f, 0.0f);
             break;
-        case SHAPE_RAMP_POS_Z:
+        case SHAPE_RAMP_SOUTH: // POS_Z
             n_side = glm::vec3( 0.0f, 0.0f, -1.0f);
             break;
-        case SHAPE_RAMP_NEG_Z:
+        case SHAPE_RAMP_NORTH: // NEG_Z
             n_side = glm::vec3( 0.0f, 0.0f,  1.0f);
             break;
         default:
@@ -83,15 +84,30 @@ glm::vec3 GreedyMesher::calculate_diagonal_normal(VoxelShape shape) {
     return glm::normalize(n_base + n_side);
 }
 
-inline bool is_face_occluded(Voxel current, Voxel neighbor) {
+static inline uint32_t get_emissive_intensity(uint32_t mat_id) {
+    switch (mat_id) {
+        case MAT_VOIDITE_CRYSTAL: return 220;
+        case MAT_THERMITE_SLAG: return 255;
+        case MAT_RADIOACTIVE_ORE: return 180;
+        case MAT_PRISMATIC_CRYSTAL: return 210;
+        case MAT_BIOLUMINESCENT_FLORA: return 175;
+        case MAT_OBSIDIAN_SPIKES: return 190;
+        case MAT_CRYSTAL_AQUIFER: return 80;
+        default: return 0;
+    }
+}
+
+static inline bool is_face_occluded(Voxel current, Voxel neighbor) {
     if (!neighbor.is_renderable()) {
         return false;
     }
     if (current.is_liquid()) {
-        // Liquid faces are occluded by the same liquid, or by solid voxels
         return neighbor.material_id == current.material_id || neighbor.is_solid();
     }
-    // Solid voxels are occluded by other solid voxels
+    // Solid voxels: a full cube is ONLY occluded if neighbor provides a 100% flush face (solid cube)
+    if (current.shape() == SHAPE_CUBE) {
+        return neighbor.is_solid() && (neighbor.shape() == SHAPE_CUBE);
+    }
     return neighbor.is_solid();
 }
 
@@ -105,20 +121,7 @@ bool GreedyMesher::is_face_visible(
     if (!current.is_renderable()) {
         return false;
     }
-    if (current.is_ramp()) {
-        // Top horizontal face is replaced by diagonal slope plane
-        if (ny > y) return false;
-        // Suppress lower step edge vertical face
-        VoxelShape s = current.shape();
-        if (s == SHAPE_RAMP_POS_X && nx < x) return false;
-        if (s == SHAPE_RAMP_NEG_X && nx > x) return false;
-        if (s == SHAPE_RAMP_POS_Z && nz < z) return false;
-        if (s == SHAPE_RAMP_NEG_Z && nz > z) return false;
-    }
     Voxel neighbor = sample_voxel(chunk, get_neighbor, nx, ny, nz);
-    if (current.is_ramp() && neighbor.shape() == current.shape()) {
-        return false;
-    }
     return !is_face_occluded(current, neighbor);
 }
 
@@ -131,19 +134,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
         return vertices;
     }
 
-    // Reserve reasonable initial capacity
     vertices.reserve(2048);
-
-    // 6 Directions / Faces
-    // 0: +X, 1: -X, 2: +Y, 3: -Y, 4: +Z, 5: -Z
-    const int normal_dirs[6][3] = {
-        { 1,  0,  0}, // +X (0)
-        {-1,  0,  0}, // -X (1)
-        { 0,  1,  0}, // +Y (2)
-        { 0, -1,  0}, // -Y (3)
-        { 0,  0,  1}, // +Z (4)
-        { 0,  0, -1}  // -Z (5)
-    };
 
     struct FaceQuad {
         Voxel voxel;
@@ -151,7 +142,9 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
         bool visible{false};
     };
 
-    // Meshing across 3 axes
+    // ─────────────────────────────────────────────────────────────
+    // PART 1: 3-Axis Greedy Quad Meshing for SHAPE_CUBE Blocks
+    // ─────────────────────────────────────────────────────────────
     for (int d = 0; d < 3; ++d) {
         int u = (d + 1) % 3;
         int v = (d + 2) % 3;
@@ -161,9 +154,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
 
         std::array<FaceQuad, CHUNK_SIZE * CHUNK_SIZE> mask;
 
-        // Iterate through all slices along axis d
         for (x[d] = 0; x[d] < CHUNK_SIZE; ++x[d]) {
-            // For both forward (+1) and backward (-1) faces
             for (int face_dir = 0; face_dir < 2; ++face_dir) {
                 int norm_idx = (d * 2) + face_dir;
                 int dir_step = (face_dir == 0) ? 1 : -1;
@@ -178,21 +169,8 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         mask[mask_idx].visible = false;
 
                         Voxel current = chunk.get_voxel(x[0], x[1], x[2]);
-                        if (!current.is_renderable()) {
+                        if (!current.is_renderable() || current.shape() != SHAPE_CUBE) {
                             continue;
-                        }
-
-                        if (current.is_ramp()) {
-                            // Suppress top horizontal quad (+Y) - replaced by diagonal plane
-                            if (d == 1 && face_dir == 0) {
-                                continue;
-                            }
-                            // Suppress vertical side quad at the lower step edge
-                            VoxelShape s = current.shape();
-                            if (s == SHAPE_RAMP_POS_X && d == 0 && face_dir == 1) continue; // -X
-                            if (s == SHAPE_RAMP_NEG_X && d == 0 && face_dir == 0) continue; // +X
-                            if (s == SHAPE_RAMP_POS_Z && d == 2 && face_dir == 1) continue; // -Z
-                            if (s == SHAPE_RAMP_NEG_Z && d == 2 && face_dir == 0) continue; // +Z
                         }
 
                         int nx = x[0] + q[0];
@@ -202,20 +180,25 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                             ? chunk.get_voxel(nx, ny, nz)
                             : sample_voxel(chunk, get_neighbor, nx, ny, nz);
 
-                        // Adjacent coplanar ramps of the same shape along perpendicular axis occlude each other
-                        if (current.is_ramp() && neighbor.shape() == current.shape()) {
-                            continue;
-                        }
-
-                        if (is_face_occluded(current, neighbor)) {
-                            continue;
+                        // Boundary Face Culling Rule:
+                        // A face may ONLY be culled if the neighbor cell is opaque AND provides
+                        // a 100% coplanar, flush surface across that entire boundary quad.
+                        // If a full cube touches a SHAPE_RAMP_*, SHAPE_SLAB_*, or SHAPE_CORNER_*,
+                        // the full cube must render its full boundary quad facing that cell!
+                        if (current.is_liquid()) {
+                            if (neighbor.material_id == current.material_id || neighbor.is_solid()) {
+                                continue;
+                            }
+                        } else {
+                            if (neighbor.is_solid() && neighbor.shape() == SHAPE_CUBE) {
+                                continue;
+                            }
                         }
 
                         mask[mask_idx].visible = true;
                         mask[mask_idx].voxel = current;
 
                         // Calculate Baked Vertex AO for the 4 corners
-                        // Tangent offsets:
                         int tu[3] = {0, 0, 0}; tu[u] = 1;
                         int tv[3] = {0, 0, 0}; tv[v] = 1;
 
@@ -223,7 +206,6 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         int by = x[1] + q[1];
                         int bz = x[2] + q[2];
 
-                        // Check 8 neighbors in the adjacent face plane
                         bool s_left   = sample_voxel(chunk, get_neighbor, bx - tu[0], by - tu[1], bz - tu[2]).is_solid();
                         bool s_right  = sample_voxel(chunk, get_neighbor, bx + tu[0], by + tu[1], bz + tu[2]).is_solid();
                         bool s_down   = sample_voxel(chunk, get_neighbor, bx - tv[0], by - tv[1], bz - tv[2]).is_solid();
@@ -234,10 +216,10 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         bool c_ru = sample_voxel(chunk, get_neighbor, bx + tu[0] + tv[0], by + tu[1] + tv[1], bz + tu[2] + tv[2]).is_solid();
                         bool c_lu = sample_voxel(chunk, get_neighbor, bx - tu[0] + tv[0], by - tu[1] + tv[1], bz - tu[2] + tv[2]).is_solid();
 
-                        mask[mask_idx].ao[0] = compute_vertex_ao(s_left, s_down, c_ld);  // Corner (0, 0)
-                        mask[mask_idx].ao[1] = compute_vertex_ao(s_right, s_down, c_rd); // Corner (1, 0)
-                        mask[mask_idx].ao[2] = compute_vertex_ao(s_right, s_up, c_ru);   // Corner (1, 1)
-                        mask[mask_idx].ao[3] = compute_vertex_ao(s_left, s_up, c_lu);    // Corner (0, 1)
+                        mask[mask_idx].ao[0] = compute_vertex_ao(s_left, s_down, c_ld);
+                        mask[mask_idx].ao[1] = compute_vertex_ao(s_right, s_down, c_rd);
+                        mask[mask_idx].ao[2] = compute_vertex_ao(s_right, s_up, c_ru);
+                        mask[mask_idx].ao[3] = compute_vertex_ao(s_left, s_up, c_lu);
                     }
                 }
 
@@ -252,7 +234,6 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
 
                         FaceQuad root = mask[idx];
                         int width = 1;
-                        // Extend along U axis (blocks must match material, damage, and AO values)
                         while (i + width < CHUNK_SIZE) {
                             int next_idx = (i + width) + j * CHUNK_SIZE;
                             const FaceQuad& next = mask[next_idx];
@@ -288,14 +269,12 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                             }
                         }
 
-                        // Mark merged quads as processed
                         for (int dy = 0; dy < height; ++dy) {
                             for (int dx = 0; dx < width; ++dx) {
                                 mask[(i + dx) + (j + dy) * CHUNK_SIZE].visible = false;
                             }
                         }
 
-                        // Corner vertex coordinates in 3D
                         int p[3];
                         p[d] = x[d] + (face_dir == 0 ? 1 : 0);
                         p[u] = i;
@@ -306,80 +285,43 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
 
                         uint32_t mat_id = root.voxel.material_id;
                         uint32_t damage = root.voxel.damage();
-                        uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
-                                            (mat_id == MAT_THERMITE_SLAG) ? 255 :
-                                            (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
-                                            (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
-                                            (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
-                                            (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
-                                            (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
+                        uint32_t emissive = get_emissive_intensity(mat_id);
                         uint32_t aux = root.voxel.is_highlighted() ? 1 : 0;
 
-                        // 4 Quad vertices with actual quad corner AO
                         uint8_t ao0 = mask[i + j * CHUNK_SIZE].ao[0];
                         uint8_t ao1 = mask[(i + width - 1) + j * CHUNK_SIZE].ao[1];
                         uint8_t ao2 = mask[(i + width - 1) + (j + height - 1) * CHUNK_SIZE].ao[2];
                         uint8_t ao3 = mask[i + (j + height - 1) * CHUNK_SIZE].ao[3];
 
                         PackedVoxelVertex vert0 = PackedVoxelVertex::encode(
-                            p[0], p[1], p[2],
-                            norm_idx, ao0, mat_id,
-                            width, height, 0, damage, emissive, aux
+                            p[0], p[1], p[2], norm_idx, ao0, mat_id, width, height, 0, damage, emissive, aux
                         );
                         PackedVoxelVertex vert1 = PackedVoxelVertex::encode(
-                            p[0] + du[0], p[1] + du[1], p[2] + du[2],
-                            norm_idx, ao1, mat_id,
-                            width, height, 1, damage, emissive, aux
+                            p[0] + du[0], p[1] + du[1], p[2] + du[2], norm_idx, ao1, mat_id, width, height, 1, damage, emissive, aux
                         );
                         PackedVoxelVertex vert2 = PackedVoxelVertex::encode(
-                            p[0] + du[0] + dv[0], p[1] + du[1] + dv[1], p[2] + du[2] + dv[2],
-                            norm_idx, ao2, mat_id,
-                            width, height, 2, damage, emissive, aux
+                            p[0] + du[0] + dv[0], p[1] + du[1] + dv[1], p[2] + du[2] + dv[2], norm_idx, ao2, mat_id, width, height, 2, damage, emissive, aux
                         );
                         PackedVoxelVertex vert3 = PackedVoxelVertex::encode(
-                            p[0] + dv[0], p[1] + dv[1], p[2] + dv[2],
-                            norm_idx, ao3, mat_id,
-                            width, height, 3, damage, emissive, aux
+                            p[0] + dv[0], p[1] + dv[1], p[2] + dv[2], norm_idx, ao3, mat_id, width, height, 3, damage, emissive, aux
                         );
 
-                        // Winding order and AO anisotropy diagonal flip
                         bool flip_diag = (ao0 + ao2) < (ao1 + ao3);
-
-                        if (face_dir == 0) { // Forward face (+X, +Y, +Z)
+                        if (face_dir == 0) {
                             if (flip_diag) {
-                                vertices.push_back(vert0);
-                                vertices.push_back(vert1);
-                                vertices.push_back(vert2);
-
-                                vertices.push_back(vert0);
-                                vertices.push_back(vert2);
-                                vertices.push_back(vert3);
+                                vertices.push_back(vert0); vertices.push_back(vert1); vertices.push_back(vert2);
+                                vertices.push_back(vert0); vertices.push_back(vert2); vertices.push_back(vert3);
                             } else {
-                                vertices.push_back(vert1);
-                                vertices.push_back(vert2);
-                                vertices.push_back(vert3);
-
-                                vertices.push_back(vert1);
-                                vertices.push_back(vert3);
-                                vertices.push_back(vert0);
+                                vertices.push_back(vert1); vertices.push_back(vert2); vertices.push_back(vert3);
+                                vertices.push_back(vert1); vertices.push_back(vert3); vertices.push_back(vert0);
                             }
-                        } else { // Backward face (-X, -Y, -Z)
+                        } else {
                             if (flip_diag) {
-                                vertices.push_back(vert0);
-                                vertices.push_back(vert2);
-                                vertices.push_back(vert1);
-
-                                vertices.push_back(vert0);
-                                vertices.push_back(vert3);
-                                vertices.push_back(vert2);
+                                vertices.push_back(vert0); vertices.push_back(vert2); vertices.push_back(vert1);
+                                vertices.push_back(vert0); vertices.push_back(vert3); vertices.push_back(vert2);
                             } else {
-                                vertices.push_back(vert1);
-                                vertices.push_back(vert3);
-                                vertices.push_back(vert2);
-
-                                vertices.push_back(vert1);
-                                vertices.push_back(vert0);
-                                vertices.push_back(vert3);
+                                vertices.push_back(vert1); vertices.push_back(vert3); vertices.push_back(vert2);
+                                vertices.push_back(vert1); vertices.push_back(vert0); vertices.push_back(vert3);
                             }
                         }
 
@@ -390,26 +332,55 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
         }
     }
 
-    // 3. Sloped Greedy Meshing for voxels with SHAPE_RAMP_*
-    // Pass A: Slopes along X (SHAPE_RAMP_POS_X, SHAPE_RAMP_NEG_X) - Perpendicular axis is Z
+    // ─────────────────────────────────────────────────────────────
+    // PART 2: Watertight Self-Enclosing Meshing for SHAPE_RAMP_*
+    // ─────────────────────────────────────────────────────────────
+    // Helper lambda to emit a quad (2 triangles / 6 vertices)
+    auto emit_quad = [&](
+        const glm::ivec3& p0, const glm::ivec3& p1, const glm::ivec3& p2, const glm::ivec3& p3,
+        uint32_t norm_idx, uint32_t mat_id, uint32_t u_dim, uint32_t v_dim,
+        uint32_t damage, uint32_t emissive, uint32_t aux, uint32_t sub_y_half = 0
+    ) {
+        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half);
+        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half);
+        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half);
+        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half);
+
+        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+    };
+
+    // Helper lambda to emit a triangular side cap (1 triangle / 3 vertices)
+    auto emit_triangle = [&](
+        const glm::ivec3& p0, const glm::ivec3& p1, const glm::ivec3& p2,
+        uint32_t norm_idx, uint32_t mat_id,
+        uint32_t damage, uint32_t emissive, uint32_t aux
+    ) {
+        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, 1, 1, 0, damage, emissive, aux);
+        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, 1, 1, 1, damage, emissive, aux);
+        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, 1, 1, 2, damage, emissive, aux);
+
+        vertices.push_back(v0);
+        vertices.push_back(v1);
+        vertices.push_back(v2);
+    };
+
+    // Pass 2A: Ramps along X (SHAPE_RAMP_EAST, SHAPE_RAMP_WEST) - Perpendicular axis Z
     for (int y = 0; y < CHUNK_SIZE; ++y) {
         for (int x = 0; x < CHUNK_SIZE; ++x) {
             for (int z = 0; z < CHUNK_SIZE; ) {
                 Voxel cur = chunk.get_voxel(x, y, z);
                 VoxelShape s = cur.shape();
-                if (s != SHAPE_RAMP_POS_X && s != SHAPE_RAMP_NEG_X) {
+                if (s != SHAPE_RAMP_EAST && s != SHAPE_RAMP_WEST) {
                     ++z;
                     continue;
                 }
 
-                // Check headroom / visibility (solid block directly above occludes the slope)
+                // Headroom check: solid cube directly above occludes hypotenuse
                 Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
-                if (above.is_solid()) {
-                    ++z;
-                    continue;
-                }
+                bool above_solid = above.is_solid() && (above.shape() == SHAPE_CUBE);
 
-                // Greedy merge adjacent coplanar ramp voxels along perpendicular axis Z
+                // Run-length greedy merging along perpendicular axis Z
                 int width = 1;
                 while (z + width < CHUNK_SIZE) {
                     Voxel next_v = chunk.get_voxel(x, y, z + width);
@@ -419,83 +390,146 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         break;
                     }
                     Voxel next_above = sample_voxel(chunk, get_neighbor, x, y + 1, z + width);
-                    if (next_above.is_solid()) {
+                    if (next_above.is_solid() && next_above.shape() == SHAPE_CUBE) {
                         break;
                     }
                     ++width;
                 }
 
-                // Calculate diagonal normal (N = normalize(N_base + N_side))
-                glm::vec3 diag_normal = calculate_diagonal_normal(s);
-                (void)diag_normal;
-
                 uint32_t mat_id = cur.material_id;
                 uint32_t damage = cur.damage();
-                uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
-                                    (mat_id == MAT_THERMITE_SLAG) ? 255 :
-                                    (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
-                                    (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
-                                    (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
-                                    (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
-                                    (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
+                uint32_t emissive = get_emissive_intensity(mat_id);
                 uint32_t aux = cur.is_highlighted() ? 1 : 0;
 
-                // Ambient Occlusion along strip endpoints
-                bool s_z_start_neg = sample_voxel(chunk, get_neighbor, x, y + 1, z - 1).is_solid();
-                bool s_z_end_pos   = sample_voxel(chunk, get_neighbor, x, y + 1, z + width).is_solid();
-                uint8_t ao_start = s_z_start_neg ? 1 : 0;
-                uint8_t ao_end   = s_z_end_pos ? 1 : 0;
-
-                // Base normal index 2 (+Y) maintains shader array bounds and lighting
-                uint32_t norm_idx = 2;
-
-                PackedVoxelVertex v0, v1, v2, v3;
-                if (s == SHAPE_RAMP_POS_X) {
-                    // Lower edge at X = x, Y = y; Upper edge at X = x + 1, Y = y + 1
-                    v0 = PackedVoxelVertex::encode(x,     y,     z,         norm_idx, ao_start, mat_id, width, 1, 0, damage, emissive, aux);
-                    v1 = PackedVoxelVertex::encode(x,     y,     z + width, norm_idx, ao_end,   mat_id, width, 1, 1, damage, emissive, aux);
-                    v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + width, norm_idx, ao_end,   mat_id, width, 1, 2, damage, emissive, aux);
-                    v3 = PackedVoxelVertex::encode(x + 1, y + 1, z,         norm_idx, ao_start, mat_id, width, 1, 3, damage, emissive, aux);
-                } else { // SHAPE_RAMP_NEG_X
-                    // Lower edge at X = x + 1, Y = y; Upper edge at X = x, Y = y + 1
-                    v0 = PackedVoxelVertex::encode(x + 1, y,     z + width, norm_idx, ao_end,   mat_id, width, 1, 0, damage, emissive, aux);
-                    v1 = PackedVoxelVertex::encode(x + 1, y,     z,         norm_idx, ao_start, mat_id, width, 1, 1, damage, emissive, aux);
-                    v2 = PackedVoxelVertex::encode(x,     y + 1, z,         norm_idx, ao_start, mat_id, width, 1, 2, damage, emissive, aux);
-                    v3 = PackedVoxelVertex::encode(x,     y + 1, z + width, norm_idx, ao_end,   mat_id, width, 1, 3, damage, emissive, aux);
+                // 1. Hypotenuse Quad (45° diagonal plane)
+                if (!above_solid) {
+                    if (s == SHAPE_RAMP_EAST) {
+                        emit_quad(
+                            glm::ivec3(x,     y,     z),
+                            glm::ivec3(x,     y,     z + width),
+                            glm::ivec3(x + 1, y + 1, z + width),
+                            glm::ivec3(x + 1, y + 1, z),
+                            2, mat_id, width, 1, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_WEST
+                        emit_quad(
+                            glm::ivec3(x + 1, y,     z + width),
+                            glm::ivec3(x + 1, y,     z),
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x,     y + 1, z + width),
+                            2, mat_id, width, 1, damage, emissive, aux
+                        );
+                    }
                 }
 
-                vertices.push_back(v0);
-                vertices.push_back(v1);
-                vertices.push_back(v2);
+                // 2. Floor Base Quad (facing -Y)
+                for (int k = 0; k < width; ++k) {
+                    Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z + k);
+                    bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP);
+                    if (!below_flush) {
+                        emit_quad(
+                            glm::ivec3(x,     y, z + k),
+                            glm::ivec3(x + 1, y, z + k),
+                            glm::ivec3(x + 1, y, z + k + 1),
+                            glm::ivec3(x,     y, z + k + 1),
+                            3, mat_id, 1, 1, damage, emissive, aux
+                        );
+                    }
+                }
 
-                vertices.push_back(v0);
-                vertices.push_back(v2);
-                vertices.push_back(v3);
+                // 3. Vertical Back Quad (high end)
+                for (int k = 0; k < width; ++k) {
+                    if (s == SHAPE_RAMP_EAST) {
+                        Voxel back_n = sample_voxel(chunk, get_neighbor, x + 1, y, z + k);
+                        bool back_flush = back_n.is_solid() && (back_n.shape() == SHAPE_CUBE);
+                        if (!back_flush) {
+                            emit_quad(
+                                glm::ivec3(x + 1, y,     z + k + 1),
+                                glm::ivec3(x + 1, y,     z + k),
+                                glm::ivec3(x + 1, y + 1, z + k),
+                                glm::ivec3(x + 1, y + 1, z + k + 1),
+                                0, mat_id, 1, 1, damage, emissive, aux
+                            );
+                        }
+                    } else { // SHAPE_RAMP_WEST
+                        Voxel back_n = sample_voxel(chunk, get_neighbor, x - 1, y, z + k);
+                        bool back_flush = back_n.is_solid() && (back_n.shape() == SHAPE_CUBE);
+                        if (!back_flush) {
+                            emit_quad(
+                                glm::ivec3(x, y,     z + k),
+                                glm::ivec3(x, y,     z + k + 1),
+                                glm::ivec3(x, y + 1, z + k + 1),
+                                glm::ivec3(x, y + 1, z + k),
+                                1, mat_id, 1, 1, damage, emissive, aux
+                            );
+                        }
+                    }
+                }
+
+                // 4. Two Triangular Side Walls
+                // Flank at start (-Z)
+                Voxel side_neg = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                bool side_neg_flush = side_neg.is_solid() && (side_neg.shape() == SHAPE_CUBE || side_neg.shape() == s);
+                if (!side_neg_flush) {
+                    if (s == SHAPE_RAMP_EAST) {
+                        emit_triangle(
+                            glm::ivec3(x,     y,     z),
+                            glm::ivec3(x + 1, y + 1, z),
+                            glm::ivec3(x + 1, y,     z),
+                            5, mat_id, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_WEST
+                        emit_triangle(
+                            glm::ivec3(x + 1, y,     z),
+                            glm::ivec3(x,     y,     z),
+                            glm::ivec3(x,     y + 1, z),
+                            5, mat_id, damage, emissive, aux
+                        );
+                    }
+                }
+
+                // Flank at end (+Z)
+                Voxel side_pos = sample_voxel(chunk, get_neighbor, x, y, z + width);
+                bool side_pos_flush = side_pos.is_solid() && (side_pos.shape() == SHAPE_CUBE || side_pos.shape() == s);
+                if (!side_pos_flush) {
+                    if (s == SHAPE_RAMP_EAST) {
+                        emit_triangle(
+                            glm::ivec3(x,     y,     z + width),
+                            glm::ivec3(x + 1, y,     z + width),
+                            glm::ivec3(x + 1, y + 1, z + width),
+                            4, mat_id, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_WEST
+                        emit_triangle(
+                            glm::ivec3(x + 1, y,     z + width),
+                            glm::ivec3(x,     y + 1, z + width),
+                            glm::ivec3(x,     y,     z + width),
+                            4, mat_id, damage, emissive, aux
+                        );
+                    }
+                }
 
                 z += width;
             }
         }
     }
 
-    // Pass B: Slopes along Z (SHAPE_RAMP_POS_Z, SHAPE_RAMP_NEG_Z) - Perpendicular axis is X
+    // Pass 2B: Ramps along Z (SHAPE_RAMP_SOUTH, SHAPE_RAMP_NORTH) - Perpendicular axis X
     for (int y = 0; y < CHUNK_SIZE; ++y) {
         for (int z = 0; z < CHUNK_SIZE; ++z) {
             for (int x = 0; x < CHUNK_SIZE; ) {
                 Voxel cur = chunk.get_voxel(x, y, z);
                 VoxelShape s = cur.shape();
-                if (s != SHAPE_RAMP_POS_Z && s != SHAPE_RAMP_NEG_Z) {
+                if (s != SHAPE_RAMP_SOUTH && s != SHAPE_RAMP_NORTH) {
                     ++x;
                     continue;
                 }
 
-                // Check headroom / visibility
+                // Headroom check
                 Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
-                if (above.is_solid()) {
-                    ++x;
-                    continue;
-                }
+                bool above_solid = above.is_solid() && (above.shape() == SHAPE_CUBE);
 
-                // Greedy merge adjacent coplanar ramp voxels along perpendicular axis X
+                // Run-length greedy merging along perpendicular axis X
                 int width = 1;
                 while (x + width < CHUNK_SIZE) {
                     Voxel next_v = chunk.get_voxel(x + width, y, z);
@@ -505,58 +539,354 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                         break;
                     }
                     Voxel next_above = sample_voxel(chunk, get_neighbor, x + width, y + 1, z);
-                    if (next_above.is_solid()) {
+                    if (next_above.is_solid() && next_above.shape() == SHAPE_CUBE) {
                         break;
                     }
                     ++width;
                 }
 
-                // Calculate diagonal normal (N = normalize(N_base + N_side))
-                glm::vec3 diag_normal = calculate_diagonal_normal(s);
-                (void)diag_normal;
+                uint32_t mat_id = cur.material_id;
+                uint32_t damage = cur.damage();
+                uint32_t emissive = get_emissive_intensity(mat_id);
+                uint32_t aux = cur.is_highlighted() ? 1 : 0;
+
+                // 1. Hypotenuse Quad
+                if (!above_solid) {
+                    if (s == SHAPE_RAMP_SOUTH) {
+                        emit_quad(
+                            glm::ivec3(x + width, y,     z),
+                            glm::ivec3(x,         y,     z),
+                            glm::ivec3(x,         y + 1, z + 1),
+                            glm::ivec3(x + width, y + 1, z + 1),
+                            2, mat_id, width, 1, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_NORTH
+                        emit_quad(
+                            glm::ivec3(x,         y,     z + 1),
+                            glm::ivec3(x + width, y,     z + 1),
+                            glm::ivec3(x + width, y + 1, z),
+                            glm::ivec3(x,         y + 1, z),
+                            2, mat_id, width, 1, damage, emissive, aux
+                        );
+                    }
+                }
+
+                // 2. Floor Base Quad (facing -Y)
+                for (int k = 0; k < width; ++k) {
+                    Voxel below = sample_voxel(chunk, get_neighbor, x + k, y - 1, z);
+                    bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP);
+                    if (!below_flush) {
+                        emit_quad(
+                            glm::ivec3(x + k,     y, z),
+                            glm::ivec3(x + k + 1, y, z),
+                            glm::ivec3(x + k + 1, y, z + 1),
+                            glm::ivec3(x + k,     y, z + 1),
+                            3, mat_id, 1, 1, damage, emissive, aux
+                        );
+                    }
+                }
+
+                // 3. Vertical Back Quad (high end)
+                for (int k = 0; k < width; ++k) {
+                    if (s == SHAPE_RAMP_SOUTH) {
+                        Voxel back_n = sample_voxel(chunk, get_neighbor, x + k, y, z + 1);
+                        bool back_flush = back_n.is_solid() && (back_n.shape() == SHAPE_CUBE);
+                        if (!back_flush) {
+                            emit_quad(
+                                glm::ivec3(x + k,     y,     z + 1),
+                                glm::ivec3(x + k + 1, y,     z + 1),
+                                glm::ivec3(x + k + 1, y + 1, z + 1),
+                                glm::ivec3(x + k,     y + 1, z + 1),
+                                4, mat_id, 1, 1, damage, emissive, aux
+                            );
+                        }
+                    } else { // SHAPE_RAMP_NORTH
+                        Voxel back_n = sample_voxel(chunk, get_neighbor, x + k, y, z - 1);
+                        bool back_flush = back_n.is_solid() && (back_n.shape() == SHAPE_CUBE);
+                        if (!back_flush) {
+                            emit_quad(
+                                glm::ivec3(x + k + 1, y,     z),
+                                glm::ivec3(x + k,     y,     z),
+                                glm::ivec3(x + k,     y + 1, z),
+                                glm::ivec3(x + k + 1, y + 1, z),
+                                5, mat_id, 1, 1, damage, emissive, aux
+                            );
+                        }
+                    }
+                }
+
+                // 4. Two Triangular Side Walls
+                // Flank at start (-X)
+                Voxel side_neg = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                bool side_neg_flush = side_neg.is_solid() && (side_neg.shape() == SHAPE_CUBE || side_neg.shape() == s);
+                if (!side_neg_flush) {
+                    if (s == SHAPE_RAMP_SOUTH) {
+                        emit_triangle(
+                            glm::ivec3(x, y,     z),
+                            glm::ivec3(x, y,     z + 1),
+                            glm::ivec3(x, y + 1, z + 1),
+                            1, mat_id, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_NORTH
+                        emit_triangle(
+                            glm::ivec3(x, y,     z + 1),
+                            glm::ivec3(x, y + 1, z),
+                            glm::ivec3(x, y,     z),
+                            1, mat_id, damage, emissive, aux
+                        );
+                    }
+                }
+
+                // Flank at end (+X)
+                Voxel side_pos = sample_voxel(chunk, get_neighbor, x + width, y, z);
+                bool side_pos_flush = side_pos.is_solid() && (side_pos.shape() == SHAPE_CUBE || side_pos.shape() == s);
+                if (!side_pos_flush) {
+                    if (s == SHAPE_RAMP_SOUTH) {
+                        emit_triangle(
+                            glm::ivec3(x + width, y,     z),
+                            glm::ivec3(x + width, y + 1, z + 1),
+                            glm::ivec3(x + width, y,     z + width > 1 ? z + 1 : z + 1),
+                            0, mat_id, damage, emissive, aux
+                        );
+                    } else { // SHAPE_RAMP_NORTH
+                        emit_triangle(
+                            glm::ivec3(x + width, y,     z + 1),
+                            glm::ivec3(x + width, y,     z),
+                            glm::ivec3(x + width, y + 1, z),
+                            0, mat_id, damage, emissive, aux
+                        );
+                    }
+                }
+
+                x += width;
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // PART 3: Meshing SHAPE_SLAB_BOTTOM and SHAPE_SLAB_TOP
+    // ─────────────────────────────────────────────────────────────
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                Voxel cur = chunk.get_voxel(x, y, z);
+                VoxelShape s = cur.shape();
+                if (s != SHAPE_SLAB_BOTTOM && s != SHAPE_SLAB_TOP) {
+                    continue;
+                }
 
                 uint32_t mat_id = cur.material_id;
                 uint32_t damage = cur.damage();
-                uint32_t emissive = (mat_id == MAT_VOIDITE_CRYSTAL) ? 220 :
-                                    (mat_id == MAT_THERMITE_SLAG) ? 255 :
-                                    (mat_id == MAT_RADIOACTIVE_ORE) ? 180 :
-                                    (mat_id == MAT_PRISMATIC_CRYSTAL) ? 210 :
-                                    (mat_id == MAT_BIOLUMINESCENT_FLORA) ? 175 :
-                                    (mat_id == MAT_OBSIDIAN_SPIKES) ? 190 :
-                                    (mat_id == MAT_CRYSTAL_AQUIFER) ? 80 : 0;
+                uint32_t emissive = get_emissive_intensity(mat_id);
                 uint32_t aux = cur.is_highlighted() ? 1 : 0;
 
-                bool s_x_start_neg = sample_voxel(chunk, get_neighbor, x - 1, y + 1, z).is_solid();
-                bool s_x_end_pos   = sample_voxel(chunk, get_neighbor, x + width, y + 1, z).is_solid();
-                uint8_t ao_start = s_x_start_neg ? 1 : 0;
-                uint8_t ao_end   = s_x_end_pos ? 1 : 0;
+                if (s == SHAPE_SLAB_BOTTOM) {
+                    // Top quad at Y = 0.5 (encoded with Y = y + 1, sub_y_half = 1)
+                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                    bool above_flush = above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_TOP);
+                    if (!above_flush) {
+                        emit_quad(
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z),
+                            2, mat_id, 1, 1, damage, emissive, aux, 1 /* sub_y_half = 1 */
+                        );
+                    }
 
-                uint32_t norm_idx = 2;
+                    // Bottom quad at Y = 0.0 (sub_y_half = 0)
+                    Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
+                    bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP);
+                    if (!below_flush) {
+                        emit_quad(
+                            glm::ivec3(x,     y, z),
+                            glm::ivec3(x + 1, y, z),
+                            glm::ivec3(x + 1, y, z + 1),
+                            glm::ivec3(x,     y, z + 1),
+                            3, mat_id, 1, 1, damage, emissive, aux, 0
+                        );
+                    }
 
-                PackedVoxelVertex v0, v1, v2, v3;
-                if (s == SHAPE_RAMP_POS_Z) {
-                    // Lower edge at Z = z, Y = y; Upper edge at Z = z + 1, Y = y + 1
-                    v0 = PackedVoxelVertex::encode(x + width, y,     z,     norm_idx, ao_end,   mat_id, width, 1, 0, damage, emissive, aux);
-                    v1 = PackedVoxelVertex::encode(x,         y,     z,     norm_idx, ao_start, mat_id, width, 1, 1, damage, emissive, aux);
-                    v2 = PackedVoxelVertex::encode(x,         y + 1, z + 1, norm_idx, ao_start, mat_id, width, 1, 2, damage, emissive, aux);
-                    v3 = PackedVoxelVertex::encode(x + width, y + 1, z + 1, norm_idx, ao_end,   mat_id, width, 1, 3, damage, emissive, aux);
-                } else { // SHAPE_RAMP_NEG_Z
-                    // Lower edge at Z = z + 1, Y = y; Upper edge at Z = z, Y = y + 1
-                    v0 = PackedVoxelVertex::encode(x,         y,     z + 1, norm_idx, ao_start, mat_id, width, 1, 0, damage, emissive, aux);
-                    v1 = PackedVoxelVertex::encode(x + width, y,     z + 1, norm_idx, ao_end,   mat_id, width, 1, 1, damage, emissive, aux);
-                    v2 = PackedVoxelVertex::encode(x + width, y + 1, z,     norm_idx, ao_end,   mat_id, width, 1, 2, damage, emissive, aux);
-                    v3 = PackedVoxelVertex::encode(x,         y + 1, z,     norm_idx, ao_start, mat_id, width, 1, 3, damage, emissive, aux);
+                    // 4 Side quads of height 0.5m:
+                    // +X side:
+                    Voxel n_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                    if (!n_px.is_solid() || (n_px.shape() != SHAPE_CUBE && n_px.shape() != SHAPE_SLAB_BOTTOM)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 0, 0, mat_id, 1, 1, 0, damage, emissive, aux, 0);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z,     0, 0, mat_id, 1, 1, 1, damage, emissive, aux, 0);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 2, damage, emissive, aux, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 3, damage, emissive, aux, 1);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // -X side:
+                    Voxel n_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                    if (!n_nx.is_solid() || (n_nx.shape() != SHAPE_CUBE && n_nx.shape() != SHAPE_SLAB_BOTTOM)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x, y,     z,     1, 0, mat_id, 1, 1, 0, damage, emissive, aux, 0);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x, y,     z + 1, 1, 0, mat_id, 1, 1, 1, damage, emissive, aux, 0);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 2, damage, emissive, aux, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 3, damage, emissive, aux, 1);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // +Z side:
+                    Voxel n_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                    if (!n_pz.is_solid() || (n_pz.shape() != SHAPE_CUBE && n_pz.shape() != SHAPE_SLAB_BOTTOM)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x,     y,     z + 1, 4, 0, mat_id, 1, 1, 0, damage, emissive, aux, 0);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 4, 0, mat_id, 1, 1, 1, damage, emissive, aux, 0);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 2, damage, emissive, aux, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 3, damage, emissive, aux, 1);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // -Z side:
+                    Voxel n_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                    if (!n_nz.is_solid() || (n_nz.shape() != SHAPE_CUBE && n_nz.shape() != SHAPE_SLAB_BOTTOM)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y,     z, 5, 0, mat_id, 1, 1, 0, damage, emissive, aux, 0);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x,     y,     z, 5, 0, mat_id, 1, 1, 1, damage, emissive, aux, 0);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 2, damage, emissive, aux, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 3, damage, emissive, aux, 1);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+                } else { // SHAPE_SLAB_TOP
+                    // Top quad at Y = 1.0 (sub_y_half = 0)
+                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                    bool above_flush = above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM);
+                    if (!above_flush) {
+                        emit_quad(
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x + 1, y + 1, z),
+                            2, mat_id, 1, 1, damage, emissive, aux, 0
+                        );
+                    }
+
+                    // Bottom quad at Y = 0.5 (encoded as Y = y + 1, sub_y_half = 1)
+                    Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
+                    bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_BOTTOM);
+                    if (!below_flush) {
+                        emit_quad(
+                            glm::ivec3(x,     y + 1, z),
+                            glm::ivec3(x + 1, y + 1, z),
+                            glm::ivec3(x + 1, y + 1, z + 1),
+                            glm::ivec3(x,     y + 1, z + 1),
+                            3, mat_id, 1, 1, damage, emissive, aux, 1
+                        );
+                    }
+
+                    // 4 Side quads along upper [0.5, 1.0]:
+                    // +X side:
+                    Voxel n_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                    if (!n_px.is_solid() || (n_px.shape() != SHAPE_CUBE && n_px.shape() != SHAPE_SLAB_TOP)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 0, damage, emissive, aux, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 1, damage, emissive, aux, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 2, damage, emissive, aux, 0);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 3, damage, emissive, aux, 0);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // -X side:
+                    Voxel n_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                    if (!n_nx.is_solid() || (n_nx.shape() != SHAPE_CUBE && n_nx.shape() != SHAPE_SLAB_TOP)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 0, damage, emissive, aux, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 1, damage, emissive, aux, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 2, damage, emissive, aux, 0);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 3, damage, emissive, aux, 0);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // +Z side:
+                    Voxel n_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                    if (!n_pz.is_solid() || (n_pz.shape() != SHAPE_CUBE && n_pz.shape() != SHAPE_SLAB_TOP)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 0, damage, emissive, aux, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 1, damage, emissive, aux, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 2, damage, emissive, aux, 0);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 3, damage, emissive, aux, 0);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+
+                    // -Z side:
+                    Voxel n_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                    if (!n_nz.is_solid() || (n_nz.shape() != SHAPE_CUBE && n_nz.shape() != SHAPE_SLAB_TOP)) {
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 0, damage, emissive, aux, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 1, damage, emissive, aux, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 2, damage, emissive, aux, 0);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 3, damage, emissive, aux, 0);
+                        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+                        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
+                    }
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // PART 4: Meshing SHAPE_CORNER_* Sub-Blocks
+    // ─────────────────────────────────────────────────────────────
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                Voxel cur = chunk.get_voxel(x, y, z);
+                VoxelShape s = cur.shape();
+                if (!is_corner_shape(s)) {
+                    continue;
                 }
 
-                vertices.push_back(v0);
-                vertices.push_back(v1);
-                vertices.push_back(v2);
+                uint32_t mat_id = cur.material_id;
+                uint32_t damage = cur.damage();
+                uint32_t emissive = get_emissive_intensity(mat_id);
+                uint32_t aux = cur.is_highlighted() ? 1 : 0;
 
-                vertices.push_back(v0);
-                vertices.push_back(v2);
-                vertices.push_back(v3);
+                // Base quad at Y = y (omitted only if solid cube below)
+                Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
+                if (!below.is_solid() || below.shape() != SHAPE_CUBE) {
+                    emit_quad(
+                        glm::ivec3(x,     y, z),
+                        glm::ivec3(x + 1, y, z),
+                        glm::ivec3(x + 1, y, z + 1),
+                        glm::ivec3(x,     y, z + 1),
+                        3, mat_id, 1, 1, damage, emissive, aux, 0
+                    );
+                }
 
-                x += width;
+                // Outer Corners (Convex pyramid slope)
+                if (s == SHAPE_CORNER_OUTER_NE) {
+                    // Apex at (x + 1, y + 1, z)
+                    emit_triangle(glm::ivec3(x, y, z), glm::ivec3(x + 1, y + 1, z), glm::ivec3(x + 1, y, z), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x, y, z + 1), glm::ivec3(x + 1, y + 1, z), glm::ivec3(x, y, z), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x + 1, y, z + 1), glm::ivec3(x + 1, y + 1, z), glm::ivec3(x, y, z + 1), 2, mat_id, damage, emissive, aux);
+                } else if (s == SHAPE_CORNER_OUTER_NW) {
+                    // Apex at (x, y + 1, z)
+                    emit_triangle(glm::ivec3(x + 1, y, z), glm::ivec3(x, y, z), glm::ivec3(x, y + 1, z), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x + 1, y, z + 1), glm::ivec3(x + 1, y, z), glm::ivec3(x, y + 1, z), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x, y, z + 1), glm::ivec3(x + 1, y, z + 1), glm::ivec3(x, y + 1, z), 2, mat_id, damage, emissive, aux);
+                } else if (s == SHAPE_CORNER_OUTER_SE) {
+                    // Apex at (x + 1, y + 1, z + 1)
+                    emit_triangle(glm::ivec3(x, y, z), glm::ivec3(x + 1, y, z), glm::ivec3(x + 1, y + 1, z + 1), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x + 1, y, z), glm::ivec3(x + 1, y, z + 1), glm::ivec3(x + 1, y + 1, z + 1), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x, y, z + 1), glm::ivec3(x, y, z), glm::ivec3(x + 1, y + 1, z + 1), 2, mat_id, damage, emissive, aux);
+                } else if (s == SHAPE_CORNER_OUTER_SW) {
+                    // Apex at (x, y + 1, z + 1)
+                    emit_triangle(glm::ivec3(x, y, z), glm::ivec3(x, y + 1, z + 1), glm::ivec3(x + 1, y, z), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x + 1, y, z), glm::ivec3(x, y + 1, z + 1), glm::ivec3(x + 1, y, z + 1), 2, mat_id, damage, emissive, aux);
+                    emit_triangle(glm::ivec3(x + 1, y, z + 1), glm::ivec3(x, y + 1, z + 1), glm::ivec3(x, y, z + 1), 2, mat_id, damage, emissive, aux);
+                } else {
+                    // Inner valley corners: diagonal slope face
+                    emit_quad(
+                        glm::ivec3(x,     y,     z),
+                        glm::ivec3(x,     y,     z + 1),
+                        glm::ivec3(x + 1, y + 1, z + 1),
+                        glm::ivec3(x + 1, y + 1, z),
+                        2, mat_id, 1, 1, damage, emissive, aux, 0
+                    );
+                }
             }
         }
     }
