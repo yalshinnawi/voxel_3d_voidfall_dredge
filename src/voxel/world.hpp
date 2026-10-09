@@ -1,6 +1,7 @@
 #pragma once
 #include "chunk.hpp"
 #include "greedy_mesher.hpp"
+#include "fluid_sim.hpp"
 #include "level_shapes.hpp"
 #include "../entities/enemies/void_stalker.hpp"
 #include "../entities/vault_door.hpp"
@@ -247,17 +248,13 @@ public:
     void update_debris(float dt, const glm::vec3& player_pos = glm::vec3(-9999.0f), bool is_player_sheltered = false);
 
     // Event-Driven Fluid Simulation Engine (Active Queue Architecture)
-    std::deque<glm::ivec3> m_activeFluids;
-    std::unordered_set<uint64_t> m_activeFluidSet;
-    float m_fluidAccumulator{0.0f};
+    FluidSim m_fluidSim;
+    std::deque<glm::ivec3>& m_activeFluids{m_fluidSim.m_activeFluids};
+    std::unordered_set<glm::ivec3, Ivec3Hash>& m_activeFluidSet{m_fluidSim.m_activeFluidSet};
+    float& m_fluidAccumulator{m_fluidSim.m_accumulator};
     std::unordered_set<Chunk*> m_fluidDirtyChunks;
 
-    static inline uint64_t PackCoord(const glm::ivec3& p) {
-        return (uint64_t(p.x & 0x1FFFFF) << 42) | (uint64_t(p.y & 0x1FFFFF) << 21) | uint64_t(p.z & 0x1FFFFF);
-    }
-    static inline uint64_t PackPos(const glm::ivec3& pos) { return PackCoord(pos); }
-
-    void WakeFluid(const glm::ivec3& pos);
+    void WakeFluid(const glm::ivec3& pos) { m_fluidSim.WakeFluid(pos); }
     void wake_fluid(const glm::ivec3& pos) { WakeFluid(pos); }
     void PushActiveFluid(const glm::ivec3& pos) { WakeFluid(pos); }
     void check_wake_fluid_around(const glm::ivec3& pos);
@@ -268,22 +265,17 @@ public:
     void set_fluid_cell(const glm::ivec3& pos, uint8_t mat, uint8_t level, bool is_waterlogged = false);
     void set_waterlogged_cell(const glm::ivec3& pos, bool state);
     void flush_fluid_dirty_chunks();
-    void update_fluids(float dt);
+    void update_fluids(float dt) { m_fluidSim.Update(dt, *this); }
     void UpdateFluids(float dt) { update_fluids(dt); }
 
-    void SimulateFluidCell(const glm::ivec3& pos);
-    void SimulateFluidCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
-    bool SimulateAirCell(const glm::ivec3& pos);
-    bool SimulateAirCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
-
-    size_t active_fluid_count() const { return m_activeFluids.size(); }
+    size_t active_fluid_count() const { return m_fluidSim.m_activeFluids.size(); }
     size_t ActiveFluidCount() const { return active_fluid_count(); }
 
     bool DestroyBlock(const glm::ivec3& pos);
 
     void Update(float dt) {
         update_debris(dt);
-        update_fluids(dt);
+        m_fluidSim.Update(dt, *this);
         upload_mesh_queue(MAX_CHUNK_UPLOADS_PER_FRAME);
     }
 

@@ -104,7 +104,12 @@ public:
     inline void set_shape(int x, int y, int z, VoxelShape shape) { SetShape(x, y, z, shape); }
 
     inline bool IsLiquid(uint8_t mat) const {
-        return mat == MAT_WATER || mat == MAT_ACID || mat == MAT_COOLANT;
+        return mat == MAT_WATER || 
+               mat == MAT_ACID || 
+               mat == MAT_COOLANT || 
+               mat == MAT_THERMITE_SLAG || 
+               mat == MAT_LAVA || 
+               mat == MAT_RADIOACTIVE_SLUDGE;
     }
     inline bool IsWaterlogged(int x, int y, int z) const {
         return (GetFlags(x, y, z) & VOXEL_FLAG_WATERLOGGED) != 0;

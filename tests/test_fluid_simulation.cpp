@@ -543,6 +543,82 @@ TEST(FluidSimTest, InternalLiquidFacesAreCulled) {
   std::cout << "  -> PASSED" << std::endl;
 }
 
+TEST(FluidSimTest, Sector1DrillingRockBorderingWaterFlowsAndFills) {
+  std::cout << "[Test 11] Sector 1: Drilling rock bordering water flows and fills..." << std::endl;
+  World world(1001, false);
+
+  // Set floor at Y = 4
+  world.SetBlock(10, 4, 10, MAT_FRACTURED_GRANITE, 0);
+  world.SetBlock(11, 4, 10, MAT_FRACTURED_GRANITE, 0);
+
+  // Place water at (10, 5, 10) and granite rock at (11, 5, 10)
+  world.set_fluid_cell(glm::ivec3(10, 5, 10), MAT_WATER, 5, false);
+  world.SetBlock(11, 5, 10, MAT_FRACTURED_GRANITE, 0);
+
+  world.m_activeFluids.clear();
+  world.m_activeFluidSet.clear();
+  ASSERT_EQ(world.ActiveFluidCount(), 0);
+
+  // Drill rock block: SetBlock(11, 5, 10, MAT_AIR)
+  world.SetBlock(11, 5, 10, MAT_AIR, 0);
+
+  // Wake-up hook must immediately wake up water at (10, 5, 10)
+  ASSERT_GE(world.ActiveFluidCount(), 1);
+
+  // Step fluid sim
+  world.update_fluids(0.1f);
+
+  // Water must immediately flow and fill the drilled space
+  ASSERT_EQ(world.GetBlockMaterial(glm::ivec3(11, 5, 10)), MAT_WATER);
+  ASSERT_EQ(GetFluidLevel(world.GetBlockFlags(glm::ivec3(11, 5, 10))), 4);
+  std::cout << "  -> PASSED" << std::endl;
+}
+
+TEST(FluidSimTest, Sector2DrillingBulkheadAroundMoltenSlagLavaSpreadsAndDropsIntoPit) {
+  std::cout << "[Test 12] Sector 2: Drilling bulkhead around molten slag/lava spreads and drops into pit..." << std::endl;
+  World world(1002, false);
+
+  // Set floor under lava at Y = 4
+  world.SetBlock(20, 4, 20, MAT_VOLCANIC_BASALT, 0);
+  world.SetBlock(21, 4, 20, MAT_VOLCANIC_BASALT, 0);
+  // Pit floor at Y = 2
+  world.SetBlock(22, 2, 20, MAT_VOLCANIC_BASALT, 0);
+  world.SetBlock(22, 3, 20, MAT_AIR, 0);
+  world.SetBlock(22, 4, 20, MAT_AIR, 0);
+  world.SetBlock(22, 5, 20, MAT_AIR, 0);
+
+  // Place molten lava/thermite slag at (20, 5, 20)
+  world.set_fluid_cell(glm::ivec3(20, 5, 20), MAT_LAVA, 5, false);
+  ASSERT_TRUE(IsLiquid(world.GetBlockMaterial(glm::ivec3(20, 5, 20))));
+
+  // Industrial bulkhead retaining wall at (21, 5, 20)
+  world.SetBlock(21, 5, 20, MAT_INDUSTRIAL_BULKHEAD, 0);
+
+  world.m_activeFluids.clear();
+  world.m_activeFluidSet.clear();
+  ASSERT_EQ(world.ActiveFluidCount(), 0);
+
+  // Drill bulkhead: SetBlock(21, 5, 20, MAT_AIR)
+  world.SetBlock(21, 5, 20, MAT_AIR, 0);
+
+  // Wake-up hook must immediately wake up lava at (20, 5, 20)
+  ASSERT_GE(world.ActiveFluidCount(), 1);
+
+  // Tick 1: molten slag spreads laterally to (21, 5, 20)
+  world.update_fluids(0.1f);
+  ASSERT_EQ(world.GetBlockMaterial(glm::ivec3(21, 5, 20)), MAT_LAVA);
+
+  // Tick 2: molten slag cascades over ledge into (22, 5, 20) and drops downward into pit
+  world.update_fluids(0.1f);
+  ASSERT_EQ(world.GetBlockMaterial(glm::ivec3(22, 5, 20)), MAT_LAVA);
+
+  // Tick 3: gravity pulls falling column down into (22, 4, 20)
+  world.update_fluids(0.1f);
+  ASSERT_EQ(world.GetBlockMaterial(glm::ivec3(22, 4, 20)), MAT_LAVA);
+
+  std::cout << "  -> PASSED" << std::endl;
+}
+
 int main() {
   std::cout << "=========================================================="
             << std::endl;
@@ -561,10 +637,12 @@ int main() {
   FluidSimTest_MiningAdjacentBlockWakesLiquid();
   FluidSimTest_GravityDownwardFlowTakesPriority();
   FluidSimTest_InternalLiquidFacesAreCulled();
+  FluidSimTest_Sector1DrillingRockBorderingWaterFlowsAndFills();
+  FluidSimTest_Sector2DrillingBulkheadAroundMoltenSlagLavaSpreadsAndDropsIntoPit();
 
   std::cout << "=========================================================="
             << std::endl;
-  std::cout << "  ALL 10 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)  "
+  std::cout << "  ALL 12 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)  "
             << std::endl;
   std::cout << "=========================================================="
             << std::endl;

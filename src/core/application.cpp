@@ -2777,8 +2777,9 @@ void Application::fixed_tick(float dt) {
         VF_LOG_INFO("Gameplay", "Player Delver died: " << death_cause);
     }
 
-    // 5. Stream chunks around player
+    // 5. Stream chunks around player and update voxel world systems (fluids, dynamic debris)
     m_world->update(m_player->position(), 2);
+    m_world->Update(dt);
 
     // Chemical Flare simulation update
     FlareManager::instance().update(dt, *m_world);

@@ -361,34 +361,7 @@ const Chunk* World::GetChunkFromBlockPos(const glm::ivec3& blockPos) const {
 }
 
 void World::OnChunkGenerated(Chunk* chunk) {
-    if (!chunk) return;
-    int base_x = chunk->get_pos().x * CHUNK_SIZE;
-    int base_y = chunk->get_pos().y * CHUNK_SIZE;
-    int base_z = chunk->get_pos().z * CHUNK_SIZE;
-
-    static const glm::ivec3 NEIGHBORS_6[6] = {
-        glm::ivec3(1, 0, 0), glm::ivec3(-1, 0, 0),
-        glm::ivec3(0, 1, 0), glm::ivec3(0, -1, 0),
-        glm::ivec3(0, 0, 1), glm::ivec3(0, 0, -1)
-    };
-
-    for (int y = 0; y < CHUNK_SIZE; ++y) {
-        for (int z = 0; z < CHUNK_SIZE; ++z) {
-            for (int x = 0; x < CHUNK_SIZE; ++x) {
-                Voxel v = chunk->get_voxel(x, y, z);
-                if (IsLiquid(v.material_id) || v.is_waterlogged()) {
-                    glm::ivec3 world_pos(base_x + x, base_y + y, base_z + z);
-                    for (const auto& off : NEIGHBORS_6) {
-                        glm::ivec3 np = world_pos + off;
-                        if (GetBlockMaterial(np) == MAT_AIR) {
-                            WakeFluid(world_pos);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    (void)chunk;
 }
 
 Chunk* World::get_or_create_chunk(const ChunkPos& pos) {
@@ -495,21 +468,62 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
 }
 
 bool World::set_block_with_flags(const glm::ivec3& pos, uint8_t mat, uint8_t flags) {
-    return set_voxel(pos.x, pos.y, pos.z, Voxel{mat, flags}, true);
+    int cx = floor_div(pos.x, CHUNK_SIZE);
+    int cy = floor_div(pos.y, CHUNK_SIZE);
+    int cz = floor_div(pos.z, CHUNK_SIZE);
+    ChunkPos cpos{cx, cy, cz};
+    Chunk* chunk = get_or_create_chunk(cpos);
+    if (!chunk) return false;
+
+    int lx = floor_mod(pos.x, CHUNK_SIZE);
+    int ly = floor_mod(pos.y, CHUNK_SIZE);
+    int lz = floor_mod(pos.z, CHUNK_SIZE);
+
+    chunk->set_voxel(lx, ly, lz, Voxel{mat, flags});
+    chunk->MarkDirty();
+    queue_chunk_for_meshing(cpos);
+
+    // Cross-chunk mesh dirtying on boundaries
+    if (lx == 0) {
+        Chunk* c = get_chunk(ChunkPos{cx - 1, cy, cz});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (lx == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cx + 1, cy, cz});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+    if (ly == 0) {
+        Chunk* c = get_chunk(ChunkPos{cx, cy - 1, cz});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (ly == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cx, cy + 1, cz});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+    if (lz == 0) {
+        Chunk* c = get_chunk(ChunkPos{cx, cy, cz - 1});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (lz == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cx, cy, cz + 1});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+
+    return true;
 }
+
 
 bool World::SetBlock(int x, int y, int z, uint8_t mat, uint8_t flags) {
     bool res = set_voxel(x, y, z, Voxel{mat, flags}, true);
     if (mat == MAT_AIR) {
         glm::ivec3 pos(x, y, z);
-        for (int dx = -1; dx <= 1; ++dx) {
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dz = -1; dz <= 1; ++dz) {
-                    glm::ivec3 neighbor = pos + glm::ivec3(dx, dy, dz);
-                    if (IsLiquid(GetBlockMaterial(neighbor)) || get_voxel(neighbor.x, neighbor.y, neighbor.z).is_waterlogged()) {
-                        PushActiveFluid(neighbor);
-                    }
-                }
+        const glm::ivec3 offsets[6] = {
+            { 1, 0, 0}, {-1, 0, 0},
+            { 0, 1, 0}, { 0,-1, 0},
+            { 0, 0, 1}, { 0, 0,-1}
+        };
+        for (const auto& offset : offsets) {
+            glm::ivec3 nPos = pos + offset;
+            uint8_t nMat = GetBlockMaterial(nPos);
+            if (IsLiquid(nMat)) {
+                m_fluidSim.WakeFluid(nPos);
             }
         }
     }
@@ -1549,17 +1563,19 @@ void World::update_debris(float dt, const glm::vec3& player_pos, bool is_player_
 bool World::DestroyBlock(const glm::ivec3& pos) {
     bool broke = break_voxel(pos.x, pos.y, pos.z);
     if (!broke) {
-        set_voxel(pos.x, pos.y, pos.z, Voxel{MAT_AIR, 0}, true);
+        SetBlock(pos, MAT_AIR);
         broke = true;
     }
-    for (int dx = -1; dx <= 1; ++dx) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dz = -1; dz <= 1; ++dz) {
-                glm::ivec3 neighbor = pos + glm::ivec3(dx, dy, dz);
-                if (IsLiquid(GetBlockMaterial(neighbor)) || get_voxel(neighbor.x, neighbor.y, neighbor.z).is_waterlogged()) {
-                    PushActiveFluid(neighbor);
-                }
-            }
+    const glm::ivec3 offsets[6] = {
+        { 1, 0, 0}, {-1, 0, 0},
+        { 0, 1, 0}, { 0,-1, 0},
+        { 0, 0, 1}, { 0, 0,-1}
+    };
+    for (const auto& offset : offsets) {
+        glm::ivec3 neighbor = pos + offset;
+        uint8_t mat = GetBlockMaterial(neighbor);
+        if (IsLiquid(mat)) {
+            m_fluidSim.WakeFluid(neighbor);
         }
     }
     return broke;
@@ -1569,25 +1585,18 @@ uint8_t World::GetBlockMaterial(const glm::ivec3& pos) const {
     return get_voxel(pos.x, pos.y, pos.z).material_id;
 }
 
-void World::WakeFluid(const glm::ivec3& pos) {
-    uint64_t key = PackCoord(pos);
-    if (m_activeFluidSet.insert(key).second) {
-        m_activeFluids.push_back(pos);
-    }
-}
-
 void World::check_wake_fluid_around(const glm::ivec3& pos) {
-    for (int dx = -1; dx <= 1; ++dx) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dz = -1; dz <= 1; ++dz) {
-                if (dx == 0 && dy == 0 && dz == 0) continue;
-                glm::ivec3 neighbor = pos + glm::ivec3(dx, dy, dz);
-                uint8_t mat = GetBlockMaterial(neighbor);
-                Voxel nv = get_voxel(neighbor.x, neighbor.y, neighbor.z);
-                if (IsLiquid(mat) || nv.is_waterlogged()) {
-                    WakeFluid(neighbor);
-                }
-            }
+    const glm::ivec3 offsets[6] = {
+        { 1, 0, 0}, {-1, 0, 0},
+        { 0, 1, 0}, { 0,-1, 0},
+        { 0, 0, 1}, { 0, 0,-1}
+    };
+    for (const auto& offset : offsets) {
+        glm::ivec3 neighbor = pos + offset;
+        uint8_t mat = GetBlockMaterial(neighbor);
+        Voxel nv = get_voxel(neighbor.x, neighbor.y, neighbor.z);
+        if (IsLiquid(mat) || nv.is_waterlogged()) {
+            m_fluidSim.WakeFluid(neighbor);
         }
     }
 }
@@ -1655,58 +1664,6 @@ void World::flush_fluid_dirty_chunks() {
         }
     }
     m_fluidDirtyChunks.clear();
-}
-
-void World::SimulateFluidCell(const glm::ivec3& pos) {
-    FluidSim::SimulateFluidCell(*this, pos);
-}
-
-void World::SimulateFluidCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks) {
-    FluidSim::SimulateFluidCell(*this, pos, dirtyChunks);
-}
-
-bool World::SimulateAirCell(const glm::ivec3& pos) {
-    return FluidSim::SimulateAirCell(*this, pos);
-}
-
-bool World::SimulateAirCell(const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks) {
-    return FluidSim::SimulateAirCell(*this, pos, dirtyChunks);
-}
-
-void World::update_fluids(float dt) {
-    m_fluidAccumulator += dt;
-    if (m_fluidAccumulator > 0.5f) {
-        m_fluidAccumulator = 0.5f; // Prevent spiral of death
-    }
-
-    constexpr float FLUID_TICK_RATE = 12.0f;
-    constexpr float FLUID_STEP_DT = 1.0f / FLUID_TICK_RATE; // ~0.08333f (12 Hz)
-    constexpr int MAX_FLUID_STEPS_PER_TICK = 256;
-
-    while (m_fluidAccumulator >= FLUID_STEP_DT) {
-        m_fluidAccumulator -= FLUID_STEP_DT;
-
-        int stepsProcessed = 0;
-        std::unordered_set<Chunk*> dirtyChunks;
-
-        while (!m_activeFluids.empty() && stepsProcessed < MAX_FLUID_STEPS_PER_TICK) {
-            glm::ivec3 pos = m_activeFluids.front();
-            m_activeFluids.pop_front();
-            m_activeFluidSet.erase(PackCoord(pos));
-
-            SimulateFluidCell(pos, dirtyChunks);
-            stepsProcessed++;
-        }
-
-        for (Chunk* chunk : dirtyChunks) {
-            if (chunk) {
-                chunk->MarkDirty();
-                queue_chunk_for_meshing(chunk->get_pos());
-            }
-        }
-
-        flush_fluid_dirty_chunks();
-    }
 }
 
 } // namespace Voidfall

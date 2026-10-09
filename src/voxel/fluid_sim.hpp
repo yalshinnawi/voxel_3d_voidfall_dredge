@@ -11,40 +11,38 @@ namespace Voidfall {
 class Chunk;
 class World;
 
+struct Ivec3Hash {
+    size_t operator()(const glm::ivec3& p) const noexcept {
+        size_t h1 = std::hash<int>()(p.x);
+        size_t h2 = std::hash<int>()(p.y);
+        size_t h3 = std::hash<int>()(p.z);
+        return h1 ^ (h2 << 1) ^ (h3 << 2);
+    }
+};
+
 class FluidSim {
 public:
-    static constexpr float TICK_RATE = 12.0f;
-    static constexpr float STEP_DT = 1.0f / TICK_RATE; // ~0.08333f (12 Hz)
-    static constexpr int MAX_FLUID_STEPS_PER_TICK = 256;
+    void WakeFluid(const glm::ivec3& pos) {
+        if (m_activeFluidSet.insert(pos).second) {
+            m_activeFluids.push_back(pos);
+        }
+    }
+    void Update(float dt, World& world);
 
+    // Static test harness hooks
     static inline World* s_activeWorld{nullptr};
     static void SetActiveWorld(World* w) { s_activeWorld = w; }
-
-    static inline uint64_t PackCoord(const glm::ivec3& p) {
-        return (uint64_t(p.x & 0x1FFFFF) << 42) | (uint64_t(p.y & 0x1FFFFF) << 21) | uint64_t(p.z & 0x1FFFFF);
-    }
-    static inline uint64_t PackPos(const glm::ivec3& pos) { return PackCoord(pos); }
-
-    static inline glm::ivec3 UnpackPos(uint64_t key) {
-        int32_t x = static_cast<int32_t>((key >> 42) & 0x1FFFFFu);
-        int32_t y = static_cast<int32_t>((key >> 21) & 0x1FFFFFu);
-        int32_t z = static_cast<int32_t>(key & 0x1FFFFFu);
-        if (x & 0x100000) x |= ~0x1FFFFF;
-        if (y & 0x100000) y |= ~0x1FFFFF;
-        if (z & 0x100000) z |= ~0x1FFFFF;
-        return glm::ivec3(x, y, z);
-    }
-
-    // Cellular Automaton flow evaluation for an active cell
-    static void SimulateFluidCell(World& world, const glm::ivec3& pos);
-    static void SimulateFluidCell(World& world, const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
-
-    // Pool Infilling evaluation for an air cell (converts to source if >= 2 adjacent sources)
-    static bool SimulateAirCell(World& world, const glm::ivec3& pos);
-    static bool SimulateAirCell(World& world, const glm::ivec3& pos, std::unordered_set<Chunk*>& dirtyChunks);
-
     static void Update(World& world, float dt);
     static void Update(float dt);
+
+    std::deque<glm::ivec3>& active_fluids() { return m_activeFluids; }
+    const std::deque<glm::ivec3>& active_fluids() const { return m_activeFluids; }
+    std::unordered_set<glm::ivec3, Ivec3Hash>& active_fluid_set() { return m_activeFluidSet; }
+    const std::unordered_set<glm::ivec3, Ivec3Hash>& active_fluid_set() const { return m_activeFluidSet; }
+
+    std::deque<glm::ivec3> m_activeFluids;
+    std::unordered_set<glm::ivec3, Ivec3Hash> m_activeFluidSet;
+    float m_accumulator = 0.0f;
 };
 
 } // namespace Voidfall

@@ -5,50 +5,7 @@
 
 namespace Voidfall {
 
-// Standard Material Tiers for Voidfall: Dredge
-enum MaterialID : uint8_t {
-    MAT_AIR = 0,
-    MAT_FRACTURED_GRANITE = 1,
-    MAT_VOLCANIC_BASALT = 2,
-    MAT_VOIDITE_CRYSTAL = 3,       // Emissive purple/void crystal
-    MAT_INDUSTRIAL_BULKHEAD = 4,   // Metallic subterranean vault alloy
-    MAT_REINFORCED_VAULT_DOOR = 5, // Structural anchor (indestructible / anchor point)
-    MAT_THERMITE_SLAG = 6,         // Heated molten slag from demolition charges
-    MAT_RADIOACTIVE_ORE = 7,       // Glowing green toxic mineral
-    MAT_DREDGE_BEDROCK = 8,        // Deep planetary crust
-    MAT_GAS = 9,
-    MAT_VOLATILE_SMOKE = 10,
-    MAT_CRYSTAL_AQUIFER = 11,      // Clear subterranean aquifer water / cascade pool
-    MAT_BIOLUMINESCENT_FLORA = 12, // Subterranean glowing moss, fungi, and oasis flora
-    MAT_PRISMATIC_CRYSTAL = 13,    // Translucent radiant prismatic crystal spires
-    MAT_OBSIDIAN_SPIKES = 14,      // Lethal needle-sharp obsidian punji spikes
-    MAT_COUNT = 15
-};
 
-// Aliases for gameplay and surveying systems
-constexpr uint8_t MAT_VOIDITE = MAT_VOIDITE_CRYSTAL;
-constexpr uint8_t MAT_TITANIUM = MAT_INDUSTRIAL_BULKHEAD;
-constexpr uint8_t MAT_BULKHEAD = MAT_INDUSTRIAL_BULKHEAD;
-constexpr uint8_t MAT_VAULT_DOOR = MAT_REINFORCED_VAULT_DOOR;
-constexpr uint8_t MAT_RADIOACTIVE = MAT_RADIOACTIVE_ORE;
-constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
-constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
-constexpr uint8_t MAT_WATER = MAT_CRYSTAL_AQUIFER;
-constexpr uint8_t MAT_AQUIFER = MAT_CRYSTAL_AQUIFER;
-constexpr uint8_t MAT_COOLANT = MAT_CRYSTAL_AQUIFER;
-constexpr uint8_t MAT_ACID = MAT_THERMITE_SLAG;
-constexpr uint8_t MAT_FLORA = MAT_BIOLUMINESCENT_FLORA;
-constexpr uint8_t MAT_MOSS = MAT_BIOLUMINESCENT_FLORA;
-constexpr uint8_t MAT_CRYSTAL = MAT_PRISMATIC_CRYSTAL;
-constexpr uint8_t MAT_TOXIC_GAS = MAT_GAS;
-constexpr uint8_t MAT_MOLTEN_MAGMA = MAT_THERMITE_SLAG;
-constexpr uint8_t MAT_LAVA = MAT_THERMITE_SLAG;
-constexpr uint8_t MAT_SPIKES = MAT_OBSIDIAN_SPIKES;
-constexpr uint8_t MAT_PRECURSOR_STONE = MAT_DREDGE_BEDROCK;
-
-inline bool IsLiquid(uint8_t mat) {
-    return mat == MAT_WATER || mat == MAT_ACID || mat == MAT_COOLANT || mat == MAT_THERMITE_SLAG || mat == MAT_CRYSTAL_AQUIFER;
-}
 
 // Voxel bit flags
 constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;

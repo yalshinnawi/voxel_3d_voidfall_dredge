@@ -763,7 +763,7 @@ void PlayerController::update_physics(float dt, World& world) {
             glm::vec3 ray_origin = eye + m_front * 0.6f;
             RaycastHit hit = world.raycast(ray_origin, m_front, 6.0f);
             if (hit.hit && (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD || hit.voxel.material_id == MAT_BULKHEAD)) {
-                world.set_voxel(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z, Voxel{MAT_AIR, 0}, true);
+                world.SetBlock(hit.block_pos, MAT_AIR);
                 if (m_on_bulkhead_dismantle) {
                     m_on_bulkhead_dismantle(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
                 }
@@ -2007,7 +2007,7 @@ void PlayerController::MineBlock(float dt, World& world) {
                 uint8_t old_flags = target_vox.flags_and_damage;
                 glm::ivec3 break_pos = hit.block_pos;
                 glm::ivec3 break_norm = hit.normal;
-                world.set_voxel(break_pos.x, break_pos.y, break_pos.z, Voxel{MAT_AIR, 0}, true);
+                world.SetBlock(break_pos, MAT_AIR);
                 if (m_on_block_break) {
                     m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
                 }
