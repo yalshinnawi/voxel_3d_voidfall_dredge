@@ -94,6 +94,11 @@ TESTS = {
         "target": "test_fluid_physics",
         "exe": f"test_fluid_physics{EXE_EXT}",
         "name": "Fluid Physics: Anti-Stacking, Bullet Safety, Drainage & Translucent Meshing (4 modules)"
+    },
+    "fluid_geometry": {
+        "target": "test_fluid_geometry",
+        "exe": f"test_fluid_geometry{EXE_EXT}",
+        "name": "Generalized Sub-Block Fluid Filling & Watertight Inter-Level Flow (4 modules)"
     }
 }
 

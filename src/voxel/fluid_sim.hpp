@@ -30,6 +30,9 @@ public:
     void SimulateFluidCell(const glm::ivec3& pos, World& world, std::unordered_set<Chunk*>& dirtyChunks);
     void SimulateFluidCell(const glm::ivec3& pos, World& world);
     void SimulateFluidCell(const glm::ivec3& pos);
+    void TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos, 
+                             uint8_t liquidMat, int newLevel, 
+                             std::unordered_set<Chunk*>& dirtyChunks);
     void Update(float dt, World& world);
 
     // Static test harness hooks

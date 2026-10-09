@@ -14,6 +14,7 @@ in float vAO;
 in float vEmissive;
 in float vDamage;
 in float vSonarIntensity;
+in float vIsVerticalFlow;
 
 // PBR Texture Arrays
 uniform sampler2DArray uAlbedoArray;
@@ -360,35 +361,48 @@ void main() {
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
     float alpha = 1.0;
 
-    // World-Space Continuous UV Projection & Translucent Specular for Liquids:
-    if (v_MaterialID == MAT_WATER || v_MaterialID == MAT_CRYSTAL_AQUIFER) {
-        // Continuous world-space UV for animated caustics and flow
-        vec2 uv = v_FragPos.xz * 0.25;
-        float u_Time = uTime;
-        vec2 flow = vec2(u_Time * 0.04, u_Time * 0.02);
+    // World-Space Continuous Flow-Aligned UV Projection & Translucent Specular for Liquids:
+    if (isLiquid) {
+        vec2 fluidUV;
+        vec2 flowOffset;
 
-        // Sample perturbed normals for ripples
-        vec3 rippleNormal = normalize(v_Normal + sin(uv.x * 12.0 + u_Time * 2.0) * 0.05 + cos(uv.y * 12.0 + u_Time * 1.5) * 0.05);
-        normal = rippleNormal;
+        if (abs(v_Normal.y) > 0.80) {
+            // 1. Horizontal pool surfaces: isotropic world-space XZ projection
+            fluidUV = v_FragPos.xz * 0.25;
+            flowOffset = vec2(uTime * 0.03, uTime * 0.015);
+        } 
+        else if (abs(v_Normal.y) > 0.25 && vIsVerticalFlow < 0.5) {
+            // 2. Arbitrary sloped surfaces (ramps, wedges): scroll along the downward slope vector
+            vec2 slopeHorizontalDir = (length(v_Normal.xz) > 0.001) ? normalize(v_Normal.xz) : vec2(1.0, 0.0);
+            float alongSlope = dot(v_FragPos.xz, slopeHorizontalDir);
+            fluidUV = vec2(alongSlope, v_FragPos.y) * 0.35;
+            flowOffset = vec2(uTime * 0.15, -uTime * 0.22);
+        } 
+        else {
+            // 3. Vertical step skirts and waterfall curtains: scroll down world Y
+            float horizCoord = (abs(v_Normal.x) > 0.5) ? v_FragPos.z : v_FragPos.x;
+            fluidUV = vec2(horizCoord, v_FragPos.y) * 0.35;
+            flowOffset = vec2(0.0, -uTime * 0.28);
+        }
 
-        // Water color: vibrant subterranean cyan with 0.65 alpha transparency
-        albedo = vec3(0.02, 0.45, 0.60);
-        alpha = 0.65;
-        roughness = 0.03; // High specular reflection for spotlights/headlamps
-    } else if (isLiquid) {
-        vec2 fluidUV = v_FragPos.xz * 0.25; // 4-meter repeat cycle across all chunks
-        vec2 flowOffset = vec2(uTime * 0.03, uTime * 0.015);
-
-        // Sample moving caustics/normals seamlessly
         if (uUseTextureArray == 1) {
-            vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(v_MaterialID)));
-            vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.4 - flowOffset * 0.7, float(v_MaterialID)));
-            normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.2);
+            vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(vTexLayer)));
+            vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.3 - flowOffset * 0.6, float(vTexLayer)));
+            normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.22);
         } else {
             float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
             normal = normalize(v_Normal + vec3(wave, 0.0, wave));
         }
-        roughness = 0.02; // Mirror specular reflection for other liquids
+
+        if (v_MaterialID == MAT_ACID) {
+            albedo = vec3(0.2, 0.8, 0.1);
+        } else if (v_MaterialID == MAT_THERMITE_SLAG) {
+            albedo = vec3(0.85, 0.35, 0.05);
+        } else {
+            albedo = vec3(0.02, 0.48, 0.62);
+        }
+        roughness = 0.02;
+        alpha = 0.70;
     }
     N = normal;
 

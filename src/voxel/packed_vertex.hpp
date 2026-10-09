@@ -88,7 +88,7 @@ struct Voxel {
         return is_corner_shape(shape());
     }
     inline bool is_waterlogged() const {
-        return (is_slab() || is_ramp() || is_corner()) && ((flags_and_damage & VOXEL_FLAG_WATERLOGGED) != 0);
+        return (shape() != SHAPE_CUBE) && ((flags_and_damage & VOXEL_FLAG_WATERLOGGED) != 0);
     }
 };
 #pragma pack(pop)
@@ -116,7 +116,7 @@ struct PackedVoxelVertex {
     // [26]     sub_y_half (1 bit: 0 or 1, offsets Y by -0.5 for half-slabs)
     // [27]     water_slope_offset (1 bit: offsets Y by +0.04 for sloped water surface)
     // [28..30] water_fluid_level (3 bits: fluid level [1..5], offsets Y by 1.0 - liquidHeight)
-    // [31]     reserved / extra
+    // [31]     water_vertical_flow (1 bit: vertical step skirt / waterfall curtain)
     uint32_t data1;
 
     static inline PackedVoxelVertex encode(
@@ -125,7 +125,8 @@ struct PackedVoxelVertex {
         uint32_t u_dim, uint32_t v_dim, uint32_t corner_idx,
         uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0,
         uint32_t sub_y_half = 0, uint32_t water_offset = 0,
-        uint32_t water_recess = 0, uint32_t water_fluid_level = 0
+        uint32_t water_recess = 0, uint32_t water_fluid_level = 0,
+        uint32_t water_vertical_flow = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
@@ -148,8 +149,13 @@ struct PackedVoxelVertex {
                   ((emission & 0xFFu) << 18) |
                   ((sub_y_half & 0x1u) << 26) |
                   ((water_offset & 0x1u) << 27) |
-                  ((fluid_lvl & 0x7u) << 28);
+                  ((fluid_lvl & 0x7u) << 28) |
+                  ((water_vertical_flow & 0x1u) << 31);
         return v;
+    }
+
+    inline bool is_vertical_flow() const {
+        return ((data1 >> 31) & 0x1u) != 0;
     }
 
     inline glm::vec3 position() const {
@@ -157,7 +163,7 @@ struct PackedVoxelVertex {
         uint32_t fluid_lvl = (data1 >> 28) & 0x7u;
         float recess = 0.0f;
         if (fluid_lvl > 0) {
-            float liquidHeight = (fluid_lvl >= 5) ? 0.88f : (0.20f + (static_cast<float>(fluid_lvl) / 5.0f) * 0.65f);
+            float liquidHeight = GetFluidHeight(static_cast<int>(fluid_lvl));
             recess = 1.0f - liquidHeight;
         }
         float py = static_cast<float>((data0 >> 6) & 0x3Fu)

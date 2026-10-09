@@ -31,6 +31,47 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world) {
     }
 }
 
+void FluidSim::TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos, 
+                                   uint8_t liquidMat, int newLevel, 
+                                   std::unordered_set<Chunk*>& dirtyChunks) {
+    uint8_t targetMat = world.GetBlockMaterial(targetPos);
+    uint8_t targetFlags = world.GetBlockFlags(targetPos);
+    VoxelShape targetShape = static_cast<VoxelShape>(targetFlags & VOXEL_SHAPE_MASK);
+
+    if (targetMat == MAT_AIR) {
+        // Standard full-block spread
+        world.SetBlockWithFlags(targetPos, liquidMat, newLevel);
+        WakeFluid(targetPos);
+        Chunk* c = world.GetChunkFromBlockPos(targetPos);
+        if (c) dirtyChunks.insert(c);
+    } 
+    else if (!ShapeGeometry::IsFullCube(targetShape)) {
+        // Target is a partial block (ramp, slab, wedge): waterlog it without destroying solid rock
+        if (!(targetFlags & VOXEL_FLAG_WATERLOGGED)) {
+            world.SetBlockFlags(targetPos, targetFlags | VOXEL_FLAG_WATERLOGGED);
+            WakeFluid(targetPos);
+            Chunk* c = world.GetChunkFromBlockPos(targetPos);
+            if (c) dirtyChunks.insert(c);
+        }
+
+        // Wake neighbors downstream/downward from this partial block
+        glm::ivec3 belowPos = targetPos + glm::ivec3(0, -1, 0);
+        if (world.GetBlockMaterial(belowPos) == MAT_AIR) {
+            WakeFluid(belowPos);
+        }
+    }
+    else if (targetMat == liquidMat) {
+        // Merge and update level if higher
+        int existingLevel = GetFluidLevel(targetFlags);
+        if (existingLevel < newLevel) {
+            world.SetBlockFlags(targetPos, (targetFlags & ~VOXEL_DAMAGE_MASK) | (newLevel & VOXEL_DAMAGE_MASK));
+            WakeFluid(targetPos);
+            Chunk* c = world.GetChunkFromBlockPos(targetPos);
+            if (c) dirtyChunks.insert(c);
+        }
+    }
+}
+
 void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unordered_set<Chunk*>& dirtyChunks) {
     uint8_t currentMat = world.GetBlockMaterial(pos);
     Voxel curVox = world.get_voxel(pos.x, pos.y, pos.z);
@@ -70,10 +111,10 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
     if (isPureLiquid) {
         for (const auto& dir : lateralDirs) {
             glm::ivec3 target = pos + dir;
-            Voxel targetVox = world.get_voxel(target.x, target.y, target.z);
-            if ((targetVox.is_slab() || targetVox.is_ramp() || targetVox.is_corner()) && !targetVox.is_waterlogged()) {
-                world.set_waterlogged_cell(target, true);
-                WakeFluid(target);
+            uint8_t targetFlags = world.GetBlockFlags(target);
+            VoxelShape targetShape = static_cast<VoxelShape>(targetFlags & VOXEL_SHAPE_MASK);
+            if (!ShapeGeometry::IsFullCube(targetShape) && !(targetFlags & VOXEL_FLAG_WATERLOGGED)) {
+                TrySpreadToNeighbor(world, target, fluidMat, currentLevel > 1 ? currentLevel - 1 : 1, dirtyChunks);
                 collectDirty(target);
             }
         }
@@ -92,8 +133,7 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
 
         if (matBelow == MAT_AIR) {
             // Flowing fluid created below is level 4 (never level 5 source)
-            world.SetBlockWithFlags(below, fluidMat, 4);
-            WakeFluid(below);
+            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
             collectDirty(below);
 
             // If current cell is Flowing and has no liquid stream above feeding it, drain volume down
@@ -105,9 +145,8 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
         }
 
         // Sub-block ramp or slab beneath liquid
-        if ((voxBelow.is_slab() || voxBelow.is_ramp() || voxBelow.is_corner()) && !voxBelow.is_waterlogged()) {
-            world.set_waterlogged_cell(below, true);
-            WakeFluid(below);
+        if (!ShapeGeometry::IsFullCube(voxBelow.shape()) && !voxBelow.is_waterlogged()) {
+            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
             collectDirty(below);
             if (!isSource && !hasLiquidAbove) {
                 world.SetBlock(pos, MAT_AIR);
@@ -118,8 +157,7 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
 
         // Liquid cell below that is not yet full (level < 4)
         if (IsLiquid(matBelow) && GetFluidLevel(world.GetBlockFlags(below)) < 4) {
-            world.SetBlockWithFlags(below, fluidMat, 4);
-            WakeFluid(below);
+            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
             collectDirty(below);
             if (!isSource && !hasLiquidAbove) {
                 world.SetBlock(pos, MAT_AIR);
@@ -140,15 +178,11 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
         }
     }
 
-
     if (floor_supported && currentLevel > 1 && !curVox.is_ramp()) {
         int baseTargetLevel = currentLevel - 1;
         for (const auto& dir : lateralDirs) {
             glm::ivec3 target = pos + dir;
             if (target.y > pos.y) continue; // Anti-stacking: fluid never moves upward
-
-            uint8_t targetMat = world.GetBlockMaterial(target);
-            Voxel targetVox = world.get_voxel(target.x, target.y, target.z);
 
             int targetLevel = baseTargetLevel;
             // Lake Infilling: Two adjacent source blocks (level 5) infill an empty pocket on a solid floor to a source block (level 5)
@@ -166,22 +200,8 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
                 }
             }
 
-            if (targetMat == MAT_AIR) {
-                world.SetBlockWithFlags(target, fluidMat, targetLevel);
-                WakeFluid(target);
-                collectDirty(target);
-            } else if (targetMat == fluidMat) {
-                int existingLevel = GetFluidLevel(world.GetBlockFlags(target));
-                if (existingLevel < targetLevel) {
-                    world.SetBlockWithFlags(target, fluidMat, targetLevel);
-                    WakeFluid(target);
-                    collectDirty(target);
-                }
-            } else if ((targetVox.is_slab() || targetVox.is_ramp() || targetVox.is_corner()) && !targetVox.is_waterlogged()) {
-                world.set_waterlogged_cell(target, true);
-                WakeFluid(target);
-                collectDirty(target);
-            }
+            TrySpreadToNeighbor(world, target, fluidMat, targetLevel, dirtyChunks);
+            collectDirty(target);
         }
     }
 
@@ -198,17 +218,9 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
         if (downhill_offset != glm::ivec3(0)) {
             glm::ivec3 downhill_pos = pos + downhill_offset;
             if (downhill_pos.y <= pos.y) {
-                Voxel dn_vox = world.get_voxel(downhill_pos.x, downhill_pos.y, downhill_pos.z);
                 int dnLevel = currentLevel > 1 ? currentLevel - 1 : 1;
-                if (dn_vox.material_id == MAT_AIR) {
-                    world.SetBlockWithFlags(downhill_pos, fluidMat, dnLevel);
-                    WakeFluid(downhill_pos);
-                    collectDirty(downhill_pos);
-                } else if ((dn_vox.is_slab() || dn_vox.is_ramp() || dn_vox.is_corner()) && !dn_vox.is_waterlogged()) {
-                    world.set_waterlogged_cell(downhill_pos, true);
-                    WakeFluid(downhill_pos);
-                    collectDirty(downhill_pos);
-                }
+                TrySpreadToNeighbor(world, downhill_pos, fluidMat, dnLevel, dirtyChunks);
+                collectDirty(downhill_pos);
             }
         }
     }

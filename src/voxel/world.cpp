@@ -546,6 +546,21 @@ uint8_t World::get_block_flags(const glm::ivec3& pos) const {
     return get_voxel(pos.x, pos.y, pos.z).flags_and_damage;
 }
 
+bool World::set_block_flags(const glm::ivec3& pos, uint8_t flags) {
+    ChunkPos cpos{
+        floor_div(pos.x, CHUNK_SIZE),
+        floor_div(pos.y, CHUNK_SIZE),
+        floor_div(pos.z, CHUNK_SIZE)
+    };
+    Chunk* chunk = get_or_create_chunk(cpos);
+    if (!chunk) return false;
+    int lx = floor_mod(pos.x, CHUNK_SIZE);
+    int ly = floor_mod(pos.y, CHUNK_SIZE);
+    int lz = floor_mod(pos.z, CHUNK_SIZE);
+    chunk->SetFlags(lx, ly, lz, flags);
+    return true;
+}
+
 bool World::is_solid(const glm::ivec3& pos) const {
     if (pos.y < 0) return false;  // Out-of-bounds below is the lethal void singularity chasm, NOT solid!
 

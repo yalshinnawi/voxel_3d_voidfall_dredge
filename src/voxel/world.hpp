@@ -121,6 +121,8 @@ public:
     bool set_block(const glm::ivec3& pos, uint8_t mat, uint8_t flags = 0);
     uint8_t get_block_flags(const glm::ivec3& pos) const;
     uint8_t GetBlockFlags(const glm::ivec3& pos) const { return get_block_flags(pos); }
+    bool set_block_flags(const glm::ivec3& pos, uint8_t flags);
+    bool SetBlockFlags(const glm::ivec3& pos, uint8_t flags) { return set_block_flags(pos, flags); }
 
     bool is_solid(const glm::ivec3& pos) const;
     bool is_solid(int world_x, int world_y, int world_z) const;

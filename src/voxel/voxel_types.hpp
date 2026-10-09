@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <algorithm>
 
 namespace Voidfall {
 
@@ -67,6 +68,11 @@ inline int GetFluidLevel(uint8_t flags) {
     return (lvl == 0) ? 5 : lvl; // 0 or 5 is a permanent source block
 }
 
+inline float GetFluidHeight(int level) {
+    if (level >= 5) return 0.88f; // Recessed source pool surface below rock lip
+    return 0.18f + (level / 5.0f) * 0.65f; // Levels 1-4 scale continuously
+}
+
 enum VoxelShape : uint8_t {
     SHAPE_CUBE            = 0x00, // Standard 1x1x1 cube
     SHAPE_SLAB_BOTTOM     = 0x08, // 0.5m bottom slab (Y: [0.0, 0.5])
@@ -117,5 +123,40 @@ inline constexpr bool is_corner_shape(VoxelShape shape) {
 inline constexpr bool is_sub_block(VoxelShape shape) {
     return shape != SHAPE_CUBE;
 }
+
+struct ShapeGeometry {
+    // Evaluates whether a shape fills the entire 1x1x1 unit cube
+    static bool IsFullCube(VoxelShape shape) {
+        return shape == SHAPE_CUBE;
+    }
+
+    // Returns solid surface height Y in [0.0, 1.0] at local horizontal position (u, w) in [0.0, 1.0]^2
+    static float GetSolidHeightAt(VoxelShape shape, float u, float w) {
+        switch (shape) {
+            case SHAPE_SLAB_BOTTOM:     return 0.5f;
+            case SHAPE_SLAB_TOP:        return 1.0f; // Solid starts at 0.5, ends at 1.0
+            case SHAPE_RAMP_EAST:       return u;           // Rising +X (u)
+            case SHAPE_RAMP_WEST:       return 1.0f - u;    // Rising -X
+            case SHAPE_RAMP_SOUTH:      return w;           // Rising +Z (w)
+            case SHAPE_RAMP_NORTH:      return 1.0f - w;    // Rising -Z
+            case SHAPE_CORNER_OUTER_NE: return std::min(u, 1.0f - w);
+            case SHAPE_CORNER_OUTER_NW: return std::min(1.0f - u, 1.0f - w);
+            case SHAPE_CORNER_OUTER_SE: return std::min(u, w);
+            case SHAPE_CORNER_OUTER_SW: return std::min(1.0f - u, w);
+            case SHAPE_CORNER_INNER_NE: return std::max(u, 1.0f - w);
+            case SHAPE_CORNER_INNER_NW: return std::max(1.0f - u, 1.0f - w);
+            case SHAPE_CORNER_INNER_SE: return std::max(u, w);
+            case SHAPE_CORNER_INNER_SW: return std::max(1.0f - u, w);
+            default:                    return 1.0f;
+        }
+    }
+
+    // Returns solid lower floor clearance Y in [0.0, 1.0] (e.g., top slabs have air beneath Y=0.5)
+    static float GetSolidBaseAt(VoxelShape shape, float u, float w) {
+        (void)u; (void)w;
+        if (shape == SHAPE_SLAB_TOP) return 0.5f;
+        return 0.0f;
+    }
+};
 
 } // namespace Voidfall
