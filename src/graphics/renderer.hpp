@@ -64,7 +64,11 @@ public:
     void resize(int width, int height);
 
     void begin_frame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& cam_pos);
+    void begin_solid_pass();
     void render_chunk(const Chunk& chunk);
+    void render_chunk_liquid(const Chunk& chunk);
+    void begin_liquid_pass();
+    void end_liquid_pass();
     void render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos);
     SurfaceClutterSystem& clutter_system() { return m_clutter_system; }
     const SurfaceClutterSystem& clutter_system() const { return m_clutter_system; }

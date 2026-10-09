@@ -187,10 +187,28 @@ public:
     requires (!std::is_same_v<std::decay_t<TRenderer>, glm::vec3>)
     void Render(TRenderer& renderer, const glm::vec3& camera_pos, const glm::vec3& player_pos) {
         set_frustum_planes(renderer.frustum_planes());
-        render([&renderer, &player_pos](const Chunk& chunk) {
+
+        std::vector<const Chunk*> visible_liquid_chunks;
+        visible_liquid_chunks.reserve(64);
+
+        // Pass 1: Solid terrain & clutter (glDepthMask(GL_TRUE))
+        renderer.begin_solid_pass();
+        render([&renderer, &player_pos, &visible_liquid_chunks](const Chunk& chunk) {
             renderer.render_chunk(chunk);
             renderer.render_chunk_clutter(chunk, player_pos);
+            if (chunk.has_liquid_mesh()) {
+                visible_liquid_chunks.push_back(&chunk);
+            }
         }, player_pos);
+
+        // Pass 2: Translucent liquid chunks (glEnable(GL_BLEND), glDepthMask(GL_FALSE))
+        if (!visible_liquid_chunks.empty()) {
+            renderer.begin_liquid_pass();
+            for (const Chunk* chunk : visible_liquid_chunks) {
+                renderer.render_chunk_liquid(*chunk);
+            }
+            renderer.end_liquid_pass();
+        }
     }
 
     template <typename TRenderer>

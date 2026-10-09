@@ -115,8 +115,8 @@ struct PackedVoxelVertex {
     // [18..25] emission_intensity (8 bits: 0..255)
     // [26]     sub_y_half (1 bit: 0 or 1, offsets Y by -0.5 for half-slabs)
     // [27]     water_slope_offset (1 bit: offsets Y by +0.04 for sloped water surface)
-    // [28]     water_recess (1 bit: offsets Y by -0.10 for recessed water surface at Y = 0.90m)
-    // [29..31] reserved / extra
+    // [28..30] water_fluid_level (3 bits: fluid level [1..5], offsets Y by 1.0 - liquidHeight)
+    // [31]     reserved / extra
     uint32_t data1;
 
     static inline PackedVoxelVertex encode(
@@ -125,7 +125,7 @@ struct PackedVoxelVertex {
         uint32_t u_dim, uint32_t v_dim, uint32_t corner_idx,
         uint32_t damage = 0, uint32_t emission = 0, uint32_t aux = 0,
         uint32_t sub_y_half = 0, uint32_t water_offset = 0,
-        uint32_t water_recess = 0
+        uint32_t water_recess = 0, uint32_t water_fluid_level = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
@@ -136,6 +136,11 @@ struct PackedVoxelVertex {
                   ((tex_layer & 0xFFu) << 23) |
                   ((aux & 0x1u) << 31);
 
+        uint32_t fluid_lvl = water_fluid_level;
+        if (fluid_lvl == 0 && water_recess != 0) {
+            fluid_lvl = 5;
+        }
+
         v.data1 = (u_dim & 0x3Fu) |
                   ((v_dim & 0x3Fu) << 6) |
                   ((corner_idx & 0x3u) << 12) |
@@ -143,16 +148,22 @@ struct PackedVoxelVertex {
                   ((emission & 0xFFu) << 18) |
                   ((sub_y_half & 0x1u) << 26) |
                   ((water_offset & 0x1u) << 27) |
-                  ((water_recess & 0x1u) << 28);
+                  ((fluid_lvl & 0x7u) << 28);
         return v;
     }
 
     inline glm::vec3 position() const {
         float px = static_cast<float>(data0 & 0x3Fu);
+        uint32_t fluid_lvl = (data1 >> 28) & 0x7u;
+        float recess = 0.0f;
+        if (fluid_lvl > 0) {
+            float liquidHeight = (fluid_lvl >= 5) ? 0.88f : (0.20f + (static_cast<float>(fluid_lvl) / 5.0f) * 0.65f);
+            recess = 1.0f - liquidHeight;
+        }
         float py = static_cast<float>((data0 >> 6) & 0x3Fu)
                    - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f)
                    + (((data1 >> 27) & 0x1u) ? 0.04f : 0.0f)
-                   - (((data1 >> 28) & 0x1u) ? 0.10f : 0.0f);
+                   - recess;
         float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
         return glm::vec3(px, py, pz);
     }

@@ -149,12 +149,18 @@ public:
     // Upload pending vertex mesh to GPU buffers (must be called on main render thread)
     void upload_mesh();
     void render() const;
+    void render_solid() const;
+    void render_liquid() const;
 
     // Direct buffer staging (produced by GreedyMesher worker threads)
     void stage_mesh(std::vector<PackedVoxelVertex>&& vertices);
 
     bool has_staged_mesh() const { return m_has_staged_mesh.load(std::memory_order_acquire); }
     size_t vertex_count() const { return m_uploaded_vertex_count; }
+    size_t solid_vertex_count() const { return m_solid_vertex_count; }
+    size_t liquid_vertex_count() const { return m_liquid_vertex_count; }
+    bool has_solid_mesh() const { return m_solid_vertex_count > 0; }
+    bool has_liquid_mesh() const { return m_liquid_vertex_count > 0; }
 
     const std::vector<ClutterInstance>& clutter_instances() const { return m_clutter_instances; }
     std::vector<ClutterInstance>& clutter_instances_mut() { return m_clutter_instances; }
@@ -178,6 +184,8 @@ private:
     unsigned int m_vao{0};
     unsigned int m_vbo{0};
     size_t m_uploaded_vertex_count{0};
+    size_t m_solid_vertex_count{0};
+    size_t m_liquid_vertex_count{0};
     bool m_gpu_initialized{false};
 };
 

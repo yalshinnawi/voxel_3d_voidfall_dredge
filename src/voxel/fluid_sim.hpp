@@ -27,6 +27,8 @@ public:
             m_activeFluids.push_back(pos);
         }
     }
+    void SimulateFluidCell(const glm::ivec3& pos, World& world);
+    void SimulateFluidCell(const glm::ivec3& pos);
     void Update(float dt, World& world);
 
     // Static test harness hooks

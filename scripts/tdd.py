@@ -89,6 +89,11 @@ TESTS = {
         "target": "test_fluid_permeation",
         "exe": f"test_fluid_permeation{EXE_EXT}",
         "name": "Liquid Permeation, Ledge Cascades, Infilling & Cross-Chunk Meshing (5 modules)"
+    },
+    "fluid_physics": {
+        "target": "test_fluid_physics",
+        "exe": f"test_fluid_physics{EXE_EXT}",
+        "name": "Fluid Physics: Anti-Stacking, Bullet Safety, Drainage & Translucent Meshing (4 modules)"
     }
 }
 

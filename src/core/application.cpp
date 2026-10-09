@@ -2001,7 +2001,7 @@ void Application::fixed_tick(float dt) {
                 uint8_t new_damage = current_damage + bullet_block_damage;
                 if (new_damage >= 15) {
                     // Block completely breaks under heavy ballistic impact!
-                    m_world->set_voxel(bx, by, bz, Voxel{MAT_AIR, 0}, true);
+                    m_world->SetBlock(bx, by, bz, MAT_AIR, 0);
                     on_block_broken(bx, by, bz, hit_norm, v.material_id, v.flags_and_damage);
                     m_noise_meter.add_voxel_break_sound(next_pos, v.material_id);
                     SoundCue break_cue = (v.material_id == MAT_VOIDITE_CRYSTAL) ? SoundCue::VoxelBreakVoidite :

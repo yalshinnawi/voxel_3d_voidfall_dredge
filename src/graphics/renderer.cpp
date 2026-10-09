@@ -1386,8 +1386,12 @@ bool Renderer::is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_p
     return true;
 }
 
+void Renderer::begin_solid_pass() {
+    glDepthMask(GL_TRUE);
+}
+
 void Renderer::render_chunk(const Chunk& chunk) {
-    if (chunk.is_empty() || chunk.vertex_count() == 0) return;
+    if (chunk.is_empty() || chunk.solid_vertex_count() == 0) return;
 
     glm::vec3 min_pt = chunk.get_world_pos();
     glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
@@ -1396,7 +1400,32 @@ void Renderer::render_chunk(const Chunk& chunk) {
     glm::mat4 model = glm::mat4(1.0f);
     m_voxel_shader.set_mat4("uModel", model);
     m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
-    chunk.render();
+    chunk.render_solid();
+}
+
+void Renderer::render_chunk_liquid(const Chunk& chunk) {
+    if (chunk.is_empty() || chunk.liquid_vertex_count() == 0) return;
+
+    glm::vec3 min_pt = chunk.get_world_pos();
+    glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
+    if (!is_box_in_frustum(min_pt, max_pt)) return;
+
+    glm::mat4 model = glm::mat4(1.0f);
+    m_voxel_shader.set_mat4("uModel", model);
+    m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
+    chunk.render_liquid();
+}
+
+void Renderer::begin_liquid_pass() {
+    m_voxel_shader.use();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE); // Allow seeing through water to the cavern floor beneath
+}
+
+void Renderer::end_liquid_pass() {
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 void Renderer::render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos) {

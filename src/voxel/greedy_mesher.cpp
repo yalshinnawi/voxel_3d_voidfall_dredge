@@ -910,12 +910,12 @@ void GreedyMesher::mesh_liquid_pass(
         const glm::ivec3& p0, const glm::ivec3& p1, const glm::ivec3& p2, const glm::ivec3& p3,
         uint32_t norm_idx, uint32_t mat_id, uint32_t u_dim, uint32_t v_dim,
         uint32_t damage, uint32_t emissive, uint32_t aux, uint32_t sub_y_half = 0, uint32_t water_offset = 0,
-        uint32_t water_recess = 0
+        uint32_t water_recess = 0, uint32_t fluid_lvl = 0
     ) {
-        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half, water_offset, water_recess);
-        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half, water_offset, water_recess);
-        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half, water_offset, water_recess);
-        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half, water_offset, water_recess);
+        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0.x, p0.y, p0.z, norm_idx, 0, mat_id, u_dim, v_dim, 0, damage, emissive, aux, sub_y_half, water_offset, water_recess, fluid_lvl);
+        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1.x, p1.y, p1.z, norm_idx, 0, mat_id, u_dim, v_dim, 1, damage, emissive, aux, sub_y_half, water_offset, water_recess, fluid_lvl);
+        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2.x, p2.y, p2.z, norm_idx, 0, mat_id, u_dim, v_dim, 2, damage, emissive, aux, sub_y_half, water_offset, water_recess, fluid_lvl);
+        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3.x, p3.y, p3.z, norm_idx, 0, mat_id, u_dim, v_dim, 3, damage, emissive, aux, sub_y_half, water_offset, water_recess, fluid_lvl);
 
         vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
         vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
@@ -927,6 +927,7 @@ void GreedyMesher::mesh_liquid_pass(
         uint32_t emissive{0};
         uint32_t aux{0};
         uint32_t sub_y_half{0};
+        uint32_t fluid_level{5};
     };
 
     // ─────────────────────────────────────────────────────────────
@@ -957,7 +958,8 @@ void GreedyMesher::mesh_liquid_pass(
                         top_mask[idx].mat_id = cur.material_id;
                         top_mask[idx].emissive = get_emissive_intensity(cur.material_id);
                         top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
-                        top_mask[idx].sub_y_half = (cur.fluid_level() > 0 && cur.fluid_level() <= 2) ? 1 : 0;
+                        top_mask[idx].sub_y_half = 0;
+                        top_mask[idx].fluid_level = cur.fluid_level();
                     }
                 } else if (is_slab_waterlogged) {
                     bool above_culled = IsLiquid(above.material_id) ||
@@ -969,6 +971,7 @@ void GreedyMesher::mesh_liquid_pass(
                         top_mask[idx].emissive = get_emissive_intensity(MAT_WATER);
                         top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
                         top_mask[idx].sub_y_half = 1; /* Y = 0.5m top surface */
+                        top_mask[idx].fluid_level = 0;
                     }
                 }
             }
@@ -991,6 +994,7 @@ void GreedyMesher::mesh_liquid_pass(
                     if (!next.visible ||
                         next.mat_id != root.mat_id ||
                         next.sub_y_half != root.sub_y_half ||
+                        next.fluid_level != root.fluid_level ||
                         next.emissive != root.emissive ||
                         next.aux != root.aux) {
                         break;
@@ -1007,6 +1011,7 @@ void GreedyMesher::mesh_liquid_pass(
                         if (!next.visible ||
                             next.mat_id != root.mat_id ||
                             next.sub_y_half != root.sub_y_half ||
+                            next.fluid_level != root.fluid_level ||
                             next.emissive != root.emissive ||
                             next.aux != root.aux) {
                             can_expand_z = false;
@@ -1025,13 +1030,12 @@ void GreedyMesher::mesh_liquid_pass(
                 }
 
                 // Emit greedy rectangular top quad (+Y, normal_idx = 2)
-                uint32_t top_recess = (root.sub_y_half == 0) ? 1 : 0;
                 emit_quad(
                     glm::ivec3(x,         y + 1, z),
                     glm::ivec3(x,         y + 1, z + height),
                     glm::ivec3(x + width, y + 1, z + height),
                     glm::ivec3(x + width, y + 1, z),
-                    2, root.mat_id, width, height, 0, root.emissive, root.aux, root.sub_y_half, 0, top_recess
+                    2, root.mat_id, width, height, 0, root.emissive, root.aux, root.sub_y_half, 0, 0, root.fluid_level
                 );
 
                 x += width;

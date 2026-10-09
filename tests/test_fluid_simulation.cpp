@@ -527,14 +527,14 @@ TEST(FluidSimTest, InternalLiquidFacesAreCulled) {
   }
   ASSERT_EQ(shared_face_vertices, 0);
 
-  // Assert top surface quads merge and are placed at recessed Y = 0.90m relative to base
+  // Assert top surface quads merge and are placed at recessed Y = 0.88m relative to base
   bool found_recessed_top = false;
   for (const auto& v : mesh) {
     uint32_t layer = (v.data0 >> 23u) & 0xFFu;
     uint32_t norm = (v.data0 >> 18u) & 0x7u;
     if (layer == MAT_WATER && norm == 2) {
       glm::vec3 pos = v.position();
-      ASSERT_NEAR(pos.y, 0.90f, 0.01f);
+      ASSERT_NEAR(pos.y, 0.88f, 0.01f);
       found_recessed_top = true;
     }
   }

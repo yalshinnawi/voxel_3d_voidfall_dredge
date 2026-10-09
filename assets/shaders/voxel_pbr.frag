@@ -358,9 +358,24 @@ void main() {
 
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
+    float alpha = 1.0;
 
-    // World-Space Continuous UV Projection & Mirror Specular for Liquids:
-    if (isLiquid) {
+    // World-Space Continuous UV Projection & Translucent Specular for Liquids:
+    if (v_MaterialID == MAT_WATER || v_MaterialID == MAT_CRYSTAL_AQUIFER) {
+        // Continuous world-space UV for animated caustics and flow
+        vec2 uv = v_FragPos.xz * 0.25;
+        float u_Time = uTime;
+        vec2 flow = vec2(u_Time * 0.04, u_Time * 0.02);
+
+        // Sample perturbed normals for ripples
+        vec3 rippleNormal = normalize(v_Normal + sin(uv.x * 12.0 + u_Time * 2.0) * 0.05 + cos(uv.y * 12.0 + u_Time * 1.5) * 0.05);
+        normal = rippleNormal;
+
+        // Water color: vibrant subterranean cyan with 0.65 alpha transparency
+        albedo = vec3(0.02, 0.45, 0.60);
+        alpha = 0.65;
+        roughness = 0.03; // High specular reflection for spotlights/headlamps
+    } else if (isLiquid) {
         vec2 fluidUV = v_FragPos.xz * 0.25; // 4-meter repeat cycle across all chunks
         vec2 flowOffset = vec2(uTime * 0.03, uTime * 0.015);
 
@@ -373,7 +388,7 @@ void main() {
             float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
             normal = normalize(v_Normal + vec3(wave, 0.0, wave));
         }
-        roughness = 0.02; // Mirror specular reflection for water
+        roughness = 0.02; // Mirror specular reflection for other liquids
     }
     N = normal;
 
@@ -586,7 +601,7 @@ void main() {
         finalColor += sonarColor * vSonarIntensity * 2.0;
     }
 
-    FragColor = vec4(finalColor, 1.0);
+    FragColor = vec4(finalColor, alpha);
 
     // 6. Thresholded Bright Extraction for HDR Bloom
     // Bloom luminance cutoff threshold raised from 1.0 to 2.0 (1.8-2.2 range).
@@ -597,8 +612,8 @@ void main() {
     const float BLOOM_CUTOFF = 2.0;
 
     if (luminance > BLOOM_CUTOFF || emissivePeak > 1.8) {
-        BrightColor = vec4(finalColor, 1.0);
+        BrightColor = vec4(finalColor, alpha);
     } else {
-        BrightColor = vec4(0.0, 0.0, 0.0, 1.0);
+        BrightColor = vec4(0.0, 0.0, 0.0, alpha);
     }
 }

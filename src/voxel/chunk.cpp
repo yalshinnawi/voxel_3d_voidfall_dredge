@@ -72,8 +72,15 @@ void Chunk::upload_mesh() {
         m_has_staged_mesh.store(false, std::memory_order_release);
     }
 
+    auto it = std::stable_partition(local_mesh.begin(), local_mesh.end(), [](const PackedVoxelVertex& v) {
+        uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+        return !Voidfall::IsLiquid(static_cast<uint8_t>(layer));
+    });
+    m_solid_vertex_count = static_cast<size_t>(std::distance(local_mesh.begin(), it));
+    m_liquid_vertex_count = local_mesh.size() - m_solid_vertex_count;
+    m_uploaded_vertex_count = local_mesh.size();
+
     if (!glad_glGenVertexArrays || !glad_glGenBuffers) {
-        m_uploaded_vertex_count = local_mesh.size();
         return;
     }
 
@@ -83,7 +90,6 @@ void Chunk::upload_mesh() {
         m_gpu_initialized = true;
     }
 
-    m_uploaded_vertex_count = local_mesh.size();
     if (m_uploaded_vertex_count == 0) {
         return;
     }
@@ -103,11 +109,23 @@ void Chunk::upload_mesh() {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-void Chunk::render() const {
-    if (!m_gpu_initialized || m_uploaded_vertex_count == 0) return;
+void Chunk::render_solid() const {
+    if (!m_gpu_initialized || m_solid_vertex_count == 0) return;
     glBindVertexArray(m_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_uploaded_vertex_count));
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_solid_vertex_count));
     glBindVertexArray(0);
+}
+
+void Chunk::render_liquid() const {
+    if (!m_gpu_initialized || m_liquid_vertex_count == 0) return;
+    glBindVertexArray(m_vao);
+    glDrawArrays(GL_TRIANGLES, static_cast<GLint>(m_solid_vertex_count), static_cast<GLsizei>(m_liquid_vertex_count));
+    glBindVertexArray(0);
+}
+
+void Chunk::render() const {
+    render_solid();
+    render_liquid();
 }
 
 } // namespace Voidfall
