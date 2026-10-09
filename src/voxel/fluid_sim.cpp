@@ -150,8 +150,8 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
         bool hasLiquidAbove = IsLiquid(matAbove) || voxAbove.is_waterlogged();
 
         if (matBelow == MAT_AIR) {
-            // Flowing fluid created below is level 4 (never level 5 source)
-            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
+            // Downward Fall Priority: set block below to current liquid material with Level 5
+            TrySpreadToNeighbor(world, below, fluidMat, 5, dirtyChunks);
             collectDirty(below);
 
             // If current cell is Flowing and has no liquid stream above feeding it, drain volume down
@@ -164,7 +164,7 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
 
         // Sub-block ramp or slab beneath liquid
         if (!ShapeGeometry::IsFullCube(voxBelow.shape()) && !voxBelow.is_waterlogged()) {
-            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
+            TrySpreadToNeighbor(world, below, fluidMat, 5, dirtyChunks);
             collectDirty(below);
             if (!isSource && !hasLiquidAbove) {
                 world.SetBlock(pos, MAT_AIR);
@@ -173,9 +173,9 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
             return;
         }
 
-        // Liquid cell below that is not yet full (level < 4)
-        if (IsLiquid(matBelow) && GetFluidLevel(world.GetBlockFlags(below)) < 4) {
-            TrySpreadToNeighbor(world, below, fluidMat, 4, dirtyChunks);
+        // Liquid cell below that is not yet full (level < 5)
+        if (IsLiquid(matBelow) && GetFluidLevel(world.GetBlockFlags(below)) < 5) {
+            TrySpreadToNeighbor(world, below, fluidMat, 5, dirtyChunks);
             collectDirty(below);
             if (!isSource && !hasLiquidAbove) {
                 world.SetBlock(pos, MAT_AIR);

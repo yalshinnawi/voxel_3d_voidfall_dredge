@@ -44,9 +44,18 @@ public:
         for (int dx = -1; dx <= 0; ++dx) {
             for (int dz = -1; dz <= 0; ++dz) {
                 glm::ivec3 colPos(cornerX + dx, y, cornerZ + dz);
-                float h = GetBlockFluidHeight(world, colPos);
-                if (h >= 0.0f) {
-                    if (h >= 1.0f) return 1.0f;
+                glm::ivec3 abovePos(colPos.x, y + 1, colPos.z);
+                uint8_t matAbove = world.GetBlockMaterial(abovePos);
+                uint8_t flagsAbove = world.GetBlockFlags(abovePos);
+                if (IsLiquid(matAbove) || (flagsAbove & VOXEL_FLAG_WATERLOGGED)) {
+                    return 1.0f;
+                }
+
+                uint8_t mat = world.GetBlockMaterial(colPos);
+                uint8_t flags = world.GetBlockFlags(colPos);
+                if (IsLiquid(mat) || (flags & VOXEL_FLAG_WATERLOGGED)) {
+                    int level = GetFluidLevel(flags);
+                    float h = (level >= 5 || level == 0) ? 0.88f : (0.15f + level * 0.14f);
                     sumHeight += h;
                     count++;
                 }

@@ -935,15 +935,6 @@ void GreedyMesher::mesh_liquid_pass(
         vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
     };
 
-    struct LiquidTopCell {
-        bool visible{false};
-        uint32_t mat_id{0};
-        uint32_t emissive{0};
-        uint32_t aux{0};
-        uint32_t sub_y_half{0};
-        uint32_t fluid_level{5};
-    };
-
     // ─────────────────────────────────────────────────────────────
     // PASS 1: HORIZONTAL TOP FACES (4-CORNER HEIGHT EVALUATION & FLOW VECTORS)
     // ─────────────────────────────────────────────────────────────
@@ -960,11 +951,7 @@ void GreedyMesher::mesh_liquid_pass(
     };
     ChunkWorldView world_view{chunk, get_neighbor};
 
-    std::vector<LiquidTopCell> top_mask(CHUNK_SIZE * CHUNK_SIZE);
-
     for (int y = 0; y < CHUNK_SIZE; ++y) {
-        std::fill(top_mask.begin(), top_mask.end(), LiquidTopCell{});
-
         for (int z = 0; z < CHUNK_SIZE; ++z) {
             for (int x = 0; x < CHUNK_SIZE; ++x) {
                 Voxel cur = chunk.get_voxel(x, y, z);
@@ -992,26 +979,7 @@ void GreedyMesher::mesh_liquid_pass(
                 float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1);
                 float C01 = CalculateCornerHeight(world_view, x,     y, z + 1);
 
-                bool is_corners_flat = (std::abs(C00 - C10) < 0.005f &&
-                                        std::abs(C00 - C11) < 0.005f &&
-                                        std::abs(C00 - C01) < 0.005f);
-
-                uint8_t lvl = cur.fluid_level();
-                if (lvl == 0) lvl = 5;
-
-                // Stationary flat source pool: greedy merge coplanar rectangular quads
-                if (is_pure && is_corners_flat && lvl >= 5) {
-                    int idx = x + z * CHUNK_SIZE;
-                    top_mask[idx].visible = true;
-                    top_mask[idx].mat_id = mat_id;
-                    top_mask[idx].emissive = get_emissive_intensity(mat_id);
-                    top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
-                    top_mask[idx].sub_y_half = 0;
-                    top_mask[idx].fluid_level = lvl;
-                    continue;
-                }
-
-                // Sloped flowing liquid or waterlogged sub-blocks: emit Minecraft smooth corner triangles
+                // Compute flow direction vector
                 glm::vec2 flowDir(0.0f);
                 float centerH = GetBlockFluidHeight(world_view, glm::ivec3(x, y, z));
                 const glm::ivec3 sideOffsets[4] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
@@ -1048,71 +1016,6 @@ void GreedyMesher::mesh_liquid_pass(
                     PackedVoxelVertex c3 = PackedVoxelVertex::encode(x + 1, y + 1, z,     2, 0, mat_id, 1, 1, 3, 0, 0, 0, 1, 0, 0, 0);
                     emit_custom_quad(c0, c1, c2, c3);
                 }
-            }
-        }
-
-        // Greedy-merge coplanar horizontal top faces in this slice
-        for (int z = 0; z < CHUNK_SIZE; ++z) {
-            for (int x = 0; x < CHUNK_SIZE; ) {
-                int idx = x + z * CHUNK_SIZE;
-                if (!top_mask[idx].visible) {
-                    ++x;
-                    continue;
-                }
-
-                LiquidTopCell root = top_mask[idx];
-                int width = 1;
-                while (x + width < CHUNK_SIZE) {
-                    int next_idx = (x + width) + z * CHUNK_SIZE;
-                    const auto& next = top_mask[next_idx];
-                    if (!next.visible ||
-                        next.mat_id != root.mat_id ||
-                        next.sub_y_half != root.sub_y_half ||
-                        next.fluid_level != root.fluid_level ||
-                        next.emissive != root.emissive ||
-                        next.aux != root.aux) {
-                        break;
-                    }
-                    ++width;
-                }
-
-                int height = 1;
-                bool can_expand_z = true;
-                while (z + height < CHUNK_SIZE && can_expand_z) {
-                    for (int k = 0; k < width; ++k) {
-                        int next_idx = (x + k) + (z + height) * CHUNK_SIZE;
-                        const auto& next = top_mask[next_idx];
-                        if (!next.visible ||
-                            next.mat_id != root.mat_id ||
-                            next.sub_y_half != root.sub_y_half ||
-                            next.fluid_level != root.fluid_level ||
-                            next.emissive != root.emissive ||
-                            next.aux != root.aux) {
-                            can_expand_z = false;
-                            break;
-                        }
-                    }
-                    if (can_expand_z) {
-                        ++height;
-                    }
-                }
-
-                for (int dz = 0; dz < height; ++dz) {
-                    for (int dx = 0; dx < width; ++dx) {
-                        top_mask[(x + dx) + (z + dz) * CHUNK_SIZE].visible = false;
-                    }
-                }
-
-                // Emit greedy rectangular top quad (+Y, normal_idx = 2)
-                emit_quad(
-                    glm::ivec3(x,         y + 1, z),
-                    glm::ivec3(x,         y + 1, z + height),
-                    glm::ivec3(x + width, y + 1, z + height),
-                    glm::ivec3(x + width, y + 1, z),
-                    2, root.mat_id, width, height, 0, root.emissive, root.aux, root.sub_y_half, 0, 0, root.fluid_level
-                );
-
-                x += width;
             }
         }
     }
@@ -1160,8 +1063,8 @@ void GreedyMesher::mesh_liquid_pass(
                         return;
                     }
 
-                    // 2. Neighbor is pure liquid: interval culling & step skirts
-                    if (nb.is_liquid()) {
+                    // 2. Neighbor is pure liquid or waterlogged sub-block: interval culling & step skirts
+                    if (nb.is_liquid() || nb.is_waterlogged()) {
                         uint8_t nb_lvl = nb.fluid_level();
                         if (nb_lvl == 0) nb_lvl = 5;
                         float h_nb = static_cast<float>(y) + GetFluidHeight(static_cast<int>(nb_lvl));
@@ -1179,25 +1082,13 @@ void GreedyMesher::mesh_liquid_pass(
 
                     // 3. Neighbor is solid sub-block (e.g., bottom slab)
                     if (nb.is_solid() && nb.shape() == SHAPE_SLAB_BOTTOM) {
-                        if (nb.is_waterlogged()) {
-                            float h_nb = static_cast<float>(y) + GetFluidHeight(5);
-                            if (h_curr > h_nb + 0.001f) {
-                                PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y + 1, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 5, 1);
-                                PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y + 1, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 5, 1);
-                                PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                                PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                                emit_custom_quad(v0, v1, v2, v3);
-                            }
-                            return;
-                        } else {
-                            // Non-waterlogged slab: seal down to slab surface (Y = y + 0.5)
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y + 1, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 1, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y + 1, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 1, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
-                            return;
-                        }
+                        // Non-waterlogged slab: seal down to slab surface (Y = y + 0.5)
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y + 1, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 1, 0, 0, 0, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y + 1, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 1, 0, 0, 0, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
+                        emit_custom_quad(v0, v1, v2, v3);
+                        return;
                     }
 
                     // 4. Neighbor is AIR or downward cliff drop: check for receiving fluid below
@@ -1206,7 +1097,7 @@ void GreedyMesher::mesh_liquid_pass(
                     for (int dy = 1; dy <= 8; ++dy) {
                         if (y - dy < -16) break;
                         Voxel lower_v = sample_voxel(chunk, get_neighbor, nx, y - dy, nz);
-                        if (lower_v.is_liquid()) {
+                        if (lower_v.is_liquid() || lower_v.is_waterlogged()) {
                             cascade_dy = dy;
                             lower_lvl = lower_v.fluid_level();
                             if (lower_lvl == 0) lower_lvl = 5;

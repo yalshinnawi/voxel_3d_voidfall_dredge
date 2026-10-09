@@ -35,6 +35,20 @@ using namespace Voidfall;
     std::exit(1);                                                              \
   }
 
+#define ASSERT_EQ(a, b)                                                        \
+  if (!((a) == (b))) {                                                         \
+    std::cerr << "[TEST FAILED] " #a " == " #b " at " << __FILE__ << ":" << __LINE__ \
+              << std::endl;                                                    \
+    std::exit(1);                                                              \
+  }
+
+#define ASSERT_GE(a, b)                                                        \
+  if (!((a) >= (b))) {                                                         \
+    std::cerr << "[TEST FAILED] " #a " >= " #b " at " << __FILE__ << ":" << __LINE__ \
+              << std::endl;                                                    \
+    std::exit(1);                                                              \
+  }
+
 #define TEST(suite, name) void suite##_##name()
 
 // ─────────────────────────────────────────────────────────────
@@ -183,6 +197,85 @@ TEST(MinecraftFluid, WaterStreamsDownhillOnRamp) {
     std::cout << "  -> PASSED (Foot of ramp received liquid: mat=" << static_cast<int>(footVox.material_id) << ")" << std::endl;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 4. InitialChunkLoadWakeUp
+// Create a chunk with a water source next to air.
+// Call world.OnChunkGenerated(chunk).
+// Assert that the water source is woken up (added to active fluid queue).
+// ─────────────────────────────────────────────────────────────
+TEST(MinecraftFluid, InitialChunkLoadWakeUp) {
+    std::cout << "[Test 4] InitialChunkLoadWakeUp..." << std::endl;
+    World world(42, false);
+    Chunk* chunk = world.get_or_create_chunk(ChunkPos{0, 0, 0});
+    ASSERT_TRUE(chunk != nullptr);
+
+    // Place water voxel at (5, 5, 5) with air at (6, 5, 5)
+    chunk->set_voxel(5, 5, 5, Voxel{MAT_WATER, 5});
+    chunk->set_voxel(6, 5, 5, Voxel{MAT_AIR, 0});
+
+    // Clear any active fluids
+    world.m_fluidSim.m_activeFluids.clear();
+    world.m_fluidSim.m_activeFluidSet.clear();
+    ASSERT_EQ(world.ActiveFluidCount(), 0);
+
+    world.OnChunkGenerated(chunk);
+
+    // Fluid cell (5, 5, 5) must be woken up because neighbor (6, 5, 5) is MAT_AIR
+    ASSERT_GE(world.ActiveFluidCount(), 1);
+    bool found = false;
+    for (const auto& p : world.m_fluidSim.m_activeFluids) {
+        if (p == glm::ivec3(5, 5, 5)) {
+            found = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(found);
+    std::cout << "  -> PASSED" << std::endl;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5. DownwardFallPrioritySetsLevel5
+// Place a water block at (10, 10, 10) with MAT_AIR below at (10, 9, 10).
+// Step simulation.
+// Assert block below becomes MAT_WATER with Level 5.
+// ─────────────────────────────────────────────────────────────
+TEST(MinecraftFluid, DownwardFallPrioritySetsLevel5) {
+    std::cout << "[Test 5] DownwardFallPrioritySetsLevel5..." << std::endl;
+    World world(43, false);
+    world.SetBlock(10, 10, 10, MAT_WATER, 5);
+    world.SetBlock(10, 9, 10, MAT_AIR, 0);
+    world.SetBlock(10, 8, 10, MAT_FRACTURED_GRANITE, 0); // Solid floor under falling block
+
+    world.WakeFluid(glm::ivec3(10, 10, 10));
+    world.update_fluids(0.085f);
+
+    Voxel belowVox = world.get_voxel(10, 9, 10);
+    ASSERT_TRUE(IsLiquid(belowVox.material_id));
+    ASSERT_EQ(belowVox.fluid_level(), 5);
+    std::cout << "  -> PASSED" << std::endl;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 6. NonFullBlockSubBlockWaterloggingWithoutReplacingMaterial
+// Spread fluid into a bottom slab cell.
+// Assert solid material is preserved and VOXEL_FLAG_WATERLOGGED is applied.
+// ─────────────────────────────────────────────────────────────
+TEST(MinecraftFluid, NonFullBlockSubBlockWaterloggingWithoutReplacingMaterial) {
+    std::cout << "[Test 6] NonFullBlockSubBlockWaterloggingWithoutReplacingMaterial..." << std::endl;
+    World world(44, false);
+    world.SetBlock(10, 5, 10, MAT_VOLCANIC_BASALT, 0);
+    world.SetBlockWithFlags(glm::ivec3(10, 5, 10), MAT_VOLCANIC_BASALT, static_cast<uint8_t>(SHAPE_SLAB_BOTTOM));
+
+    std::unordered_set<Chunk*> dirty;
+    world.m_fluidSim.TrySpreadToNeighbor(world, glm::ivec3(10, 5, 10), MAT_WATER, 4, dirty);
+
+    Voxel target = world.get_voxel(10, 5, 10);
+    ASSERT_EQ(target.material_id, MAT_VOLCANIC_BASALT); // Material NOT replaced!
+    ASSERT_TRUE(target.is_waterlogged());
+    ASSERT_EQ(target.fluid_level(), 4);
+    std::cout << "  -> PASSED" << std::endl;
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- MINECRAFT FLUID REGRESSION SUITE     " << std::endl;
@@ -191,6 +284,9 @@ int main() {
     MinecraftFluid_CornerAveragingCreatesSlopedQuad();
     MinecraftFluid_FluidFillsNegativeSpaceOfRamp();
     MinecraftFluid_WaterStreamsDownhillOnRamp();
+    MinecraftFluid_InitialChunkLoadWakeUp();
+    MinecraftFluid_DownwardFallPrioritySetsLevel5();
+    MinecraftFluid_NonFullBlockSubBlockWaterloggingWithoutReplacingMaterial();
 
     std::cout << "=== All Minecraft Fluid Tests PASSED successfully ===" << std::endl;
     return 0;

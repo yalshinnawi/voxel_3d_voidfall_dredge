@@ -361,7 +361,51 @@ const Chunk* World::GetChunkFromBlockPos(const glm::ivec3& blockPos) const {
 }
 
 void World::OnChunkGenerated(Chunk* chunk) {
-    (void)chunk;
+    if (!chunk || chunk->is_empty()) return;
+
+    ChunkPos cpos = chunk->get_pos();
+    int bx = cpos.x * CHUNK_SIZE;
+    int by = cpos.y * CHUNK_SIZE;
+    int bz = cpos.z * CHUNK_SIZE;
+
+    const glm::ivec3 orthogonalDirs[6] = {
+        { 1, 0, 0}, {-1, 0, 0},
+        { 0, 1, 0}, { 0,-1, 0},
+        { 0, 0, 1}, { 0, 0,-1}
+    };
+
+    for (int z = 0; z < CHUNK_SIZE; ++z) {
+        for (int y = 0; y < CHUNK_SIZE; ++y) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                Voxel vox = chunk->get_voxel(x, y, z);
+                if (!vox.is_liquid() && !vox.is_waterlogged()) {
+                    continue;
+                }
+
+                glm::ivec3 worldPos(bx + x, by + y, bz + z);
+                bool hasAirNeighbor = false;
+                for (const auto& dir : orthogonalDirs) {
+                    int nx = x + dir.x;
+                    int ny = y + dir.y;
+                    int nz = z + dir.z;
+                    uint8_t nbMat = MAT_AIR;
+                    if (Chunk::in_bounds(nx, ny, nz)) {
+                        nbMat = chunk->get_voxel(nx, ny, nz).material_id;
+                    } else {
+                        nbMat = get_voxel(worldPos.x + dir.x, worldPos.y + dir.y, worldPos.z + dir.z).material_id;
+                    }
+                    if (nbMat == MAT_AIR) {
+                        hasAirNeighbor = true;
+                        break;
+                    }
+                }
+
+                if (hasAirNeighbor) {
+                    m_fluidSim.WakeFluid(worldPos);
+                }
+            }
+        }
+    }
 }
 
 Chunk* World::get_or_create_chunk(const ChunkPos& pos) {

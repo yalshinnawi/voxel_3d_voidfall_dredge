@@ -73,15 +73,12 @@ inline int GetFluidLevel(uint8_t flags) {
 }
 
 inline float GetFluidHeight(int level) {
-    if (level >= 5) return 0.88f; // Recessed source pool surface below rock lip
-    return 0.15f + (level / 5.0f) * 0.68f; // Levels 1-4 scale continuously
+    if (level >= 5 || level == 0) return 0.88f; // Recessed source pool surface below rock lip
+    return 0.15f + level * 0.14f; // Levels 1-4 scale continuously (0.15f + level * 0.14f, max 0.88m for source)
 }
 
 template<typename WorldLike = World>
 inline float GetBlockFluidHeight(const WorldLike& world, const glm::ivec3& pos) {
-    uint8_t mat = world.GetBlockMaterial(pos);
-    uint8_t flags = world.GetBlockFlags(pos);
-
     // If block above is liquid, this column is full/submerged
     glm::ivec3 abovePos = pos + glm::ivec3(0, 1, 0);
     uint8_t matAbove = world.GetBlockMaterial(abovePos);
@@ -89,16 +86,19 @@ inline float GetBlockFluidHeight(const WorldLike& world, const glm::ivec3& pos) 
         return 1.0f;
     }
 
+    uint8_t mat = world.GetBlockMaterial(pos);
+    uint8_t flags = world.GetBlockFlags(pos);
+
     if (IsLiquid(mat)) {
         int level = GetFluidLevel(flags);
-        if (level >= 5) return 0.88f; // Recessed source pool
-        return 0.15f + (level / 5.0f) * 0.68f;
+        if (level >= 5 || level == 0) return 0.88f; // Recessed source pool
+        return 0.15f + level * 0.14f;
     }
 
     if (flags & VOXEL_FLAG_WATERLOGGED) {
         int level = GetFluidLevel(flags);
-        if (level >= 5) return 0.88f;
-        return 0.15f + (level / 5.0f) * 0.68f;
+        if (level >= 5 || level == 0) return 0.88f;
+        return 0.15f + level * 0.14f;
     }
 
     return -1.0f; // Not a fluid

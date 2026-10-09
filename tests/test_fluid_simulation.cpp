@@ -156,7 +156,7 @@ void test_gravity_downward_flow() {
   // Water must have flowed straight down to the floor at y = 10
   Voxel floor_liquid = world.get_voxel(16, 10, 16);
   ASSERT_TRUE(IsLiquid(floor_liquid.material_id));
-  ASSERT_EQ(floor_liquid.fluid_level(), 4);
+  ASSERT_EQ(floor_liquid.fluid_level(), 5);
 
   // Cell at y = 11, 12, 13, 14, 15 should all be water
   for (int y = 10; y <= 15; ++y) {
@@ -384,7 +384,7 @@ void test_greedy_mesher_liquid_conformance() {
   ASSERT_TRUE(found_ramp_liquid_plane);
   ASSERT_TRUE(found_slab_liquid_plane);
 
-  // Verify greedy rectangular strip merging for liquid pools:
+  // Verify dedicated fluid top meshing: fluid top faces are emitted as individual 1x1 cells
   Chunk pool_chunk(ChunkPos{0, 0, 0});
   for (int x = 2; x <= 4; ++x) {
     for (int z = 2; z <= 4; ++z) {
@@ -393,7 +393,6 @@ void test_greedy_mesher_liquid_conformance() {
   }
   auto pool_mesh = GreedyMesher::generate_mesh(pool_chunk, nullptr);
   int top_quad_count = 0;
-  int merged_3x3_quads = 0;
   for (const auto &v : pool_mesh) {
     uint32_t layer = (v.data0 >> 23u) & 0xFFu;
     uint32_t norm = (v.data0 >> 18u) & 0x7u;
@@ -403,14 +402,12 @@ void test_greedy_mesher_liquid_conformance() {
     if (layer == MAT_WATER && norm == 2) {
       if (corner_idx == 1) {
         top_quad_count++;
-        if (u_dim == 3 && v_dim == 3) {
-          merged_3x3_quads++;
-        }
+        ASSERT_EQ(u_dim, 1);
+        ASSERT_EQ(v_dim, 1);
       }
     }
   }
-  ASSERT_EQ(top_quad_count, 1);
-  ASSERT_EQ(merged_3x3_quads, 1);
+  ASSERT_EQ(top_quad_count, 9);
 
   // Verify pure liquid block adjacent to SHAPE_RAMP_* emits vertical side quad sealing against ramp:
   Chunk ramp_seal_chunk(ChunkPos{0, 0, 0});
