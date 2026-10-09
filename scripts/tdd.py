@@ -104,6 +104,11 @@ TESTS = {
         "target": "test_minecraft_fluid",
         "exe": f"test_minecraft_fluid{EXE_EXT}",
         "name": "Minecraft Corner Fluid Meshing, Flow Fields & Non-Full Block Infilling (3 modules)"
+    },
+    "fluid_rendering": {
+        "target": "test_fluid_rendering",
+        "exe": f"test_fluid_rendering{EXE_EXT}",
+        "name": "Fluid Rendering, Shared Edge Elevation & Step Skirt Meshing (2 modules)"
     }
 }
 

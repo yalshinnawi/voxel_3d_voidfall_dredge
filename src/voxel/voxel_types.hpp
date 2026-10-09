@@ -74,34 +74,39 @@ inline int GetFluidLevel(uint8_t flags) {
 
 inline float GetFluidHeight(int level) {
     if (level >= 5 || level == 0) return 0.88f; // Recessed source pool surface below rock lip
-    return 0.15f + level * 0.14f; // Levels 1-4 scale continuously (0.15f + level * 0.14f, max 0.88m for source)
+    return 0.16f + (level / 5.0f) * 0.68f; // Continuous surface height for levels 1-4
+}
+
+template<typename WorldLike = World>
+inline float GetBlockFluidSurface(const WorldLike& world, const glm::ivec3& pos) {
+    uint8_t mat = world.GetBlockMaterial(pos);
+    uint8_t flags = world.GetBlockFlags(pos);
+
+    // Submerged column under another liquid block
+    glm::ivec3 above = pos + glm::ivec3(0, 1, 0);
+    if (IsLiquid(world.GetBlockMaterial(above)) || (world.GetBlockFlags(above) & VOXEL_FLAG_WATERLOGGED)) {
+        return 1.0f;
+    }
+
+    if (IsLiquid(mat)) {
+        int lvl = flags & 0x07;
+        lvl = (lvl == 0) ? 5 : lvl;
+        if (lvl >= 5) return 0.88f; // Source pool lip
+        return 0.16f + (lvl / 5.0f) * 0.68f;
+    }
+
+    if (flags & VOXEL_FLAG_WATERLOGGED) {
+        int lvl = flags & 0x07;
+        lvl = (lvl == 0) ? 5 : lvl;
+        return 0.16f + (lvl / 5.0f) * 0.68f;
+    }
+
+    return -1.0f; // Not fluid
 }
 
 template<typename WorldLike = World>
 inline float GetBlockFluidHeight(const WorldLike& world, const glm::ivec3& pos) {
-    // If block above is liquid, this column is full/submerged
-    glm::ivec3 abovePos = pos + glm::ivec3(0, 1, 0);
-    uint8_t matAbove = world.GetBlockMaterial(abovePos);
-    if (IsLiquid(matAbove) || (world.GetBlockFlags(abovePos) & VOXEL_FLAG_WATERLOGGED)) {
-        return 1.0f;
-    }
-
-    uint8_t mat = world.GetBlockMaterial(pos);
-    uint8_t flags = world.GetBlockFlags(pos);
-
-    if (IsLiquid(mat)) {
-        int level = GetFluidLevel(flags);
-        if (level >= 5 || level == 0) return 0.88f; // Recessed source pool
-        return 0.15f + level * 0.14f;
-    }
-
-    if (flags & VOXEL_FLAG_WATERLOGGED) {
-        int level = GetFluidLevel(flags);
-        if (level >= 5 || level == 0) return 0.88f;
-        return 0.15f + level * 0.14f;
-    }
-
-    return -1.0f; // Not a fluid
+    return GetBlockFluidSurface(world, pos);
 }
 
 enum VoxelShape : uint8_t {

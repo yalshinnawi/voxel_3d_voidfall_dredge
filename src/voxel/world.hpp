@@ -211,6 +211,7 @@ public:
             for (const Chunk* chunk : visible_liquid_chunks) {
                 renderer.render_chunk_liquid(*chunk);
             }
+            renderer.RenderLiquidPass();
             renderer.end_liquid_pass();
         }
     }

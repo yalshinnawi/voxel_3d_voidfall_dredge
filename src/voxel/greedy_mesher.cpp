@@ -974,18 +974,18 @@ void GreedyMesher::mesh_liquid_pass(
 
                 uint32_t mat_id = is_pure ? cur.material_id : MAT_WATER;
 
-                float C00 = CalculateCornerHeight(world_view, x,     y, z);
-                float C10 = CalculateCornerHeight(world_view, x + 1, y, z);
-                float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1);
-                float C01 = CalculateCornerHeight(world_view, x,     y, z + 1);
+                float C00 = SampleCornerHeight(world_view, x,     y, z);
+                float C10 = SampleCornerHeight(world_view, x + 1, y, z);
+                float C11 = SampleCornerHeight(world_view, x + 1, y, z + 1);
+                float C01 = SampleCornerHeight(world_view, x,     y, z + 1);
 
                 // Compute flow direction vector
                 glm::vec2 flowDir(0.0f);
-                float centerH = GetBlockFluidHeight(world_view, glm::ivec3(x, y, z));
+                float centerH = GetBlockFluidSurface(world_view, glm::ivec3(x, y, z));
                 const glm::ivec3 sideOffsets[4] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
                 for (const auto& off : sideOffsets) {
                     glm::ivec3 nPos = glm::ivec3(x, y, z) + off;
-                    float nH = GetBlockFluidHeight(world_view, nPos);
+                    float nH = GetBlockFluidSurface(world_view, nPos);
                     if (nH < 0.0f) {
                         if (world_view.GetBlockMaterial(nPos) == MAT_AIR) {
                             flowDir.x += off.x * 1.5f;
@@ -1222,10 +1222,10 @@ void GreedyMesher::mesh_liquid_pass(
 
                     if (!above_solid && !above_liquid) {
                         ChunkWorldView world_view{chunk, get_neighbor};
-                        float C00 = CalculateCornerHeight(world_view, x,     y, z);
-                        float C10 = CalculateCornerHeight(world_view, x + 1, y, z);
-                        float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1);
-                        float C01 = CalculateCornerHeight(world_view, x,     y, z + 1);
+                        float C00 = SampleCornerHeight(world_view, x,     y, z);
+                        float C10 = SampleCornerHeight(world_view, x + 1, y, z);
+                        float C11 = SampleCornerHeight(world_view, x + 1, y, z + 1);
+                        float C01 = SampleCornerHeight(world_view, x,     y, z + 1);
 
                         glm::vec2 rampFlowDir(0.0f);
                         if (shape == SHAPE_RAMP_EAST)  rampFlowDir = glm::vec2(-1.0f, 0.0f);

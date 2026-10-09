@@ -37,31 +37,27 @@ public:
 
     // Evaluates Minecraft-style 4-corner averaged fluid height for a vertex column
     template<typename WorldLike>
-    static float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
-        float sumHeight = 0.0f;
+    static float SampleCornerHeight(const WorldLike& world, int cx, int y, int cz) {
+        // Average the 4 block columns meeting at corner vertex (cx, cz):
+        // (cx - 1, cz - 1), (cx, cz - 1), (cx - 1, cz), (cx, cz)
+        float sum = 0.0f;
         int count = 0;
-
         for (int dx = -1; dx <= 0; ++dx) {
             for (int dz = -1; dz <= 0; ++dz) {
-                glm::ivec3 colPos(cornerX + dx, y, cornerZ + dz);
-                glm::ivec3 abovePos(colPos.x, y + 1, colPos.z);
-                uint8_t matAbove = world.GetBlockMaterial(abovePos);
-                uint8_t flagsAbove = world.GetBlockFlags(abovePos);
-                if (IsLiquid(matAbove) || (flagsAbove & VOXEL_FLAG_WATERLOGGED)) {
-                    return 1.0f;
-                }
-
-                uint8_t mat = world.GetBlockMaterial(colPos);
-                uint8_t flags = world.GetBlockFlags(colPos);
-                if (IsLiquid(mat) || (flags & VOXEL_FLAG_WATERLOGGED)) {
-                    int level = GetFluidLevel(flags);
-                    float h = (level >= 5 || level == 0) ? 0.88f : (0.15f + level * 0.14f);
-                    sumHeight += h;
+                float h = GetBlockFluidSurface(world, glm::ivec3(cx + dx, y, cz + dz));
+                if (h >= 0.0f) {
+                    if (h >= 1.0f) return 1.0f; // If any column is submerged, corner is full height
+                    sum += h;
                     count++;
                 }
             }
         }
-        return (count > 0) ? (sumHeight / static_cast<float>(count)) : 0.88f;
+        return (count > 0) ? (sum / float(count)) : 0.88f;
+    }
+
+    template<typename WorldLike>
+    static float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
+        return SampleCornerHeight(world, cornerX, y, cornerZ);
     }
 
     // Queries face visibility between adjacent voxels.
@@ -105,8 +101,13 @@ private:
 };
 
 template<typename WorldLike>
+inline float SampleCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
+    return GreedyMesher::SampleCornerHeight(world, cornerX, y, cornerZ);
+}
+
+template<typename WorldLike>
 inline float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
-    return GreedyMesher::CalculateCornerHeight(world, cornerX, y, cornerZ);
+    return GreedyMesher::SampleCornerHeight(world, cornerX, y, cornerZ);
 }
 
 } // namespace Voidfall

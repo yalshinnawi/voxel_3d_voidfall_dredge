@@ -69,6 +69,18 @@ public:
     void render_chunk_liquid(const Chunk& chunk);
     void begin_liquid_pass();
     void end_liquid_pass();
+    void RenderLiquidPass();
+    void RenderScene();
+    template<typename RenderSolidFn, typename RenderLiquidFn>
+    void RenderScene(RenderSolidFn&& render_solid, RenderLiquidFn&& render_liquid) {
+        begin_solid_pass();
+        render_solid();
+
+        begin_liquid_pass();
+        render_liquid();
+        RenderLiquidPass();
+        end_liquid_pass();
+    }
     void render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos);
     SurfaceClutterSystem& clutter_system() { return m_clutter_system; }
     const SurfaceClutterSystem& clutter_system() const { return m_clutter_system; }

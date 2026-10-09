@@ -1387,6 +1387,7 @@ bool Renderer::is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_p
 }
 
 void Renderer::begin_solid_pass() {
+    glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
 }
 
@@ -1420,10 +1421,24 @@ void Renderer::begin_liquid_pass() {
     m_voxel_shader.use();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE); // Allow seeing through water to the cavern floor beneath
+    glDepthMask(GL_FALSE); // Read depth, do not write depth over background
 }
 
 void Renderer::end_liquid_pass() {
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
+void Renderer::RenderLiquidPass() {
+    // Dedicated liquid pass completion / post-liquid draw state hook
+}
+
+void Renderer::RenderScene() {
+    begin_solid_pass();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    RenderLiquidPass();
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }

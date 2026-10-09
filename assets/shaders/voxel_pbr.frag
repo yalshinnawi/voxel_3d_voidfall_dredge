@@ -104,6 +104,8 @@ const uint MAT_WATER               = 11u;
 const uint MAT_CRYSTAL_AQUIFER     = 11u;
 const uint MAT_COOLANT             = 11u;
 const uint MAT_ACID                = 6u;
+const uint MAT_LAVA                = 6u;
+const uint MAT_MOLTEN_MAGMA        = 6u;
 const uint MAT_FLORA               = 12u;
 const uint MAT_BIOLUMINESCENT_FLORA = 12u;
 const uint MAT_PRISMATIC_CRYSTAL   = 13u;
@@ -187,7 +189,13 @@ void main() {
 
     vec3 v_FragPos = vWorldPos;
     uint v_MaterialID = vTexLayer;
-    bool isLiquid = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT);
+    bool isLiquid = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT || v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG);
+
+    if (isLiquid && abs(geoN.y) > 0.4) {
+        vec3 triN = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+        if (dot(triN, geoN) < 0.0) triN = -triN;
+        geoN = triN;
+    }
 
     vec2 baseUV = fract(vUV);
     // World-Space UV Mapping for Liquids:
@@ -343,6 +351,9 @@ void main() {
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
     float minEdge = min(edgeDist.x, edgeDist.y);
     vec3 v_Normal = vNormal;
+    if (isLiquid && abs(geoN.y) > 0.4) {
+        v_Normal = geoN;
+    }
 
     // Only bevel solid rock/metal edges; leave liquid surfaces perfectly smooth
     if (!isLiquid && minEdge < 0.045) {
@@ -364,64 +375,28 @@ void main() {
 
     // World-Space Continuous Flow-Aligned UV Projection & Translucent Specular for Liquids:
     if (isLiquid) {
-        if (length(v_FlowDir) > 0.001) {
-            vec2 flowVector = v_FlowDir;
-            float speed = 0.22;
+        vec2 flowVector = (length(v_FlowDir) > 0.01) ? v_FlowDir : vec2(0.1, 0.05);
+        vec2 flowOffset = flowVector * (uTime * 0.22);
+        vec2 fluidUV = v_FragPos.xz * 0.35;
 
-            // Align UV mapping along the flow vector
-            vec2 flowOffset = flowVector * (uTime * speed);
-            vec2 fluidUV = v_FragPos.xz * 0.35;
-
-            if (uUseTextureArray == 1) {
-                vec4 n1 = texture(uNormalArray, vec3(fluidUV - flowOffset, float(vTexLayer)));
-                vec4 n2 = texture(uNormalArray, vec3(fluidUV * 1.25 - flowOffset * 1.4, float(vTexLayer)));
-                normal = normalize(v_Normal + (n1.rgb + n2.rgb - 1.0) * 0.25);
-            } else {
-                float wave = sin((fluidUV.x - flowOffset.x) * 6.28 + uTime * 2.0) * cos((fluidUV.y - flowOffset.y) * 6.28 + uTime * 1.5) * 0.15;
-                normal = normalize(v_Normal + vec3(wave, 0.0, wave));
-            }
+        if (uUseTextureArray == 1) {
+            vec4 n1 = texture(uNormalArray, vec3(fluidUV - flowOffset, float(vTexLayer)));
+            vec4 n2 = texture(uNormalArray, vec3(fluidUV * 1.25 - flowOffset * 1.35, float(vTexLayer)));
+            normal = normalize(v_Normal + (n1.rgb + n2.rgb - 1.0) * 0.25);
         } else {
-            vec2 fluidUV;
-            vec2 flowOffset;
-
-            if (abs(v_Normal.y) > 0.80) {
-                // 1. Horizontal pool surfaces: isotropic world-space XZ projection
-                fluidUV = v_FragPos.xz * 0.25;
-                flowOffset = vec2(uTime * 0.03, uTime * 0.015);
-            } 
-            else if (abs(v_Normal.y) > 0.25 && vIsVerticalFlow < 0.5) {
-                // 2. Arbitrary sloped surfaces (ramps, wedges): scroll along the downward slope vector
-                vec2 slopeHorizontalDir = (length(v_Normal.xz) > 0.001) ? normalize(v_Normal.xz) : vec2(1.0, 0.0);
-                float alongSlope = dot(v_FragPos.xz, slopeHorizontalDir);
-                fluidUV = vec2(alongSlope, v_FragPos.y) * 0.35;
-                flowOffset = vec2(uTime * 0.15, -uTime * 0.22);
-            } 
-            else {
-                // 3. Vertical step skirts and waterfall curtains: scroll down world Y
-                float horizCoord = (abs(v_Normal.x) > 0.5) ? v_FragPos.z : v_FragPos.x;
-                fluidUV = vec2(horizCoord, v_FragPos.y) * 0.35;
-                flowOffset = vec2(0.0, -uTime * 0.28);
-            }
-
-            if (uUseTextureArray == 1) {
-                vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(vTexLayer)));
-                vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.3 - flowOffset * 0.6, float(vTexLayer)));
-                normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.22);
-            } else {
-                float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
-                normal = normalize(v_Normal + vec3(wave, 0.0, wave));
-            }
+            float wave = sin((fluidUV.x - flowOffset.x) * 6.28 + uTime * 2.0) * cos((fluidUV.y - flowOffset.y) * 6.28 + uTime * 1.5) * 0.15;
+            normal = normalize(v_Normal + vec3(wave, 0.0, wave));
         }
 
         if (v_MaterialID == MAT_ACID) {
             albedo = vec3(0.2, 0.8, 0.1);
-        } else if (v_MaterialID == MAT_THERMITE_SLAG) {
+        } else if (v_MaterialID == MAT_THERMITE_SLAG || v_MaterialID == MAT_LAVA) {
             albedo = vec3(0.85, 0.35, 0.05);
         } else {
-            albedo = vec3(0.02, 0.48, 0.62);
+            albedo = vec3(0.04, 0.52, 0.68); // Translucent subterranean cyan
         }
-        roughness = 0.02;
-        alpha = 0.70;
+        roughness = 0.03;
+        alpha = 0.72;
     }
     N = normal;
 

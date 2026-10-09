@@ -76,7 +76,7 @@ void main() {
     } else {
         float recess = 0.0;
         if (fluidLvl > 0u) {
-            float liquidHeight = (fluidLvl >= 5u) ? 0.88 : (0.15 + (float(fluidLvl) / 5.0) * 0.68);
+            float liquidHeight = (fluidLvl >= 5u) ? 0.88 : (0.16 + (float(fluidLvl) / 5.0) * 0.68);
             recess = 1.0 - liquidHeight;
         }
         localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04 - recess;

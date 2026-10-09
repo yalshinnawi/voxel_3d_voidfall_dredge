@@ -214,6 +214,9 @@ target_link_libraries(test_fluid_geometry PRIVATE voidfall_engine_core)
 add_executable(test_minecraft_fluid tests/test_minecraft_fluid.cpp)
 target_link_libraries(test_minecraft_fluid PRIVATE voidfall_engine_core)
 
+add_executable(test_fluid_rendering tests/test_fluid_rendering.cpp)
+target_link_libraries(test_fluid_rendering PRIVATE voidfall_engine_core)
+
 # ── Reuse Precompiled Headers Across All Test Executables ──
 set(VOIDFALL_TEST_TARGETS
     test_progression
@@ -234,6 +237,7 @@ set(VOIDFALL_TEST_TARGETS
     test_fluid_physics
     test_fluid_geometry
     test_minecraft_fluid
+    test_fluid_rendering
 )
 foreach(tgt ${VOIDFALL_TEST_TARGETS})
     target_precompile_headers(${tgt} REUSE_FROM voidfall_engine_core)
@@ -259,5 +263,6 @@ add_test(NAME FluidPermeationTests COMMAND test_fluid_permeation)
 add_test(NAME FluidPhysicsTests COMMAND test_fluid_physics)
 add_test(NAME FluidGeometryTests COMMAND test_fluid_geometry)
 add_test(NAME MinecraftFluidTests COMMAND test_minecraft_fluid)
+add_test(NAME FluidRenderingTests COMMAND test_fluid_rendering)
 
 
