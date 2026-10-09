@@ -36,7 +36,7 @@ void FluidSim::TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos,
                                    std::unordered_set<Chunk*>& dirtyChunks) {
     uint8_t targetMat = world.GetBlockMaterial(targetPos);
     uint8_t targetFlags = world.GetBlockFlags(targetPos);
-    VoxelShape targetShape = static_cast<VoxelShape>(targetFlags & VOXEL_SHAPE_MASK);
+    VoxelShape targetShape = world.GetShape(targetPos);
 
     if (targetMat == MAT_AIR) {
         // Standard full-block spread
@@ -47,16 +47,34 @@ void FluidSim::TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos,
     } 
     else if (!ShapeGeometry::IsFullCube(targetShape)) {
         // Target is a partial block (ramp, slab, wedge): waterlog it without destroying solid rock
-        if (!(targetFlags & VOXEL_FLAG_WATERLOGGED)) {
-            world.SetBlockFlags(targetPos, targetFlags | VOXEL_FLAG_WATERLOGGED);
-            WakeFluid(targetPos);
-            Chunk* c = world.GetChunkFromBlockPos(targetPos);
-            if (c) dirtyChunks.insert(c);
+        uint8_t updatedFlags = (targetFlags & ~VOXEL_DAMAGE_MASK) | (newLevel & VOXEL_DAMAGE_MASK) | VOXEL_FLAG_WATERLOGGED;
+        world.SetBlockFlags(targetPos, updatedFlags);
+        WakeFluid(targetPos);
+        Chunk* c = world.GetChunkFromBlockPos(targetPos);
+        if (c) dirtyChunks.insert(c);
+
+        // Downward ramp shedding vector
+        glm::ivec3 shedDir(0);
+        switch (targetShape) {
+            case SHAPE_RAMP_EAST:  shedDir = glm::ivec3(-1, 0, 0); break;
+            case SHAPE_RAMP_WEST:  shedDir = glm::ivec3( 1, 0, 0); break;
+            case SHAPE_RAMP_SOUTH: shedDir = glm::ivec3( 0, 0,-1); break;
+            case SHAPE_RAMP_NORTH: shedDir = glm::ivec3( 0, 0, 1); break;
+            default: break;
+        }
+        if (shedDir != glm::ivec3(0)) {
+            uint8_t shedMat = world.GetBlockMaterial(targetPos + shedDir);
+            uint8_t shedFlags = world.GetBlockFlags(targetPos + shedDir);
+            if (IsLiquid(shedMat) || (shedFlags & VOXEL_FLAG_WATERLOGGED)) {
+                WakeFluid(targetPos + shedDir);
+            }
         }
 
         // Wake neighbors downstream/downward from this partial block
         glm::ivec3 belowPos = targetPos + glm::ivec3(0, -1, 0);
-        if (world.GetBlockMaterial(belowPos) == MAT_AIR) {
+        uint8_t belowMat = world.GetBlockMaterial(belowPos);
+        uint8_t belowFlags = world.GetBlockFlags(belowPos);
+        if (IsLiquid(belowMat) || (belowFlags & VOXEL_FLAG_WATERLOGGED)) {
             WakeFluid(belowPos);
         }
     }
@@ -80,7 +98,7 @@ void FluidSim::SimulateFluidCell(const glm::ivec3& pos, World& world, std::unord
     if (!isPureLiquid && !isWaterlogged) return;
 
     uint8_t fluidMat = isPureLiquid ? currentMat : MAT_WATER;
-    int currentLevel = isPureLiquid ? GetFluidLevel(world.GetBlockFlags(pos)) : 5;
+    int currentLevel = GetFluidLevel(world.GetBlockFlags(pos));
     bool isSource = (currentLevel >= 5);
 
     auto collectDirty = [&](const glm::ivec3& p) {

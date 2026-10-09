@@ -154,6 +154,39 @@ struct PackedVoxelVertex {
         return v;
     }
 
+    static inline PackedVoxelVertex encode_smooth_fluid(
+        uint32_t x, uint32_t y, uint32_t z,
+        float corner_height,
+        const glm::vec2& flow_dir,
+        uint32_t mat_id = MAT_WATER,
+        uint32_t corner_idx = 0
+    ) {
+        PackedVoxelVertex v;
+        v.data0 = (x & 0x3Fu) |
+                  ((y & 0x3Fu) << 6) |
+                  ((z & 0x3Fu) << 12) |
+                  ((2u & 0x7u) << 18) | // normal_idx = 2 (+Y)
+                  (0u << 21) |          // ao = 0
+                  ((mat_id & 0xFFu) << 23);
+
+        uint32_t height_fixed = static_cast<uint32_t>(std::clamp(std::round(corner_height * 127.0f), 0.0f, 127.0f));
+        uint32_t flow_packed = 0;
+        if (glm::length(flow_dir) >= 0.001f) {
+            float angle = std::atan2(flow_dir.y, flow_dir.x);
+            float norm_angle = (angle + 3.1415926535f) / (2.0f * 3.1415926535f);
+            flow_packed = 1 + static_cast<uint32_t>(std::clamp(std::round(norm_angle * 30.0f), 0.0f, 30.0f));
+        }
+
+        v.data1 = (1u & 0x3Fu) |               // u_dim = 1 (bits 0..5)
+                  ((1u & 0x3Fu) << 6) |         // v_dim = 1 (bits 6..11)
+                  ((corner_idx & 0x3u) << 12) | // corner_idx = 0..3 (bits 12..13)
+                  ((height_fixed & 0x7Fu) << 14) | // 7-bit corner height (bits 14..20)
+                  ((flow_packed & 0x1Fu) << 21) |  // 5-bit flow dir (bits 21..25)
+                  // bits 26 (sub_y_half), 27 (water_offset) are strictly 0
+                  (6u << 28);                   // fluid_lvl = 6 (bits 28..30)
+        return v;
+    }
+
     inline bool is_vertical_flow() const {
         return ((data1 >> 31) & 0x1u) != 0;
     }
@@ -161,6 +194,12 @@ struct PackedVoxelVertex {
     inline glm::vec3 position() const {
         float px = static_cast<float>(data0 & 0x3Fu);
         uint32_t fluid_lvl = (data1 >> 28) & 0x7u;
+        float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
+        if (fluid_lvl == 6) {
+            float cornerH = static_cast<float>((data1 >> 14) & 0x7Fu) / 127.0f;
+            float py = static_cast<float>((data0 >> 6) & 0x3Fu) + cornerH;
+            return glm::vec3(px, py, pz);
+        }
         float recess = 0.0f;
         if (fluid_lvl > 0) {
             float liquidHeight = GetFluidHeight(static_cast<int>(fluid_lvl));
@@ -170,7 +209,6 @@ struct PackedVoxelVertex {
                    - (((data1 >> 26) & 0x1u) ? 0.5f : 0.0f)
                    + (((data1 >> 27) & 0x1u) ? 0.04f : 0.0f)
                    - recess;
-        float pz = static_cast<float>((data0 >> 12) & 0x3Fu);
         return glm::vec3(px, py, pz);
     }
 };

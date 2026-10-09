@@ -99,6 +99,11 @@ TESTS = {
         "target": "test_fluid_geometry",
         "exe": f"test_fluid_geometry{EXE_EXT}",
         "name": "Generalized Sub-Block Fluid Filling & Watertight Inter-Level Flow (4 modules)"
+    },
+    "minecraft_fluid": {
+        "target": "test_minecraft_fluid",
+        "exe": f"test_minecraft_fluid{EXE_EXT}",
+        "name": "Minecraft Corner Fluid Meshing, Flow Fields & Non-Full Block Infilling (3 modules)"
     }
 }
 

@@ -25,6 +25,7 @@ out float vEmissive;
 out float vDamage;
 out float vSonarIntensity;
 out float vIsVerticalFlow;
+out vec2 v_FlowDir;
 
 const vec3 NORMALS[6] = vec3[6](
     vec3( 1.0,  0.0,  0.0), // +X
@@ -62,12 +63,24 @@ void main() {
     uint subYHalf = (d1 >> 26u) & 0x1u;
     uint slopeWaterOffset = (d1 >> 27u) & 0x1u;
     uint fluidLvl = (d1 >> 28u) & 0x7u;
-    float recess = 0.0;
-    if (fluidLvl > 0u) {
-        float liquidHeight = (fluidLvl >= 5u) ? 0.88 : (0.18 + (float(fluidLvl) / 5.0) * 0.65);
-        recess = 1.0 - liquidHeight;
+    v_FlowDir = vec2(0.0);
+    float localY;
+    if (fluidLvl == 6u) {
+        float cornerH = float((d1 >> 14u) & 0x7Fu) / 127.0;
+        localY = float((d0 >> 6u) & 0x3Fu) + cornerH;
+        uint flowPacked = (d1 >> 21u) & 0x1Fu;
+        if (flowPacked > 0u) {
+            float angle = (float(flowPacked - 1u) / 30.0) * 6.2831853 - 3.14159265;
+            v_FlowDir = vec2(cos(angle), sin(angle));
+        }
+    } else {
+        float recess = 0.0;
+        if (fluidLvl > 0u) {
+            float liquidHeight = (fluidLvl >= 5u) ? 0.88 : (0.15 + (float(fluidLvl) / 5.0) * 0.68);
+            recess = 1.0 - liquidHeight;
+        }
+        localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04 - recess;
     }
-    float localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04 - recess;
     float localZ = float((d0 >> 12u) & 0x3Fu);
     uint normIdx = (d0 >> 18u) & 0x7u;
     uint aoIdx   = (d0 >> 21u) & 0x3u;

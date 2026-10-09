@@ -35,6 +35,26 @@ public:
         mesh_liquid_pass(chunk, get_neighbor, vertices);
     }
 
+    // Evaluates Minecraft-style 4-corner averaged fluid height for a vertex column
+    template<typename WorldLike>
+    static float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
+        float sumHeight = 0.0f;
+        int count = 0;
+
+        for (int dx = -1; dx <= 0; ++dx) {
+            for (int dz = -1; dz <= 0; ++dz) {
+                glm::ivec3 colPos(cornerX + dx, y, cornerZ + dz);
+                float h = GetBlockFluidHeight(world, colPos);
+                if (h >= 0.0f) {
+                    if (h >= 1.0f) return 1.0f;
+                    sumHeight += h;
+                    count++;
+                }
+            }
+        }
+        return (count > 0) ? (sumHeight / static_cast<float>(count)) : 0.88f;
+    }
+
     // Queries face visibility between adjacent voxels.
     // If neighbor chunk is unloaded, treats boundary block as SOLID (MAT_GRANITE) to prevent void leaks.
     static bool is_face_visible(
@@ -74,5 +94,10 @@ private:
         int x, int y, int z
     );
 };
+
+template<typename WorldLike>
+inline float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
+    return GreedyMesher::CalculateCornerHeight(world, cornerX, y, cornerZ);
+}
 
 } // namespace Voidfall

@@ -15,6 +15,7 @@ in float vEmissive;
 in float vDamage;
 in float vSonarIntensity;
 in float vIsVerticalFlow;
+in vec2 v_FlowDir;
 
 // PBR Texture Arrays
 uniform sampler2DArray uAlbedoArray;
@@ -363,35 +364,53 @@ void main() {
 
     // World-Space Continuous Flow-Aligned UV Projection & Translucent Specular for Liquids:
     if (isLiquid) {
-        vec2 fluidUV;
-        vec2 flowOffset;
+        if (length(v_FlowDir) > 0.001) {
+            vec2 flowVector = v_FlowDir;
+            float speed = 0.22;
 
-        if (abs(v_Normal.y) > 0.80) {
-            // 1. Horizontal pool surfaces: isotropic world-space XZ projection
-            fluidUV = v_FragPos.xz * 0.25;
-            flowOffset = vec2(uTime * 0.03, uTime * 0.015);
-        } 
-        else if (abs(v_Normal.y) > 0.25 && vIsVerticalFlow < 0.5) {
-            // 2. Arbitrary sloped surfaces (ramps, wedges): scroll along the downward slope vector
-            vec2 slopeHorizontalDir = (length(v_Normal.xz) > 0.001) ? normalize(v_Normal.xz) : vec2(1.0, 0.0);
-            float alongSlope = dot(v_FragPos.xz, slopeHorizontalDir);
-            fluidUV = vec2(alongSlope, v_FragPos.y) * 0.35;
-            flowOffset = vec2(uTime * 0.15, -uTime * 0.22);
-        } 
-        else {
-            // 3. Vertical step skirts and waterfall curtains: scroll down world Y
-            float horizCoord = (abs(v_Normal.x) > 0.5) ? v_FragPos.z : v_FragPos.x;
-            fluidUV = vec2(horizCoord, v_FragPos.y) * 0.35;
-            flowOffset = vec2(0.0, -uTime * 0.28);
-        }
+            // Align UV mapping along the flow vector
+            vec2 flowOffset = flowVector * (uTime * speed);
+            vec2 fluidUV = v_FragPos.xz * 0.35;
 
-        if (uUseTextureArray == 1) {
-            vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(vTexLayer)));
-            vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.3 - flowOffset * 0.6, float(vTexLayer)));
-            normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.22);
+            if (uUseTextureArray == 1) {
+                vec4 n1 = texture(uNormalArray, vec3(fluidUV - flowOffset, float(vTexLayer)));
+                vec4 n2 = texture(uNormalArray, vec3(fluidUV * 1.25 - flowOffset * 1.4, float(vTexLayer)));
+                normal = normalize(v_Normal + (n1.rgb + n2.rgb - 1.0) * 0.25);
+            } else {
+                float wave = sin((fluidUV.x - flowOffset.x) * 6.28 + uTime * 2.0) * cos((fluidUV.y - flowOffset.y) * 6.28 + uTime * 1.5) * 0.15;
+                normal = normalize(v_Normal + vec3(wave, 0.0, wave));
+            }
         } else {
-            float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
-            normal = normalize(v_Normal + vec3(wave, 0.0, wave));
+            vec2 fluidUV;
+            vec2 flowOffset;
+
+            if (abs(v_Normal.y) > 0.80) {
+                // 1. Horizontal pool surfaces: isotropic world-space XZ projection
+                fluidUV = v_FragPos.xz * 0.25;
+                flowOffset = vec2(uTime * 0.03, uTime * 0.015);
+            } 
+            else if (abs(v_Normal.y) > 0.25 && vIsVerticalFlow < 0.5) {
+                // 2. Arbitrary sloped surfaces (ramps, wedges): scroll along the downward slope vector
+                vec2 slopeHorizontalDir = (length(v_Normal.xz) > 0.001) ? normalize(v_Normal.xz) : vec2(1.0, 0.0);
+                float alongSlope = dot(v_FragPos.xz, slopeHorizontalDir);
+                fluidUV = vec2(alongSlope, v_FragPos.y) * 0.35;
+                flowOffset = vec2(uTime * 0.15, -uTime * 0.22);
+            } 
+            else {
+                // 3. Vertical step skirts and waterfall curtains: scroll down world Y
+                float horizCoord = (abs(v_Normal.x) > 0.5) ? v_FragPos.z : v_FragPos.x;
+                fluidUV = vec2(horizCoord, v_FragPos.y) * 0.35;
+                flowOffset = vec2(0.0, -uTime * 0.28);
+            }
+
+            if (uUseTextureArray == 1) {
+                vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(vTexLayer)));
+                vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.3 - flowOffset * 0.6, float(vTexLayer)));
+                normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.22);
+            } else {
+                float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
+                normal = normalize(v_Normal + vec3(wave, 0.0, wave));
+            }
         }
 
         if (v_MaterialID == MAT_ACID) {

@@ -945,10 +945,25 @@ void GreedyMesher::mesh_liquid_pass(
     };
 
     // ─────────────────────────────────────────────────────────────
-    // PASS 1: HORIZONTAL TOP FACES (GREEDY RECTANGULAR STRIP MERGING)
+    // PASS 1: HORIZONTAL TOP FACES (4-CORNER HEIGHT EVALUATION & FLOW VECTORS)
     // ─────────────────────────────────────────────────────────────
+    struct ChunkWorldView {
+        const Chunk& chunk;
+        const NeighborChunkGetter& get_neighbor;
+
+        uint8_t GetBlockMaterial(const glm::ivec3& pos) const {
+            return GreedyMesher::sample_voxel(chunk, get_neighbor, pos.x, pos.y, pos.z).material_id;
+        }
+        uint8_t GetBlockFlags(const glm::ivec3& pos) const {
+            return GreedyMesher::sample_voxel(chunk, get_neighbor, pos.x, pos.y, pos.z).flags_and_damage;
+        }
+    };
+    ChunkWorldView world_view{chunk, get_neighbor};
+
+    std::vector<LiquidTopCell> top_mask(CHUNK_SIZE * CHUNK_SIZE);
+
     for (int y = 0; y < CHUNK_SIZE; ++y) {
-        std::array<LiquidTopCell, CHUNK_SIZE * CHUNK_SIZE> top_mask{};
+        std::fill(top_mask.begin(), top_mask.end(), LiquidTopCell{});
 
         for (int z = 0; z < CHUNK_SIZE; ++z) {
             for (int x = 0; x < CHUNK_SIZE; ++x) {
@@ -961,31 +976,77 @@ void GreedyMesher::mesh_liquid_pass(
                 }
 
                 Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                bool top_culled = (above.material_id == cur.material_id) ||
+                                  (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
+                if (is_slab_waterlogged) {
+                    top_culled = IsLiquid(above.material_id) ||
+                                 (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
+                }
 
-                if (is_pure) {
-                    bool top_culled = (above.material_id == cur.material_id) ||
-                                      (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
-                    if (!top_culled) {
-                        int idx = x + z * CHUNK_SIZE;
-                        top_mask[idx].visible = true;
-                        top_mask[idx].mat_id = cur.material_id;
-                        top_mask[idx].emissive = get_emissive_intensity(cur.material_id);
-                        top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
-                        top_mask[idx].sub_y_half = 0;
-                        top_mask[idx].fluid_level = cur.fluid_level();
+                if (top_culled) continue;
+
+                uint32_t mat_id = is_pure ? cur.material_id : MAT_WATER;
+
+                float C00 = CalculateCornerHeight(world_view, x,     y, z);
+                float C10 = CalculateCornerHeight(world_view, x + 1, y, z);
+                float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1);
+                float C01 = CalculateCornerHeight(world_view, x,     y, z + 1);
+
+                bool is_corners_flat = (std::abs(C00 - C10) < 0.005f &&
+                                        std::abs(C00 - C11) < 0.005f &&
+                                        std::abs(C00 - C01) < 0.005f);
+
+                uint8_t lvl = cur.fluid_level();
+                if (lvl == 0) lvl = 5;
+
+                // Stationary flat source pool: greedy merge coplanar rectangular quads
+                if (is_pure && is_corners_flat && lvl >= 5) {
+                    int idx = x + z * CHUNK_SIZE;
+                    top_mask[idx].visible = true;
+                    top_mask[idx].mat_id = mat_id;
+                    top_mask[idx].emissive = get_emissive_intensity(mat_id);
+                    top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
+                    top_mask[idx].sub_y_half = 0;
+                    top_mask[idx].fluid_level = lvl;
+                    continue;
+                }
+
+                // Sloped flowing liquid or waterlogged sub-blocks: emit Minecraft smooth corner triangles
+                glm::vec2 flowDir(0.0f);
+                float centerH = GetBlockFluidHeight(world_view, glm::ivec3(x, y, z));
+                const glm::ivec3 sideOffsets[4] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
+                for (const auto& off : sideOffsets) {
+                    glm::ivec3 nPos = glm::ivec3(x, y, z) + off;
+                    float nH = GetBlockFluidHeight(world_view, nPos);
+                    if (nH < 0.0f) {
+                        if (world_view.GetBlockMaterial(nPos) == MAT_AIR) {
+                            flowDir.x += off.x * 1.5f;
+                            flowDir.y += off.z * 1.5f;
+                        }
+                    } else {
+                        flowDir.x += off.x * (centerH - nH);
+                        flowDir.y += off.z * (centerH - nH);
                     }
-                } else if (is_slab_waterlogged) {
-                    bool above_culled = IsLiquid(above.material_id) ||
-                                        (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
-                    if (!above_culled) {
-                        int idx = x + z * CHUNK_SIZE;
-                        top_mask[idx].visible = true;
-                        top_mask[idx].mat_id = MAT_WATER;
-                        top_mask[idx].emissive = get_emissive_intensity(MAT_WATER);
-                        top_mask[idx].aux = cur.is_highlighted() ? 1 : 0;
-                        top_mask[idx].sub_y_half = 1; /* Y = 0.5m contact surface */
-                        top_mask[idx].fluid_level = 0;
-                    }
+                }
+                if (glm::length(flowDir) > 0.001f) {
+                    flowDir = glm::normalize(flowDir);
+                }
+
+                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z,     C00, flowDir, mat_id, 0);
+                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, flowDir, mat_id, 1);
+                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11, flowDir, mat_id, 2);
+                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, flowDir, mat_id, 3);
+
+                emit_custom_triangle(v0, v1, v2);
+                emit_custom_triangle(v0, v2, v3);
+
+                if (is_slab_waterlogged) {
+                    // Internal contact interface at Y = 0.5m
+                    PackedVoxelVertex c0 = PackedVoxelVertex::encode(x,     y + 1, z,     2, 0, mat_id, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0);
+                    PackedVoxelVertex c1 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 2, 0, mat_id, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0);
+                    PackedVoxelVertex c2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 2, 0, mat_id, 1, 1, 2, 0, 0, 0, 1, 0, 0, 0);
+                    PackedVoxelVertex c3 = PackedVoxelVertex::encode(x + 1, y + 1, z,     2, 0, mat_id, 1, 1, 3, 0, 0, 0, 1, 0, 0, 0);
+                    emit_custom_quad(c0, c1, c2, c3);
                 }
             }
         }
@@ -1269,6 +1330,25 @@ void GreedyMesher::mesh_liquid_pass(
                     bool above_liquid = IsLiquid(above.material_id);
 
                     if (!above_solid && !above_liquid) {
+                        ChunkWorldView world_view{chunk, get_neighbor};
+                        float C00 = CalculateCornerHeight(world_view, x,     y, z);
+                        float C10 = CalculateCornerHeight(world_view, x + 1, y, z);
+                        float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1);
+                        float C01 = CalculateCornerHeight(world_view, x,     y, z + 1);
+
+                        glm::vec2 rampFlowDir(0.0f);
+                        if (shape == SHAPE_RAMP_EAST)  rampFlowDir = glm::vec2(-1.0f, 0.0f);
+                        if (shape == SHAPE_RAMP_WEST)  rampFlowDir = glm::vec2( 1.0f, 0.0f);
+                        if (shape == SHAPE_RAMP_SOUTH) rampFlowDir = glm::vec2( 0.0f,-1.0f);
+                        if (shape == SHAPE_RAMP_NORTH) rampFlowDir = glm::vec2( 0.0f, 1.0f);
+
+                        PackedVoxelVertex tv0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z,     C00, rampFlowDir, mat_id, 0);
+                        PackedVoxelVertex tv1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, rampFlowDir, mat_id, 1);
+                        PackedVoxelVertex tv2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11, rampFlowDir, mat_id, 2);
+                        PackedVoxelVertex tv3 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, rampFlowDir, mat_id, 3);
+                        emit_custom_triangle(tv0, tv1, tv2);
+                        emit_custom_triangle(tv0, tv2, tv3);
+
                         if (shape == SHAPE_RAMP_EAST) {
                             emit_quad(
                                 glm::ivec3(x,     y,     z),

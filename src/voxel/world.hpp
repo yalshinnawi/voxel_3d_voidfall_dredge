@@ -121,6 +121,8 @@ public:
     bool set_block(const glm::ivec3& pos, uint8_t mat, uint8_t flags = 0);
     uint8_t get_block_flags(const glm::ivec3& pos) const;
     uint8_t GetBlockFlags(const glm::ivec3& pos) const { return get_block_flags(pos); }
+    VoxelShape GetShape(const glm::ivec3& pos) const { return static_cast<VoxelShape>(GetBlockFlags(pos) & VOXEL_SHAPE_MASK); }
+    VoxelShape get_shape(const glm::ivec3& pos) const { return GetShape(pos); }
     bool set_block_flags(const glm::ivec3& pos, uint8_t flags);
     bool SetBlockFlags(const glm::ivec3& pos, uint8_t flags) { return set_block_flags(pos, flags); }
 
