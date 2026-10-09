@@ -112,7 +112,7 @@ public:
                mat == MAT_RADIOACTIVE_SLUDGE;
     }
     inline bool IsWaterlogged(int x, int y, int z) const {
-        return (GetFlags(x, y, z) & VOXEL_FLAG_WATERLOGGED) != 0;
+        return get_voxel(x, y, z).is_waterlogged();
     }
     inline void SetWaterlogged(int x, int y, int z, bool state) {
         uint8_t flags = GetFlags(x, y, z);

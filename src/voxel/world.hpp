@@ -297,6 +297,8 @@ public:
         upload_mesh_queue(MAX_CHUNK_UPLOADS_PER_FRAME);
     }
 
+    void queue_chunk_for_meshing(const ChunkPos& pos);
+
 private:
     void generate_chunk_terrain(Chunk& chunk);
     Voxel get_voxel_unlocked(int world_x, int world_y, int world_z) const;
@@ -304,7 +306,6 @@ private:
 
     // Worker thread meshing queue
     void worker_thread_loop();
-    void queue_chunk_for_meshing(const ChunkPos& pos);
 
     uint32_t m_seed{1337};
     int m_sector_index{1};

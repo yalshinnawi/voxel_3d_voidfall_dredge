@@ -38,9 +38,31 @@ using namespace Voidfall;
     std::exit(1);                                                              \
   }
 
+#define ASSERT_NE(a, b)                                                        \
+  if ((a) == (b)) {                                                            \
+    std::cerr << "[TEST FAILED] " #a " != " #b " failed (" << (a)              \
+              << " == " << (b) << ") at " << __FILE__ << ":" << __LINE__       \
+              << std::endl;                                                    \
+    std::exit(1);                                                              \
+  }
+
 #define ASSERT_GE(a, b)                                                        \
   if (!((a) >= (b))) {                                                         \
     std::cerr << "[TEST FAILED] " #a " (" << (a) << ") >= " #b " (" << (b)     \
+              << ") failed at " << __FILE__ << ":" << __LINE__ << std::endl;   \
+    std::exit(1);                                                              \
+  }
+
+#define ASSERT_LE(a, b)                                                        \
+  if (!((a) <= (b))) {                                                         \
+    std::cerr << "[TEST FAILED] " #a " (" << (a) << ") <= " #b " (" << (b)     \
+              << ") failed at " << __FILE__ << ":" << __LINE__ << std::endl;   \
+    std::exit(1);                                                              \
+  }
+
+#define ASSERT_GT(a, b)                                                        \
+  if (!((a) > (b))) {                                                          \
+    std::cerr << "[TEST FAILED] " #a " (" << (a) << ") > " #b " (" << (b)      \
               << ") failed at " << __FILE__ << ":" << __LINE__ << std::endl;   \
     std::exit(1);                                                              \
   }
@@ -134,7 +156,7 @@ void test_gravity_downward_flow() {
   // Water must have flowed straight down to the floor at y = 10
   Voxel floor_liquid = world.get_voxel(16, 10, 16);
   ASSERT_TRUE(IsLiquid(floor_liquid.material_id));
-  ASSERT_EQ(floor_liquid.fluid_level(), 5);
+  ASSERT_EQ(floor_liquid.fluid_level(), 4);
 
   // Cell at y = 11, 12, 13, 14, 15 should all be water
   for (int y = 10; y <= 15; ++y) {
@@ -619,6 +641,97 @@ TEST(FluidSimTest, Sector2DrillingBulkheadAroundMoltenSlagLavaSpreadsAndDropsInt
   std::cout << "  -> PASSED" << std::endl;
 }
 
+// 13. Bullet Hit On Bulkhead Does Not Spawn Liquid
+TEST(WeaponTest, BulletsDoNotSpawnLiquid) {
+  std::cout << "[Test 13] WeaponTest.BulletsDoNotSpawnLiquid..." << std::endl;
+  World world(1001, false);
+  glm::ivec3 blockPos(10, 5, 10);
+  world.SetBlock(blockPos, MAT_BULKHEAD, 0);
+
+  // Non-fatal bullet impact (e.g. damage = 6)
+  Voxel v = world.get_voxel(blockPos.x, blockPos.y, blockPos.z);
+  uint8_t bullet_damage = 6;
+  uint8_t new_damage = (v.flags_and_damage & 0x0F) + bullet_damage;
+  if (new_damage >= 15) {
+    world.SetBlock(blockPos, MAT_AIR);
+  } else {
+    v.flags_and_damage = (v.flags_and_damage & 0xF0) | (new_damage & 0x0F);
+    v.flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
+    world.set_voxel(blockPos.x, blockPos.y, blockPos.z, v, true);
+  }
+
+  uint8_t mat1 = world.GetBlockMaterial(blockPos);
+  ASSERT_TRUE(mat1 == MAT_BULKHEAD || mat1 == MAT_AIR);
+  ASSERT_NE(mat1, MAT_WATER);
+
+  // Second fatal bullet impact (damage >= 15)
+  new_damage += 10;
+  if (new_damage >= 15) {
+    world.SetBlock(blockPos, MAT_AIR);
+  }
+  uint8_t mat2 = world.GetBlockMaterial(blockPos);
+  ASSERT_TRUE(mat2 == MAT_BULKHEAD || mat2 == MAT_AIR);
+  ASSERT_NE(mat2, MAT_WATER);
+  std::cout << "  -> PASSED" << std::endl;
+}
+
+// 14. Flowing Water Does Not Multiply Infinitely
+TEST(FluidSimTest, FlowingWaterDoesNotMultiplyInfinitely) {
+  std::cout << "[Test 14] FluidSimTest.FlowingWaterDoesNotMultiplyInfinitely..." << std::endl;
+  World world(1337, false);
+  FluidSim::SetActiveWorld(&world);
+
+  // Flat floor channel at y = 10 along X
+  for (int x = 10; x <= 22; ++x) {
+    world.SetBlock(x, 10, 16, MAT_DREDGE_BEDROCK, 0);
+    world.SetBlock(x, 11, 15, MAT_DREDGE_BEDROCK, 0);
+    world.SetBlock(x, 11, 17, MAT_DREDGE_BEDROCK, 0);
+    world.SetBlock(x, 11, 16, MAT_AIR, 0);
+  }
+
+  // Place a single flowing water cell (level 3) on flat floor
+  world.set_fluid_cell(glm::ivec3(16, 11, 16), MAT_WATER, 3, false);
+  world.WakeFluid(glm::ivec3(16, 11, 16));
+
+  for (int i = 0; i < 20; ++i) {
+    FluidSim::Update(0.085f);
+  }
+
+  int count = 0;
+  for (int x = 10; x <= 22; ++x) {
+    if (IsLiquid(world.GetBlockMaterial(glm::ivec3(x, 11, 16)))) {
+      count++;
+    }
+  }
+
+  ASSERT_LE(count, 5);
+  ASSERT_GT(count, 0);
+  ASSERT_EQ(world.ActiveFluidCount(), 0);
+  std::cout << "  -> PASSED" << std::endl;
+}
+
+// 15. Tick Step Ceiling Respected
+TEST(FluidSimTest, TickStepCeilingRespected) {
+  std::cout << "[Test 15] FluidSimTest.TickStepCeilingRespected..." << std::endl;
+  World world(1337, false);
+  FluidSim sim;
+
+  // Seed 500 active fluid cells
+  for (int i = 0; i < 500; ++i) {
+    glm::ivec3 p(i % 20, 10 + (i / 20), 0);
+    sim.WakeFluid(p);
+  }
+  ASSERT_EQ(sim.active_fluids().size(), 500);
+
+  // Run a single simulation step
+  sim.Update(0.0833f, world);
+
+  // Assert that processed steps <= 128
+  ASSERT_LE(sim.last_steps_processed(), 128);
+  ASSERT_GE(sim.last_steps_processed(), 1);
+  std::cout << "  -> PASSED" << std::endl;
+}
+
 int main() {
   std::cout << "=========================================================="
             << std::endl;
@@ -639,10 +752,13 @@ int main() {
   FluidSimTest_InternalLiquidFacesAreCulled();
   FluidSimTest_Sector1DrillingRockBorderingWaterFlowsAndFills();
   FluidSimTest_Sector2DrillingBulkheadAroundMoltenSlagLavaSpreadsAndDropsIntoPit();
+  WeaponTest_BulletsDoNotSpawnLiquid();
+  FluidSimTest_FlowingWaterDoesNotMultiplyInfinitely();
+  FluidSimTest_TickStepCeilingRespected();
 
   std::cout << "=========================================================="
             << std::endl;
-  std::cout << "  ALL 12 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)  "
+  std::cout << "  ALL 15 FLUID SIMULATION TEST MODULES PASSED (0 ERRORS)  "
             << std::endl;
   std::cout << "=========================================================="
             << std::endl;

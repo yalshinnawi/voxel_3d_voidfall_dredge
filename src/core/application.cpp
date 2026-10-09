@@ -2029,7 +2029,13 @@ void Application::fixed_tick(float dt) {
                     }
                 } else {
                     // Accumulate ballistic damage and spawn progressive crack debris
-                    v.flags_and_damage = (v.flags_and_damage & 0xF0) | (new_damage & 0x0F);
+                    if (v.is_slab() || v.is_ramp() || v.is_corner()) {
+                        v.flags_and_damage = (v.flags_and_damage & ~VOXEL_DAMAGE_MASK) | (new_damage & VOXEL_DAMAGE_MASK);
+                        v.flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
+                    } else {
+                        v.flags_and_damage = (v.flags_and_damage & 0xF0) | (new_damage & 0x0F);
+                        v.flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
+                    }
                     m_world->set_voxel(bx, by, bz, v, true);
                     if (m_renderer) {
                         m_renderer->spawn_crack_debris(next_pos, hit_norm, static_cast<float>(new_damage) / 15.0f, v.material_id);

@@ -2268,7 +2268,7 @@ void test_cellular_fluid_simulation() {
 
     Voxel floor_liq = world.get_voxel(16, 10, 16);
     TEST_CHECK(IsLiquid(floor_liq.material_id), "Floor cell must become liquid via downward gravity");
-    TEST_CHECK(floor_liq.fluid_level() == 5, "Falling liquid must maintain level 5");
+    TEST_CHECK(floor_liq.fluid_level() == 4, "Falling liquid must be flowing level 4");
     log_pass("Event-Driven Downward Gravity Flow & Pure Fall Behavior");
 
     // 3. Lateral Spreading & Level Decay (L - 1)

@@ -28,9 +28,6 @@ struct Voxel {
     inline bool is_liquid() const {
         return IsLiquid(material_id);
     }
-    inline bool is_waterlogged() const {
-        return (flags_and_damage & VOXEL_FLAG_WATERLOGGED) != 0;
-    }
     inline void set_waterlogged(bool w) {
         if (w) flags_and_damage |= VOXEL_FLAG_WATERLOGGED;
         else   flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;
@@ -89,6 +86,9 @@ struct Voxel {
     }
     inline bool is_corner() const {
         return is_corner_shape(shape());
+    }
+    inline bool is_waterlogged() const {
+        return (is_slab() || is_ramp() || is_corner()) && ((flags_and_damage & VOXEL_FLAG_WATERLOGGED) != 0);
     }
 };
 #pragma pack(pop)
