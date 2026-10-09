@@ -81,6 +81,10 @@ public:
         RenderLiquidPass();
         end_liquid_pass();
     }
+    std::vector<Chunk*>& visible_chunks() { return m_visibleChunks; }
+    const std::vector<Chunk*>& visible_chunks() const { return m_visibleChunks; }
+    void add_visible_chunk(Chunk* chunk) { m_visibleChunks.push_back(chunk); }
+    Shader* liquid_shader() { return m_liquidShader; }
     void render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos);
     SurfaceClutterSystem& clutter_system() { return m_clutter_system; }
     const SurfaceClutterSystem& clutter_system() const { return m_clutter_system; }
@@ -175,12 +179,16 @@ private:
 
     // Shaders
     Shader m_voxel_shader;
+    Shader* m_liquidShader{&m_voxel_shader};
     Shader m_fog_compute_shader;
     Shader m_bloom_shader;
     Shader m_postprocess_shader;
     Shader m_wireframe_shader;
     Shader m_particle_shader;
     Shader m_stalker_shader;
+
+    // Chunks
+    std::vector<Chunk*> m_visibleChunks;
 
     // Textures
     std::unique_ptr<TextureArray> m_texture_array;

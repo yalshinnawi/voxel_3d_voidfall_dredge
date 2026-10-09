@@ -177,6 +177,65 @@ TEST(FluidMesher, SkirtEmittedOnElevationDelta) {
               << " down to Y=" << skirt_bot_y << " bridging elevation delta." << std::endl;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 3. LiquidMeshBufferNotEmpty
+// Place source water at (1, 1, 1) surrounded by air.
+// Mesh chunk and assert chunk->GetLiquidVertexCount() > 0.
+// ─────────────────────────────────────────────────────────────
+TEST(FluidMeshTest, LiquidMeshBufferNotEmpty) {
+    std::cout << "[Test 3] LiquidMeshBufferNotEmpty..." << std::endl;
+
+    auto chunk = std::make_unique<Chunk>(ChunkPos{0, 0, 0});
+    chunk->set_voxel(1, 1, 1, Voxel{MAT_WATER, 5});
+    chunk->mesh();
+
+    ASSERT_TRUE(chunk->GetLiquidVertexCount() > 0);
+    std::cout << "  -> PASSED: Liquid vertex count = " << chunk->GetLiquidVertexCount() << std::endl;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 4. SteppedDropsEmitBoundarySkirts
+// Place Level 5 water at (0, 0, 0) and Level 4 water at (1, 0, 0).
+// Assert that a vertical skirt quad is emitted between X = 1.0,
+// spanning the delta between the two levels.
+// ─────────────────────────────────────────────────────────────
+TEST(FluidMeshTest, SteppedDropsEmitBoundarySkirts) {
+    std::cout << "[Test 4] SteppedDropsEmitBoundarySkirts..." << std::endl;
+
+    auto chunk = std::make_unique<Chunk>(ChunkPos{0, 0, 0});
+    chunk->set_voxel(0, 0, 0, Voxel{MAT_WATER, 5});
+    chunk->set_voxel(1, 0, 0, Voxel{MAT_WATER, 4});
+    chunk->mesh();
+
+    ASSERT_TRUE(chunk->GetLiquidVertexCount() > 0);
+
+    auto mesh = GreedyMesher::generate_mesh(*chunk, nullptr);
+    bool found_skirt = false;
+    float skirt_top_y = -1.0f;
+    float skirt_bot_y = -1.0f;
+
+    for (const auto& v : mesh) {
+        uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+        uint32_t norm = (v.data0 >> 18u) & 0x7u;
+        if (layer == MAT_WATER && norm == 0 && v.is_vertical_flow()) {
+            glm::vec3 pos = v.position();
+            if (std::abs(pos.x - 1.0f) < 0.001f) {
+                found_skirt = true;
+                if (skirt_top_y < 0.0f || pos.y > skirt_top_y) skirt_top_y = pos.y;
+                if (skirt_bot_y < 0.0f || pos.y < skirt_bot_y) skirt_bot_y = pos.y;
+            }
+        }
+    }
+
+    ASSERT_TRUE(found_skirt);
+    ASSERT_NEAR(skirt_top_y, 0.88f, 0.02f);
+    ASSERT_NEAR(skirt_bot_y, 0.704f, 0.02f);
+    ASSERT_TRUE(skirt_top_y > skirt_bot_y);
+
+    std::cout << "  -> PASSED: Vertical skirt quad at X=1.0 spanning Y="
+              << skirt_top_y << " to Y=" << skirt_bot_y << std::endl;
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- FLUID RENDERING REGRESSION SUITE     " << std::endl;
@@ -184,6 +243,8 @@ int main() {
 
     FluidMesher_SharedEdgeHasIdenticalElevation();
     FluidMesher_SkirtEmittedOnElevationDelta();
+    FluidMeshTest_LiquidMeshBufferNotEmpty();
+    FluidMeshTest_SteppedDropsEmitBoundarySkirts();
 
     std::cout << "=== All Fluid Rendering Tests PASSED successfully ===" << std::endl;
     return 0;

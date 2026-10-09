@@ -1283,6 +1283,7 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
     m_view = view;
     m_proj = proj;
     m_cam_pos = cam_pos;
+    m_visibleChunks.clear();
 
     // Bind HDR FBO and clear
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
@@ -1392,20 +1393,24 @@ void Renderer::begin_solid_pass() {
 }
 
 void Renderer::render_chunk(const Chunk& chunk) {
-    if (chunk.is_empty() || chunk.solid_vertex_count() == 0) return;
+    if (chunk.solid_vertex_count() == 0 && chunk.liquid_vertex_count() == 0) return;
 
     glm::vec3 min_pt = chunk.get_world_pos();
     glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
     if (!is_box_in_frustum(min_pt, max_pt)) return;
 
-    glm::mat4 model = glm::mat4(1.0f);
-    m_voxel_shader.set_mat4("uModel", model);
-    m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
-    chunk.render_solid();
+    m_visibleChunks.push_back(const_cast<Chunk*>(&chunk));
+
+    if (chunk.solid_vertex_count() > 0) {
+        glm::mat4 model = glm::mat4(1.0f);
+        m_voxel_shader.set_mat4("uModel", model);
+        m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
+        chunk.render_solid();
+    }
 }
 
 void Renderer::render_chunk_liquid(const Chunk& chunk) {
-    if (chunk.is_empty() || chunk.liquid_vertex_count() == 0) return;
+    if (chunk.liquid_vertex_count() == 0) return;
 
     glm::vec3 min_pt = chunk.get_world_pos();
     glm::vec3 max_pt = min_pt + glm::vec3(static_cast<float>(CHUNK_SIZE));
@@ -1414,33 +1419,68 @@ void Renderer::render_chunk_liquid(const Chunk& chunk) {
     glm::mat4 model = glm::mat4(1.0f);
     m_voxel_shader.set_mat4("uModel", model);
     m_voxel_shader.set_vec3("uChunkWorldPos", min_pt);
-    chunk.render_liquid();
+    chunk.DrawLiquidMesh();
 }
 
 void Renderer::begin_liquid_pass() {
-    m_voxel_shader.use();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE); // Read depth, do not write depth over background
+    glDepthMask(GL_FALSE); // Read depth, do not occlude geometry behind water
+    glDisable(GL_CULL_FACE); // Temporarily disable face culling or ensure CCW winding
+
+    if (m_liquidShader) {
+        m_liquidShader->Bind();
+        m_liquidShader->SetMat4("u_ViewProjection", m_proj * m_view);
+        m_liquidShader->SetMat4("uViewProj", m_proj * m_view);
+        m_liquidShader->SetFloat("u_Time", m_total_time);
+        m_liquidShader->SetFloat("uTime", m_total_time);
+    }
 }
 
 void Renderer::end_liquid_pass() {
+    glEnable(GL_CULL_FACE);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
 
 void Renderer::RenderLiquidPass() {
-    // Dedicated liquid pass completion / post-liquid draw state hook
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE); // Read depth, do not occlude geometry behind water
+    glDisable(GL_CULL_FACE); // Temporarily disable face culling or ensure CCW winding
+
+    if (m_liquidShader) {
+        m_liquidShader->Bind();
+        m_liquidShader->SetMat4("u_ViewProjection", m_proj * m_view);
+        m_liquidShader->SetMat4("uViewProj", m_proj * m_view);
+        m_liquidShader->SetFloat("u_Time", m_total_time);
+        m_liquidShader->SetFloat("uTime", m_total_time);
+    }
+
+    for (Chunk* chunk : m_visibleChunks) {
+        if (chunk && chunk->HasLiquidMesh()) {
+            glm::vec3 min_pt = chunk->get_world_pos();
+            if (m_liquidShader) {
+                m_liquidShader->SetMat4("uModel", glm::mat4(1.0f));
+                m_liquidShader->SetVec3("uChunkWorldPos", min_pt);
+            }
+            chunk->DrawLiquidMesh();
+        }
+    }
+
+    glEnable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 void Renderer::RenderScene() {
     begin_solid_pass();
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
+    for (Chunk* chunk : m_visibleChunks) {
+        if (chunk && chunk->has_solid_mesh()) {
+            render_chunk(*chunk);
+        }
+    }
     RenderLiquidPass();
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
 }
 
 void Renderer::render_chunk_clutter(const Chunk& chunk, const glm::vec3& player_pos) {

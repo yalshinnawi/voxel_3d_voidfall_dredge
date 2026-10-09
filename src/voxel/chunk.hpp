@@ -6,6 +6,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <functional>
 
 namespace Voidfall {
 
@@ -161,6 +162,18 @@ public:
     size_t liquid_vertex_count() const { return m_liquid_vertex_count; }
     bool has_solid_mesh() const { return m_solid_vertex_count > 0; }
     bool has_liquid_mesh() const { return m_liquid_vertex_count > 0; }
+
+    inline size_t GetLiquidVertexCount() const {
+        if (m_liquid_vertex_count > 0) return m_liquid_vertex_count;
+        if (m_has_staged_mesh.load(std::memory_order_acquire)) {
+            const_cast<Chunk*>(this)->upload_mesh();
+            return m_liquid_vertex_count;
+        }
+        return 0;
+    }
+    inline bool HasLiquidMesh() const { return has_liquid_mesh() || GetLiquidVertexCount() > 0; }
+    inline void DrawLiquidMesh() const { render_liquid(); }
+    void mesh(const std::function<const Chunk*(const ChunkPos&)>& get_neighbor = nullptr);
 
     const std::vector<ClutterInstance>& clutter_instances() const { return m_clutter_instances; }
     std::vector<ClutterInstance>& clutter_instances_mut() { return m_clutter_instances; }

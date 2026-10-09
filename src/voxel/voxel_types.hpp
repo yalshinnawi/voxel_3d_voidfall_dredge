@@ -78,20 +78,21 @@ inline float GetFluidHeight(int level) {
 }
 
 template<typename WorldLike = World>
-inline float GetBlockFluidSurface(const WorldLike& world, const glm::ivec3& pos) {
+inline float GetLiquidColumnHeight(const WorldLike& world, const glm::ivec3& pos) {
     uint8_t mat = world.GetBlockMaterial(pos);
     uint8_t flags = world.GetBlockFlags(pos);
 
-    // Submerged column under another liquid block
+    // If block directly above is fluid, this column is fully submerged
     glm::ivec3 above = pos + glm::ivec3(0, 1, 0);
-    if (IsLiquid(world.GetBlockMaterial(above)) || (world.GetBlockFlags(above) & VOXEL_FLAG_WATERLOGGED)) {
+    uint8_t aboveMat = world.GetBlockMaterial(above);
+    if (IsLiquid(aboveMat) || (world.GetBlockFlags(above) & VOXEL_FLAG_WATERLOGGED)) {
         return 1.0f;
     }
 
     if (IsLiquid(mat)) {
         int lvl = flags & 0x07;
-        lvl = (lvl == 0) ? 5 : lvl;
-        if (lvl >= 5) return 0.88f; // Source pool lip
+        lvl = (lvl == 0) ? 5 : lvl; // Default source block to 5
+        if (lvl >= 5) return 0.88f;
         return 0.16f + (lvl / 5.0f) * 0.68f;
     }
 
@@ -101,12 +102,41 @@ inline float GetBlockFluidSurface(const WorldLike& world, const glm::ivec3& pos)
         return 0.16f + (lvl / 5.0f) * 0.68f;
     }
 
-    return -1.0f; // Not fluid
+    return -1.0f; // Not liquid
+}
+
+template<typename WorldLike = World>
+inline float CalculateCornerHeight(const WorldLike& world, int cx, int y, int cz, float centerH = 0.88f) {
+    float sum = 0.0f;
+    int count = 0;
+
+    for (int dx = -1; dx <= 0; ++dx) {
+        for (int dz = -1; dz <= 0; ++dz) {
+            glm::ivec3 colPos(cx + dx, y, cz + dz);
+            float h = GetLiquidColumnHeight(world, colPos);
+            if (h >= 0.0f) {
+                if (h >= 1.0f) return 1.0f; // Submerged corner clamped to 1.0m
+                sum += h;
+                count++;
+            }
+        }
+    }
+    return (count > 0) ? (sum / float(count)) : centerH;
+}
+
+template<typename WorldLike = World>
+inline float SampleCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ, float centerH = 0.88f) {
+    return CalculateCornerHeight(world, cornerX, y, cornerZ, centerH);
+}
+
+template<typename WorldLike = World>
+inline float GetBlockFluidSurface(const WorldLike& world, const glm::ivec3& pos) {
+    return GetLiquidColumnHeight(world, pos);
 }
 
 template<typename WorldLike = World>
 inline float GetBlockFluidHeight(const WorldLike& world, const glm::ivec3& pos) {
-    return GetBlockFluidSurface(world, pos);
+    return GetLiquidColumnHeight(world, pos);
 }
 
 enum VoxelShape : uint8_t {

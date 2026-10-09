@@ -26,6 +26,14 @@ public:
     void set_float(const std::string& name, float val) const;
     void set_int(const std::string& name, int val) const;
 
+    void Bind() const { use(); }
+    void SetMat4(const std::string& name, const glm::mat4& mat) const { set_mat4(name, mat); }
+    void SetVec4(const std::string& name, const glm::vec4& vec) const { set_vec4(name, vec); }
+    void SetVec3(const std::string& name, const glm::vec3& vec) const { set_vec3(name, vec); }
+    void SetVec2(const std::string& name, const glm::vec2& vec) const { set_vec2(name, vec); }
+    void SetFloat(const std::string& name, float val) const { set_float(name, val); }
+    void SetInt(const std::string& name, int val) const { set_int(name, val); }
+
 private:
     static std::string read_file_to_string(const std::string& filepath);
     static unsigned int compile_stage(unsigned int type, const std::string& source, const std::string& path);

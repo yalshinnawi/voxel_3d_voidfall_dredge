@@ -1,4 +1,5 @@
 #include "chunk.hpp"
+#include "greedy_mesher.hpp"
 #include <glad/glad.h>
 #include <algorithm>
 
@@ -126,6 +127,12 @@ void Chunk::render_liquid() const {
 void Chunk::render() const {
     render_solid();
     render_liquid();
+}
+
+void Chunk::mesh(const std::function<const Chunk*(const ChunkPos&)>& get_neighbor) {
+    auto verts = GreedyMesher::generate_mesh(*this, get_neighbor);
+    stage_mesh(std::move(verts));
+    upload_mesh();
 }
 
 } // namespace Voidfall

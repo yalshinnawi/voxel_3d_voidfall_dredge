@@ -393,10 +393,11 @@ void main() {
         } else if (v_MaterialID == MAT_THERMITE_SLAG || v_MaterialID == MAT_LAVA) {
             albedo = vec3(0.85, 0.35, 0.05);
         } else {
-            albedo = vec3(0.04, 0.52, 0.68); // Translucent subterranean cyan
+            albedo = vec3(0.04, 0.55, 0.70); // High-visibility subterranean cyan
         }
-        roughness = 0.03;
-        alpha = 0.72;
+        alpha = 0.75;
+        roughness = 0.04;
+        normal = normalize(v_Normal);
     }
     N = normal;
 

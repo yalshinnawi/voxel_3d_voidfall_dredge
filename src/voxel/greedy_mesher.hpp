@@ -37,27 +37,13 @@ public:
 
     // Evaluates Minecraft-style 4-corner averaged fluid height for a vertex column
     template<typename WorldLike>
-    static float SampleCornerHeight(const WorldLike& world, int cx, int y, int cz) {
-        // Average the 4 block columns meeting at corner vertex (cx, cz):
-        // (cx - 1, cz - 1), (cx, cz - 1), (cx - 1, cz), (cx, cz)
-        float sum = 0.0f;
-        int count = 0;
-        for (int dx = -1; dx <= 0; ++dx) {
-            for (int dz = -1; dz <= 0; ++dz) {
-                float h = GetBlockFluidSurface(world, glm::ivec3(cx + dx, y, cz + dz));
-                if (h >= 0.0f) {
-                    if (h >= 1.0f) return 1.0f; // If any column is submerged, corner is full height
-                    sum += h;
-                    count++;
-                }
-            }
-        }
-        return (count > 0) ? (sum / float(count)) : 0.88f;
+    static float SampleCornerHeight(const WorldLike& world, int cx, int y, int cz, float centerH = 0.88f) {
+        return Voidfall::CalculateCornerHeight(world, cx, y, cz, centerH);
     }
 
     template<typename WorldLike>
-    static float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
-        return SampleCornerHeight(world, cornerX, y, cornerZ);
+    static float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ, float centerH = 0.88f) {
+        return Voidfall::CalculateCornerHeight(world, cornerX, y, cornerZ, centerH);
     }
 
     // Queries face visibility between adjacent voxels.
@@ -99,15 +85,5 @@ private:
         int x, int y, int z
     );
 };
-
-template<typename WorldLike>
-inline float SampleCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
-    return GreedyMesher::SampleCornerHeight(world, cornerX, y, cornerZ);
-}
-
-template<typename WorldLike>
-inline float CalculateCornerHeight(const WorldLike& world, int cornerX, int y, int cornerZ) {
-    return GreedyMesher::SampleCornerHeight(world, cornerX, y, cornerZ);
-}
 
 } // namespace Voidfall

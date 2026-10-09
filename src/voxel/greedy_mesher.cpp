@@ -974,18 +974,20 @@ void GreedyMesher::mesh_liquid_pass(
 
                 uint32_t mat_id = is_pure ? cur.material_id : MAT_WATER;
 
-                float C00 = SampleCornerHeight(world_view, x,     y, z);
-                float C10 = SampleCornerHeight(world_view, x + 1, y, z);
-                float C11 = SampleCornerHeight(world_view, x + 1, y, z + 1);
-                float C01 = SampleCornerHeight(world_view, x,     y, z + 1);
+                float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
+                if (centerH < 0.0f) centerH = 0.88f;
+
+                float C00 = CalculateCornerHeight(world_view, x,     y, z,     centerH);
+                float C10 = CalculateCornerHeight(world_view, x + 1, y, z,     centerH);
+                float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1, centerH);
+                float C01 = CalculateCornerHeight(world_view, x,     y, z + 1, centerH);
 
                 // Compute flow direction vector
                 glm::vec2 flowDir(0.0f);
-                float centerH = GetBlockFluidSurface(world_view, glm::ivec3(x, y, z));
                 const glm::ivec3 sideOffsets[4] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
                 for (const auto& off : sideOffsets) {
                     glm::ivec3 nPos = glm::ivec3(x, y, z) + off;
-                    float nH = GetBlockFluidSurface(world_view, nPos);
+                    float nH = GetLiquidColumnHeight(world_view, nPos);
                     if (nH < 0.0f) {
                         if (world_view.GetBlockMaterial(nPos) == MAT_AIR) {
                             flowDir.x += off.x * 1.5f;
@@ -1000,13 +1002,19 @@ void GreedyMesher::mesh_liquid_pass(
                     flowDir = glm::normalize(flowDir);
                 }
 
-                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z,     C00, flowDir, mat_id, 0);
-                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, flowDir, mat_id, 1);
-                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11, flowDir, mat_id, 2);
-                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, flowDir, mat_id, 3);
+                // Form 4 top vertices with Counter-Clockwise (CCW) winding seen from above:
+                // V0: (x + 0, y + C00, z + 0)
+                // V1: (x + 0, y + C01, z + 1)
+                // V2: (x + 1, y + C11, z + 1)
+                // V3: (x + 1, y + C10, z + 0)
+                PackedVoxelVertex V0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z,     C00, flowDir, mat_id, 0);
+                PackedVoxelVertex V1 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, flowDir, mat_id, 3);
+                PackedVoxelVertex V2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11, flowDir, mat_id, 2);
+                PackedVoxelVertex V3 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, flowDir, mat_id, 1);
 
-                emit_custom_triangle(v0, v1, v2);
-                emit_custom_triangle(v0, v2, v3);
+                // Emit two triangles: (V0, V1, V2) and (V0, V2, V3)
+                emit_custom_triangle(V0, V1, V2);
+                emit_custom_triangle(V0, V2, V3);
 
                 if (is_slab_waterlogged) {
                     // Internal contact interface at Y = 0.5m
@@ -1222,10 +1230,13 @@ void GreedyMesher::mesh_liquid_pass(
 
                     if (!above_solid && !above_liquid) {
                         ChunkWorldView world_view{chunk, get_neighbor};
-                        float C00 = SampleCornerHeight(world_view, x,     y, z);
-                        float C10 = SampleCornerHeight(world_view, x + 1, y, z);
-                        float C11 = SampleCornerHeight(world_view, x + 1, y, z + 1);
-                        float C01 = SampleCornerHeight(world_view, x,     y, z + 1);
+                        float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
+                        if (centerH < 0.0f) centerH = 0.88f;
+
+                        float C00 = CalculateCornerHeight(world_view, x,     y, z,     centerH);
+                        float C10 = CalculateCornerHeight(world_view, x + 1, y, z,     centerH);
+                        float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1, centerH);
+                        float C01 = CalculateCornerHeight(world_view, x,     y, z + 1, centerH);
 
                         glm::vec2 rampFlowDir(0.0f);
                         if (shape == SHAPE_RAMP_EAST)  rampFlowDir = glm::vec2(-1.0f, 0.0f);
@@ -1234,9 +1245,9 @@ void GreedyMesher::mesh_liquid_pass(
                         if (shape == SHAPE_RAMP_NORTH) rampFlowDir = glm::vec2( 0.0f, 1.0f);
 
                         PackedVoxelVertex tv0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z,     C00, rampFlowDir, mat_id, 0);
-                        PackedVoxelVertex tv1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, rampFlowDir, mat_id, 1);
+                        PackedVoxelVertex tv1 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, rampFlowDir, mat_id, 3);
                         PackedVoxelVertex tv2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11, rampFlowDir, mat_id, 2);
-                        PackedVoxelVertex tv3 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01, rampFlowDir, mat_id, 3);
+                        PackedVoxelVertex tv3 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10, rampFlowDir, mat_id, 1);
                         emit_custom_triangle(tv0, tv1, tv2);
                         emit_custom_triangle(tv0, tv2, tv3);
 
