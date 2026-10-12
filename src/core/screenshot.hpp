@@ -65,12 +65,12 @@ private:
                    const std::string& text, uint8_t r, uint8_t g, uint8_t b);
 
     std::vector<FrameVisualMetrics> m_metrics;
-    std::vector<uint8_t> m_montage_buffer; // 1600 x 675 RGB canvas (4x3 grid)
+    std::vector<uint8_t> m_montage_buffer; // 1600 x 900 RGB canvas (4x4 grid)
     static constexpr int MONTAGE_W = 1600;
-    static constexpr int MONTAGE_H = 675;
+    static constexpr int MONTAGE_H = 900;
     static constexpr int TILE_W = 400;
     static constexpr int TILE_H = 225;
-    static constexpr int NUM_SLOTS = 12;
+    static constexpr int NUM_SLOTS = 16;
 
     std::vector<FrameVisualMetrics> m_enemy_metrics;
     std::vector<uint8_t> m_enemy_montage_buffer; // 1200 x 450 RGB canvas (3x2 grid)

@@ -24,6 +24,7 @@ struct CharacterAttributes {
     float baseMineSpeed{1.0f};          // Multiplier for excavation rate
     float moveSpeed{1.0f};              // Multiplier for walking/sprinting
     float suitIntegrity{100.0f};        // Base maximum health points
+    float baseShield{50.0f};            // Base maximum kinetic barrier / shield points
     float grapplePullSpeed{1.0f};       // Reel velocity factor
     float sonarRadius{14.0f};           // Scan query sphere radius (voxels)
     float sonarCooldown{10.0f};         // Base acoustic pulse recharge cooldown (seconds)

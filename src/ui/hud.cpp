@@ -453,11 +453,31 @@ void HUD::PushLootToast(const std::string& itemId, const std::string& displayNam
                    toast.displayName == displayName;
         });
 
+    std::string tag_symbol = "";
+    glm::vec4 toast_col = color;
+    if (displayName.find("VOIDITE") != std::string::npos || itemId.find("VOIDITE") != std::string::npos) {
+        tag_symbol = "<voidite> ";
+        toast_col = Typography::COLOR_VOIDITE;
+    } else if (displayName.find("TITANIUM") != std::string::npos || itemId.find("TITANIUM") != std::string::npos) {
+        tag_symbol = "<titanium> ";
+        toast_col = Typography::COLOR_TITANIUM;
+    } else if (displayName.find("SCRAP") != std::string::npos || itemId.find("SCRAP") != std::string::npos) {
+        tag_symbol = "<scrap> ";
+        toast_col = Typography::COLOR_SCRAP;
+    } else if (displayName.find("SALVAGE") != std::string::npos || itemId.find("SALVAGE") != std::string::npos) {
+        tag_symbol = "<salvage> ";
+        toast_col = Typography::COLOR_SALVAGE;
+    } else if (displayName.find("EXP") != std::string::npos || itemId.find("EXP") != std::string::npos) {
+        tag_symbol = "<exp> ";
+        toast_col = Typography::COLOR_EXP;
+    }
+
     if (it != m_loot_toasts.end()) {
         it->count += count;
         it->lifetime = 2.5f; // Refresh timer
         it->maxLifetime = 2.5f;
-        it->text = "+" + std::to_string(it->count) + " " + displayName + " [x" + std::to_string(it->count) + "]";
+        it->color = toast_col;
+        it->text = tag_symbol + "+" + std::to_string(it->count) + " " + displayName + " [x" + std::to_string(it->count) + "]";
         it->label = it->text;
         return;
     }
@@ -472,11 +492,11 @@ void HUD::PushLootToast(const std::string& itemId, const std::string& displayNam
     toast.displayName = displayName;
     toast.resource_name = displayName;
     toast.count = count;
-    toast.color = color;
+    toast.color = toast_col;
     toast.lifetime = 2.5f;
     toast.maxLifetime = 2.5f;
-    toast.text = (count > 1) ? ("+" + std::to_string(count) + " " + displayName + " [x" + std::to_string(count) + "]")
-                             : ("+1 " + displayName);
+    toast.text = (count > 1) ? (tag_symbol + "+" + std::to_string(count) + " " + displayName + " [x" + std::to_string(count) + "]")
+                             : (tag_symbol + "+1 " + displayName);
     toast.label = toast.text;
     m_loot_toasts.push_front(toast);
 }
@@ -572,7 +592,7 @@ void HUD::trigger_hit_marker(bool is_critical, float damage) {
     m_hit_marker_damage = damage;
 }
 
-void HUD::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color) {
+void HUD::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font) {
     if (m_headless || text.empty()) return;
 
     m_text_shader.use();
@@ -590,7 +610,7 @@ void HUD::draw_text(const std::string& text, float x, float y, float scale, cons
 
     std::vector<float> vertices;
     vertices.reserve(text.length() * 24);
-    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices);
+    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices, font);
 
     if (!vertices.empty()) {
         glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
@@ -600,26 +620,26 @@ void HUD::draw_text(const std::string& text, float x, float y, float scale, cons
     glBindVertexArray(0);
 }
 
-void HUD::draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color) {
+void HUD::draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font) {
     if (text.empty()) return;
-    float text_w = FontRenderer::get_rendered_width(text, scale);
-    float text_h = FontRenderer::get_rendered_height(scale);
+    float text_w = FontRenderer::get_rendered_width(text, scale, font);
+    float text_h = FontRenderer::get_rendered_height(scale, font);
     float x = box_x + (box_w - text_w) * 0.5f;
     float y = box_y + (box_h - text_h) * 0.5f;
-    draw_text(text, x, y, scale, color);
+    draw_text(text, x, y, scale, color, font);
 }
 
-void HUD::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale) {
+void HUD::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale, FontType font) {
     if (text.empty()) return;
-    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale);
-    draw_text(text, x, y, scale, color);
+    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale, font);
+    draw_text(text, x, y, scale, color, font);
 }
 
-void HUD::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale) {
+void HUD::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale, FontType font) {
     if (text.empty()) return;
     float pad = 4.0f;
-    float scale = FontRenderer::fit_scale(text, std::max(20.0f, box_w - pad * 2.0f), base_scale, min_scale);
-    draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color);
+    float scale = FontRenderer::fit_scale(text, std::max(20.0f, box_w - pad * 2.0f), base_scale, min_scale, font);
+    draw_text_centered(text, box_x, box_y, box_w, box_h, scale, color, font);
 }
 
 void HUD::render_optical_scope_lens(
@@ -1056,19 +1076,21 @@ void HUD::render_crosshair(
         glm::vec3 relic_world = glm::vec3(mission->vault().relic_pos) + glm::vec3(0.5f);
         float dist_to_relic = glm::distance(player.position(), relic_world);
         RaycastHit look_hit = player.get_look_target(world, 5.0f);
-        if (dist_to_relic <= 3.8f || (look_hit.hit && look_hit.block_pos == mission->vault().relic_pos)) {
+
+        bool relic_los = has_vault_objective_los(player.eye_position(), world, *mission);
+        if (relic_los && (dist_to_relic <= 3.8f || (look_hit.hit && look_hit.block_pos == mission->vault().relic_pos))) {
             relic_interact_prompt = true;
         }
     }
 
     if (relic_interact_prompt) {
-        std::string prompt = "[E] RETRIEVE PRECURSOR RELIC";
+        std::string prompt = "[E] RETRIEVE RELIC";
         glm::vec4 prompt_col = Typography::COLOR_CYAN;
-        float text_w = FontRenderer::get_rendered_width(prompt, 1.15f * ui_scale);
+        float text_w = FontRenderer::get_rendered_width(prompt, 1.18f * ui_scale);
         float pill_w = text_w + 24.0f * ui_scale;
         float pill_h = 24.0f * ui_scale;
         draw_pill(cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, prompt_col * 0.55f);
-        draw_text_centered(prompt, cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, 1.15f * ui_scale, prompt_col);
+        draw_text_centered_fitted(prompt, cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, 1.18f * ui_scale, prompt_col);
     } else if (player.active_tool() != ToolSlot::CombatWeapon) {
         RaycastHit hit = player.get_look_target(world, 5.0f);
         if (hit.hit && hit.voxel.is_solid()) {
@@ -1077,6 +1099,12 @@ void HUD::render_crosshair(
 
             if (hit.voxel.material_id == MAT_VOIDITE_CRYSTAL) {
                 prompt = "[LMB] DRILL VOIDITE";
+                prompt_col = glm::vec4(0.88f, 0.30f, 1.0f, 1.0f);
+            } else if (hit.voxel.material_id == MAT_ASTRAL_ORE) {
+                prompt = "[LMB] MINE ASTRAL ORE";
+                prompt_col = glm::vec4(1.0f, 0.84f, 0.15f, 1.0f);
+            } else if (hit.voxel.material_id == MAT_PRISMATIC_CRYSTAL) {
+                prompt = "[LMB] SALVAGE PRISMATIC";
                 prompt_col = Typography::COLOR_CYAN;
             } else if (hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD) {
                 prompt = "[LMB] DRILL BULKHEAD";
@@ -1092,11 +1120,11 @@ void HUD::render_crosshair(
                 prompt_col = Typography::COLOR_PRIMARY;
             }
 
-            float text_w = FontRenderer::get_rendered_width(prompt, 1.15f * ui_scale);
+            float text_w = FontRenderer::get_rendered_width(prompt, 1.18f * ui_scale);
             float pill_w = text_w + 24.0f * ui_scale;
             float pill_h = 24.0f * ui_scale;
             draw_pill(cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, prompt_col * 0.45f);
-            draw_text_centered(prompt, cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, 1.15f * ui_scale, prompt_col);
+            draw_text_centered_fitted(prompt, cx - pill_w / 2.0f, cy + 36.0f * ui_scale, pill_w, pill_h, 1.18f * ui_scale, prompt_col);
         }
     }
 }
@@ -1129,10 +1157,8 @@ void HUD::render_loot_toasts() {
     if (m_loot_toasts.empty()) return;
 
     float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
-    float toast_w = std::clamp(300.0f * ui_scale, 230.0f, 360.0f);
-    float toast_x = static_cast<float>(m_width) - toast_w - 20.0f * ui_scale;
-    float row_h = std::clamp(28.0f * ui_scale, 24.0f, 34.0f);
-    float base_y = (m_briefingTimer > 0.0f && !m_show_help_briefing) ? (208.0f * ui_scale) : (110.0f * ui_scale);
+    float row_h = std::clamp(30.0f * ui_scale, 26.0f, 36.0f);
+    float base_y = (m_briefingTimer > 0.0f && !m_show_help_briefing) ? (180.0f * ui_scale) : (100.0f * ui_scale);
 
     for (size_t i = 0; i < m_loot_toasts.size(); ++i) {
         const auto& toast = m_loot_toasts[i];
@@ -1147,12 +1173,14 @@ void HUD::render_loot_toasts() {
             slide_offset = (1.0f - t) * 40.0f * ui_scale;
         }
 
+        float text_scale = 0.98f * ui_scale;
+        float text_w = FontRenderer::get_rendered_width(toast.label, text_scale, FontType::Display);
+        float toast_w = std::clamp(text_w + 28.0f * ui_scale, 240.0f * ui_scale, 420.0f * ui_scale);
+        float toast_x = static_cast<float>(m_width) - toast_w - 20.0f * ui_scale;
         float draw_x = toast_x + slide_offset;
         float y = base_y + static_cast<float>(i * (row_h + 6.0f * ui_scale));
 
-        glm::vec4 border_col = (toast.resource_name.find("VOIDITE") != std::string::npos) ?
-            glm::vec4(Typography::COLOR_CYAN.r, Typography::COLOR_CYAN.g, Typography::COLOR_CYAN.b, 0.90f * alpha) :
-            glm::vec4(Typography::COLOR_AMBER.r, Typography::COLOR_AMBER.g, Typography::COLOR_AMBER.b, 0.90f * alpha);
+        glm::vec4 border_col = glm::vec4(toast.color.r, toast.color.g, toast.color.b, 0.90f * alpha);
 
         // Dark semi-transparent pill container (rgba(10, 15, 22, 0.85)) with 1px border
         glm::vec4 pill_bg(10.0f / 255.0f, 15.0f / 255.0f, 22.0f / 255.0f, 0.85f * alpha);
@@ -1163,8 +1191,8 @@ void HUD::render_loot_toasts() {
         draw_rect(draw_x + toast_w - 1.0f, y, 1.0f, row_h, border_col);
 
         glm::vec4 text_col = glm::vec4(1.0f, 1.0f, 1.0f, alpha);
-        float font_h = FontRenderer::get_rendered_height(0.95f * ui_scale);
-        draw_text(toast.label, draw_x + 12.0f * ui_scale, y + (row_h - font_h) * 0.5f, 0.95f * ui_scale, text_col);
+        float font_h = FontRenderer::get_rendered_height(text_scale, FontType::Display);
+        draw_text(toast.label, draw_x + 14.0f * ui_scale, y + (row_h - font_h) * 0.5f, text_scale, text_col, FontType::Display);
     }
 }
 
@@ -1272,13 +1300,14 @@ void HUD::render(
             }
         }
 
-        // Discovered Voidite clusters and high-value mineral anomalies on Compass Ribbon
-        if (surveying) {
+        // Discovered Objectives and Hostile Monster signatures on Compass Ribbon
+        if (surveying && surveying->is_active()) {
             int shown_anomalies = 0;
-            for (const auto& sv : surveying->surveyed_voxels()) {
+            // 1. Objectives: Voidite and Vault Bulkhead Doors
+            for (const auto& cl : surveying->clusters()) {
                 if (shown_anomalies >= 8) break;
-                if (sv.material_id == MAT_VOIDITE_CRYSTAL || sv.material_id == MAT_PRISMATIC_CRYSTAL) {
-                    glm::vec3 to_anom = glm::vec3(sv.pos.x + 0.5f, sv.pos.y + 0.5f, sv.pos.z + 0.5f) - player.position();
+                if (cl.material_id == MAT_VOIDITE_CRYSTAL || cl.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                    glm::vec3 to_anom = cl.centroid - player.position();
                     float anom_angle = glm::degrees(std::atan2(to_anom.x, -to_anom.z));
                     float anom_heading = std::fmod(anom_angle + 360.0f, 360.0f);
                     float a_diff = anom_heading - current_heading;
@@ -1287,66 +1316,85 @@ void HUD::render(
 
                     if (std::abs(a_diff) <= fov_range) {
                         float a_x = cx + (a_diff / fov_range) * (comp_w * 0.46f);
-                        glm::vec4 a_col = (sv.material_id == MAT_VOIDITE_CRYSTAL)
+                        glm::vec4 a_col = (cl.material_id == MAT_VOIDITE_CRYSTAL)
                             ? glm::vec4(0.85f, 0.25f, 1.0f, 0.95f) // Voidite purple
-                            : glm::vec4(0.2f, 1.0f, 0.85f, 0.95f); // Prismatic crystal
+                            : glm::vec4(1.0f, 0.0f, 0.85f, 0.95f); // Vault door magenta
                         draw_rect(a_x - 1.5f, comp_y + 2.0f, 3.0f, comp_h - 4.0f, a_col);
                         shown_anomalies++;
                     }
                 }
             }
+
+            // 2. Hostile Monsters: Void Stalkers and Seismic Burrowers
+            for (const auto& m : surveying->monsters()) {
+                if (shown_anomalies >= 12) break;
+                glm::vec3 to_m = m.position - player.position();
+                float m_angle = glm::degrees(std::atan2(to_m.x, -to_m.z));
+                float m_heading = std::fmod(m_angle + 360.0f, 360.0f);
+                float m_diff = m_heading - current_heading;
+                while (m_diff < -180.0f) m_diff += 360.0f;
+                while (m_diff > 180.0f) m_diff -= 360.0f;
+
+                if (std::abs(m_diff) <= fov_range) {
+                    float m_x = cx + (m_diff / fov_range) * (comp_w * 0.46f);
+                    glm::vec4 m_col = m.is_burrower
+                        ? glm::vec4(1.0f, 0.45f, 0.10f, 0.95f) // Fiery amber for burrower
+                        : glm::vec4(1.0f, 0.20f, 0.15f, 0.95f); // Hostile red for stalker
+                    draw_rect(m_x - 1.5f, comp_y + 1.0f, 3.0f, comp_h - 2.0f, m_col);
+                    shown_anomalies++;
+                }
+            }
         }
     }
 
-    // 3. TOP-LEFT (Extraction Manifest & Resources) - Dedicated, prominent, easy to read
+    // 3. TOP-LEFT (Extraction Manifest & Resources) - Minimalist, larger high-contrast typography
     {
         float mf_x = 24.0f * ui_scale;
         float mf_y = 16.0f * ui_scale;
         float mf_w = std::clamp(280.0f * ui_scale, 220.0f, 320.0f);
-        float mf_h = std::clamp(74.0f * ui_scale, 62.0f, 82.0f);
+        float mf_h = std::clamp(62.0f * ui_scale, 52.0f, 70.0f);
 
         draw_pill(mf_x, mf_y, mf_w, mf_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
         draw_rect(mf_x, mf_y, 3.0f, mf_h, Typography::COLOR_CYAN);
 
         float pad_x = mf_x + 12.0f * ui_scale;
-        float r0_y = mf_y + 8.0f * ui_scale;
-        draw_text("// EXTRACTION MANIFEST", pad_x, r0_y, 0.85f * ui_scale, Typography::COLOR_MUTED);
+        float bar_w = mf_w - 24.0f * ui_scale;
 
-        // Row 1: Voidite Haul & Quota Progress
-        float r1_y = mf_y + 22.0f * ui_scale;
+        // Row 1: Voidite Haul & Quota Progress (Prominent, High-Contrast)
+        float r1_y = mf_y + 8.0f * ui_scale;
         int target = inventory.target_voidite > 0 ? inventory.target_voidite : (current_level == 1 ? 25 : (current_level == 2 ? 30 : 45));
         bool quota_met = (inventory.voidite >= target);
 
-        std::string v_str = "VOIDITE: " + std::to_string(inventory.voidite) + " / " + std::to_string(target);
+        std::string v_str = "<voidite> VOIDITE: " + std::to_string(inventory.voidite) + " / " + std::to_string(target);
         if (quota_met) {
             v_str += " [MET!]";
         }
         glm::vec4 v_col = quota_met ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
-        draw_text(v_str, pad_x, r1_y, 1.15f * ui_scale, v_col);
+        draw_text_fitted(v_str, pad_x, r1_y, bar_w, 1.25f * ui_scale, v_col, 0.65f * ui_scale, FontType::Tech);
 
         // Progress bar under Voidite
-        float bar_w = mf_w - 24.0f * ui_scale;
         float bar_h = 5.0f * ui_scale;
-        float bar_y = r1_y + 16.0f * ui_scale;
+        float bar_y = r1_y + 19.0f * ui_scale;
         float fill_ratio = (target > 0) ? std::clamp(static_cast<float>(inventory.voidite) / static_cast<float>(target), 0.0f, 1.0f) : 0.0f;
         draw_rect(pad_x, bar_y, bar_w, bar_h, glm::vec4(0.08f, 0.14f, 0.18f, 0.85f));
         draw_rect(pad_x, bar_y, bar_w * fill_ratio, bar_h, v_col);
 
-        // Row 2: Secondary Minerals & Cargo Weight
+        // Row 2: Secondary Minerals & Materials (Clean, uncluttered, larger text)
         float r2_y = bar_y + bar_h + 6.0f * ui_scale;
-        std::string ti_str = "TITAN: " + std::to_string(inventory.titanium);
-        draw_text(ti_str, pad_x, r2_y, 0.98f * ui_scale, Typography::COLOR_AMBER);
-
-        float cur_w = inventory.carry_weight();
-        float max_w = inventory.max_carry_weight(static_cast<int>(player.character_class()));
-        bool over = inventory.is_overburdened(static_cast<int>(player.character_class()));
-        char load_buf[32];
-        std::snprintf(load_buf, sizeof(load_buf), "LOAD: %.0f/%.0fKG", cur_w, max_w);
-        glm::vec4 load_col = over ? Typography::COLOR_CRIMSON : Typography::COLOR_MUTED;
-        if (over && std::fmod(m_total_time * 4.0f, 1.0f) > 0.5f) {
-            load_col = Typography::COLOR_AMBER;
+        std::string ti_str = "<titanium> " + std::to_string(inventory.titanium);
+        std::string mat_str;
+        if (inventory.target_astral_ore > 0 || inventory.astral_ore > 0) {
+            std::string ast_str = "<scrap> " + std::to_string(inventory.astral_ore);
+            if (inventory.target_astral_ore > 0) {
+                ast_str += "/" + std::to_string(inventory.target_astral_ore);
+            }
+            std::string sal_str = "<salvage> " + std::to_string(inventory.salvage_parts);
+            mat_str = ti_str + "   " + ast_str + "   " + sal_str;
+        } else {
+            std::string sal_str = "<salvage> " + std::to_string(inventory.salvage_parts);
+            mat_str = ti_str + "      " + sal_str;
         }
-        draw_text(std::string(load_buf), pad_x + bar_w * 0.52f, r2_y, 0.98f * ui_scale, load_col);
+        draw_text_fitted(mat_str, pad_x, r2_y, bar_w, 1.08f * ui_scale, Typography::COLOR_AMBER, 0.65f * ui_scale, FontType::Tech);
     }
 
     // 4. TOP-CENTER (Hazard Clock & Cavern Tension)
@@ -1378,14 +1426,15 @@ void HUD::render(
         obj_str = "SECTOR: STABLE";
         obj_col = Typography::COLOR_CYAN;
     }
-    float obj_font_h = FontRenderer::get_rendered_height(1.02f * ui_scale);
-    draw_text(obj_str, hz_x + 12.0f * ui_scale, hz_y + (hz_h - obj_font_h) * 0.5f, 1.02f * ui_scale, obj_col);
+    float obj_font_h = FontRenderer::get_rendered_height(1.15f * ui_scale, FontType::Display);
+    float obj_avail = (hz_w * 0.45f) - 18.0f * ui_scale;
+    draw_text_fitted(obj_str, hz_x + 12.0f * ui_scale, hz_y + (hz_h - obj_font_h) * 0.5f, obj_avail, 1.15f * ui_scale, obj_col, 0.70f * ui_scale, FontType::Display);
 
     // Multi-Stage Secondary Objective readout
     if (mission && !mission->get_secondary_objective_text().empty()) {
         float sec_y = hz_y + hz_h + 3.0f * ui_scale;
         draw_text(mission->get_secondary_objective_text(), hz_x + 12.0f * ui_scale, sec_y, 0.80f * ui_scale,
-                  mission->is_relic_retrieved() ? Typography::COLOR_GREEN : Typography::COLOR_AMBER);
+                  mission->is_relic_retrieved() ? Typography::COLOR_GREEN : Typography::COLOR_AMBER, FontType::Body);
     }
 
     // Subtle vertical divider line
@@ -1398,15 +1447,15 @@ void HUD::render(
     float right_avail = right_end - right_x;
     if (tremoring) {
         if (hazard.is_player_in_tremor_zone()) {
-            draw_text("! SEISMIC TREMOR !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_CRIMSON);
+            draw_text_fitted("<warning> SEISMIC TREMOR", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, right_avail, 0.98f * ui_scale, Typography::COLOR_CRIMSON, 0.65f * ui_scale, FontType::Display);
         } else {
-            draw_text("! REMOTE TREMOR  !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_AMBER);
+            draw_text_fitted("<warning> REMOTE TREMOR", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, right_avail, 0.98f * ui_scale, Typography::COLOR_AMBER, 0.65f * ui_scale, FontType::Display);
         }
     } else if (hazard.is_warning()) {
         if (hazard.is_player_in_tremor_zone()) {
-            draw_text("! FAULT RUPTURE  !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_CRIMSON);
+            draw_text_fitted("<warning> FAULT RUPTURE", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, right_avail, 0.98f * ui_scale, Typography::COLOR_CRIMSON, 0.65f * ui_scale, FontType::Display);
         } else {
-            draw_text("! REMOTE RUPTURE !", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, 0.90f * ui_scale, Typography::COLOR_AMBER);
+            draw_text_fitted("<warning> REMOTE RUPTURE", right_x, hz_y + (hz_h - obj_font_h) * 0.5f, right_avail, 0.98f * ui_scale, Typography::COLOR_AMBER, 0.65f * ui_scale, FontType::Display);
         }
     } else {
         float stress = hazard.seismic_stress();
@@ -1415,11 +1464,11 @@ void HUD::render(
                                                  Typography::COLOR_PRIMARY;
 
         // Row 1 (top): "SEISMIC" label left, percentage value right — no bar on this row
-        float label_y = hz_y + 5.0f * ui_scale;
-        draw_text("SEISMIC", right_x, label_y, 0.80f * ui_scale, Typography::COLOR_MUTED);
+        float label_y = hz_y + 4.0f * ui_scale;
+        draw_text("SEISMIC", right_x, label_y, 0.85f * ui_scale, Typography::COLOR_MUTED, FontType::Display);
         std::string pct_str = std::to_string(static_cast<int>(stress)) + "%";
-        float pct_w = FontRenderer::get_rendered_width(pct_str, 0.92f * ui_scale);
-        draw_text(pct_str, right_end - pct_w, label_y, 0.92f * ui_scale, trem_col);
+        float pct_w = FontRenderer::get_rendered_width(pct_str, 1.05f * ui_scale, FontType::Tech);
+        draw_text(pct_str, right_end - pct_w, label_y, 1.05f * ui_scale, trem_col, FontType::Tech);
 
         // Row 2 (bottom strip): full-width progress bar — completely separate from text above
         float bar_h = std::clamp(4.0f * ui_scale, 3.0f, 6.0f);
@@ -1535,7 +1584,7 @@ void HUD::render(
     // 5. BOTTOM-LEFT (Delver Vitals: HP & Thruster Fuel - Clean Stacked Layout)
     {
         float s_w = std::clamp(280.0f * ui_scale, 240.0f, 320.0f);
-        float s_h = std::clamp(78.0f * ui_scale, 72.0f, 88.0f);
+        float s_h = std::clamp(102.0f * ui_scale, 94.0f, 114.0f);
         float s_x = 24.0f * ui_scale;
         float s_y = sh - s_h - 24.0f * ui_scale;
 
@@ -1543,7 +1592,9 @@ void HUD::render(
 
         draw_pill(s_x, s_y, s_w, s_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.35f));
         glm::vec4 hp_bar_col = (exo.integrity <= 25.0f) ? Typography::COLOR_CRIMSON : Typography::COLOR_GREEN;
-        draw_rect(s_x, s_y, 3.0f, s_h, hp_bar_col);
+        glm::vec4 left_strip_col = (exo.shield > 0.0f) ? Typography::COLOR_CYAN :
+                                   ((exo.integrity <= 25.0f) ? Typography::COLOR_CRIMSON : Typography::COLOR_AMBER);
+        draw_rect(s_x, s_y, 3.0f, s_h, left_strip_col);
 
         float pad_x = s_x + 12.0f * ui_scale;
         float crouch_badge_w = player.is_crouching() ? (FontRenderer::get_rendered_width("[CROUCH]", 0.78f * ui_scale) + 6.0f * ui_scale) : 0.0f;
@@ -1552,38 +1603,57 @@ void HUD::render(
         float hl_badge_w = FontRenderer::get_rendered_width(hl_str, 0.78f * ui_scale) + 6.0f * ui_scale;
 
         float max_title_w = std::max(50.0f, s_w - 24.0f * ui_scale - crouch_badge_w - hl_badge_w);
-        draw_text_fitted("// EXOSUIT VITALS", pad_x, s_y + 8.0f * ui_scale, max_title_w, 0.82f * ui_scale, Typography::COLOR_MUTED);
+        draw_text_fitted("// SUIT VITALS", pad_x, s_y + 8.0f * ui_scale, max_title_w, 0.85f * ui_scale, Typography::COLOR_MUTED, 0.65f * ui_scale, FontType::Display);
 
         float right_badges_x = s_x + s_w - 12.0f * ui_scale;
         if (player.is_crouching()) {
             right_badges_x -= crouch_badge_w;
-            draw_text("[CROUCH]", right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, Typography::COLOR_CYAN);
+            draw_text("[CROUCH]", right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.82f * ui_scale, Typography::COLOR_CYAN, FontType::Tech);
         }
         right_badges_x -= hl_badge_w;
-        draw_text(hl_str, right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.78f * ui_scale, hl_col);
+        draw_text(hl_str, right_badges_x + 6.0f * ui_scale, s_y + 8.0f * ui_scale, 0.82f * ui_scale, hl_col, FontType::Tech);
 
         float bar_w = s_w - 24.0f * ui_scale;
-        float bar_h = 6.0f * ui_scale;
+        float bar_h = 5.0f * ui_scale;
 
-        // Row 1: Health (Integrity) - Text line with percentage, bar on next line
+        // Row 1: Kinetic Shield (Recharging Layer)
         float r1_text_y = s_y + 20.0f * ui_scale;
-        draw_text("SUIT INTEGRITY", pad_x, r1_text_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY);
+        draw_text("<shield> SHIELD", pad_x, r1_text_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY, FontType::Display);
+        std::string shield_val = std::to_string(static_cast<int>(exo.shield)) + "%";
+        if (player.is_shield_recharging()) {
+            shield_val += " [REGEN]";
+        }
+        glm::vec4 shield_bar_col = player.is_shield_recharging()
+            ? (glm::vec4(0.20f, 0.90f, 1.0f, 1.0f) * (0.85f + 0.15f * std::sin(m_total_time * 8.0f)))
+            : Typography::COLOR_CYAN;
+        float shield_val_w = FontRenderer::get_rendered_width(shield_val, 1.05f * ui_scale, FontType::Tech);
+        draw_text(shield_val, s_x + s_w - shield_val_w - 12.0f * ui_scale, r1_text_y, 1.05f * ui_scale, shield_bar_col, FontType::Tech);
+
+        float r1_bar_y = s_y + 32.0f * ui_scale;
+        draw_rect(pad_x, r1_bar_y, bar_w, bar_h, glm::vec4(0.06f, 0.14f, 0.22f, 0.8f));
+        draw_rect(pad_x, r1_bar_y, bar_w * std::clamp(exo.shield / 100.0f, 0.0f, 1.0f), bar_h, shield_bar_col);
+
+        // Row 2: Health (Integrity - Non-regenerating)
+        float r2_text_y = s_y + 44.0f * ui_scale;
+        draw_text("<health> INTEGRITY", pad_x, r2_text_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY, FontType::Display);
         std::string hp_val = std::to_string(static_cast<int>(exo.integrity)) + "%";
-        draw_text(hp_val, s_x + s_w - 48.0f * ui_scale, r1_text_y, 0.95f * ui_scale, hp_bar_col);
+        float hp_val_w = FontRenderer::get_rendered_width(hp_val, 1.05f * ui_scale, FontType::Tech);
+        draw_text(hp_val, s_x + s_w - hp_val_w - 12.0f * ui_scale, r2_text_y, 1.05f * ui_scale, hp_bar_col, FontType::Tech);
 
-        float hp_bar_y = s_y + 34.0f * ui_scale;
-        draw_rect(pad_x, hp_bar_y, bar_w, bar_h, glm::vec4(0.10f, 0.16f, 0.12f, 0.8f));
-        draw_rect(pad_x, hp_bar_y, bar_w * std::clamp(exo.integrity / 100.0f, 0.0f, 1.0f), bar_h, hp_bar_col);
+        float r2_bar_y = s_y + 56.0f * ui_scale;
+        draw_rect(pad_x, r2_bar_y, bar_w, bar_h, glm::vec4(0.10f, 0.16f, 0.12f, 0.8f));
+        draw_rect(pad_x, r2_bar_y, bar_w * std::clamp(exo.integrity / 100.0f, 0.0f, 1.0f), bar_h, hp_bar_col);
 
-        // Row 2: Fuel (Power) - Text line with percentage, bar on next line
-        float r2_text_y = s_y + 46.0f * ui_scale;
-        draw_text("THRUST POWER", pad_x, r2_text_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY);
+        // Row 3: Fuel (Power)
+        float r3_text_y = s_y + 68.0f * ui_scale;
+        draw_text("<sonar> THRUST", pad_x, r3_text_y, 0.95f * ui_scale, Typography::COLOR_PRIMARY, FontType::Display);
         std::string fuel_val = std::to_string(static_cast<int>(exo.power)) + "%";
-        draw_text(fuel_val, s_x + s_w - 48.0f * ui_scale, r2_text_y, 0.95f * ui_scale, Typography::COLOR_CYAN);
+        float fuel_val_w = FontRenderer::get_rendered_width(fuel_val, 1.05f * ui_scale, FontType::Tech);
+        draw_text(fuel_val, s_x + s_w - fuel_val_w - 12.0f * ui_scale, r3_text_y, 1.05f * ui_scale, Typography::COLOR_CYAN, FontType::Tech);
 
-        float fuel_bar_y = r2_text_y + 14.0f * ui_scale;
-        draw_rect(pad_x, fuel_bar_y, bar_w, bar_h, glm::vec4(0.08f, 0.14f, 0.20f, 0.8f));
-        draw_rect(pad_x, fuel_bar_y, bar_w * std::clamp(exo.power / 100.0f, 0.0f, 1.0f), bar_h, Typography::COLOR_CYAN);
+        float r3_bar_y = s_y + 80.0f * ui_scale;
+        draw_rect(pad_x, r3_bar_y, bar_w, bar_h, glm::vec4(0.08f, 0.14f, 0.20f, 0.8f));
+        draw_rect(pad_x, r3_bar_y, bar_w * std::clamp(exo.power / 100.0f, 0.0f, 1.0f), bar_h, Typography::COLOR_CYAN);
 
         // 5b. Geiger / Radiation monitor (Color-coded: Green = Safe, Yellow = Caution, Red = Danger & Damage)
         float cur_rad = exo.radiation;
@@ -1692,7 +1762,7 @@ void HUD::render(
             float prog = player.sonar_recharge_progress();
             draw_rect(ab_x + 4.0f, ab_y + ab_h - 2.0f, (half_w - 8.0f) * prog, 2.0f, Typography::COLOR_CYAN * 0.7f);
         }
-        draw_text_centered_fitted(q_str, ab_x, ab_y, half_w, ab_h, 0.92f * ui_scale, q_col);
+        draw_text_centered_fitted(q_str, ab_x, ab_y, half_w, ab_h, 1.05f * ui_scale, q_col, 0.65f * ui_scale, FontType::Display);
 
         // Right Half: [C] Tactical Class Skill
         bool t_ready = player.is_tactical_ready();
@@ -1712,13 +1782,13 @@ void HUD::render(
             float t_prog = player.tactical_recharge_progress();
             draw_rect(mid_x + 4.0f, ab_y + ab_h - 2.0f, (half_w - 8.0f) * t_prog, 2.0f, Typography::COLOR_AMBER * 0.7f);
         }
-        draw_text_centered_fitted(c_str, mid_x, ab_y, half_w, ab_h, 0.92f * ui_scale, c_col);
+        draw_text_centered_fitted(c_str, mid_x, ab_y, half_w, ab_h, 1.05f * ui_scale, c_col, 0.65f * ui_scale, FontType::Display);
 
         // 6a. Throwable Chemical Flare Status: [T] FLARE: X/3
         float flare_y = ab_y - 20.0f * ui_scale;
         float flare_w = ab_w;
         float flare_h = 16.0f * ui_scale;
-        std::string fl_str = "[T] CHEMICAL FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
+        std::string fl_str = "<flare> [T] FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
         if (player.flare_count() < player.max_flares()) {
             char fl_buf[32];
             std::snprintf(fl_buf, sizeof(fl_buf), " (%.0fs)", player.flare_recharge_timer());
@@ -1726,7 +1796,7 @@ void HUD::render(
         }
         glm::vec4 fl_col = (player.flare_count() > 0) ? Typography::COLOR_CYAN : Typography::COLOR_AMBER;
         draw_pill(ab_x, flare_y, flare_w, flare_h, glm::vec4(0.02f, 0.04f, 0.07f, 0.85f));
-        draw_text_centered_fitted(fl_str, ab_x, flare_y, flare_w, flare_h, 0.78f * ui_scale, fl_col);
+        draw_text_centered_fitted(fl_str, ab_x, flare_y, flare_w, flare_h, 0.90f * ui_scale, fl_col, 0.60f * ui_scale, FontType::Tech);
         if (player.flare_count() < player.max_flares()) {
             draw_rect(ab_x + 4.0f, flare_y + flare_h - 2.0f, (flare_w - 8.0f) * player.flare_recharge_progress(), 2.0f, Typography::COLOR_CYAN * 0.7f);
         }
@@ -1753,46 +1823,9 @@ void HUD::render(
         }
     }
 
-    // 7. COMPUTE UNIFIED TOP-STACK LAYOUT (Seismic Alert -> Evac Banner -> Notifications Stack)
+    // 7. COMPUTE UNIFIED TOP-STACK LAYOUT (Evac Banner Layout)
     HudTopStackLayout top_stack = compute_top_stack_layout(ui_scale, sw, hazard.is_tremoring(), hazard.is_warning(), extraction.phase());
 
-    // 7a. PRIMARY ENVIRONMENTAL CRISIS BANNER (Seismic Tremor / Fault Rupture)
-    if (top_stack.has_seismic_banner) {
-        float alert_x = top_stack.seismic_banner.x;
-        float alert_y = top_stack.seismic_banner.y;
-        float alert_w = top_stack.seismic_banner.w;
-        float alert_h = top_stack.seismic_banner.h;
-
-        if (hazard.is_tremoring()) {
-            float pulse = 0.55f + 0.45f * std::sin(m_total_time * 14.0f);
-            if (hazard.is_player_in_tremor_zone()) {
-                draw_pill(alert_x, alert_y, alert_w, alert_h, glm::vec4(1.0f, 0.15f, 0.15f, 0.95f));
-                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.20f, 0.02f, 0.02f, 0.80f * pulse));
-                draw_text_centered("! ! ! ACTIVE SEISMIC TREMOR IN PROGRESS ! ! !", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.25f * ui_scale, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
-                draw_text_centered("LOCAL CEILING DESTABILIZED // WATCH FOR FALLING ROCKS", alert_x, alert_y + 20.0f * ui_scale, alert_w, alert_h * 0.45f, 0.95f * ui_scale, glm::vec4(1.0f, 0.70f, 0.20f, 1.0f));
-            } else {
-                draw_pill(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.95f, 0.45f, 0.15f, 0.90f));
-                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.18f, 0.08f, 0.02f, 0.75f * pulse));
-                draw_text_centered("! ! ! REMOTE SEISMIC FAULT COLLAPSE ! ! !", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.25f * ui_scale, glm::vec4(1.0f, 0.9f, 0.9f, 1.0f));
-                draw_text_centered("TECTONIC STRATUM SHIFT IN EXCAVATION ZONE", alert_x, alert_y + 20.0f * ui_scale, alert_w, alert_h * 0.45f, 0.95f * ui_scale, glm::vec4(1.0f, 0.80f, 0.40f, 1.0f));
-            }
-        } else if (hazard.is_warning()) {
-            float pulse = 0.5f + 0.5f * std::sin(m_total_time * 10.0f);
-            if (hazard.is_player_in_tremor_zone()) {
-                glm::vec4 warn_col(1.0f, 0.75f, 0.10f, 0.75f * pulse);
-                draw_pill(alert_x, alert_y, alert_w, alert_h, warn_col);
-                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.18f, 0.12f, 0.02f, 0.75f * pulse));
-                draw_text_centered("[ ! ] WARNING: SEISMIC FAULT RUPTURE DETECTED [ ! ]", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.15f * ui_scale, glm::vec4(1.0f, 0.95f, 0.6f, 1.0f));
-                draw_text_centered("EARTHQUAKE IMMINENT -- SEEK REINFORCED SHELTER", alert_x, alert_y + 19.0f * ui_scale, alert_w, alert_h * 0.45f, 0.92f * ui_scale, Typography::COLOR_AMBER);
-            } else {
-                glm::vec4 warn_col(0.85f, 0.65f, 0.20f, 0.65f * pulse);
-                draw_pill(alert_x, alert_y, alert_w, alert_h, warn_col);
-                draw_rect(alert_x, alert_y, alert_w, alert_h, glm::vec4(0.12f, 0.09f, 0.02f, 0.65f * pulse));
-                draw_text_centered("[ ! ] ADVISORY: REMOTE FAULT RUPTURE DETECTED [ ! ]", alert_x, alert_y + 4.0f * ui_scale, alert_w, alert_h * 0.45f, 1.15f * ui_scale, glm::vec4(1.0f, 0.95f, 0.7f, 1.0f));
-                draw_text_centered("SUBSURFACE STRAIN IN DISTANT EXCAVATION ZONE", alert_x, alert_y + 19.0f * ui_scale, alert_w, alert_h * 0.45f, 0.92f * ui_scale, Typography::COLOR_AMBER);
-            }
-        }
-    }
 
     // 7b. MISSION EXTRACTION BEACON / POD ARRIVAL BANNER
     if (top_stack.has_evac_banner) {
@@ -1815,10 +1848,10 @@ void HUD::render(
                 int def_bonus = (current_level <= 1) ? 40 : (current_level == 2 ? 25 : 15);
                 evac_str += "  [LZ DEFENSE +" + std::to_string(def_bonus) + "% RESIST]";
             }
-            draw_text_centered(evac_str, ex_x, ex_y, ex_w, ex_h, 1.15f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            draw_text_centered_fitted(evac_str, ex_x, ex_y, ex_w, ex_h, 1.15f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
         } else if (extraction.phase() == ExtractionPhase::PodLanded) {
             draw_pill(ex_x, ex_y, ex_w, ex_h, glm::vec4(0.1f, 0.85f, 0.3f, 0.95f));
-            draw_text_centered("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x, ex_y, ex_w, ex_h, 1.18f * ui_scale, glm::vec4(0.2f, 1.0f, 0.4f, 1.0f));
+            draw_text_centered_fitted("EVACUATION POD HAS TOUCHED DOWN! EXTRACT NOW!", ex_x, ex_y, ex_w, ex_h, 1.18f * ui_scale, glm::vec4(0.2f, 1.0f, 0.4f, 1.0f));
         }
     }
 
@@ -1875,107 +1908,79 @@ void HUD::render(
     // 8b. OVERHEAD ENEMY AWARENESS INDICATORS (Yellow '!' for Investigating, Red Triangle for Engaged/Attack)
     render_enemy_awareness_markers(view, proj, player.position(), world, stalkers, burrowers);
 
-    // 8c. 3D-to-2D PRECURSOR VAULT BULKHEAD WAYPOINT DIAMOND (When within 35m)
+    // 8c. 3D-to-2D PRECURSOR VAULT BULKHEAD WAYPOINT DIAMOND (When in plain sight)
+    // The terrain map is the primary way the player navigates to the vault through walls/caverns.
+    // The in-world waypoint & objective text only appears in plain sight when the player has physical line-of-sight and looks towards it.
     if (mission && mission->vault().exists && !mission->is_relic_retrieved()) {
         glm::vec3 v_world = (mission->vault().state == VaultObjectiveState::Breached)
             ? (glm::vec3(mission->vault().relic_pos) + glm::vec3(0.5f, 1.0f, 0.5f))
             : (glm::vec3(mission->vault().door_pos) + glm::vec3(0.5f, 1.5f, 0.5f));
 
         float dist = glm::distance(player.position(), v_world);
-        if (dist <= 35.0f) {
+        if (dist <= 35.0f && has_vault_objective_los(player.eye_position(), world, *mission)) {
             glm::vec4 clip = proj * view * glm::vec4(v_world, 1.0f);
-            if (clip.w > 0.1f) {
-                glm::vec3 ndc = glm::vec3(clip) / clip.w;
-                if (ndc.z >= -1.0f && ndc.z <= 1.0f) {
-                    float sx = (ndc.x * 0.5f + 0.5f) * static_cast<float>(m_width);
-                    float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(m_height);
+                if (clip.w > 0.1f) {
+                    glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                    if (ndc.z >= -1.0f && ndc.z <= 1.0f &&
+                        ndc.x >= -1.05f && ndc.x <= 1.05f &&
+                        ndc.y >= -1.05f && ndc.y <= 1.05f) {
+                        float sx = (ndc.x * 0.5f + 0.5f) * static_cast<float>(m_width);
+                        float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(m_height);
 
-                    float pulse = 0.5f + 0.5f * std::sin(m_total_time * 5.0f);
-                    glm::vec4 marker_col = (mission->vault().state == VaultObjectiveState::Breached)
-                        ? glm::vec4(0.0f, 0.95f, 1.0f, 1.0f) // Cyan for unlocked relic
-                        : glm::mix(glm::vec4(0.0f, 0.85f, 1.0f, 1.0f), glm::vec4(1.0f, 0.75f, 0.1f, 1.0f), pulse);
+                        float pulse = 0.5f + 0.5f * std::sin(m_total_time * 5.0f);
+                        glm::vec4 marker_col = (mission->vault().state == VaultObjectiveState::Breached)
+                            ? glm::vec4(0.0f, 0.95f, 1.0f, 1.0f) // Cyan for unlocked relic
+                            : glm::mix(glm::vec4(0.0f, 0.85f, 1.0f, 1.0f), glm::vec4(1.0f, 0.75f, 0.1f, 1.0f), pulse);
 
-                    float d_sz = (16.0f + 2.0f * std::sin(m_total_time * 6.0f)) * ui_scale;
-                    glm::mat4 ui_proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+                        float d_sz = (16.0f + 2.0f * std::sin(m_total_time * 6.0f)) * ui_scale;
+                        glm::mat4 ui_proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
 
-                    glm::mat4 d_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
-                    d_model = glm::rotate(d_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-                    d_model = glm::scale(d_model, glm::vec3(d_sz, d_sz, 1.0f));
-                    d_model = glm::translate(d_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+                        glm::mat4 d_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                        d_model = glm::rotate(d_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                        d_model = glm::scale(d_model, glm::vec3(d_sz, d_sz, 1.0f));
+                        d_model = glm::translate(d_model, glm::vec3(-0.5f, -0.5f, 0.0f));
 
-                    m_ui_shader.use();
-                    m_ui_shader.set_mat4("uProjection", ui_proj * d_model);
-                    m_ui_shader.set_vec4("uColor", marker_col);
+                        m_ui_shader.use();
+                        m_ui_shader.set_mat4("uProjection", ui_proj * d_model);
+                        m_ui_shader.set_vec4("uColor", marker_col);
 
-                    glBindVertexArray(m_rect_vao);
-                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                        glBindVertexArray(m_rect_vao);
+                        glDrawArrays(GL_TRIANGLES, 0, 6);
 
-                    float in_sz = d_sz - 4.0f * ui_scale;
-                    glm::mat4 in_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
-                    in_model = glm::rotate(in_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-                    in_model = glm::scale(in_model, glm::vec3(in_sz, in_sz, 1.0f));
-                    in_model = glm::translate(in_model, glm::vec3(-0.5f, -0.5f, 0.0f));
-                    m_ui_shader.set_mat4("uProjection", ui_proj * in_model);
-                    m_ui_shader.set_vec4("uColor", glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
-                    glDrawArrays(GL_TRIANGLES, 0, 6);
-                    glBindVertexArray(0);
+                        float in_sz = d_sz - 4.0f * ui_scale;
+                        glm::mat4 in_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                        in_model = glm::rotate(in_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                        in_model = glm::scale(in_model, glm::vec3(in_sz, in_sz, 1.0f));
+                        in_model = glm::translate(in_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+                        m_ui_shader.set_mat4("uProjection", ui_proj * in_model);
+                        m_ui_shader.set_vec4("uColor", glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+                        glDrawArrays(GL_TRIANGLES, 0, 6);
+                        glBindVertexArray(0);
 
-                    std::string label = (mission->vault().state == VaultObjectiveState::Breached)
-                        ? (dist <= 3.8f ? "[!] PRECURSOR RELIC [IN RANGE] [PRESS E TO RETRIEVE]" : ("[!] PRECURSOR RELIC [" + std::to_string(static_cast<int>(dist)) + "m] [PRESS E TO RETRIEVE]"))
-                        : ("[!] VAULT BULKHEAD [" + std::to_string(static_cast<int>(dist)) + "m] [BREACH WITH SATCHEL CHARGE]");
+                        std::string label = (mission->vault().state == VaultObjectiveState::Breached)
+                            ? (dist <= 3.8f ? "[!] PRECURSOR RELIC [IN RANGE] [PRESS E TO RETRIEVE]" : ("[!] PRECURSOR RELIC [" + std::to_string(static_cast<int>(dist)) + "m] [PRESS E TO RETRIEVE]"))
+                            : ("[!] VAULT BULKHEAD [" + std::to_string(static_cast<int>(dist)) + "m] [BREACH WITH SATCHEL CHARGE]");
 
-                    float text_w = FontRenderer::get_rendered_width(label, 1.0f * ui_scale);
-                    float pill_w = text_w + 16.0f * ui_scale;
-                    float pill_h = 22.0f * ui_scale;
-                    draw_pill(sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, marker_col * 0.6f);
-                    draw_text_centered(label, sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, 1.0f * ui_scale, marker_col);
+                        float text_w = FontRenderer::get_rendered_width(label, 1.0f * ui_scale);
+                        float pill_w = text_w + 16.0f * ui_scale;
+                        float pill_h = 22.0f * ui_scale;
+                        draw_pill(sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, marker_col * 0.6f);
+                        draw_text_centered(label, sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, 1.0f * ui_scale, marker_col);
+                    }
                 }
             }
         }
-    }
 
-    // 9. ON-SCREEN TACTICAL NOTIFICATIONS STACK (Guaranteed non-overlapping, semantic colors)
-    for (size_t i = 0; i < top_stack.notifications.size() && i < m_notifications.size(); ++i) {
-        const auto& notif = m_notifications[i];
-        const auto& rect = top_stack.notifications[i];
 
-        std::string display_text = (notif.count > 1) ?
-            (notif.text + " [x" + std::to_string(notif.count) + "]") : notif.text;
 
-        float alpha = std::clamp(notif.timer / 0.30f, 0.0f, 1.0f);
-
-        glm::vec4 border_col = notif.color;
-        border_col.a *= (0.95f * alpha);
-
-        glm::vec4 bg_col(0.06f, 0.08f, 0.11f, 0.90f * alpha);
-        if (notif.color.r > 0.8f && notif.color.g < 0.4f) {
-            bg_col = glm::vec4(0.18f, 0.03f, 0.03f, 0.92f * alpha);
-        } else if (notif.color.g > 0.8f && notif.color.r < 0.4f) {
-            bg_col = glm::vec4(0.02f, 0.16f, 0.06f, 0.92f * alpha);
-        }
-
-        // Crisp semi-transparent tinted backdrop
-        draw_rect(rect.x, rect.y, rect.w, rect.h, bg_col);
-
-        // Vibrant 1px border with semantic accent
-        draw_rect(rect.x, rect.y, rect.w, 1.0f, border_col);
-        draw_rect(rect.x, rect.y + rect.h - 1.0f, rect.w, 1.0f, border_col);
-        draw_rect(rect.x, rect.y, 1.0f, rect.h, border_col);
-        draw_rect(rect.x + rect.w - 1.0f, rect.y, 1.0f, rect.h, border_col);
-
-        // Immediate high-contrast legible text
-        draw_text_centered(display_text, rect.x, rect.y, rect.w, rect.h, 1.10f * ui_scale,
-                           glm::vec4(notif.color.r, notif.color.g, notif.color.b, alpha));
-    }
-
-    // 9b. SURVEYING SONAR MINERAL LABELS (Unlocked at Rank 2+)
-    if (surveying && surveying->is_active() &&
-        (surveying->is_identifying_materials() || skills.can_identify_materials() || player.upgrades().can_identify_materials())) {
+    // 9b. SURVEYING SONAR TACTICAL OBJECTIVE & MONSTER LABELS (Unlocked at Rank 2+)
+    if (surveying && surveying->is_active()) {
         glm::mat4 vp = proj * view;
         float s_alpha = surveying->alpha();
         float screen_w = static_cast<float>(m_width);
         float screen_h = static_cast<float>(m_height);
 
+        // 1. Objective Clusters (Voidite & Precursor Vault Doors)
         for (const auto& cl : surveying->clusters()) {
             glm::vec4 clip = vp * glm::vec4(cl.centroid, 1.0f);
             if (clip.w > 0.1f) {
@@ -1990,26 +1995,63 @@ void HUD::render(
                     std::string label;
                     glm::vec4 mat_col = Typography::COLOR_PRIMARY;
                     if (cl.material_id == MAT_VOIDITE || cl.material_id == MAT_VOIDITE_CRYSTAL) {
-                        label = "[VOIDITE: " + std::to_string(static_cast<int>(dist)) + "m]";
-                        mat_col = Typography::COLOR_CYAN;
-                    } else if (cl.material_id == MAT_TITANIUM || cl.material_id == MAT_INDUSTRIAL_BULKHEAD) {
-                        label = "[TITANIUM: " + std::to_string(static_cast<int>(dist)) + "m]";
-                        mat_col = Typography::COLOR_AMBER;
+                        label = "[OBJ VOIDITE: " + std::to_string(static_cast<int>(dist)) + "m]";
+                        mat_col = glm::vec4(0.88f, 0.30f, 1.0f, 1.0f);
                     } else if (cl.material_id == MAT_VAULT_DOOR || cl.material_id == MAT_REINFORCED_VAULT_DOOR) {
-                        label = "[VAULT DOOR: " + std::to_string(static_cast<int>(dist)) + "m]";
+                        // Vault door text must not appear through walls; player navigates via map or line of sight
+                        glm::vec3 eye = player.eye_position();
+                        glm::vec3 to_cl = cl.centroid - eye;
+                        float d_cl = glm::length(to_cl);
+                        if (d_cl > 0.001f) {
+                            RaycastHit rh = world.raycast(eye, to_cl / d_cl, d_cl);
+                            if (rh.hit && rh.voxel.material_id != MAT_REINFORCED_VAULT_DOOR && rh.distance < (d_cl - 0.85f)) {
+                                continue; // Occluded by wall
+                            }
+                        }
+                        label = "[OBJ VAULT DOOR: " + std::to_string(static_cast<int>(dist)) + "m]";
                         mat_col = glm::vec4(1.0f, 0.0f, 0.85f, 1.0f);
-                    } else if (cl.material_id == MAT_RADIOACTIVE || cl.material_id == MAT_RADIOACTIVE_ORE) {
-                        label = "[RADIOACTIVE: " + std::to_string(static_cast<int>(dist)) + "m]";
-                        mat_col = Typography::COLOR_GREEN;
                     } else {
-                        label = "[MINERAL: " + std::to_string(static_cast<int>(dist)) + "m]";
-                        mat_col = Typography::COLOR_PRIMARY;
+                        continue; // Sonar highlights objectives and monsters only, nothing else
                     }
 
                     glm::vec4 text_col = mat_col;
                     text_col.a = s_alpha;
                     glm::vec4 border_col = mat_col;
                     border_col.a = s_alpha * 0.8f;
+
+                    float text_w = FontRenderer::get_rendered_width(label, 1.05f * ui_scale);
+                    float pill_w = text_w + 14.0f * ui_scale;
+                    float pill_h = 20.0f * ui_scale;
+
+                    draw_pill(sx - pill_w * 0.5f, sy - pill_h * 0.5f, pill_w, pill_h, border_col);
+                    draw_text_centered(label, sx - pill_w * 0.5f, sy - pill_h * 0.5f, pill_w, pill_h, 1.05f * ui_scale, text_col);
+                }
+            }
+        }
+
+        // 2. Hostile Monsters (Void Stalkers & Seismic Burrowers)
+        for (const auto& m : surveying->monsters()) {
+            glm::vec4 clip = vp * glm::vec4(m.position + glm::vec3(0.0f, 0.5f, 0.0f), 1.0f);
+            if (clip.w > 0.1f) {
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                if (ndc.z >= -1.0f && ndc.z <= 1.0f &&
+                    ndc.x >= -1.05f && ndc.x <= 1.05f &&
+                    ndc.y >= -1.05f && ndc.y <= 1.05f) {
+                    float sx = (ndc.x * 0.5f + 0.5f) * screen_w;
+                    float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * screen_h;
+                    float dist = glm::distance(player.position(), m.position);
+
+                    std::string label = m.is_burrower
+                        ? "[HOSTILE BURROWER: " + std::to_string(static_cast<int>(dist)) + "m]"
+                        : "[HOSTILE STALKER: " + std::to_string(static_cast<int>(dist)) + "m]";
+                    glm::vec4 m_col = m.is_burrower
+                        ? glm::vec4(1.0f, 0.45f, 0.10f, 1.0f)
+                        : glm::vec4(1.0f, 0.20f, 0.15f, 1.0f);
+
+                    glm::vec4 text_col = m_col;
+                    text_col.a = s_alpha;
+                    glm::vec4 border_col = m_col;
+                    border_col.a = s_alpha * 0.85f;
 
                     float text_w = FontRenderer::get_rendered_width(label, 1.05f * ui_scale);
                     float pill_w = text_w + 14.0f * ui_scale;
@@ -2194,8 +2236,8 @@ void HUD::render(
         draw_rect(menu_x, menu_y, menu_w, hdr_h, glm::vec4(0.04f, 0.10f, 0.17f, 0.98f));
         draw_rect(menu_x, menu_y + hdr_h, menu_w, 1.5f * ui_scale, Typography::COLOR_CYAN);
         float title_w = menu_w - 180.0f * ui_scale;
-        draw_text_fitted("// CONTRACTOR FIELD BRIEFING & OPERATIONS MANUAL", menu_x + 14.0f * ui_scale, menu_y + 7.0f * ui_scale, title_w, 1.08f * ui_scale, Typography::COLOR_CYAN);
-        draw_text_fitted("[ H / ESC: CLOSE ]", menu_x + menu_w - 150.0f * ui_scale, menu_y + 7.0f * ui_scale, 140.0f * ui_scale, 0.92f * ui_scale, Typography::COLOR_AMBER);
+        draw_text_fitted("// CONTRACTOR FIELD BRIEFING & OPERATIONS MANUAL", menu_x + 14.0f * ui_scale, menu_y + 7.0f * ui_scale, title_w, 1.08f * ui_scale, Typography::COLOR_CYAN, 0.65f * ui_scale, FontType::Display);
+        draw_text_fitted("[ H / ESC: CLOSE ]", menu_x + menu_w - 150.0f * ui_scale, menu_y + 7.0f * ui_scale, 140.0f * ui_scale, 0.92f * ui_scale, Typography::COLOR_AMBER, 0.65f * ui_scale, FontType::Display);
 
         // Footer prompt bar
         float ftr_h = 28.0f * ui_scale;
@@ -2203,7 +2245,7 @@ void HUD::render(
         float ftr_w = menu_w - 24.0f * ui_scale;
         float ftr_x = menu_x + 12.0f * ui_scale;
         draw_pill(ftr_x, ftr_y, ftr_w, ftr_h, glm::vec4(0.0f, 0.85f, 1.0f, 0.40f));
-        draw_text_centered_fitted(">> PRESS [H] OR [ESC] TO CLOSE BRIEFING & RESUME EXPEDITION <<", ftr_x, ftr_y, ftr_w, ftr_h, 0.95f * ui_scale, Typography::COLOR_CYAN);
+        draw_text_centered_fitted(">> PRESS [H] OR [ESC] TO CLOSE BRIEFING & RESUME EXPEDITION <<", ftr_x, ftr_y, ftr_w, ftr_h, 0.95f * ui_scale, Typography::COLOR_CYAN, 0.65f * ui_scale, FontType::Display);
 
         // Two-Column Responsive Content
         float pad_x = 16.0f * ui_scale;
@@ -2215,7 +2257,7 @@ void HUD::render(
         float body_h = ftr_y - cur_y - 8.0f * ui_scale;
 
         // Column 1: Field Directives & Expedition Protocols
-        draw_text("FIELD DIRECTIVES & OBJECTIVES", col1_x, cur_y, 1.04f * ui_scale, Typography::COLOR_AMBER);
+        draw_text("FIELD DIRECTIVES & OBJECTIVES", col1_x, cur_y, 1.04f * ui_scale, Typography::COLOR_AMBER, FontType::Display);
         draw_rect(col1_x, cur_y + 17.0f * ui_scale, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.5f, 0.4f));
 
         struct DirectiveEntry {
@@ -2234,17 +2276,17 @@ void HUD::render(
         float d_step = (body_h - 22.0f * ui_scale) / 5.0f;
         float dy = cur_y + 24.0f * ui_scale;
         for (const auto& d : directives) {
-            draw_text_fitted(d.tag, col1_x + 4.0f * ui_scale, dy, col_w - 8.0f * ui_scale, 0.95f * ui_scale, d.color);
+            draw_text_fitted(d.tag, col1_x + 4.0f * ui_scale, dy, col_w - 8.0f * ui_scale, 0.95f * ui_scale, d.color, 0.65f * ui_scale, FontType::Display);
             float desc_y = dy + 14.0f * ui_scale;
-            auto wrapped = FontRenderer::wrap_text(d.desc, col_w - 12.0f * ui_scale, 0.84f * ui_scale);
+            auto wrapped = FontRenderer::wrap_text(d.desc, col_w - 12.0f * ui_scale, 0.84f * ui_scale, FontType::Body);
             for (size_t wi = 0; wi < wrapped.size() && wi < 2; ++wi) {
-                draw_text_fitted(wrapped[wi], col1_x + 8.0f * ui_scale, desc_y + wi * 12.0f * ui_scale, col_w - 16.0f * ui_scale, 0.84f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.92f));
+                draw_text_fitted(wrapped[wi], col1_x + 8.0f * ui_scale, desc_y + wi * 12.0f * ui_scale, col_w - 16.0f * ui_scale, 0.84f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.92f), 0.60f * ui_scale, FontType::Body);
             }
             dy += d_step;
         }
 
         // Column 2: Delver Controls & Avionics
-        draw_text("DELVER CONTROLS & AVIONICS", col2_x, cur_y, 1.04f * ui_scale, Typography::COLOR_CYAN);
+        draw_text("DELVER CONTROLS & AVIONICS", col2_x, cur_y, 1.04f * ui_scale, Typography::COLOR_CYAN, FontType::Display);
         draw_rect(col2_x, cur_y + 17.0f * ui_scale, col_w, 1.0f, glm::vec4(0.2f, 0.35f, 0.5f, 0.4f));
 
         struct BindingEntry {
@@ -2272,8 +2314,8 @@ void HUD::render(
         float key_w = std::clamp(112.0f * ui_scale, 96.0f, 132.0f);
         float by_bind = cur_y + 24.0f * ui_scale;
         for (const auto& b : bindings) {
-            draw_text_fitted(b.key, col2_x + 4.0f * ui_scale, by_bind, key_w - 4.0f * ui_scale, 0.88f * ui_scale, Typography::COLOR_CYAN);
-            draw_text_fitted(b.action, col2_x + key_w + 8.0f * ui_scale, by_bind, col_w - key_w - 12.0f * ui_scale, 0.88f * ui_scale, b.color);
+            draw_text_fitted(b.key, col2_x + 4.0f * ui_scale, by_bind, key_w - 4.0f * ui_scale, 0.88f * ui_scale, Typography::COLOR_CYAN, 0.65f * ui_scale, FontType::Tech);
+            draw_text_fitted(b.action, col2_x + key_w + 8.0f * ui_scale, by_bind, col_w - key_w - 12.0f * ui_scale, 0.88f * ui_scale, b.color, 0.65f * ui_scale, FontType::Body);
             by_bind += b_step;
         }
     } else if (m_briefingTimer > 0.0f) {
@@ -2282,7 +2324,7 @@ void HUD::render(
         if (briefing_alpha > 0.001f) {
             float card_w = std::clamp(sw * 0.36f, 380.0f * ui_scale, 500.0f * ui_scale);
             card_w = std::min(card_w, sw - 32.0f);
-            float card_h = 136.0f * ui_scale;
+            float card_h = 106.0f * ui_scale;
             float card_x = sw - card_w - 20.0f * ui_scale;
             float card_y = 65.0f * ui_scale;
 
@@ -2292,23 +2334,19 @@ void HUD::render(
             cyan_hdr.a *= briefing_alpha;
             float max_text_w = card_w - 20.0f * ui_scale;
             float line_x = card_x + 10.0f * ui_scale;
-            draw_text_fitted("// CONTRACTOR FIELD BRIEFING // DIRECTIVE", line_x, card_y + 4.0f * ui_scale, max_text_w, 1.00f * ui_scale, cyan_hdr);
+            draw_text_fitted("// EXPEDITION DIRECTIVES", line_x, card_y + 4.0f * ui_scale, max_text_w, 1.05f * ui_scale, cyan_hdr, 0.65f * ui_scale, FontType::Display);
 
             float by = card_y + 24.0f * ui_scale;
-            float b_step = 16.0f * ui_scale;
-            float line_scale = 0.88f * ui_scale;
+            float b_step = 18.0f * ui_scale;
+            float line_scale = 1.00f * ui_scale;
 
-            draw_text_fitted("1. QUOTA: Mine Voidite crystals using [LMB] Drill.", line_x, by, max_text_w, line_scale, glm::vec4(0.85f, 0.95f, 1.0f, 0.95f * briefing_alpha));
+            draw_text_fitted("<voidite> 1. MINE VOIDITE: Reach extraction quota with [LMB].", line_x, by, max_text_w, line_scale, glm::vec4(0.85f, 0.95f, 1.0f, 0.95f * briefing_alpha), 0.65f * ui_scale, FontType::Body);
             by += b_step;
-            draw_text_fitted("2. STEALTH: [L-CTRL] to crouch; decays acoustic noise.", line_x, by, max_text_w, line_scale, glm::vec4(0.2f, 0.95f, 0.5f, 0.95f * briefing_alpha));
+            draw_text_fitted("<hazard> 2. SURVIVE: Crouch [L-CTRL] for stealth. Watch seismic clock.", line_x, by, max_text_w, line_scale, glm::vec4(0.2f, 0.95f, 0.5f, 0.95f * briefing_alpha), 0.65f * ui_scale, FontType::Body);
             by += b_step;
-            draw_text_fitted("3. HAZARD: >50% radiation drains suit HP. Move fast!", line_x, by, max_text_w, line_scale, glm::vec4(1.0f, 0.4f, 0.3f, 0.95f * briefing_alpha));
-            by += b_step;
-            draw_text_fitted("4. BURROWERS: Wyrms tunnel in Phase 3/4 & holdouts.", line_x, by, max_text_w, line_scale, glm::vec4(1.0f, 0.7f, 0.1f, 0.95f * briefing_alpha));
-            by += b_step;
-            draw_text_fitted("5. EXTRACTION: [B] at quota deploys beacon. Survive 40s.", line_x, by, max_text_w, line_scale, glm::vec4(0.0f, 0.94f, 1.0f, 0.95f * briefing_alpha));
+            draw_text_fitted("<evac> 3. EXTRACT: Press [B] at quota to call evac pod and defend LZ.", line_x, by, max_text_w, line_scale, glm::vec4(0.0f, 0.94f, 1.0f, 0.95f * briefing_alpha), 0.65f * ui_scale, FontType::Body);
             by += b_step + 4.0f * ui_scale;
-            draw_text_fitted(">> PRESS [H] FOR FULL FIELD MANUAL & CONTROLS <<", line_x, by, max_text_w, 0.82f * ui_scale, glm::vec4(0.6f, 0.75f, 0.9f, 0.85f * briefing_alpha));
+            draw_text_fitted(">> [H] FOR OPERATIONS MANUAL & CONTROLS <<", line_x, by, max_text_w, 0.88f * ui_scale, glm::vec4(0.6f, 0.75f, 0.9f, 0.85f * briefing_alpha), 0.65f * ui_scale, FontType::Display);
         }
     }
 
@@ -2453,6 +2491,57 @@ std::vector<EnemyAwarenessMarker> HUD::compute_awareness_markers(
     }
 
     return markers;
+}
+
+bool HUD::has_vault_objective_los(
+    const glm::vec3& cam_pos,
+    const World& world,
+    const MissionSystem& mission
+) const {
+    if (!mission.vault().exists || mission.is_relic_retrieved()) {
+        return false;
+    }
+
+    if (mission.vault().state == VaultObjectiveState::Breached) {
+        // Relic in plain sight
+        glm::ivec3 r_pos = mission.vault().relic_pos;
+        const glm::vec3 relic_pts[3] = {
+            glm::vec3(r_pos) + glm::vec3(0.5f, 1.0f, 0.5f),
+            glm::vec3(r_pos) + glm::vec3(0.5f, 1.4f, 0.5f),
+            glm::vec3(r_pos) + glm::vec3(0.5f, 0.6f, 0.5f)
+        };
+        for (const auto& pt : relic_pts) {
+            glm::vec3 to_pt = pt - cam_pos;
+            float d = glm::length(to_pt);
+            if (d < 0.001f) return true;
+            RaycastHit hit = world.raycast(cam_pos, to_pt / d, d);
+            if (!hit.hit || hit.block_pos == r_pos || hit.distance >= (d - 0.65f)) {
+                return true;
+            }
+        }
+        return false;
+    } else {
+        // Vault bulkhead door in plain sight
+        glm::ivec3 d_pos = mission.vault().door_pos;
+        const glm::vec3 door_pts[3] = {
+            glm::vec3(d_pos) + glm::vec3(0.5f, 1.5f, 0.5f),
+            glm::vec3(d_pos) + glm::vec3(0.5f, 2.2f, 0.5f),
+            glm::vec3(d_pos) + glm::vec3(0.5f, 0.8f, 0.5f)
+        };
+        for (const auto& pt : door_pts) {
+            glm::vec3 to_pt = pt - cam_pos;
+            float d = glm::length(to_pt);
+            if (d < 0.001f) return true;
+            RaycastHit hit = world.raycast(cam_pos, to_pt / d, d);
+            if (!hit.hit ||
+                hit.voxel.material_id == MAT_REINFORCED_VAULT_DOOR ||
+                hit.voxel.material_id == MAT_INDUSTRIAL_BULKHEAD ||
+                hit.distance >= (d - 0.85f)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 void HUD::render_enemy_awareness_markers(

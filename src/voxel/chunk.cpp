@@ -135,4 +135,58 @@ void Chunk::mesh(const std::function<const Chunk*(const ChunkPos&)>& get_neighbo
     upload_mesh();
 }
 
+bool Chunk::is_clutter_attached_to_face(const ClutterInstance& inst, const glm::ivec3& host_block) {
+    if (inst.host_voxel == host_block) {
+        return true;
+    }
+    // Geometric adjacent face verification (anchor tolerance: within 0.20m of face center)
+    glm::vec3 host_center = glm::vec3(host_block) + glm::vec3(0.5f);
+
+    bool is_crystal = (inst.type == ClutterType::VoiditeCrystal || inst.type == ClutterType::PrismaticCrystal);
+
+    // Top face (+Y) - floor stalagmites, rubble, voidite / prismatic crystals
+    if (inst.type == ClutterType::FloorStalagmiteRubble || is_crystal) {
+        glm::vec3 diff = inst.position - (host_center + glm::vec3(0.0f, 0.5f, 0.0f));
+        if (glm::dot(diff, diff) < 0.04f) return true;
+    }
+    // Bottom face (-Y) - ceiling stalactites, voidite / prismatic crystals
+    if (inst.type == ClutterType::CeilingStalactite || is_crystal) {
+        glm::vec3 diff = inst.position - (host_center + glm::vec3(0.0f, -0.5f, 0.0f));
+        if (glm::dot(diff, diff) < 0.04f) return true;
+    }
+    // Side faces - voidite / prismatic crystals, wall props
+    if (is_crystal) {
+        const glm::vec3 side_offsets[4] = {
+            { 0.5f, 0.0f, 0.0f},
+            {-0.5f, 0.0f, 0.0f},
+            { 0.0f, 0.0f, 0.5f},
+            { 0.0f, 0.0f,-0.5f}
+        };
+        for (int i = 0; i < 4; ++i) {
+            glm::vec3 diff = inst.position - (host_center + side_offsets[i]);
+            if (glm::dot(diff, diff) < 0.04f) return true;
+        }
+    }
+    return false;
+}
+
+int Chunk::remove_clutter_hosted_at(const glm::ivec3& host_block, std::vector<ClutterInstance>* out_removed) {
+    if (m_clutter_instances.empty()) return 0;
+
+    int removed_count = 0;
+    auto it = std::remove_if(m_clutter_instances.begin(), m_clutter_instances.end(), [&](const ClutterInstance& inst) {
+        if (is_clutter_attached_to_face(inst, host_block)) {
+            if (out_removed) {
+                out_removed->push_back(inst);
+            }
+            removed_count++;
+            return true;
+        }
+        return false;
+    });
+
+    m_clutter_instances.erase(it, m_clutter_instances.end());
+    return removed_count;
+}
+
 } // namespace Voidfall

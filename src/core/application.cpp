@@ -174,8 +174,8 @@ void Application::init_systems() {
         m_noise_meter.add_bulkhead_sound(world_pos, true);
     });
 
-    m_player->set_on_warning([this](const std::string& msg) {
-        if (m_hud) m_hud->show_warning(msg);
+    m_player->set_on_warning([this](const std::string& /*msg*/) {
+        // Sensory feedback handled via audio/visuals/environment
     });
 
     m_player->set_on_sonar_cast([this](const glm::vec3& origin) {
@@ -210,9 +210,6 @@ void Application::init_systems() {
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::TacticalOvercharge, origin, 1.0f);
         }
-        if (m_hud) {
-            m_hud->show_warning("CHEMICAL FLARE DEPLOYED (60s ILLUMINATION)", 2.0f);
-        }
     });
 
     m_player->set_on_melee_shove([this](const glm::vec3& cam_pos, const glm::vec3& cam_dir) {
@@ -230,8 +227,8 @@ void Application::init_systems() {
         try_interact();
     });
 
-    m_mission.set_on_notification([this](const std::string& msg, float dur) {
-        if (m_hud) m_hud->show_warning(msg, dur);
+    m_mission.set_on_notification([this](const std::string& /*msg*/, float /*dur*/) {
+        // Rely on sounds, visuals, and environment events instead of on-screen text notices
     });
     m_mission.set_on_gas_ignited([this](const glm::vec3& center, float rad) {
         if (m_renderer) {
@@ -249,9 +246,9 @@ void Application::init_systems() {
     m_player->set_on_damage_source([this](float dmg, PlayerController::DamageSource source) {
         float flash_intensity = std::clamp(dmg * 0.025f + 0.45f, 0.45f, 0.95f);
         if (source == PlayerController::DamageSource::Radiation) {
-            // ZERO screen shake trauma for radiation! Emerald ionizing static vignette
+            // ZERO screen shake trauma for radiation! Subtle emerald ionizing static vignette
             if (m_hud) {
-                m_hud->trigger_radiation_flash(flash_intensity);
+                m_hud->trigger_radiation_flash(std::clamp(dmg * 0.04f + 0.20f, 0.20f, 0.45f));
             }
         } else if (source == PlayerController::DamageSource::ToxicGas) {
             // Subtle cough shudder only (0.02f), no violent camera disorientation!
@@ -309,9 +306,6 @@ void Application::init_systems() {
 
     SwarmManager::instance().SetOnEnrageEnded([this]() {
         m_noise_meter.trigger_post_combat_cooldown();
-        if (m_hud) {
-            m_hud->show_warning("// SWARM BREACH REPELLED - DELVER RECUPERATING //", 2.5f);
-        }
     });
 
     m_noise_meter.set_on_wave([this](NoiseMeter::AlertLevel level, float pct) {
@@ -330,14 +324,14 @@ void Application::init_systems() {
         } else if (level == NoiseMeter::AlertLevel::Agitated) {
             count = (m_selected_level >= 3) ? 2 : ((m_selected_level == 2) ? 2 : 1);
             if (m_audio) {
-                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 0.85f);
+                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 0.45f);
             }
             m_player->add_trauma(0.2f);
         } else if (level == NoiseMeter::AlertLevel::Swarming) {
             count = (m_selected_level >= 3) ? 3 : ((m_selected_level == 2) ? 2 : 2);
             SwarmManager::instance().set_active_wave_hostiles(count);
             if (m_audio) {
-                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 1.0f);
+                m_audio->play_sound_2d(SoundCue::StalkerEchoScreech, 0.55f);
             }
             m_player->add_trauma(0.35f);
         }
@@ -490,7 +484,6 @@ bool Application::try_interact() {
                     m_hud->add_floating_loot(relic_pos + glm::vec3(0.0f, 0.6f, 0.0f),
                                              "+1 RELIC HYPER-CORE (+250 PTS)",
                                              glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-                    m_hud->show_warning("PRECURSOR RELIC SECURED (+350 EXP, +5 TITANIUM CORES)", 4.0f);
                 }
                 if (m_audio) {
                     m_audio->play_sound_2d(SoundCue::BulkheadDeploy, 1.0f);
@@ -525,12 +518,34 @@ void Application::start_expedition(int level) {
         m_renderer->set_sector(level);
     }
 
+    // Determine level generation seed:
+    // 1. Explicit CLI override (--seed <N>)
+    // 2. Previously completed level for this user -> use saved persistent seed (doesn't change)
+    // 3. Uncompleted / newly opened level -> generate fresh random seed
+    uint32_t seed_to_use = 0;
+    if (m_config.has_explicit_seed) {
+        seed_to_use = m_config.world_seed;
+        VF_LOG_INFO("LevelGen", "Using explicit command-line seed " << seed_to_use << " for Sector " << level);
+    } else if (level >= 1 && level < UserProfile::MAX_SECTOR_RECORDS &&
+               m_user_profile.is_sector_completed(level) &&
+               m_user_profile.sector_records[level].saved_seed != 0) {
+        seed_to_use = m_user_profile.sector_records[level].saved_seed;
+        VF_LOG_INFO("LevelGen", "Loading saved persistent seed " << seed_to_use << " for completed Sector " << level);
+    } else {
+        seed_to_use = SaveSystem::generate_random_seed(level);
+        VF_LOG_INFO("LevelGen", "Generated random seed " << seed_to_use << " for uncompleted Sector " << level);
+    }
+
+    m_current_level_seed = seed_to_use;
+    m_inventory.active_seed = seed_to_use;
+
     // Voidite target scales: Sector 1 = 25, Sector 2 = 30, Sector 3 = 45, then +10 per sector beyond 3, capped at 150
     int voidite_target = (level <= 1) ? 25 :
                          (level == 2) ? 30 :
                          (level == 3) ? 45 :
                          std::min(45 + (level - 3) * 10, 150);
-    m_inventory.reset(voidite_target);
+    int astral_target = (level >= 3) ? (3 + (level - 3) * 2) : 0;
+    m_inventory.reset(voidite_target, astral_target);
     m_expedition_time = 0.0f;
 
     // Apply Delver Archetype & Upgrades
@@ -543,7 +558,7 @@ void Application::start_expedition(int level) {
     m_inventory.bulkheads = std::min(m_inventory.bulkheads, m_inventory.get_max_bulkheads());
 
     // Generate Level Sector Procedural Topology
-    m_world->generate_world(level, m_world->seed());
+    m_world->generate_world(level, seed_to_use, voidite_target);
     m_world->update(m_player->position(), 2);
 
     glm::vec3 spawn_pos = (m_world && m_world->level_generator()) ?
@@ -557,7 +572,12 @@ void Application::start_expedition(int level) {
 
     // Reset systems
     m_noise_meter.reset();
+    SwarmManager::instance().reset();
+    StealthSystem::instance().reset();
+    m_stalker_spotted_audio_cooldown = 4.0f;
+    m_stalker_investigate_audio_cooldown = 3.5f;
     m_stalkers.reset();
+    m_stalkers.set_sector_level(level);
     m_burrowers.reset();
     m_spawn_mgr.reset(level, m_player->position());
     CarcassManager::instance().clear();
@@ -598,16 +618,23 @@ void Application::start_expedition(int level) {
             glm::vec3 bpos(static_cast<float>(rooms[room_idx].center.x),
                            static_cast<float>(rooms[room_idx].floor_y) + 2.0f,
                            static_cast<float>(rooms[room_idx].center.z));
-            m_burrowers.spawn_burrower(bpos, 1.2f + b * 0.1f);
+            m_burrowers.spawn_dormant_burrower(bpos, 1.2f + b * 0.1f);
         }
     }
 
-    // All pre-placed fauna must initialize in AIState::ROOSTING (dormant on walls/ceilings)
+    // All pre-placed fauna must initialize in AIState::ROOSTING (dormant on walls/ceilings) with spawn grace
     for (auto& s : m_stalkers.stalkers_mut()) {
         s.state = StalkerState::Roosting;
         s.state_timer = 0.0f;
         s.velocity = glm::vec3(0.0f);
+        s.spawn_grace_timer = 4.0f;
+        s.screech_timer = 12.0f;
+        s.stuck_timer = 0.0f;
+        s.stuck_checkpoint_pos = s.position;
+        s.stuck_checkpoint_timer = 0.0f;
     }
+    m_stalkers.reset_screech_cooldowns(12.0f);
+    m_burrowers.reset_audio_cooldowns(12.0f);
 
     m_extraction = std::make_unique<ExtractionSystem>();
     m_holdout_stage = 0;
@@ -664,17 +691,46 @@ void Application::setup_extraction_callbacks() {
                         << " EXP, +" << m_mission.total_bonus_titanium() << " Titanium Cores!");
         }
         m_inventory.finalize_run(m_selected_level, true); // Safe evac!
+        if (m_selected_level >= 1 && m_selected_level < UserProfile::MAX_SECTOR_RECORDS) {
+            uint32_t completed_seed = (m_world ? m_world->seed() : m_current_level_seed);
+            int rate = m_inventory.sector_records[m_selected_level].highest_completion_rate;
+            const std::string& badge = m_inventory.sector_records[m_selected_level].best_badge;
+            m_user_profile.mark_sector_completed(m_selected_level, completed_seed, rate, badge);
+            m_inventory.sector_records[m_selected_level] = m_user_profile.sector_records[m_selected_level];
+            SaveSystem::save_profile(m_user_profile, m_active_save_file);
+            VF_LOG_INFO("SaveSystem", "Sector " << m_selected_level << " completed! Rate=" << rate
+                        << "%, Badge=" << badge << ", Saved persistent level seed: "
+                        << m_user_profile.sector_records[m_selected_level].saved_seed);
+        }
         TransitionState(GameState::Debrief);
         m_window->set_cursor_locked(false);
         std::cout << "[Extraction] Delver extraction complete! Returning to debrief." << std::endl;
     });
 
+    m_extraction->set_on_clearance_verify([this](const glm::vec3& beacon_pos, std::string*) -> bool {
+        if (!m_world) return true;
+        int cx = static_cast<int>(std::floor(beacon_pos.x));
+        int cz = static_cast<int>(std::floor(beacon_pos.z));
+        int gy = static_cast<int>(std::floor(beacon_pos.y));
+        for (int dx = -2; dx <= 2; ++dx) {
+            for (int dz = -2; dz <= 2; ++dz) {
+                if (dx * dx + dz * dz > 3) continue;
+                for (int y = gy + 1; y <= gy + 5; ++y) {
+                    if (y < m_world->world_height() && m_world->is_solid(glm::ivec3(cx + dx, y, cz + dz))) {
+                        m_world->set_voxel(cx + dx, y, cz + dz, Voxel{MAT_AIR, 0}, true);
+                        if (m_renderer) {
+                            m_renderer->spawn_break_particles(glm::vec3(cx + dx, y, cz + dz) + 0.5f, glm::ivec3(0, 1, 0), MAT_FRACTURED_GRANITE);
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    });
+
     m_extraction->set_on_ceiling_warning([this](const glm::vec3& beacon_pos) {
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::MonsterDigging, beacon_pos + glm::vec3(0.0f, 16.0f, 0.0f), 1.0f);
-        }
-        if (m_hud) {
-            m_hud->show_warning("! EXTRACTION POD INBOUND: CEILING BREACH DETECTED !", 3.5f);
         }
         if (m_renderer) {
             // Spawn falling dust and rock debris from cavern ceiling above beacon
@@ -694,9 +750,6 @@ void Application::setup_extraction_callbacks() {
     m_extraction->set_on_pod_arrival([this](const glm::vec3& beacon_pos) {
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::EvacTouchdown, beacon_pos, 1.0f);
-        }
-        if (m_hud) {
-            m_hud->show_warning("EXTRACTION POD TOUCHDOWN: BOARD THE RAMP TO EXTRACT!", 4.0f);
         }
         if (m_renderer) {
             // Heavy impact dust ring around pod touchdown
@@ -752,9 +805,15 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_client->send_block_delta(pkt);
     }
 
-    // Spawn 12 dynamic billboard debris quads
-    m_renderer->spawn_break_particles(glm::vec3(x, y, z), normal, mat);
+    // Spawn dynamic billboard debris quads aligned with voxel shape
+    VoxelShape shape = static_cast<VoxelShape>(flags & VOXEL_SHAPE_MASK);
+    m_renderer->spawn_break_particles(glm::vec3(x, y, z), normal, mat, shape);
     m_spawn_mgr.on_block_broken(mat);
+
+    // Anchor Dependency & Auto-Despawn: clear surface props on broken voxel faces
+    if (m_world) {
+        m_world->clear_disconnected_clutter(glm::ivec3(x, y, z));
+    }
 
     // Update inventory, floating text, and award Demolitions XP
     glm::vec3 popup_pos(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.8f, static_cast<float>(z) + 0.5f);
@@ -795,12 +854,9 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         if (m_inventory.bulkheads == 0 && m_inventory.titanium >= 1) {
             m_inventory.bulkheads++;
             m_inventory.titanium--;
-            if (m_hud) m_hud->show_warning("+1 BULKHEAD FABRICATED FROM TITANIUM", 2.5f);
         }
     } else if (mat == MAT_FRACTURED_GRANITE) {
-        if (m_inventory.add_scrap_from_granite()) {
-            if (m_hud) m_hud->show_warning("+1 BULKHEAD FABRICATED FROM SCRAP", 2.5f);
-        }
+        m_inventory.add_scrap_from_granite();
         m_hud->add_floating_loot(popup_pos, "+1 SCRAP METAL", glm::vec4(0.85f, 0.85f, 0.9f, 1.0f));
         m_skills.add_demolitions_xp(5);
     } else if (mat == MAT_RADIOACTIVE_ORE) {
@@ -816,11 +872,25 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
         m_hud->add_floating_loot(popup_pos, "+1 VAULT BULKHEAD BREACHED (+50 PTS)", glm::vec4(1.0f, 0.82f, 0.2f, 1.0f));
         m_skills.add_demolitions_xp(50);
         m_trauma = std::min(m_trauma + 0.35f, 1.0f);
+    } else if (mat == MAT_ASTRAL_ORE) {
+        int amt = 1;
+        static uint32_t s_astral_seed = 9187;
+        s_astral_seed = s_astral_seed * 1103515245 + 12345;
+        if (is_demolitionist && ((s_astral_seed % 3) == 0)) {
+            amt = 2; // Demolitionist 33% double yield on rare stellar minerals
+        }
+        m_inventory.add_astral_ore(amt);
+        int bonus_xp = is_demolitionist ? 15 : 0;
+        int bonus_score = is_demolitionist ? 40 : 0;
+        m_inventory.total_run_score += bonus_score;
+        m_skills.add_demolitions_xp(35 + bonus_xp);
+        std::string popup = (amt > 1) ? "+2 ASTRAL ORE (+100 PTS [DEMO REFINING])" : "+1 ASTRAL ORE (+60 PTS)";
+        m_hud->add_floating_loot(popup_pos, popup, glm::vec4(1.0f, 0.84f, 0.15f, 1.0f)); // Radiant Astral Gold
     } else if (mat == MAT_PRISMATIC_CRYSTAL) {
-        m_inventory.add_voidite(2);
-        m_inventory.total_run_score += 35;
+        m_inventory.add_salvage(10);
+        m_inventory.total_run_score += 50;
         m_skills.add_demolitions_xp(25);
-        m_hud->add_floating_loot(popup_pos, "+2 PRISMATIC VOIDITE (+35 PTS)", glm::vec4(0.95f, 0.40f, 1.0f, 1.0f));
+        m_hud->add_floating_loot(popup_pos, "+10 SALVAGE (+50 PTS [PRISMATIC DECOR])", glm::vec4(0.30f, 0.95f, 1.0f, 1.0f));
     } else if (mat == MAT_BIOLUMINESCENT_FLORA) {
         m_inventory.add_salvage(8);
         m_inventory.total_run_score += 15;
@@ -845,7 +915,7 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
     if (m_audio) {
         SoundCue cue = SoundCue::VoxelBreakBasalt;
         if (mat == MAT_TITANIUM) cue = SoundCue::VoxelBreakTitanium;
-        else if (mat == MAT_VOIDITE_CRYSTAL) cue = SoundCue::VoxelBreakVoidite;
+        else if (mat == MAT_VOIDITE_CRYSTAL || mat == MAT_ASTRAL_ORE) cue = SoundCue::VoxelBreakVoidite;
         else if (mat == MAT_INDUSTRIAL_BULKHEAD) cue = SoundCue::VoxelBreakBulkhead;
         else if (mat == MAT_RADIOACTIVE_ORE) cue = SoundCue::VoxelBreakRadioactive;
         m_audio->play_sound_3d(cue, glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), 1.0f);
@@ -855,9 +925,6 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
     if (mat == MAT_GAS || mat == MAT_TOXIC_GAS) {
         if (m_renderer) {
             m_renderer->spawn_toxic_gas_cloud(glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), 5);
-        }
-        if (m_hud) {
-            m_hud->show_warning("TOXIC BIO-GAS POCKET BREACHED!", 2.5f);
         }
     }
 
@@ -981,7 +1048,12 @@ void Application::on_sonar_cast(const glm::vec3& origin) {
     float radius = attr.sonarRadius + 2.0f * static_cast<float>(effective_rank);
     float linger_bonus = attr.scanLingerBonus;
 
-    m_surveying.trigger_scan(origin, *m_world, radius, linger_bonus, effective_rank);
+    bool extraction_active = m_extraction && (m_extraction->phase() == ExtractionPhase::BeaconDeployed || m_extraction->phase() == ExtractionPhase::PodLanded);
+    glm::vec3 extraction_pos = m_extraction ? m_extraction->beacon_position() : glm::vec3(0.0f);
+
+    m_surveying.trigger_scan(origin, *m_world, radius, linger_bonus, effective_rank,
+                             &m_stalkers.stalkers(), &m_burrowers.burrowers(),
+                             extraction_pos, extraction_active);
     m_renderer->trigger_sonar_pulse(origin);
     m_skills.add_surveying_xp(40);
 
@@ -1073,7 +1145,6 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
 
     if (cls == CharacterClass::Demolitionist) {
         // Concussion shockwave disruptor pulse
-        if (m_hud) m_hud->show_warning("TACTICAL: CONCUSSION SHOCKWAVE DISRUPTOR!", 2.5f);
         m_player->add_trauma(0.35f);
         m_noise_meter.add_explosive_noise(25.0f);
 
@@ -1106,7 +1177,6 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
 
     } else if (cls == CharacterClass::Vanguard) {
         // Kinetic Repulsor Field: omni-directional shockwave repelling enemies, deflecting debris, restoring suit integrity
-        if (m_hud) m_hud->show_warning("TACTICAL: KINETIC REPULSOR FIELD!", 2.5f);
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::TacticalRepulsor, pos, 1.2f);
         }
@@ -1161,7 +1231,6 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
 
     } else if (cls == CharacterClass::Scout) {
         // Kinetic Dash Overcharge
-        if (m_hud) m_hud->show_warning("TACTICAL: KINETIC DASH OVERCHARGE!", 2.0f);
         if (m_audio) {
             m_audio->play_sound_2d(SoundCue::TacticalOvercharge, 1.0f);
         }
@@ -1274,13 +1343,6 @@ void Application::setup_hazard_system() {
         float dist = glm::distance(m_player->position(), epicenter);
         float proximity = std::clamp(1.0f - (dist / radius), 0.0f, 1.0f);
 
-        if (m_hud) {
-            if (proximity > 0.15f) {
-                m_hud->show_warning("[!] INCOMING LOCALIZED SPALL - EVADE ZONE [!]", 2.0f);
-            } else {
-                m_hud->show_warning("[!] DISTANT FAULT RUPTURE DETECTED IN EXCAVATION ZONE [!]", 1.5f);
-            }
-        }
         if (m_audio) {
             if (proximity > 0.05f) {
                 m_audio->play_sound_2d(SoundCue::CavernGroan, 0.70f * std::max(0.3f, proximity), 0.95f);
@@ -1326,24 +1388,14 @@ void Application::setup_hazard_system() {
         if (proximity > 0.15f && m_renderer) {
             m_renderer->trigger_dust_kickup(4.5f * proximity);
         }
-        if (m_hud) {
-            if (proximity > 0.15f) {
-                m_hud->show_warning("<< SEISMIC SENSOR: CATASTROPHIC LOCAL CEILING COLLAPSE >>", 2.5f);
-            } else {
-                m_hud->show_warning("<< SEISMIC SENSOR: REMOTE CATASTROPHIC FAULT COLLAPSE >>", 2.0f);
-            }
-        }
 
-        // Primary Cave-in Wave: detach 18 to 36 physical ceiling blocks in the active zone
-        spawn_ceiling_cavein_wave(epicenter, radius, 18, 36);
+        // Primary Cave-in Wave: detach 6 to 12 physical ceiling blocks in the active zone (controlled, non-lethal spall)
+        spawn_ceiling_cavein_wave(epicenter, radius, 6, 12);
 
         // Hazard Phase 3 & 4 (radiation >= 45% in Sector >= 3): chance to awaken Seismic Burrower around epicenter!
         // Sectors 1 and 2 are early/mid tier and do NOT spawn deep subterranean burrowers during routine mining.
         if (m_selected_level >= 3 && m_hazard->radiation_level() >= 45.0f && m_burrowers.active_count() == 0) {
             m_burrowers.spawn_hazard_wave(epicenter, *m_world);
-            if (m_hud) {
-                m_hud->show_warning("! SUBTERRANEAN SENSOR: SEISMIC BURROWER DETECTED !", 3.5f);
-            }
         }
     });
 }
@@ -1396,9 +1448,6 @@ void Application::process_input(int key, int action) {
     } else if (key == GLFW_KEY_F11 || ((key == GLFW_KEY_ENTER) && (m_window && (m_window->is_key_down(GLFW_KEY_LEFT_ALT) || m_window->is_key_down(GLFW_KEY_RIGHT_ALT))))) {
         if (m_window) {
             m_window->toggle_fullscreen();
-            if (m_hud) {
-                m_hud->show_warning(m_window->is_fullscreen() ? "DISPLAY: FULLSCREEN" : "DISPLAY: WINDOWED (MAXIMIZED)", 1.5f);
-            }
         }
     } else if (key == GLFW_KEY_I) {
         if (m_state == GameState::Gameplay) {
@@ -1474,7 +1523,27 @@ void Application::fixed_tick(float dt) {
     m_player->set_carry_weight_multiplier(m_inventory.overburden_penalty(m_user_profile.selected_class_id));
 
     // 2. Physics & Player simulation
+    if (m_extraction && (m_extraction->phase() == ExtractionPhase::PodLanded || m_extraction->is_ceiling_drill_active())) {
+        m_player->set_pod_collider(
+            m_extraction->beacon_position(),
+            m_extraction->pod_drill_progress(),
+            m_extraction->ramp_extension(),
+            m_extraction->is_pod_anchored()
+        );
+    } else {
+        m_player->clear_pod_collider();
+    }
+
     m_player->update_physics(dt, *m_world);
+
+    if (m_player->has_pod_collider()) {
+        m_player->resolve_extraction_pod_collision(
+            m_extraction->beacon_position(),
+            m_extraction->pod_drill_progress(),
+            m_extraction->ramp_extension(),
+            m_extraction->is_pod_anchored()
+        );
+    }
 
     // Progression XP: Acrobatics for grappling, Suit for sprinting
     if (m_player->grapple().active) {
@@ -1564,19 +1633,22 @@ void Application::fixed_tick(float dt) {
             m_burrowers.damage_nearest(ground_center, 2.6f, floor_crush, true);
         }
 
+        static float s_debris_hit_cooldown = 0.0f;
+        s_debris_hit_cooldown = std::max(0.0f, s_debris_hit_cooldown - dt);
+
         if (res.hit_player) {
-            float dmg = res.damage;
-            if (m_extraction && m_extraction->is_player_in_perimeter(player_pos)) {
-                float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
-                dmg *= resist;
+            if (s_debris_hit_cooldown <= 0.0f) {
+                s_debris_hit_cooldown = 1.2f; // Prevent multi-block cluster damage in the same instant
+                float dmg = res.damage * 0.35f; // Scaled to balanced 7-17.5 HP so ceiling rocks do not wipe out delvers
+                if (m_extraction && m_extraction->is_player_in_perimeter(player_pos)) {
+                    float resist = (m_selected_level <= 1) ? 0.40f : (m_selected_level == 2 ? 0.50f : 0.60f);
+                    dmg *= resist;
+                }
+                m_player->take_damage(dmg, PlayerController::DamageSource::FallingDebris);
+                m_player->add_trauma(0.20f);
+                m_trauma = std::min(m_trauma + 0.20f, 1.0f);
+                m_hud->trigger_damage_flash(0.5f);
             }
-            float applied_dmg = m_player->take_damage(dmg, PlayerController::DamageSource::FallingDebris);
-            m_player->add_trauma(0.35f);
-            m_trauma = std::min(m_trauma + 0.35f, 1.0f);
-            m_hud->trigger_damage_flash(0.7f);
-            m_hud->show_warning("CRITICAL IMPACT: DELVER HIT BY FALLING DEBRIS (-" + std::to_string(static_cast<int>(applied_dmg)) + " HP)!", 3.0f);
-        } else if (res.hit_bulkhead) {
-            m_hud->show_warning("TITANIUM BULKHEAD DEFLECTED FALLING DEBRIS!", 2.0f);
         }
 
         if (it->is_destroyed()) {
@@ -1670,6 +1742,9 @@ void Application::fixed_tick(float dt) {
     }
 
     m_surveying.update(dt);
+    if (m_surveying.is_active()) {
+        m_surveying.update_monsters(&m_stalkers.stalkers(), &m_burrowers.burrowers());
+    }
     m_hud->update(dt);
     m_renderer->update_particles(dt);
 
@@ -1775,15 +1850,10 @@ void Application::fixed_tick(float dt) {
             float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
             dmg *= resist;
         }
-        float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
+        m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
         m_player->add_trauma(0.45f);
         m_trauma = std::min(m_trauma + 0.45f, 1.0f);
         m_hud->trigger_damage_flash(0.75f);
-        if (stalker_res.any_melee_hit) {
-            m_hud->show_warning("RAZOR CLAW MAUL (-" + std::to_string(static_cast<int>(applied)) + " HP)!", 2.2f);
-        } else {
-            m_hud->show_warning("VOID SPINE PIERCE (-" + std::to_string(static_cast<int>(applied)) + " HP)!", 2.2f);
-        }
         if (m_audio) {
             m_audio->play_sound_3d(SoundCue::StalkerHit, m_player->position(), 1.0f);
         }
@@ -1795,9 +1865,6 @@ void Application::fixed_tick(float dt) {
     }
     if (stalker_res.any_lunge) {
         m_player->add_trauma(0.25f);
-        if (m_audio) {
-            m_audio->play_sound_3d(SoundCue::StalkerLunge, m_player->position(), 1.0f);
-        }
     }
     if (stalker_res.any_spotted) {
         if (m_audio && m_stalker_spotted_audio_cooldown <= 0.0f) {
@@ -1827,7 +1894,7 @@ void Application::fixed_tick(float dt) {
     if (stalker_res.stalkers_killed > 0) {
         m_inventory.total_run_score += 100 * stalker_res.stalkers_killed;
         m_skills.add_demolitions_xp(25 * stalker_res.stalkers_killed);
-        m_hud->show_warning("VOID STALKER ELIMINATED (+100 PTS)", 2.0f);
+        m_noise_meter.trigger_post_combat_cooldown(8.0f);
     }
     if (stalker_res.stalkers_escaped > 0) {
         if (m_renderer) {
@@ -1873,6 +1940,14 @@ void Application::fixed_tick(float dt) {
         }
     }
 
+    // Subterranean tectonic tremor and proximity horror caused by nearby burrower
+    if (burrower_res.max_rumble > 0.02f) {
+        m_player->add_trauma(burrower_res.max_rumble * 0.35f * dt);
+        if (burrower_res.max_rumble > 0.40f && m_renderer) {
+            m_renderer->trigger_dust_kickup(burrower_res.max_rumble * 1.5f);
+        }
+    }
+
     if (burrower_res.total_damage > 0.0f) {
         float dmg = burrower_res.total_damage;
         if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
@@ -1902,7 +1977,6 @@ void Application::fixed_tick(float dt) {
     if (burrower_res.burrowers_killed > 0) {
         m_inventory.total_run_score += 250 * burrower_res.burrowers_killed;
         m_skills.add_demolitions_xp(60 * burrower_res.burrowers_killed);
-        m_hud->show_warning("SEISMIC BURROWER DESTROYED (+250 PTS)", 3.0f);
     }
  
     // 5. Delver Combat Firearm Firing & Ballistics Simulation (Class Archetype Specialized)
@@ -2004,7 +2078,7 @@ void Application::fixed_tick(float dt) {
                     m_world->SetBlock(bx, by, bz, MAT_AIR, 0);
                     on_block_broken(bx, by, bz, hit_norm, v.material_id, v.flags_and_damage);
                     m_noise_meter.add_voxel_break_sound(next_pos, v.material_id);
-                    SoundCue break_cue = (v.material_id == MAT_VOIDITE_CRYSTAL) ? SoundCue::VoxelBreakVoidite :
+                    SoundCue break_cue = (v.material_id == MAT_VOIDITE_CRYSTAL || v.material_id == MAT_ASTRAL_ORE) ? SoundCue::VoxelBreakVoidite :
                                          (v.material_id == MAT_INDUSTRIAL_BULKHEAD) ? SoundCue::VoxelBreakBulkhead :
                                          SoundCue::VoxelBreakBasalt;
                     if (m_audio) {
@@ -2038,7 +2112,7 @@ void Application::fixed_tick(float dt) {
                     }
                     m_world->set_voxel(bx, by, bz, v, true);
                     if (m_renderer) {
-                        m_renderer->spawn_crack_debris(next_pos, hit_norm, static_cast<float>(new_damage) / 15.0f, v.material_id);
+                        m_renderer->spawn_crack_debris(next_pos, hit_norm, static_cast<float>(new_damage) / 15.0f, v.material_id, v.shape());
                         m_renderer->trigger_dust_kickup(0.25f + stress_impact * 0.03f);
                     }
                     if (m_hazard) {
@@ -2070,7 +2144,6 @@ void Application::fixed_tick(float dt) {
             if (is_crit) {
                 if (m_hud) {
                     m_hud->trigger_hit_marker(true, damage_dealt);
-                    m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
                 }
                 if (m_audio) {
                     m_audio->play_sound_3d(SoundCue::CritHit, next_pos, 1.0f);
@@ -2108,7 +2181,6 @@ void Application::fixed_tick(float dt) {
             if (is_b_crit) {
                 if (m_hud) {
                     m_hud->trigger_hit_marker(true, b_damage_dealt);
-                    m_hud->show_warning("<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>", 1.8f);
                 }
                 if (m_audio) {
                     m_audio->play_sound_3d(SoundCue::CritHit, next_pos, 1.0f);
@@ -2193,8 +2265,8 @@ void Application::fixed_tick(float dt) {
                 s.just_screeched = false;
                 // Pure directional 3D audio echo without HUD text clutter (leaves the player relying on hearing)
                 float pitch = 1.0f;
-                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 0.90f, &pitch);
-                m_audio->play_sound_3d(SoundCue::StalkerEchoScreech, s.position, 0.90f, pitch);
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 0.45f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerEchoScreech, s.position, 0.52f, pitch);
             }
             if (s.just_chittered) {
                 s.just_chittered = false;
@@ -2204,6 +2276,22 @@ void Application::fixed_tick(float dt) {
                 m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 0.65f, pitch);
             }
             glm::vec3 burrow_loc = (glm::length(s.burrow_entry) > 0.01f) ? s.burrow_entry : s.position;
+            if (s.state == StalkerState::Emerging && m_renderer) {
+                float progress = std::clamp(s.state_timer / std::max(0.1f, s.burrow_duration), 0.0f, 1.0f);
+                if (is_burrow_visible(s.position)) {
+                    m_renderer->spawn_monster_emergence_particles(s.position, s.contact_normal, s.role, progress, s.just_dug ? 10 : 3);
+                }
+            }
+            if (s.just_emerged) {
+                s.just_emerged = false;
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 1.0f);
+                }
+                if (m_renderer && is_burrow_visible(s.position)) {
+                    float dust_amt = (s.role == StalkerRole::ChitinGoliath) ? 2.5f : 1.2f;
+                    m_renderer->trigger_dust_kickup(dust_amt);
+                }
+            }
             if (s.state == StalkerState::Burrowing && m_renderer) {
                 // Directional rock chipping particles localized at borehole surface entry point
                 if (s.state_timer < 1.1f && is_burrow_visible(burrow_loc)) {
@@ -2240,8 +2328,8 @@ void Application::fixed_tick(float dt) {
                 // Adrenaline spike: duck background ambient drone by 70% during visceral leap attack
                 m_audio->trigger_ducking(0.28f, 0.45f, 1.8f);
                 float pitch = 1.0f;
-                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 1.05f, &pitch);
-                m_audio->play_sound_3d(SoundCue::StalkerLunge, s.position, 1.05f, pitch);
+                AudioSystem::instance().TriggerRandomizedCue(SoundCue::VoidStalkerRoar, 0.50f, &pitch);
+                m_audio->play_sound_3d(SoundCue::StalkerLunge, s.position, 0.60f, pitch);
             }
             if (s.just_hit_player) {
                 s.just_hit_player = false;
@@ -2276,6 +2364,7 @@ void Application::fixed_tick(float dt) {
             if (b.just_ground) {
                 b.just_ground = false;
                 m_audio->play_sound_3d(SoundCue::MonsterDigging, b.position, 0.90f);
+                m_audio->play_sound_3d(SoundCue::BurrowerGrind, b.position, 0.85f);
                 if (m_renderer) {
                     glm::vec3 tip_pos = b.position + b.forward() * 0.90f;
                     if (is_burrow_visible(tip_pos)) {
@@ -2288,6 +2377,12 @@ void Application::fixed_tick(float dt) {
                 glm::vec3 tip_pos = b.position + b.forward() * 0.90f;
                 if (is_burrow_visible(tip_pos)) {
                     m_renderer->spawn_burrow_particles(tip_pos, b.forward(), MAT_VOLCANIC_BASALT, 3);
+                }
+            }
+            if (b.state == BurrowerState::Breaching && m_renderer) {
+                float progress = std::clamp(b.state_timer / 1.2f, 0.0f, 1.0f);
+                if (is_burrow_visible(b.position)) {
+                    m_renderer->spawn_burrower_emergence_particles(b.position, b.forward(), progress, b.just_ground ? 12 : 4);
                 }
             }
             if (b.just_died) {
@@ -2340,47 +2435,6 @@ void Application::fixed_tick(float dt) {
             if (s_room_transition_debounce <= 0.0f) {
                 m_audio->trigger_room_micro_event(room_shape, 0.45f);
                 s_room_transition_debounce = 12.0f;
-            }
-
-            // Proactive Environmental Hazard & Biome HUD Telegraph on Room Entry
-            if (m_hud) {
-                if (room_shape == static_cast<int>(RoomShapeType::RadioactiveCoreSanctuary)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING IRRADIATED CORE SANCTUARY (HIGH RAD)", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::FungoidBioGrotto)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING SPORE GROTTO (BIO-TOXIC GAS VENTS)", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::MagmaCalderaLake)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING VOLCANIC CALDERA (THERMITE SLAG)", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::SpikeTrenchArena)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING PUNJI SPIKE TRENCH ARENA", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::VoidSingularityRift)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING GRAVITATIONAL VOID SINGULARITY", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::FaultLineCrevasse)) {
-                    m_hud->show_warning("HAZARD ADVISORY: ENTERING TECTONIC FAULT CREVASSE (GAS & LAVA)", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::SubterraneanAquiferOasis)) {
-                    m_hud->show_warning("BIOME ADVISORY: SUBTERRANEAN AQUIFER OASIS // CRYSTAL BASINS & FLORA", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::ColossalAbyssalChasm)) {
-                    m_hud->show_warning("CRITICAL HAZARD: COLOSSAL ABYSSAL CHASM // LETHAL DROP & SPIKE PIT", 3.2f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::MoltenMagmaFoundry)) {
-                    m_hud->show_warning("HAZARD ADVISORY: MOLTEN MAGMA FOUNDRY // BOILING THERMITE FLUMES", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::ToxicMiasmaSwamp)) {
-                    m_hud->show_warning("BIOHAZARD ADVISORY: TOXIC MIASMA SWAMP // VISIBLE NEUROTOXIN POCKETS", 3.2f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::PrismaticCrystalCathedral)) {
-                    m_hud->show_warning("BIOME ADVISORY: PRISMATIC CRYSTAL CATHEDRAL // COLOSSAL PILLARS", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::AncientTitanNecropolis)) {
-                    m_hud->show_warning("ANOMALY ADVISORY: ANCIENT TITAN NECROPOLIS // SKELETAL EXCAVATION", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::BioluminescentGlowwormGrotto)) {
-                    m_hud->show_warning("BIOME ADVISORY: BIOLUMINESCENT GLOWWORM GROTTO // REFLECTING CANOPY", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::PrecursorCoolantReservoir)) {
-                    m_hud->show_warning("HAZARD ADVISORY: PRECURSOR COOLANT RESERVOIR // PRESSURE PIPELINES", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::ColossalVaultedDredgeCathedral)) {
-                    m_hud->show_warning("SECTOR DISCOVERY: GRAND VAULTED DREDGE CATHEDRAL // SOARING ROTUNDA & ARCHES", 3.2f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::TectonicAbyssalSinkhole)) {
-                    m_hud->show_warning("CRITICAL HAZARD: TECTONIC ABYSSAL SINKHOLE // SHEER VERTICAL VOID & FISSURE", 3.2f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::CyclopeanExcavationSilo)) {
-                    m_hud->show_warning("INDUSTRIAL ADVISORY: CYCLOPEAN EXCAVATION SILO // MULTI-TIER MEZZANINE SHAFT", 3.0f);
-                } else if (room_shape == static_cast<int>(RoomShapeType::BioluminescentFirmamentAbyss)) {
-                    m_hud->show_warning("SECTOR DISCOVERY: BIOLUMINESCENT FIRMAMENT ABYSS // CELESTIAL CANOPY", 3.2f);
-                }
             }
         }
 
@@ -2512,35 +2566,8 @@ void Application::fixed_tick(float dt) {
             }
         }
 
-        // Pre-damage warning when approaching toxic gas
-        if (gas_dist < 8.0f && gas_dist > 1.5f) {
-            static float s_gas_near_warn = 0.0f;
-            s_gas_near_warn += dt;
-            if (s_gas_near_warn >= 3.0f) {
-                s_gas_near_warn = 0.0f;
-                m_hud->show_warning("CAUTION: TOXIC ATMOSPHERE AHEAD // BIO-GAS ESCAPING", 2.2f);
-            }
-        }
-
-        // Pre-damage warning when approaching molten magma / lava
-        if (lava_dist < 6.0f && lava_dist > 1.2f) {
-            static float s_lava_near_warn = 0.0f;
-            s_lava_near_warn += dt;
-            if (s_lava_near_warn >= 3.0f) {
-                s_lava_near_warn = 0.0f;
-                m_hud->show_warning("WARNING: THERMAL HAZARD AHEAD // MOLTEN MAGMA", 2.2f);
-            }
-        }
-
-        // Pre-damage warning when approaching spikes
-        if (spike_dist < 3.0f && spike_dist > 0.8f && m_player->position().y <= 8.0f) {
-            static float s_spike_near_warn = 0.0f;
-            s_spike_near_warn += dt;
-            if (s_spike_near_warn >= 3.0f) {
-                s_spike_near_warn = 0.0f;
-                m_hud->show_warning("CAUTION: PUNCTURE HAZARD // OBSIDIAN SPIKES AHEAD", 2.2f);
-            }
-        }
+        m_nearest_gas_distance = gas_dist;
+        m_nearest_lava_distance = lava_dist;
 
         float amb_rad_val = m_hazard->radiation_level();
         float prox_rad_val = m_proximity_radiation * 100.0f;
@@ -2565,21 +2592,13 @@ void Application::fixed_tick(float dt) {
         m_audio->update_biometrics(health_pct, threat_prox);
     }
 
-    // Low Thruster Fuel Warning (Power < 20%)
-    if (m_player->exo().power < 20.0f && m_player->exo().power > 0.0f) {
-        static float s_fuel_warn_timer = 0.0f;
-        s_fuel_warn_timer += dt;
-        if (s_fuel_warn_timer >= 6.0f) {
-            s_fuel_warn_timer = 0.0f;
-            m_hud->show_warning("! LOW THRUSTER FUEL (< 20%) !", 2.0f);
-        }
-    }
-
-    // ═══ Escalating Radiation HP Drain ═══
-    // Phase 2+: radiation accumulates; above 50% it starts biting.
-    // 50-79%: mild (~0.08 * (rad-50) HP/s = 0-2.4 HP/s)
-    // 80-94%: urgent (~0.15 * (rad-50) HP/s = 4.5-6.75 HP/s)
-    // 95%+:  lethal (5.0 HP/s — death in 16-20s for base class)
+    // ═══ Reduced & Balanced Radiation HP Drain ═══
+    // Radiation escalation is telegraphed early via audio geiger clicks, HUD dosimeter, and glowing green mist haze.
+    // HP damage only begins at extreme exposure (>= 75%) so exploration is not suffocated by early tick damage.
+    // < 75%:  safe buffer (0 HP/s — exosuit filters hold completely)
+    // 75-89%: very gentle warning corrosion (~0.03 * (rad-75) HP/s = 0 - 0.42 HP/s)
+    // 90-97%: moderate hazard (0.45 + (rad-90) * 0.08 HP/s = 0.45 - 1.01 HP/s)
+    // 98%+:   critical hazard (capped at 1.5 HP/s max, down from 5.0 HP/s)
     {
         float amb_rad = m_hazard->radiation_level();
         float prox_rad = m_proximity_radiation * 100.0f;
@@ -2587,41 +2606,41 @@ void Application::fixed_tick(float dt) {
         m_player->exo_mut().radiation = rad;
 
         float rad_damage = 0.0f;
-        if (rad >= 95.0f) {
-            rad_damage = 5.0f;
-        } else if (rad >= 80.0f) {
-            rad_damage = (rad - 50.0f) * 0.15f;
-        } else if (rad >= 50.0f) {
-            rad_damage = (rad - 50.0f) * 0.08f;
+        if (rad >= 98.0f) {
+            rad_damage = 1.5f;
+        } else if (rad >= 90.0f) {
+            rad_damage = 0.45f + (rad - 90.0f) * 0.08f;
+        } else if (rad >= 75.0f) {
+            rad_damage = (rad - 75.0f) * 0.03f;
         }
 
         if (rad_damage > 0.0f) {
             if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
-                float resist = (m_selected_level <= 1) ? 0.50f : (m_selected_level == 2 ? 0.60f : 0.75f);
+                float resist = (m_selected_level <= 1) ? 0.10f : (m_selected_level == 2 ? 0.15f : 0.20f);
                 rad_damage *= resist;
             }
             // Apply radiation damage with ZERO screen shake trauma!
             m_player->take_damage(rad_damage * dt, PlayerController::DamageSource::Radiation);
 
-            // Periodic vocal groaning from the delver under radiation sickness
+            // Periodic vocal groaning from the delver under radiation sickness (rate-limited)
             static float s_rad_groan_timer = 0.0f;
             s_rad_groan_timer += dt;
-            if (s_rad_groan_timer >= 1.75f) {
+            if (s_rad_groan_timer >= 4.5f) {
                 s_rad_groan_timer = 0.0f;
                 if (m_audio) {
-                    m_audio->trigger_player_groan(0.85f);
+                    m_audio->trigger_player_groan(0.70f);
                 }
             }
         }
 
-        // Legacy exo integrity drain at extreme levels
+        // Exosuit integrity drain only at extreme levels
         if (rad >= 100.0f) {
-            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo_mut().integrity - dt * 25.0f);
+            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo_mut().integrity - dt * 6.0f);
         }
     }
 
     // ═══ Gas Pocket Damage ═══
-    // Standing inside MAT_GAS voxels corrodes suit integrity and deals HP damage
+    // Standing inside MAT_GAS voxels corrodes suit integrity and deals mild HP damage
     {
         glm::vec3 pp = m_player->position();
         int gx = static_cast<int>(std::floor(pp.x));
@@ -2631,8 +2650,8 @@ void Application::fixed_tick(float dt) {
         Voxel gas_head  = m_world->get_voxel(gx, gy + 1, gz);
         if (gas_check.material_id == MAT_GAS || gas_head.material_id == MAT_GAS) {
             // Toxic gas damage: subtle cough shudder only (0.02f), NOT violent screen shake!
-            m_player->take_damage(3.5f * dt, PlayerController::DamageSource::ToxicGas);
-            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo().integrity - 8.0f * dt);
+            m_player->take_damage(1.0f * dt, PlayerController::DamageSource::ToxicGas);
+            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo().integrity - 3.0f * dt);
 
             // Trigger on-screen visor toxic mist particles and asphyxiation coughing
             if (m_hud) {
@@ -2641,19 +2660,13 @@ void Application::fixed_tick(float dt) {
 
             static float s_gas_asphyx_timer = 0.0f;
             s_gas_asphyx_timer += dt;
-            if (s_gas_asphyx_timer >= 1.35f) {
+            if (s_gas_asphyx_timer >= 2.0f) {
                 s_gas_asphyx_timer = 0.0f;
                 if (m_audio) {
-                    m_audio->trigger_player_asphyxiation(0.90f);
+                    m_audio->trigger_player_asphyxiation(0.80f);
                 }
             }
 
-            static float s_gas_warn_timer = 0.0f;
-            s_gas_warn_timer += dt;
-            if (s_gas_warn_timer >= 2.5f) {
-                s_gas_warn_timer = 0.0f;
-                m_hud->show_warning("! TOXIC GAS INHALATION // DELVER ASPHYXIATING !", 2.0f);
-            }
         }
     }
 
@@ -2673,20 +2686,17 @@ void Application::fixed_tick(float dt) {
             if (m_holdout_stage == 0 && progress >= 0.45f) {
                 m_holdout_stage = 1;
                 m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
-                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE SCOUT INBOUND !", 2.5f);
                 m_player->add_trauma(0.12f);
             }
             // Stage 2 (progress >= 0.80, ~16s elapsed): 1 additional stalker
             else if (m_holdout_stage == 1 && progress >= 0.80f) {
                 m_holdout_stage = 2;
                 m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
-                m_hud->show_warning("! FINAL EXTRACTION PUSH: HOSTILE APPROACHING !", 2.5f);
                 m_player->add_trauma(0.15f);
             }
-            // Stage 3 (progress >= 0.95, ~19s elapsed): Evac pod touchdown warning (NO burrowers, NO tremors)
+            // Stage 3 (progress >= 0.95, ~19s elapsed): Evac pod touchdown (NO burrowers, NO tremors)
             else if (m_holdout_stage == 2 && progress >= 0.95f) {
                 m_holdout_stage = 3;
-                m_hud->show_warning("!! EVACUATION POD TOUCHDOWN IMMINENT !!", 2.0f);
             }
         } else if (m_selected_level == 2) {
             // Level 2 (Sector 2: Volatile Fault) - Moderate Holdout (30s)
@@ -2694,21 +2704,18 @@ void Application::fixed_tick(float dt) {
             if (m_holdout_stage == 0 && progress >= 0.35f) {
                 m_holdout_stage = 1;
                 m_stalkers.spawn_wave(m_player->position(), 1, *m_world);
-                m_hud->show_warning("! EXTRACTION HOLDOUT: HOSTILE SCOUT INBOUND !", 2.5f);
                 m_player->add_trauma(0.15f);
             }
             // Stage 2 (progress >= 0.70, ~21s elapsed): 2 stalker reinforcements (fair combat, no burrower)
             else if (m_holdout_stage == 1 && progress >= 0.70f) {
                 m_holdout_stage = 2;
                 m_stalkers.spawn_wave(m_player->position(), 2, *m_world);
-                m_hud->show_warning("! FINAL DEFENSE: HOSTILE PACK APPROACHING !", 2.5f);
                 m_player->add_trauma(0.20f);
             }
             // Stage 3 (progress >= 0.90, ~27s elapsed): Mild tremor (LZ is shielded from rocks)
             else if (m_holdout_stage == 2 && progress >= 0.90f) {
                 m_holdout_stage = 3;
                 m_hazard->force_tremor(0.5f);
-                m_hud->show_warning("!!! EVAC POD ON FINAL DESCENT !!!", 2.5f);
             }
         } else {
             // Level 3+ (Sector 3: Abyssal Mantle) - Endgame High-Intensity Holdout (40s)
@@ -2716,7 +2723,6 @@ void Application::fixed_tick(float dt) {
             if (m_holdout_stage == 0 && progress >= 0.25f) {
                 m_holdout_stage = 1;
                 m_stalkers.spawn_wave(m_player->position(), 3, *m_world);
-                m_hud->show_warning("! EXTRACTION HOLDOUT: APEX SWARM DETECTED !", 2.5f);
                 m_player->add_trauma(0.25f);
             }
             // Stage 2 (progress >= 0.65, ~26s elapsed): 4 stalkers + 1 burrower
@@ -2726,7 +2732,6 @@ void Application::fixed_tick(float dt) {
                 if (m_burrowers.active_count() == 0) {
                     m_burrowers.spawn_hazard_wave(m_player->position(), *m_world);
                 }
-                m_hud->show_warning("!! CRITICAL APEX WAVE & SEISMIC BURROWER INCOMING !!", 3.5f);
                 m_player->add_trauma(0.40f);
                 if (m_audio) {
                     m_audio->play_sound_2d(SoundCue::SeismicTremor, 0.65f);
@@ -2736,7 +2741,6 @@ void Application::fixed_tick(float dt) {
             else if (m_holdout_stage == 2 && progress >= 0.88f) {
                 m_holdout_stage = 3;
                 m_hazard->force_tremor(1.5f);
-                m_hud->show_warning("!!! FINAL TECTONIC SURGE // EVAC POD INBOUND !!!", 3.0f);
             }
         }
     }
@@ -2754,7 +2758,6 @@ void Application::fixed_tick(float dt) {
             if (m_audio) {
                 m_audio->play_sound_2d(SoundCue::DamageWarning, 1.0f);
             }
-            m_hud->show_warning("TECTONIC COLLAPSE PROTOCOL EXPIRED // DELVER M.I.A.", 4.0f);
         }
     }
 
@@ -2779,7 +2782,6 @@ void Application::fixed_tick(float dt) {
         } else if (m_player->exo().radiation >= 95.0f) {
             death_cause = "LETHAL RADIATION POISONING // ACUTE IONIZATION SICKNESS";
         }
-        m_hud->show_warning(death_cause, 5.0f);
         VF_LOG_INFO("Gameplay", "Player Delver died: " << death_cause);
     }
 
@@ -3035,6 +3037,32 @@ void Application::render(float dt) {
         m_renderer->add_point_light(fl);
     }
 
+    // Dynamic Delver Plasma Bolt point lights (illuminates dark subterranean cavern tunnels in real-time)
+    int bolt_lights = 0;
+    for (const auto& bolt : m_plasma_bolts) {
+        if (!bolt.active || bolt_lights >= 6) continue;
+        PointLight bl;
+        bl.position = bolt.position;
+        bl.color = glm::vec3(bolt.color.r, bolt.color.g, bolt.color.b);
+        bl.radius = 6.0f;
+        bl.intensity = 2.8f;
+        m_renderer->add_point_light(bl);
+        bolt_lights++;
+    }
+
+    // Dynamic Void Spine Projectile point lights (radiant virulent emerald luminescence)
+    int spine_lights = 0;
+    for (const auto& proj : m_stalkers.projectiles()) {
+        if (!proj.active || spine_lights >= 4) continue;
+        PointLight pl;
+        pl.position = proj.position;
+        pl.color = glm::vec3(0.18f, 0.95f, 0.32f);
+        pl.radius = 5.0f;
+        pl.intensity = 2.5f;
+        m_renderer->add_point_light(pl);
+        spine_lights++;
+    }
+
     // Begin HDR Frame
     m_renderer->begin_frame(view, proj, cam_pos);
 
@@ -3065,6 +3093,22 @@ void Application::render(float dt) {
         m_renderer->render_delver(m_showcase_delver_pos, m_showcase_delver_yaw, m_showcase_delver_class, static_cast<float>(glfwGetTime()));
     }
 
+    // Render 3D Precursor Relic Hyper-Core (spinning celestial core, orbital gimbal rings & satellite shards)
+    if (!m_mission.is_relic_retrieved()) {
+        glm::vec3 relic_render_pos(0.0f);
+        bool should_render_relic = false;
+        if (m_mission.vault().exists) {
+            relic_render_pos = glm::vec3(m_mission.vault().relic_pos) + glm::vec3(0.5f, 0.0f, 0.5f);
+            should_render_relic = true;
+        } else if (m_world && m_world->level_generator() && m_world->level_generator()->vault_placement().exists) {
+            relic_render_pos = glm::vec3(m_world->level_generator()->vault_placement().relic_pos) + glm::vec3(0.5f, 0.0f, 0.5f);
+            should_render_relic = true;
+        }
+        if (should_render_relic) {
+            m_renderer->render_precursor_relic(relic_render_pos, static_cast<float>(glfwGetTime()));
+        }
+    }
+
     // Render 3D Extraction Beacon (tripod base, light column, drifting rings, rotating siren)
     if (m_extraction->phase() == ExtractionPhase::BeaconDeployed || m_extraction->phase() == ExtractionPhase::PodLanded) {
         bool is_landed = (m_extraction->phase() == ExtractionPhase::PodLanded);
@@ -3084,15 +3128,16 @@ void Application::render(float dt) {
         m_renderer->render_grapple_cable(tool_pos, m_player->grapple().anchor_point);
     }
 
-    // Render Volumetric Sonar Ping with X-Ray Wireframe (Module 2)
+    // Render Volumetric Sonar Ping with smooth vein cluster outlines & hulls (Module 2)
     if (m_surveying.is_active()) {
-        m_renderer->render_sonar_wireframes(m_surveying.surveyed_voxels(), m_surveying.alpha());
+        m_renderer->render_sonar_clusters(m_surveying.clusters(), m_surveying.alpha());
+        m_renderer->render_sonar_monsters(m_surveying.monsters(), m_surveying.alpha());
     }
 
     // Render Progressive Block Cracks (Module 4) - only when CrackStage > 0.05f
     if (m_player->crack_stage() > 0.05f && m_player->target_block() != glm::ivec3(-1)) {
         Voxel v = m_world->get_voxel(m_player->target_block().x, m_player->target_block().y, m_player->target_block().z);
-        m_renderer->render_block_cracks(m_player->target_block(), m_player->crack_stage(), m_player->target_normal(), v.material_id);
+        m_renderer->render_block_cracks(m_player->target_block(), m_player->crack_stage(), m_player->target_normal(), v.material_id, v.shape());
     }
 
     // Render Placed Explosive Charge (Demolition Stun / Breach Distraction)
@@ -3152,7 +3197,27 @@ void Application::render(float dt) {
 
     // End HDR Frame & Post-Processing Tonemap
     float shield_timer = (m_state == GameState::Gameplay && m_player) ? m_player->insertion_shield_timer() : 0.0f;
-    m_renderer->end_frame(dt, m_hazard->radiation_level(), shield_timer);
+    glm::vec3 danger_haze_color(0.12f, 0.65f, 0.22f); // Default radioactive toxic emerald
+    float effective_haze = 0.0f;
+    float effective_rad = (m_hazard) ? m_hazard->radiation_level() : 0.0f;
+    if (m_state == GameState::Gameplay && m_player && m_hazard) {
+        effective_rad = std::max(m_hazard->radiation_level(), m_proximity_radiation * 100.0f);
+        float rad_haze = effective_rad / 100.0f;
+        float gas_haze = (m_nearest_gas_distance < 20.0f) ? std::clamp(1.0f - (m_nearest_gas_distance / 20.0f), 0.0f, 0.85f) : 0.0f;
+        float lava_haze = (m_nearest_lava_distance < 16.0f) ? std::clamp(1.0f - (m_nearest_lava_distance / 16.0f), 0.0f, 0.85f) : 0.0f;
+
+        if (rad_haze >= gas_haze && rad_haze >= lava_haze && rad_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.12f, 0.68f, 0.24f); // Toxic emerald radiation mist
+            effective_haze = rad_haze;
+        } else if (gas_haze >= lava_haze && gas_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.48f, 0.75f, 0.12f); // Choking sulfur-green bio-gas vapor
+            effective_haze = gas_haze;
+        } else if (lava_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.85f, 0.35f, 0.06f); // Molten volcanic heat haze
+            effective_haze = lava_haze;
+        }
+    }
+    m_renderer->end_frame(dt, effective_rad, shield_timer, danger_haze_color, effective_haze);
 
     // Mouse coordinates and clicks for responsive menus
     glm::dvec2 cur_pos = m_window->get_cursor_pos();
@@ -3168,12 +3233,21 @@ void Application::render(float dt) {
                          m_user_profile.sector_records[1].highest_completion_rate > 0 ||
                          m_user_profile.sector_records[2].highest_completion_rate > 0 ||
                          m_user_profile.sector_records[3].highest_completion_rate > 0);
-        MainMenuAction action = m_hub_ui->render_main_menu(m_selected_level, m_user_profile, has_save, mouse_x, mouse_y, mouse_clicked);
+        MainMenuAction action = m_hub_ui->render_main_menu(m_selected_level, m_user_profile, has_save, mouse_x, mouse_y, mouse_clicked, mouse_down, static_cast<float>(m_window->get_scroll_delta_y()));
         m_settings = m_user_profile.settings;
         sync_audio_settings();
 
         if (m_hub_ui->check_and_clear_test_sound() && m_audio) {
             m_audio->play_sound_2d(SoundCue::UIBlip, 1.0f);
+        }
+
+        if (m_hub_ui->has_profile_changed()) {
+            m_hub_ui->clear_profile_changed();
+            SaveSystem::save_profile(m_user_profile, m_active_save_file);
+            for (int s = 1; s < PlayerInventory::MAX_SECTOR_RECORDS; ++s) {
+                m_inventory.sector_records[s] = m_user_profile.sector_records[s];
+            }
+            sync_profile_with_player();
         }
 
         if (action == MainMenuAction::Continue) {
@@ -3184,6 +3258,8 @@ void Application::render(float dt) {
             m_hub_ui->set_subview(MenuSubView::Upgrades);
         } else if (action == MainMenuAction::Settings) {
             m_hub_ui->set_subview(MenuSubView::Settings);
+        } else if (action == MainMenuAction::ResetSave) {
+            clear_save_and_reset();
         } else if (action == MainMenuAction::Exit) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             glfwSetWindowShouldClose(m_window->handle(), GLFW_TRUE);
@@ -3275,6 +3351,7 @@ void Application::render(float dt) {
             m_user_profile.grant_coins(run_coins);
             m_user_profile.total_voidite += m_inventory.voidite;
             m_user_profile.total_titanium += m_inventory.titanium;
+            m_user_profile.total_astral_ore += m_inventory.astral_ore;
             for (int s = 1; s <= 3; ++s) {
                 if (m_inventory.sector_records[s].highest_completion_rate > m_user_profile.sector_records[s].highest_completion_rate) {
                     m_user_profile.sector_records[s].highest_completion_rate = m_inventory.sector_records[s].highest_completion_rate;
@@ -3330,40 +3407,116 @@ void Application::grant_testing_resources(int exp, int voidite, int titanium) {
                 std::to_string(m_user_profile.total_coins) + " Coins).");
 }
 
+void Application::grant_expedition_objectives() {
+    int target = std::max(25, m_inventory.target_voidite);
+    m_inventory.voidite = std::max(m_inventory.voidite, target);
+    m_inventory.titanium += 15;
+    m_inventory.salvage_parts += 10;
+    m_inventory.vault_breached = true;
+    m_inventory.relic_extracted = true;
+
+    if (m_mission.vault().exists) {
+        m_mission.force_complete_vault_objective();
+    }
+
+    if (m_hud) {
+        m_hud->add_loot_toast("OBJECTIVES MET", glm::vec4(0.2f, 0.95f, 0.5f, 1.0f), target, 40);
+        m_hud->add_loot_toast("VOIDITE", glm::vec4(0.7f, 0.3f, 1.0f, 1.0f), m_inventory.voidite, 30);
+        m_hud->add_loot_toast("RELIC SECURED", glm::vec4(0.2f, 0.8f, 1.0f, 1.0f), 1, 30);
+        m_hud->show_warning("TESTING: ALL LEVEL OBJECTIVES GRANTED (" + std::to_string(m_inventory.voidite) + "/" + std::to_string(target) + " VOIDITE + RELIC)", 3.0f);
+    }
+    VF_LOG_INFO("Testing", "Granted full expedition objectives for Sector " << m_selected_level << ": "
+                << m_inventory.voidite << "/" << target << " Voidite, Vault Breached, Relic Extracted.");
+}
+
+void Application::complete_and_extract_instantly() {
+    VF_LOG_INFO("Testing", "Executing instant complete and extract for Sector " << m_selected_level);
+    grant_expedition_objectives();
+    if (m_state == GameState::Gameplay && m_extraction) {
+        m_extraction->force_escape();
+    } else {
+        // Direct profile progression update if outside active gameplay
+        if (m_selected_level >= 1 && m_selected_level < UserProfile::MAX_SECTOR_RECORDS) {
+            uint32_t seed = (m_world ? m_world->seed() : m_current_level_seed);
+            if (seed == 0) seed = SaveSystem::generate_random_seed(m_selected_level);
+            m_user_profile.mark_sector_completed(m_selected_level, seed, 100, "CLEARED (100%)");
+            m_inventory.sector_records[m_selected_level] = m_user_profile.sector_records[m_selected_level];
+            SaveSystem::save_profile(m_user_profile, m_active_save_file);
+        }
+    }
+}
+
 void Application::test_upgrade_and_respec_cycle() {
     VF_LOG_INFO("Testing", "Executing diagnostic Upgrade & Respec cycle test...");
     int player_lvl = m_user_profile.get_player_level();
-    if (m_user_profile.total_coins < 1000) {
-        m_user_profile.grant_resources(1500, 1000, 40, 20);
+    if (m_user_profile.total_exp < 1000) {
+        m_user_profile.grant_exp(1500);
         player_lvl = m_user_profile.get_player_level();
     }
 
-    // Purchase upgrades using coins and player level
-    bool b1 = m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, player_lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-    bool b2 = m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, player_lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-    bool b3 = m_user_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, player_lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
+    // Purchase upgrades using EXP and player level
+    bool b1 = m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, player_lvl, m_user_profile.total_exp);
+    bool b2 = m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, player_lvl, m_user_profile.total_exp);
+    bool b3 = m_user_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, player_lvl, m_user_profile.total_exp);
 
-    int total_spent = m_user_profile.upgrades.get_total_spent_coins();
+    int total_spent = m_user_profile.upgrades.get_total_spent_exp();
     VF_LOG_INFO("Testing", "Purchased upgrades: DrillSpeed (T" + std::to_string(m_user_profile.upgrades.drillSpeedTier) + 
                 "), ThrusterTank (T" + std::to_string(m_user_profile.upgrades.thrusterTankTier) + 
                 "), ReinforcedPlating (T" + std::to_string(m_user_profile.upgrades.reinforcedPlatingTier) + 
-                ") [Spent: " + std::to_string(total_spent) + " Coins].");
+                ") [Spent: " + std::to_string(total_spent) + " EXP].");
 
-    // Perform respec (100% full recovery)
-    int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
-    m_user_profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
-    m_user_profile.total_coins += ref_coins;
-    m_user_profile.total_voidite += ref_voidite;
-    m_user_profile.total_titanium += ref_titanium;
+    // Perform respec (100% full recovery of EXP)
+    int ref_exp = 0;
+    m_user_profile.upgrades.respec(ref_exp);
+    m_user_profile.total_exp += ref_exp;
 
-    VF_LOG_INFO("Testing", "Respec executed: refunded 100% (" + std::to_string(ref_coins) + " Coins, " +
-                std::to_string(ref_voidite) + " Voidite, " + std::to_string(ref_titanium) + " Titanium), all tiers reset to 0.");
+    VF_LOG_INFO("Testing", "Respec executed: refunded 100% (" + std::to_string(ref_exp) + " EXP), all tiers reset to 0.");
     SaveSystem::save_profile(m_user_profile, m_active_save_file);
     sync_profile_with_player();
 
     if (m_hud) {
-        m_hud->show_warning("TEST RESPEC: REFUNDED 100% (" + std::to_string(ref_coins) + " COINS)");
+        m_hud->show_warning("TEST RESPEC: REFUNDED 100% (" + std::to_string(ref_exp) + " EXP)");
     }
+}
+
+void Application::clear_save_and_reset() {
+    GameSettings old_settings = m_user_profile.settings;
+    std::string player_name = m_user_profile.player_name;
+    m_user_profile = UserProfile{};
+    m_user_profile.settings = old_settings;
+    if (!player_name.empty()) {
+        m_user_profile.player_name = player_name;
+    }
+
+    // Write fresh default profile to active save file
+    SaveSystem::save_profile(m_user_profile, m_active_save_file);
+
+    // Sync inventory sector records
+    for (int s = 1; s < PlayerInventory::MAX_SECTOR_RECORDS; ++s) {
+        m_inventory.sector_records[s] = m_user_profile.sector_records[s];
+    }
+    m_inventory.voidite = 0;
+    m_inventory.titanium = 0;
+    m_inventory.salvage_parts = 0;
+    m_inventory.total_run_score = 0;
+    m_inventory.run_coins_earned = 0;
+    m_selected_level = 1;
+
+    sync_profile_with_player();
+
+    if (m_hub_ui) {
+        m_hub_ui->trigger_save_cleared_feedback();
+    }
+
+    if (m_hud) {
+        m_hud->show_warning("SAVE DATA & PROGRESSION CLEARED // DELVER RESET", 4.0f);
+    }
+
+    if (m_audio) {
+        m_audio->play_sound_2d(SoundCue::UIBlip, 1.0f);
+    }
+
+    VF_LOG_INFO("SaveSystem", "Save file cleared and user profile reset to fresh delver defaults at " << m_active_save_file);
 }
 
 void Application::run() {
@@ -3376,7 +3529,7 @@ void Application::run() {
     std::cout << "  State Machine Active: Main Menu -> Orbital Hub -> Gameplay -> Debrief" << std::endl;
     std::cout << "========================================================\n" << std::endl;
 
-    if (m_config.test_enemy || m_config.capture_models || m_config.capture_level_shapes) {
+    if (m_config.test_enemy || m_config.test_relic || m_config.capture_models || m_config.capture_level_shapes) {
         start_expedition(1);
     }
 
@@ -3488,24 +3641,32 @@ void Application::run() {
             if (b_now && !b_down_last) {
                 bool quota_met = (m_inventory.voidite >= m_inventory.target_voidite) ||
                                  (m_inventory.vault_breached && m_inventory.relic_extracted);
+                if (m_inventory.target_astral_ore > 0) {
+                    quota_met = ((m_inventory.voidite >= m_inventory.target_voidite) &&
+                                 (m_inventory.astral_ore >= m_inventory.target_astral_ore)) ||
+                                (m_inventory.vault_breached && m_inventory.relic_extracted);
+                }
                 if (quota_met) {
                     float holdout_duration = (m_selected_level <= 1) ? 20.0f :
                                              (m_selected_level == 2)  ? 30.0f : 40.0f;
-                    m_extraction->deploy_beacon(m_player->position(), holdout_duration);
-                    m_holdout_stage = 0;
-                    m_surveying.reset(); // Clear any sonar X-ray overlay on beacon deployment
-                } else {
-                    if (m_hud) {
-                        std::string warn = "BEACON LOCKED: REQUIRE " +
-                            std::to_string(m_inventory.target_voidite) + " VOIDITE (" +
-                            std::to_string(m_inventory.voidite) + "/" + std::to_string(m_inventory.target_voidite) + ")";
-                        if (m_selected_level == 2) {
-                            warn = "BEACON LOCKED: REQUIRE " + std::to_string(m_inventory.target_voidite) +
-                                   " VOIDITE OR PRECURSOR RELIC (" + std::to_string(m_inventory.voidite) + "/" +
-                                   std::to_string(m_inventory.target_voidite) + ")";
+                    float ground_y = 0.0f;
+                    std::string reason;
+                    if (m_world && !ExtractionSystem::check_landing_clearance(*m_world, m_player->position(), ground_y, &reason)) {
+                        // Clearance warning handled via UIBlip audio
+
+                        if (m_audio) {
+                            m_audio->play_sound_2d(SoundCue::UIBlip, 0.8f);
                         }
-                        m_hud->show_warning(warn, 2.5f);
+                    } else {
+                        glm::vec3 lz_pos = (m_world && ground_y > 0.0f) ?
+                            glm::vec3(m_player->position().x, ground_y, m_player->position().z) :
+                            m_player->position();
+                        m_extraction->deploy_beacon(lz_pos, holdout_duration);
+                        m_holdout_stage = 0;
+                        m_surveying.reset(); // Clear any sonar X-ray overlay on beacon deployment
+
                     }
+                } else {
                     if (m_audio) {
                         m_audio->play_sound_2d(SoundCue::UIBlip, 0.8f);
                     }
@@ -3605,12 +3766,26 @@ void Application::run() {
             }
         }
 
+        // ── Testing & Profile Hotkeys ──
+        // F4: Clear save & reset delver profile (available in Main Menu or any Test Mode)
+        static bool f4_down_last = false;
+        bool f4_now = m_window->is_key_down(GLFW_KEY_F4);
+        if (f4_now && !f4_down_last && (is_test_mode() || m_state == GameState::MainMenu)) {
+            clear_save_and_reset();
+            VF_LOG_INFO("Testing", "Save file cleared and user profile reset via F4 hotkey.");
+        }
+        f4_down_last = f4_now;
+
         // ── Testing Hotkeys (Available ONLY in Test Mode via --test, --test-save, or --auto-play-test) ──
         if (is_test_mode()) {
             static bool f5_down_last = false;
             bool f5_now = m_window->is_key_down(GLFW_KEY_F5);
             if (f5_now && !f5_down_last) {
-                grant_testing_resources(1000, 25, 10);
+                if (m_state == GameState::Gameplay) {
+                    grant_expedition_objectives();
+                } else {
+                    grant_testing_resources(1000, 25, 10);
+                }
             }
             f5_down_last = f5_now;
 
@@ -3646,6 +3821,14 @@ void Application::run() {
                 VF_LOG_INFO("Testing", "Forced escape evacuation via F9 hotkey.");
             }
             f9_down_last = f9_now;
+
+            static bool f10_down_last = false;
+            bool f10_now = m_window->is_key_down(GLFW_KEY_F10);
+            if (f10_now && !f10_down_last) {
+                complete_and_extract_instantly();
+                VF_LOG_INFO("Testing", "Instant level complete and extract executed via F10 hotkey.");
+            }
+            f10_down_last = f10_now;
         }
 
         // ── In-Game F12 Screenshot Hotkey ──
@@ -3666,25 +3849,26 @@ void Application::run() {
         }
         f12_down_last = f12_now;
 
-        // ── Automated Visual Test & Playthrough Sequence ──
+        // ── Automated Visual Test & Playthrough Sequence (16 Screens Comprehensive Suite) ──
         if (m_config.auto_play_test) {
             m_auto_test_frame++;
 
-            // Frame 10: Capture Main Menu
+            // Frame 10: Capture Main Menu (Slot 0)
             if (m_auto_test_frame == 10) {
                 VisualTestHarness::instance().record_phase(0, "MAIN MENU", "screenshots/01_main_menu.png", m_window->width(), m_window->height());
                 // Switch to Sector Select carousel (Level Selection)
                 m_hub_ui->set_subview(MenuSubView::SectorSelect);
                 m_selected_level = 2; // Preview Sector 2 card
+                m_hub_ui->focus_sector(2, true);
             }
-            // Frame 20: Capture Level Selection (Sector Select Carousel)
+            // Frame 20: Capture Level Selection / Sector Select Carousel (Slot 1)
             else if (m_auto_test_frame == 20) {
                 VisualTestHarness::instance().record_phase(1, "LEVEL SELECT", "screenshots/02_level_select.png", m_window->width(), m_window->height());
                 // Switch to Character Selection (Delver Roster)
                 m_hub_ui->set_subview(MenuSubView::Upgrades);
                 m_hub_ui->set_active_tab(HubTab::DelverRoster);
             }
-            // Frame 30: Capture Character Selection (Delver Roster: Demolitionist, Vanguard, Scout)
+            // Frame 30: Capture Character Selection (Delver Roster: Demolitionist, Vanguard, Scout) (Slot 2)
             else if (m_auto_test_frame == 30) {
                 VisualTestHarness::instance().record_phase(2, "CHAR SELECT", "screenshots/03_character_select.png", m_window->width(), m_window->height());
                 // Switch to Upgrade Terminal tab
@@ -3694,40 +3878,43 @@ void Application::run() {
             else if (m_auto_test_frame == 33) {
                 grant_testing_resources(1500, 30, 15);
                 int lvl = m_user_profile.get_player_level();
-                m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-                m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-                VF_LOG_INFO("AutoPlayTest", "Testing: Granted resources, purchased Tier 1 DrillSpeed & ThrusterTank with Coins.");
+                m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, lvl, m_user_profile.total_exp);
+                m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_exp);
+                VF_LOG_INFO("AutoPlayTest", "Testing: Granted resources, purchased Tier 1 DrillSpeed & ThrusterTank with EXP.");
             }
             // Frame 36: Testing: Test respec points feature (100% full recovery verification)
             else if (m_auto_test_frame == 36) {
-                int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
-                m_user_profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
-                m_user_profile.total_coins += ref_coins;
-                m_user_profile.total_voidite += ref_voidite;
-                m_user_profile.total_titanium += ref_titanium;
-                VF_LOG_INFO("AutoPlayTest", "Testing: Respec verified, refunded 100% (" + std::to_string(ref_coins) + " Coins, " +
-                            std::to_string(ref_voidite) + " Voidite, " + std::to_string(ref_titanium) + " Titanium).");
+                int ref_exp = 0;
+                m_user_profile.upgrades.respec(ref_exp);
+                m_user_profile.total_exp += ref_exp;
+                VF_LOG_INFO("AutoPlayTest", "Testing: Respec verified, refunded 100% (" + std::to_string(ref_exp) + " EXP).");
                 // Re-purchase upgrades to showcase active purchased upgrade nodes in the terminal UI screenshot
                 int lvl = m_user_profile.get_player_level();
-                m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-                m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-                m_user_profile.upgrades.purchase(UpgradeType::KineticDynamo, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
-                m_user_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, lvl, m_user_profile.total_coins, m_user_profile.total_voidite, m_user_profile.total_titanium);
+                m_user_profile.upgrades.purchase(UpgradeType::DrillSpeed, lvl, m_user_profile.total_exp);
+                m_user_profile.upgrades.purchase(UpgradeType::ThrusterTank, lvl, m_user_profile.total_exp);
+                m_user_profile.upgrades.purchase(UpgradeType::KineticDynamo, lvl, m_user_profile.total_exp);
+                m_user_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, lvl, m_user_profile.total_exp);
             }
-            // Frame 40: Capture Upgrade Terminal (with active upgrades & granted resources)
+            // Frame 40: Capture Upgrade Terminal (with active upgrades & granted resources) (Slot 3)
             else if (m_auto_test_frame == 40) {
                 VisualTestHarness::instance().record_phase(3, "UPGRADES TERMINAL", "screenshots/04_upgrades_terminal.png", m_window->width(), m_window->height());
-                // Launch Sector 1 Expedition
+                // Switch to Orbital Hub Audio & Rig Settings tab
+                m_hub_ui->set_active_tab(HubTab::AudioSettings);
+            }
+            // Frame 48: Capture Orbital Hub Audio & Rig Settings (Slot 4)
+            else if (m_auto_test_frame == 48) {
+                VisualTestHarness::instance().record_phase(4, "HUB AUDIO RIG", "screenshots/05_hub_audio_settings.png", m_window->width(), m_window->height());
+                // Return to Main Menu and launch Sector 1 Expedition
                 m_hub_ui->set_subview(MenuSubView::Main);
                 start_expedition(1);
             }
-            // Frames 45 to 74: Player walks around, tests sprint and thruster hover
-            else if (m_auto_test_frame >= 45 && m_auto_test_frame < 75) {
-                if (m_auto_test_frame == 45) {
+            // Frames 52 to 78: Player walks around cavern, tests sprint and thruster hover
+            else if (m_auto_test_frame >= 52 && m_auto_test_frame < 80) {
+                if (m_auto_test_frame == 52) {
                     m_player->set_look_angles(-90.0f, 0.0f);
                 }
                 // Forward movement with surface clamping
-                if (m_auto_test_frame <= 60) {
+                if (m_auto_test_frame <= 66) {
                     m_player->set_position(m_player->position() + glm::vec3(0.0f, 0.0f, 0.12f));
                     m_player->clamp_to_surface(*m_world);
                     // Exercise thrusters and power drain
@@ -3741,94 +3928,74 @@ void Application::run() {
                     m_player->clamp_to_surface(*m_world);
                 }
             }
-            // Frame 75: Settle in gameplay cavern and capture viewmodel + HUD
-            else if (m_auto_test_frame == 75) {
+            // Frame 80: Settle in gameplay cavern and capture viewmodel + HUD (Slot 5)
+            else if (m_auto_test_frame == 80) {
                 m_player->set_look_angles(0.0f, -15.0f);
                 m_world->update(m_player->position(), 2);
-                VisualTestHarness::instance().record_phase(4, "GAMEPLAY CAVERN", "screenshots/05_gameplay_cavern.png", m_window->width(), m_window->height());
-            }
-            // Frame 76: Toggle Contractor Field Manual Briefing via [H]
-            else if (m_auto_test_frame == 76) {
+                VisualTestHarness::instance().record_phase(5, "GAMEPLAY CAVERN", "screenshots/06_gameplay_cavern.png", m_window->width(), m_window->height());
                 if (m_hud) m_hud->toggle_help_briefing();
             }
-            // Frame 77: Capture Full Centered Operations Manual & Briefing Menu, then close via [H]
-            else if (m_auto_test_frame == 77) {
-                capture_screenshot_png("screenshots/05b_briefing_manual_h.png", m_window->width(), m_window->height());
+            // Frame 86: Capture Contractor Operations Field Manual Briefing Modal [H] (Slot 6)
+            else if (m_auto_test_frame == 86) {
+                VisualTestHarness::instance().record_phase(6, "FIELD MANUAL", "screenshots/07_field_manual.png", m_window->width(), m_window->height());
                 if (m_hud) m_hud->toggle_help_briefing();
+                m_map_open = true;
+                m_terrain_scanner.set_fold_progress(1.0f);
             }
-            // Frames 80 to 105: Player mines the cavern rock directly in front with drill
-            else if (m_auto_test_frame >= 80 && m_auto_test_frame <= 105) {
+            // Frame 92: Capture 2D Tactical Cartography Map [TAB] (Slot 7)
+            else if (m_auto_test_frame == 92) {
+                VisualTestHarness::instance().record_phase(7, "TACTICAL MAP", "screenshots/08_tactical_map.png", m_window->width(), m_window->height());
+                m_map_open = false;
+                m_terrain_scanner.set_fold_progress(0.0f);
+            }
+            // Frames 95 to 118: Player mines cavern rock with drill, evaluates tremor and stalker
+            else if (m_auto_test_frame >= 95 && m_auto_test_frame <= 118) {
                 m_player->set_active_tool(ToolSlot::MiningDrill);
                 m_player->set_look_angles(0.0f, -22.0f);
                 m_player->set_drilling(true);
                 m_player->MineBlock(static_cast<float>(fixed_dt), *m_world);
 
                 // Testing: Force seismic tremor to evaluate tremor warning, screen trauma, and ceiling debris
-                if (m_auto_test_frame == 95) {
+                if (m_auto_test_frame == 105) {
                     m_hazard->force_tremor(1.4f);
                     m_stalkers.spawn_stalker(m_player->position() + glm::vec3(-2.0f, 0.2f, 5.5f));
                     VF_LOG_INFO("AutoPlayTest", "Testing: Forced seismic tremor triggered & spawned predatory Void Stalker.");
                 }
 
-                if (m_auto_test_frame == 105) {
-                    VisualTestHarness::instance().record_phase(5, "DRILL CRACKS", "screenshots/06_drilling_cracks.png", m_window->width(), m_window->height());
+                if (m_auto_test_frame == 118) {
+                    VisualTestHarness::instance().record_phase(8, "DRILL CRACKS", "screenshots/09_drilling_cracks.png", m_window->width(), m_window->height());
                 }
             }
-            // Frame 106: Stop drilling
-            else if (m_auto_test_frame == 106) {
+            // Frame 119: Stop drilling
+            else if (m_auto_test_frame == 119) {
                 m_player->set_drilling(false);
             }
-            // Frame 107: Test Fall Damage & Screen Shake Trauma
-            else if (m_auto_test_frame == 107) {
-                m_player->apply_fall_impact(16.5f); // triggers fall damage, damage flash vignette & camera shake trauma
-                VF_LOG_INFO("AutoPlayTest", "Testing: Player took fall impact damage! HP=" << m_player->health()
-                            << ", trauma=" << m_trauma << ", damage flash=" << (m_hud ? m_hud->damage_flash_timer() : 0.0f));
-            }
-            // Frame 108: Test Swarm Breach (Threat Peak) trigger
-            else if (m_auto_test_frame == 108) {
+            // Frame 120: Test Fall Damage & Screen Shake Trauma
+            else if (m_auto_test_frame == 120) {
+                m_player->apply_fall_impact(16.5f);
                 m_noise_meter.inject_noise(100.0f);
                 m_noise_meter.update(static_cast<float>(fixed_dt));
-                VF_LOG_INFO("AutoPlayTest", "Testing: Swarm Breach triggered! IsEnraged=" << SwarmManager::instance().IsEnraged()
-                            << ", Alert=" << m_noise_meter.alert_string());
             }
-            // Frame 110: Test Swarm Breach recovery (standing still drains noise, clears Threat Peak & returns to original meter)
-            else if (m_auto_test_frame == 110) {
-                VF_LOG_INFO("AutoPlayTest", "Testing: Player standing still after peak. Noise="
-                            << m_noise_meter.noise_percent() << "%, IsEnraged="
-                            << SwarmManager::instance().IsEnraged() << ", Alert=" << m_noise_meter.alert_string()
-                            << ", PostCombatCooldownActive=" << m_noise_meter.is_post_event_cooldown_active());
-            }
-            // Frame 112: Test Ability 1 - Seismic Sonar Pulse scan
-            else if (m_auto_test_frame == 112) {
+            // Frame 124: Test Ability 1 - Seismic Sonar Pulse scan
+            else if (m_auto_test_frame == 124) {
                 on_sonar_cast(m_player->position());
             }
-            // Frame 118: Test Quick Bulkhead placement on Mining Drill
-            else if (m_auto_test_frame == 118) {
+            // Frame 128: Test Quick Bulkhead placement on Mining Drill
+            else if (m_auto_test_frame == 128) {
                 m_player->set_active_tool(ToolSlot::MiningDrill);
                 glm::ivec3 place_pos = glm::ivec3(std::floor(m_player->position().x), std::floor(m_player->position().y) + 1, std::floor(m_player->position().z) + 3);
                 m_world->set_voxel(place_pos.x, place_pos.y, place_pos.z, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_PLAYER_PLACED}, true);
                 on_block_placed(place_pos.x, place_pos.y, place_pos.z, MAT_INDUSTRIAL_BULKHEAD);
             }
-            // Frame 124: Test Tool 3 - Demolition Shaped Charge explosive micro-blast
-            else if (m_auto_test_frame == 124) {
+            // Frame 132: Test Demolition Shaped Charge explosive micro-blast
+            else if (m_auto_test_frame == 132) {
                 m_player->set_active_tool(ToolSlot::DemolitionCharge);
                 glm::ivec3 blast_pos = glm::ivec3(std::floor(m_player->position().x), std::floor(m_player->position().y) + 1, std::floor(m_player->position().z) + 4);
                 on_explosive_blast(blast_pos, glm::ivec3(0, 0, 1), true);
             }
-            // Frame 130: Test Ability 2 - Grapple Hook cable tension
-            else if (m_auto_test_frame == 130) {
-                glm::vec3 anchor = m_player->position() + glm::vec3(0.0f, 5.0f, 6.0f);
-                m_player->grapple_mut().active = true;
-                m_player->grapple_mut().anchor_point = anchor;
-                m_player->grapple_mut().rest_length = glm::distance(m_player->position(), anchor);
-            }
-            // Frame 136: Release grapple hook and equip combat weapon: Plasma Carbine!
+            // Frame 136: Equip Plasma Carbine, fire weapon, add loot toasts and inventory
             else if (m_auto_test_frame == 136) {
-                m_player->grapple_mut().active = false;
                 m_player->set_active_tool(ToolSlot::PlasmaCarbine);
-            }
-            // Frame 138: Fire Combat Weapon projectile and display loot toasts
-            else if (m_auto_test_frame == 138) {
                 m_player->set_drilling(true);
                 m_player->try_fire_weapon(m_plasma_bolts, static_cast<float>(fixed_dt));
                 m_player->set_drilling(false);
@@ -3837,67 +4004,68 @@ void Application::run() {
                 m_inventory.add_voidite(3);
                 m_inventory.add_titanium(2);
             }
-            else if (m_auto_test_frame == 142) {
+            else if (m_auto_test_frame == 140) {
                 m_hud->add_loot_toast("VOIDITE CRYSTAL", glm::vec4(0.7f, 0.3f, 1.0f, 1.0f), 3, 45); // Stack +3 [x2]
                 m_inventory.add_voidite(3);
             }
-            else if (m_auto_test_frame == 146) {
-                VisualTestHarness::instance().record_phase(6, "ABILITIES & LOOT", "screenshots/07_abilities_loot.png", m_window->width(), m_window->height());
-            }
-            // Frame 150: Pause Game (In-Game Esc Menu)
-            else if (m_auto_test_frame == 150) {
+            // Frame 144: Capture Combat, Abilities & Concurrent Loot Toasts (Slot 9)
+            else if (m_auto_test_frame == 144) {
+                VisualTestHarness::instance().record_phase(9, "ABILITIES & LOOT", "screenshots/10_abilities_loot.png", m_window->width(), m_window->height());
+                // Pause Game
                 TransitionState(GameState::Paused);
                 m_window->set_cursor_locked(false);
                 if (m_pause_menu) m_pause_menu->set_active_tab(PauseTab::Mission);
             }
-            // Frame 154: Capture Esc / Pause Menu Modal (Tab 1 Telemetry)
+            // Frame 148: Capture Esc / Pause Menu Modal Tab 1: Mission Telemetry & Status (Slot 10)
+            else if (m_auto_test_frame == 148) {
+                VisualTestHarness::instance().record_phase(10, "PAUSE MISSION", "screenshots/11_pause_mission.png", m_window->width(), m_window->height());
+                if (m_pause_menu) m_pause_menu->set_active_tab(PauseTab::Inventory);
+            }
+            // Frame 154: Capture Esc / Pause Menu Modal Tab 2: Inventory & Cargo Jettison (Slot 11)
             else if (m_auto_test_frame == 154) {
-                VisualTestHarness::instance().record_phase(7, "ESC MENU", "screenshots/08_esc_menu.png", m_window->width(), m_window->height());
+                VisualTestHarness::instance().record_phase(11, "PAUSE INVENTORY", "screenshots/12_pause_inventory.png", m_window->width(), m_window->height());
                 if (m_pause_menu) m_pause_menu->set_active_tab(PauseTab::AudioSettings);
             }
-            // Frame 156: Capture Esc / Pause Menu Modal (Tab 2 Audio & Rig)
-            else if (m_auto_test_frame == 156) {
-                capture_screenshot_png("screenshots/08b_esc_audio_tab.png", m_window->width(), m_window->height());
+            // Frame 160: Capture Esc / Pause Menu Modal Tab 3: Audio & Rig Settings Mixer (Slot 12)
+            else if (m_auto_test_frame == 160) {
+                VisualTestHarness::instance().record_phase(12, "PAUSE AUDIO RIG", "screenshots/13_pause_audio.png", m_window->width(), m_window->height());
                 if (m_pause_menu) m_pause_menu->set_active_tab(PauseTab::ControlsBriefing);
             }
-            // Frame 158: Capture Esc / Pause Menu Modal (Tab 3 Controls & Directives)
-            else if (m_auto_test_frame == 158) {
-                capture_screenshot_png("screenshots/08c_esc_controls_tab.png", m_window->width(), m_window->height());
-            }
-            // Frame 160: Resume gameplay from pause and deploy extraction beacon
-            else if (m_auto_test_frame == 160) {
+            // Frame 166: Capture Esc / Pause Menu Modal Tab 4: Delver Controls & Directives (Slot 13)
+            else if (m_auto_test_frame == 166) {
+                VisualTestHarness::instance().record_phase(13, "PAUSE CONTROLS", "screenshots/14_pause_controls.png", m_window->width(), m_window->height());
+                // Resume gameplay from pause and deploy extraction beacon
                 TransitionState(GameState::Gameplay);
                 m_window->set_cursor_locked(true);
                 float holdout_duration = (m_selected_level <= 1) ? 20.0f :
                                          (m_selected_level == 2)  ? 30.0f : 40.0f;
-                m_extraction->deploy_beacon(m_player->position(), holdout_duration);
+                float ground_y = 0.0f;
+                if (m_world && ExtractionSystem::check_landing_clearance(*m_world, m_player->position(), ground_y)) {
+                    m_extraction->deploy_beacon(glm::vec3(m_player->position().x, ground_y, m_player->position().z), holdout_duration);
+                } else {
+                    m_extraction->deploy_beacon(m_player->position(), holdout_duration);
+                }
                 m_holdout_stage = 0;
                 m_surveying.reset(); // Clear sonar X-ray so beacon screenshot is clean
-            }
-            // Frame 164: Test concurrent tactical & threat notifications during holdout
-            else if (m_auto_test_frame == 164) {
                 if (m_hud) {
                     m_hud->show_warning("! CRITICAL NOISE: VOID SWARM INCOMING !", 4.0f);
                     m_hud->show_warning("VOID STALKER ELIMINATED (+100 PTS)", 4.0f);
                 }
             }
-            // Frame 174: Capture Extraction Beacon Holdout
-            else if (m_auto_test_frame == 174) {
-                VisualTestHarness::instance().record_phase(8, "EXTRACTION BEACON", "screenshots/09_extraction_beacon.png", m_window->width(), m_window->height());
-            }
-            // Frame 178: Testing: Force escape evacuation -> triggers complete safe evac into Debrief
+            // Frame 178: Capture Extraction Beacon Holdout (Slot 14)
             else if (m_auto_test_frame == 178) {
-                VF_LOG_INFO("AutoPlayTest", "Testing: Forcing escape evacuation to evaluate debrief results.");
+                VisualTestHarness::instance().record_phase(14, "EXTRACTION BEACON", "screenshots/15_extraction_beacon.png", m_window->width(), m_window->height());
+                grant_expedition_objectives();
                 m_extraction->force_escape();
             }
-            // Frame 188: Capture Mission Debrief Screen
+            // Frame 188: Capture Mission Debrief Screen (Slot 15)
             else if (m_auto_test_frame == 188) {
-                VisualTestHarness::instance().record_phase(9, "MISSION DEBRIEF", "screenshots/10_mission_debrief.png", m_window->width(), m_window->height());
+                VisualTestHarness::instance().record_phase(15, "MISSION DEBRIEF", "screenshots/16_mission_debrief.png", m_window->width(), m_window->height());
             }
             // Frame 198: Finalize Visual Test Harness & Exit Cleanly
             else if (m_auto_test_frame >= 198) {
                 VisualTestHarness::instance().finalize();
-                VF_LOG_INFO("AutoPlayTest", "Extensive visual test completed! All 10 screens & montage captured.");
+                VF_LOG_INFO("AutoPlayTest", "Extensive visual test completed! All 16 screens & montage captured.");
                 break;
             }
         }
@@ -4142,6 +4310,36 @@ void Application::run() {
             else if (m_auto_test_frame >= 92) {
                 VisualTestHarness::instance().finalize_model_showcase();
                 VF_LOG_INFO("ModelShowcase", "Dedicated 3D Model Showcase finalized! All 6 models & master contact sheet generated in docs/models/.");
+                break;
+            }
+        }
+
+        // ── Automated Dedicated Precursor Relic Showcase Capture (--test-relic) ──
+        if (m_config.test_relic) {
+            m_auto_test_frame++;
+            if (m_auto_test_frame == 1) {
+                // Ensure Precursor Vault is embedded and breached
+                glm::vec3 door_world = glm::vec3(m_mission.vault().door_pos) + glm::vec3(0.5f);
+                m_mission.check_satchel_vault_breach(*m_world, door_world, 4.0f);
+
+                // Position camera in front of the floating precursor relic on its dais
+                glm::vec3 r_pos = glm::vec3(m_mission.vault().relic_pos) + glm::vec3(0.5f, 0.5f, 0.5f);
+                glm::vec3 cam_pos = r_pos + glm::vec3(-2.2f, 0.25f, -0.9f);
+                m_player->set_position(cam_pos);
+                glm::vec3 look_dir = glm::normalize(r_pos - (cam_pos + glm::vec3(0.0f, 1.2f, 0.0f)));
+                float yaw = glm::degrees(std::atan2(look_dir.z, look_dir.x));
+                float pitch = glm::degrees(std::asin(look_dir.y));
+                m_player->set_look_angles(yaw, pitch);
+
+                if (m_renderer) {
+                    m_renderer->headlamp().enabled = true;
+                    m_renderer->headlamp().intensity = 2.4f;
+                }
+            }
+
+            if (m_auto_test_frame == 16) {
+                capture_screenshot_png("screenshots/precursor_relic_showcase.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("RelicTest", "Captured Precursor Relic Showcase to screenshots/precursor_relic_showcase.png");
                 break;
             }
         }

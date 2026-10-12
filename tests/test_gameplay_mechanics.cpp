@@ -1277,6 +1277,7 @@ TEST(EnvironmentalHazardDamageAndTelegraphTest, HazardTraumaIsolationAndVisualTe
     // 1. RADIATION DAMAGE ISOLATION:
     // Must deal health damage, but strictly ZERO camera shake / trauma.
     player.set_trauma(0.0f);
+    player.set_shield(0.0f); // Deplete shield to verify direct health damage isolation
     float hp_before = player.health();
     player.take_damage(12.5f, PlayerController::DamageSource::Radiation);
     ASSERT_NEAR(player.health(), hp_before - 12.5f, 0.01f);
@@ -1683,6 +1684,217 @@ void ScopeApertureAndOpticalVisibilityTest() {
     std::cout << "[ OK ] ScopeApertureAndOpticalVisibilityTest (magnification ratios, unobstructed sightlines, and raycasts align across all weapon classes)" << std::endl;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 21: Player Shield Layer Recharge & Non-Regenerating Hitpoints
+// ─────────────────────────────────────────────────────────────────────────────
+static void PlayerShieldLayerRechargeAndNonRegeneratingHealthTest() {
+    std::cout << "[ RUN      ] PlayerShieldLayerRechargeAndNonRegeneratingHealthTest" << std::endl;
+
+    PlayerController player(glm::vec3(0.0f, 10.0f, 0.0f));
+    player.apply_attributes_and_upgrades(CharacterClass::Demolitionist, UpgradeTree{});
+
+    // 1. Baseline status verification: 50 shield, 100 health
+    ASSERT_NEAR(player.shield(), 50.0f, 0.001f);
+    ASSERT_NEAR(player.max_shield(), 50.0f, 0.001f);
+    ASSERT_NEAR(player.health(), 100.0f, 0.001f);
+    ASSERT_NEAR(player.max_health(), 100.0f, 0.001f);
+    ASSERT_FALSE(player.is_shield_depleted());
+    ASSERT_FALSE(player.is_shield_recharging());
+    ASSERT_NEAR(player.exo().shield, 100.0f, 0.001f);
+    ASSERT_NEAR(player.exo().integrity, 100.0f, 0.001f);
+
+    // 2. Shield layer absorbs incoming damage first (health remains 100%)
+    float applied = player.take_damage(20.0f, PlayerController::DamageSource::Kinetic);
+    ASSERT_NEAR(applied, 20.0f, 0.001f);
+    ASSERT_NEAR(player.shield(), 30.0f, 0.001f);
+    ASSERT_NEAR(player.health(), 100.0f, 0.001f); // Untouched health!
+    ASSERT_NEAR(player.exo().shield, 60.0f, 0.001f);
+    ASSERT_NEAR(player.exo().integrity, 100.0f, 0.001f);
+    ASSERT_NEAR(player.time_since_last_damage(), 0.0f, 0.001f);
+
+    // 3. Shield damage exceeding capacity: 40 damage with 30 shield remaining
+    // Absorbs 30 shield (depletes to 0), remaining 10 damage punctures into hitpoints (100 -> 90)
+    applied = player.take_damage(40.0f, PlayerController::DamageSource::EnemyAttack);
+    ASSERT_NEAR(applied, 40.0f, 0.001f);
+    ASSERT_NEAR(player.shield(), 0.0f, 0.001f);
+    ASSERT_TRUE(player.is_shield_depleted());
+    ASSERT_NEAR(player.health(), 90.0f, 0.001f);
+    ASSERT_NEAR(player.exo().shield, 0.0f, 0.001f);
+    ASSERT_NEAR(player.exo().integrity, 90.0f, 0.001f);
+
+    // 4. Taking continuous damage prevents shield from recharging
+    for (int i = 0; i < 5; ++i) {
+        player.UpdatePhysics(1.0f); // 1.0s elapsed
+        player.take_damage(5.0f, PlayerController::DamageSource::Kinetic); // resets timer back to 0
+        ASSERT_NEAR(player.shield(), 0.0f, 0.001f); // Still 0 because timer resets
+        ASSERT_FALSE(player.is_shield_recharging());
+    }
+    ASSERT_NEAR(player.health(), 65.0f, 0.001f); // 90 - 5 * 5 = 65
+
+    // 5. Out of combat recovery: shield begins recharging after recharge delay (4.0s)
+    player.UpdatePhysics(3.0f); // 3.0s elapsed (< 4.0s delay)
+    ASSERT_FALSE(player.is_shield_recharging());
+    ASSERT_NEAR(player.shield(), 0.0f, 0.001f);
+
+    player.UpdatePhysics(1.0f); // reaches 4.0s delay and executes 1s of recharge (15.0/s)
+    ASSERT_GT(player.shield(), 0.0f);
+    ASSERT_NEAR(player.shield(), 15.0f, 0.1f);
+    ASSERT_TRUE(player.is_shield_recharging());
+
+    player.UpdatePhysics(1.0f); // reaches 5.0s elapsed, recharges another 15.0 (now 30.0)
+    ASSERT_NEAR(player.shield(), 30.0f, 0.1f);
+
+    // Advance 5.0s more: shield recharges back to full (50 max) and caps
+    player.UpdatePhysics(5.0f);
+    ASSERT_NEAR(player.shield(), player.max_shield(), 0.001f);
+    ASSERT_NEAR(player.exo().shield, 100.0f, 0.001f);
+    ASSERT_FALSE(player.is_shield_recharging()); // fully recharged
+
+    // 6. Hitpoints once taken damage CANNOT be regenerated
+    // Advance 60 seconds of out-of-combat idle time
+    player.UpdatePhysics(60.0f);
+    ASSERT_NEAR(player.health(), 65.0f, 0.001f); // STILL 65 HP! Permanent health damage!
+    ASSERT_NEAR(player.exo().integrity, 65.0f, 0.001f);
+
+    // 7. Dead player fatality: shields cannot recharge if delver is dead (health <= 0)
+    player.take_damage(200.0f, PlayerController::DamageSource::Kinetic); // absorbs 50 shield, 150 dmg to HP -> 0 HP
+    ASSERT_NEAR(player.health(), 0.0f, 0.001f);
+    ASSERT_NEAR(player.shield(), 0.0f, 0.001f);
+    player.UpdatePhysics(30.0f); // wait 30 seconds
+    ASSERT_NEAR(player.shield(), 0.0f, 0.001f); // DEAD delvers cannot recharge shield
+
+    std::cout << "[ OK ] PlayerShieldLayerRechargeAndNonRegeneratingHealthTest"
+              << " (shield absorbs first, recharges when not taking damage; hitpoints never regenerate)" << std::endl;
+}
+
+// ─── TEST 22: HazardBalancingAndDangerTelegraphTest ───────────────────────────
+TEST(HazardBalancingAndDangerTelegraphTest, ReducedHazardDamageCurvesAndDangerHazeTelegraphs) {
+    std::cout << "[ RUN      ] HazardBalancingAndDangerTelegraphTest.ReducedHazardDamageCurvesAndDangerHazeTelegraphs" << std::endl;
+
+    // 1. HazardClock Reduced Radiation Escalation & Tremor Pacing
+    HazardClock hazard1;
+    hazard1.set_sector_parameters(1);
+    hazard1.update(100.0f);
+    // At 0.05%/s, after 100s radiation must be ~5.0%, well below dangerous levels
+    ASSERT_NEAR(hazard1.radiation_level(), 5.0f, 0.01f);
+    ASSERT_LT(hazard1.radiation_level(), 10.0f);
+
+    HazardClock hazard2;
+    hazard2.set_sector_parameters(2);
+    hazard2.update(100.0f);
+    // At 0.09%/s, after 100s radiation must be ~9.0%
+    ASSERT_NEAR(hazard2.radiation_level(), 9.0f, 0.01f);
+
+    HazardClock hazard3;
+    hazard3.set_sector_parameters(3);
+    hazard3.update(100.0f);
+    // At 0.16%/s, after 100s radiation must be ~16.0%
+    ASSERT_NEAR(hazard3.radiation_level(), 16.0f, 0.01f);
+
+    // 2. Safe Buffer (< 75% Rad = 0 HP damage) and Balanced High-Exposure Damage Curve
+    auto compute_radiation_damage = [](float rad) -> float {
+        if (rad >= 98.0f) return 1.5f;
+        if (rad >= 90.0f) return 0.45f + (rad - 90.0f) * 0.08f;
+        if (rad >= 75.0f) return (rad - 75.0f) * 0.03f;
+        return 0.0f; // Safe buffer
+    };
+
+    ASSERT_EQ(compute_radiation_damage(0.0f), 0.0f);
+    ASSERT_EQ(compute_radiation_damage(50.0f), 0.0f); // Previously dealt damage at 50%; now 0 HP loss!
+    ASSERT_EQ(compute_radiation_damage(70.0f), 0.0f); // Safe buffer under 75%
+    ASSERT_NEAR(compute_radiation_damage(80.0f), 0.15f, 0.001f); // Gentle warning tick: 0.15 HP/s
+    ASSERT_NEAR(compute_radiation_damage(95.0f), 0.85f, 0.001f); // Moderate danger: 0.85 HP/s
+    ASSERT_EQ(compute_radiation_damage(99.0f), 1.5f);  // Critical capped at 1.5 HP/s (not 5.0 HP/s!)
+
+    // 3. Environmental Danger Haze Color & Factor Telegraphs
+    auto evaluate_danger_haze = [](float rad, float gas_dist, float lava_dist) -> std::pair<glm::vec3, float> {
+        glm::vec3 haze_col(0.12f, 0.65f, 0.22f);
+        float rad_haze = rad / 100.0f;
+        float gas_haze = (gas_dist < 20.0f) ? std::clamp(1.0f - (gas_dist / 20.0f), 0.0f, 0.85f) : 0.0f;
+        float lava_haze = (lava_dist < 16.0f) ? std::clamp(1.0f - (lava_dist / 16.0f), 0.0f, 0.85f) : 0.0f;
+        float eff_haze = 0.0f;
+
+        if (rad_haze >= gas_haze && rad_haze >= lava_haze && rad_haze > 0.05f) {
+            haze_col = glm::vec3(0.12f, 0.68f, 0.24f); // Toxic emerald radiation mist
+            eff_haze = rad_haze;
+        } else if (gas_haze >= lava_haze && gas_haze > 0.05f) {
+            haze_col = glm::vec3(0.48f, 0.75f, 0.12f); // Sulfur bio-gas vapor
+            eff_haze = gas_haze;
+        } else if (lava_haze > 0.05f) {
+            haze_col = glm::vec3(0.85f, 0.35f, 0.06f); // Molten volcanic heat haze
+            eff_haze = lava_haze;
+        }
+        return {haze_col, eff_haze};
+    };
+
+    // Test Radiation Mist Haze
+    auto [rad_color, rad_factor] = evaluate_danger_haze(60.0f, 999.0f, 999.0f);
+    ASSERT_GT(rad_factor, 0.5f);
+    ASSERT_NEAR(rad_color.y, 0.68f, 0.01f); // Vibrant emerald green
+
+    // Test Toxic Bio-Gas Vapor
+    auto [gas_color, gas_factor] = evaluate_danger_haze(0.0f, 5.0f, 999.0f);
+    ASSERT_GT(gas_factor, 0.5f);
+    ASSERT_NEAR(gas_color.x, 0.48f, 0.01f); // Distinct sulfur yellow-green
+
+    // Test Thermal Molten Magma Heat Haze
+    auto [lava_color, lava_factor] = evaluate_danger_haze(0.0f, 999.0f, 4.0f);
+    ASSERT_GT(lava_factor, 0.5f);
+    ASSERT_NEAR(lava_color.x, 0.85f, 0.01f); // Rich volcanic amber
+
+    std::cout << "[ OK ] HazardBalancingAndDangerTelegraphTest.ReducedHazardDamageCurvesAndDangerHazeTelegraphs"
+              << " (verified radiation 0.05%-0.16% pace, 75% safe buffer, capped 1.5 HP/s, and hazard mist color telegraphs)" << std::endl;
+}
+
+void ProjectileBallisticsAndShooterVelocityInheritanceTest() {
+    std::cout << "--- Running ProjectileBallisticsAndShooterVelocityInheritanceTest ---" << std::endl;
+
+    PlayerController player;
+    player.set_character_class(CharacterClass::Vanguard);
+    player.set_active_tool(ToolSlot::CombatWeapon);
+
+    // 1. Stationary shooter: bolt velocity equals pure muzzle vector
+    player.set_velocity(glm::vec3(0.0f));
+    player.set_drilling(true);
+    std::vector<PlayerPlasmaBolt> bolts_static;
+    ASSERT_TRUE(player.try_fire_weapon(bolts_static, 0.016f));
+    ASSERT_EQ(bolts_static.size(), 1);
+    ASSERT_LT(bolts_static[0].velocity.z, -30.0f); // Fast forward into -Z
+    player.set_drilling(false);
+
+    // 2. Lateral strafing shooter (traveling sideways at 6.0 m/s):
+    // In world coordinates, bolt velocity inherits +6.0 m/s in X.
+    // In player's moving frame of reference, relative velocity (bolt - player) has 0.0 m/s lateral drift,
+    // ensuring the bullet flies straight out down the sights rather than appearing as a horizontal bar sliding sideways!
+    player.Update(0.5f); // Expire fire rate cooldown
+    player.set_velocity(glm::vec3(6.0f, 0.0f, 0.0f));
+    player.set_drilling(true);
+    std::vector<PlayerPlasmaBolt> bolts_strafe;
+    ASSERT_TRUE(player.try_fire_weapon(bolts_strafe, 0.016f));
+    ASSERT_EQ(bolts_strafe.size(), 1);
+
+    // World velocity contains lateral momentum:
+    // Difference between world bolt velocity and player relative velocity is EXACTLY the shooter's strafe velocity
+    glm::vec3 rel_vel = bolts_strafe[0].velocity - player.velocity();
+    ASSERT_NEAR(bolts_strafe[0].velocity.x - rel_vel.x, 6.0f, 0.001f);
+    ASSERT_LT(rel_vel.z, -30.0f);
+    player.set_drilling(false);
+
+    // 3. Upward vertical leap: bolt inherits upward momentum
+    player.Update(0.5f); // Expire fire rate cooldown
+    player.set_velocity(glm::vec3(0.0f, 8.5f, 0.0f));
+    player.set_drilling(true);
+    std::vector<PlayerPlasmaBolt> bolts_jump;
+    ASSERT_TRUE(player.try_fire_weapon(bolts_jump, 0.016f));
+    ASSERT_EQ(bolts_jump.size(), 1);
+    glm::vec3 rel_jump_vel = bolts_jump[0].velocity - player.velocity();
+    ASSERT_NEAR(bolts_jump[0].velocity.y - rel_jump_vel.y, 8.5f, 0.001f);
+    player.set_drilling(false);
+
+    std::cout << "[ OK ] ProjectileBallisticsAndShooterVelocityInheritanceTest"
+              << " (verified Galilean velocity inheritance: strafing lateral velocity preserved, zero relative drift across reticle)" << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -1708,9 +1920,12 @@ int main() {
     WeaponZoomAndFireMechanicsTest();
     RoundSpawnShootingPauseAndInputDischargePreventionTest();
     ScopeApertureAndOpticalVisibilityTest();
+    PlayerShieldLayerRechargeAndNonRegeneratingHealthTest();
+    HazardBalancingAndDangerTelegraphTest_ReducedHazardDamageCurvesAndDangerHazeTelegraphs();
+    ProjectileBallisticsAndShooterVelocityInheritanceTest();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 20 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 23 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

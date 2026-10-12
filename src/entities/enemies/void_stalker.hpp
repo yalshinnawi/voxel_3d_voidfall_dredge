@@ -112,6 +112,9 @@ struct VoidStalker {
     float hit_surface_lock_timer{0.0f};     // Locks surface to FLOOR during hit flinch/stagger
     float stuck_timer{0.0f};                // Obstacle obstruction timer for anti-stuck steering
     glm::vec3 last_progress_pos{0.0f};      // Position checkpoint for movement progress verification
+    glm::vec3 stuck_checkpoint_pos{0.0f};   // Spatial anchor to measure net displacement over time
+    float stuck_checkpoint_timer{0.0f};     // Accumulator to sample stuck checkpoint
+    float spawn_grace_timer{0.0f};          // Initial spawn dormancy grace window (set by spawn_roosting)
     StalkerAnimationController anim_controller;
 
     // Helper references & accessors
@@ -138,6 +141,7 @@ struct VoidStalker {
     bool just_hit_player{false};
     bool just_fired_spine{false};
     bool just_died{false};
+    bool just_emerged{false};       // Successfully finished physical emergence animation into cavern
 
     // Death Animation Collapse & Ragdoll Settling
     float death_timer{0.0f};
@@ -154,9 +158,10 @@ struct VoidStalker {
     bool is_dying() const { return state == StalkerState::Dying; }
     bool is_burrowing() const { return state == StalkerState::Burrowing; }
     bool is_escaping() const { return state == StalkerState::Burrowing; }
+    bool is_emerging() const { return state == StalkerState::Emerging; }
     StalkerState GetState() const { return state; }
-    bool has_collision() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing; }
-    bool has_attack_hitbox() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing; }
+    bool has_collision() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing && state != StalkerState::Emerging; }
+    bool has_attack_hitbox() const { return state != StalkerState::Dying && state != StalkerState::Dead && state != StalkerState::Burrowing && state != StalkerState::Emerging; }
     bool IsCollisionEnabled() const { return has_collision(); }
     bool IsAttackHitboxEnabled() const { return has_attack_hitbox(); }
     bool is_melee() const { return role == StalkerRole::Melee; }
@@ -174,6 +179,19 @@ struct VoidStalker {
                                              state == StalkerState::Lunging ||
                                              (role == StalkerRole::Shooter && has_player_los));
     }
+
+    /// Forward facing direction in 3D world space (aligned with surface normal and yaw)
+    glm::vec3 forward() const {
+        glm::vec3 fwd(std::sin(yaw), 0.0f, std::cos(yaw));
+        if (surface_state != StalkerSurfaceState::FLOOR && glm::length(contact_normal) > 0.1f) {
+            glm::vec3 proj = fwd - glm::dot(fwd, contact_normal) * contact_normal;
+            if (glm::length(proj) > 0.01f) {
+                return glm::normalize(proj);
+            }
+        }
+        return fwd;
+    }
+
 
     /// Returns true if the stalker is completely unalerted (unaware of player / sounds)
     bool is_unalerted() const {
@@ -204,6 +222,7 @@ struct VoidStalker {
                 case StalkerState::Circling:      return glm::vec4(0.20f, 1.0f, 0.25f, 1.0f);  // Intense glowing neon green
                 case StalkerState::Fleeing:       return glm::vec4(0.65f, 1.0f, 0.15f, 1.0f);  // Lime-chartreuse evasion
                 case StalkerState::Burrowing:     return glm::vec4(0.85f, 1.0f, 0.20f, 1.0f);  // Electric lime burrowing
+                case StalkerState::Emerging:      return glm::vec4(0.18f, 0.95f, 0.28f, 1.0f); // Vivid toxic jade emerging
                 default:                          return glm::vec4(0.18f, 0.92f, 0.30f, 1.0f); // Toxic green
             }
         } else {
@@ -216,6 +235,7 @@ struct VoidStalker {
                 case StalkerState::Circling:      return glm::vec4(1.0f, 0.20f, 0.12f, 1.0f);  // Crimson-orange circling
                 case StalkerState::Fleeing:       return glm::vec4(1.0f, 0.55f, 0.10f, 1.0f);  // Amber retreat
                 case StalkerState::Burrowing:     return glm::vec4(1.0f, 0.65f, 0.15f, 1.0f);  // Intense amber burrowing
+                case StalkerState::Emerging:      return glm::vec4(0.95f, 0.08f, 0.08f, 1.0f); // Blazing crimson emerging
                 default:                          return glm::vec4(0.85f, 0.08f, 0.08f, 1.0f); // Predatory red
             }
         }
@@ -232,6 +252,7 @@ enum class EnemyAwarenessMarkerType : uint8_t {
 inline EnemyAwarenessMarkerType get_awareness_marker_type(const VoidStalker& s) {
     if (s.is_engaged_state()) return EnemyAwarenessMarkerType::RedTriangle;
     if (s.is_investigating_state()) return EnemyAwarenessMarkerType::YellowExclamation;
+    if (s.is_emerging()) return EnemyAwarenessMarkerType::YellowExclamation;
     return EnemyAwarenessMarkerType::None;
 }
 
@@ -242,17 +263,18 @@ public:
     VoidStalkerManager() = default;
 
     /// Spawn a new stalker with noise-gated difficulty and dedicated combat role
-    void spawn_stalker(const glm::vec3& pos, float difficulty_mul = 1.0f, StalkerRole role = StalkerRole::Melee);
-    void spawn_shooter(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::Shooter); }
-    void spawn_melee(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::Melee); }
-    void spawn_goliath(const glm::vec3& pos, float difficulty_mul = 1.0f) { spawn_stalker(pos, difficulty_mul, StalkerRole::ChitinGoliath); }
+    void spawn_stalker(const glm::vec3& pos, float difficulty_mul = 1.0f, StalkerRole role = StalkerRole::Melee, bool emerging = false);
+    void spawn_emerging(const glm::vec3& pos, const glm::vec3& normal, float difficulty_mul = 1.0f, StalkerRole role = StalkerRole::Melee);
+    void spawn_shooter(const glm::vec3& pos, float difficulty_mul = 1.0f, bool emerging = false) { spawn_stalker(pos, difficulty_mul, StalkerRole::Shooter, emerging); }
+    void spawn_melee(const glm::vec3& pos, float difficulty_mul = 1.0f, bool emerging = false) { spawn_stalker(pos, difficulty_mul, StalkerRole::Melee, emerging); }
+    void spawn_goliath(const glm::vec3& pos, float difficulty_mul = 1.0f, bool emerging = false) { spawn_stalker(pos, difficulty_mul, StalkerRole::ChitinGoliath, emerging); }
     void spawn_roosting(const glm::vec3& pos, StalkerRole role = StalkerRole::Melee, float difficulty_mul = 1.0f);
 
     /// Spawn an ambient prowling stalker inhabiting a distant cavern chamber
     void spawn_ambient_stalker(const glm::vec3& room_center, const World& world);
 
     /// Spawn a wave of stalkers around the player (called by NoiseMeter)
-    void spawn_wave(const glm::vec3& player_pos, int count, const World& world);
+    void spawn_wave(const glm::vec3& player_pos, int count, const World& world, bool emerging = true);
 
     /// Update all stalker AI, physics, and collision with player
     struct FrameResult {
@@ -312,6 +334,25 @@ public:
     /// Reset for new expedition
     void reset();
 
+    /// Reset and enforce initial peaceful audio grace window
+    void reset_screech_cooldowns(float cd = 12.0f) {
+        m_alert_screech_cooldown = cd;
+        m_global_screech_cooldown = std::max(m_global_screech_cooldown, cd);
+        m_global_hiss_cooldown = 3.5f;
+        m_global_chitter_cooldown = 2.5f;
+    }
+
+    /// Pacing & combat capacity limits
+    int max_concurrent_chasers() const { return m_max_concurrent_chasers; }
+    void set_max_concurrent_chasers(int val) { m_max_concurrent_chasers = val; }
+    int sector_level() const { return m_sector_level; }
+    void set_sector_level(int level);
+    int concurrent_chasers_count() const;
+    bool can_engage_new_chaser() const;
+    void trigger_combat_recovery(float duration = 5.0f);
+    bool is_combat_recovery_active() const { return m_combat_recovery_timer > 0.0f; }
+    float combat_recovery_timer() const { return m_combat_recovery_timer; }
+
     /// Check line-of-sight between stalker and player
     bool has_line_of_sight(const glm::vec3& from, const glm::vec3& to, const World& world) const;
 
@@ -319,8 +360,8 @@ public:
     const AISpatialHash& spatial_hash() const { return m_spatial_hash; }
 
 private:
-    /// Find a valid spawn position near target (on a wall/ceiling)
-    glm::vec3 find_spawn_pos(const glm::vec3& near, const World& world);
+    /// Find a valid spawn position near target (on a wall/ceiling) with minimum separation
+    glm::vec3 find_spawn_pos(const glm::vec3& near, const World& world, float preferred_angle = -1.0f, glm::vec3* out_normal = nullptr);
 
     /// Check if position is in headlamp cone
     bool is_in_headlamp(const glm::vec3& pos, const glm::vec3& player_pos,
@@ -331,8 +372,14 @@ private:
     AISpatialHash m_spatial_hash;
     uint32_t m_next_id{1};
     uint32_t m_next_proj_id{1};
+    int m_sector_level{1};
+    int m_max_concurrent_chasers{2};
+    float m_combat_recovery_timer{0.0f};
     float m_spawn_cooldown{0.0f};
-    float m_global_screech_cooldown{25.0f}; // Prevents constant ear fatigue; screeches are rare & terrifying
+    float m_global_screech_cooldown{45.0f}; // Prevents constant ear fatigue; distant ambient screeches are rare & terrifying
+    float m_alert_screech_cooldown{0.0f};   // Pack pursuit screech cooldown (prevents rapid repetitive combat screeches)
+    float m_global_hiss_cooldown{0.0f};     // Global rate-limit for spotted player throat hisses
+    float m_global_chitter_cooldown{0.0f};  // Global rate-limit for pack chitter clicks
     glm::vec3 m_prev_player_pos{0.0f};
     bool m_has_prev_player_pos{false};
 };

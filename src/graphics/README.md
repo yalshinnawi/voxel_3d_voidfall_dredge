@@ -46,7 +46,7 @@ Each frame follows an ordered pass sequence:
 
 ## 🔦 Dynamic Lighting Specifications
 
-- **Delver Headlamp**: High-intensity spotlight attached to camera direction (`inner_cutoff = 18°`, `outer_cutoff = 32°`, halogen LED white/cyan tint).
+- **Delver Headlamp**: Focused spotlight attached to camera direction (`inner_cutoff = 18°`, `outer_cutoff = 28°`, range clamped to 22m with quadratic falloff, halogen LED white/cyan tint, dampened rock specular glare).
 - **Extraction Beacon**: Pulsating 360° red emergency strobe with dynamic quadratic attenuation.
 - **Volatile Crystal & Radioactive Ore**: PBR emissive surface glow contributing to local voxel illumination and bloom buffer.
 - **Seismic Sonar Pulse**: Expanding spherical wave overlay rendering holographic wireframes over occluded mineral veins.

@@ -96,7 +96,7 @@ void PauseMenu::draw_rect(float x, float y, float w, float h, const glm::vec4& c
     glBindVertexArray(0);
 }
 
-void PauseMenu::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color) {
+void PauseMenu::draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font) {
     if (text.empty()) return;
 
     m_text_shader.use();
@@ -114,7 +114,7 @@ void PauseMenu::draw_text(const std::string& text, float x, float y, float scale
 
     std::vector<float> vertices;
     vertices.reserve(text.length() * 24);
-    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices);
+    FontRenderer::build_text_vertices(text, x, y, scale * 0.45f, vertices, font);
 
     if (!vertices.empty()) {
         glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
@@ -124,30 +124,30 @@ void PauseMenu::draw_text(const std::string& text, float x, float y, float scale
     glBindVertexArray(0);
 }
 
-void PauseMenu::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color) {
+void PauseMenu::draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale, FontType font) {
     if (text.empty() || max_w <= 0.0f) return;
-    float scale = FontRenderer::fit_scale(text, max_w, base_scale, base_scale * 0.65f);
-    draw_text(text, x, y, scale, color);
+    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale, font);
+    draw_text(text, x, y, scale, color, font);
 }
 
-void PauseMenu::draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color) {
+void PauseMenu::draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font) {
     if (text.empty()) return;
-    float text_w = FontRenderer::get_rendered_width(text, scale);
-    float text_h = FontRenderer::get_rendered_height(scale);
+    float text_w = FontRenderer::get_rendered_width(text, scale, font);
+    float text_h = FontRenderer::get_rendered_height(scale, font);
     float x = box_x + (box_w - text_w) * 0.5f;
     float y = box_y + (box_h - text_h) * 0.5f;
-    draw_text(text, x, y, scale, color);
+    draw_text(text, x, y, scale, color, font);
 }
 
-void PauseMenu::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color) {
+void PauseMenu::draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale, FontType font) {
     if (text.empty() || box_w <= 0.0f) return;
     float max_w = box_w - 12.0f;
-    float scale = FontRenderer::fit_scale(text, max_w, base_scale, base_scale * 0.65f);
-    float text_w = FontRenderer::get_rendered_width(text, scale);
-    float text_h = FontRenderer::get_rendered_height(scale);
+    float scale = FontRenderer::fit_scale(text, max_w, base_scale, min_scale, font);
+    float text_w = FontRenderer::get_rendered_width(text, scale, font);
+    float text_h = FontRenderer::get_rendered_height(scale, font);
     float x = box_x + (box_w - text_w) * 0.5f;
     float y = box_y + (box_h - text_h) * 0.5f;
-    draw_text(text, x, y, scale, color);
+    draw_text(text, x, y, scale, color, font);
 }
 
 void PauseMenu::draw_panel_with_border(float x, float y, float w, float h, const glm::vec4& bg_col, const glm::vec4& border_col, float border_thick) {
@@ -236,28 +236,28 @@ PauseMenuAction PauseMenu::render(
                            t1_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t1_active ? 2.0f : 1.0f);
     draw_text_centered_fitted("[ 1. TELEMETRY ]", tab1_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
-                              t1_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+                              t1_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
 
     draw_panel_with_border(tab2_x, cur_y, tab_w, tab_h,
                            t2_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t2_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t2_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t2_active ? 2.0f : 1.0f);
     draw_text_centered_fitted("[ 2. INVENTORY ]", tab2_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
-                              t2_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+                              t2_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
 
     draw_panel_with_border(tab3_x, cur_y, tab_w, tab_h,
                            t3_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t3_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t3_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t3_active ? 2.0f : 1.0f);
     draw_text_centered_fitted("[ 3. AUDIO/RIG ]", tab3_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
-                              t3_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+                              t3_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
 
     draw_panel_with_border(tab4_x, cur_y, tab_w, tab_h,
                            t4_active ? glm::vec4(0.08f, 0.18f, 0.28f, 0.95f) : (t4_hover ? Typography::COLOR_BUTTON_HOV : Typography::COLOR_BUTTON_BG),
                            t4_active ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.2f, 0.4f, 0.5f, 0.5f),
                            t4_active ? 2.0f : 1.0f);
     draw_text_centered_fitted("[ 4. CONTROLS ]", tab4_x, cur_y, tab_w, tab_h, 1.00f * ui_scale,
-                              t4_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY);
+                              t4_active ? Typography::COLOR_CYAN : Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
 
     cur_y += tab_h + 10.0f * ui_scale;
 
@@ -282,7 +282,7 @@ PauseMenuAction PauseMenu::render(
         float row_w = content_w - 2.0f * inner_pad;
         float in_y = cur_y + 12.0f * ui_scale;
 
-        draw_text("MISSION TELEMETRY & RESOURCES", rx, in_y, 1.15f * ui_scale, Typography::COLOR_AMBER);
+        draw_text("MISSION TELEMETRY & RESOURCES", rx, in_y, 1.15f * ui_scale, Typography::COLOR_AMBER, FontType::Display);
         in_y += 20.0f * ui_scale;
 
         int mins = static_cast<int>(time_elapsed) / 60;
@@ -292,22 +292,22 @@ PauseMenuAction PauseMenu::render(
 
         float row_step = std::clamp(22.0f * ui_scale, 18.0f, 26.0f);
         auto draw_telemetry_row = [&](const std::string& label, const std::string& val, const glm::vec4& l_col, const glm::vec4& v_col) {
-            draw_text(label, rx, in_y, 1.00f * ui_scale, l_col);
-            float v_w = FontRenderer::get_rendered_width(val, 1.00f * ui_scale);
-            draw_text(val, rx + row_w - v_w, in_y, 1.00f * ui_scale, v_col);
+            draw_text(label, rx, in_y, 1.00f * ui_scale, l_col, FontType::Body);
+            float v_w = FontRenderer::get_rendered_width(val, 1.00f * ui_scale, FontType::Tech);
+            draw_text(val, rx + row_w - v_w, in_y, 1.00f * ui_scale, v_col, FontType::Tech);
             in_y += row_step;
         };
 
-        draw_telemetry_row("Time In Cavern:", std::string(time_buf), Typography::COLOR_PRIMARY, Typography::COLOR_CYAN);
-        draw_telemetry_row("Voidite Extracted:", std::to_string(inventory.voidite) + " / " + std::to_string(inventory.target_voidite) + " Crystals", Typography::COLOR_PRIMARY, Typography::COLOR_CYAN);
-        draw_telemetry_row("Titanium Cores:", std::to_string(inventory.titanium) + " Cores", Typography::COLOR_PRIMARY, Typography::COLOR_AMBER);
-        draw_telemetry_row("Scrap Metal Salvaged:", std::to_string(inventory.scrap_metal) + " Scrap", Typography::COLOR_PRIMARY, Typography::COLOR_PRIMARY);
-        draw_telemetry_row("Mineral Salvage:", std::to_string(inventory.salvage_parts) + " Units", Typography::COLOR_PRIMARY, Typography::COLOR_PRIMARY);
+        draw_telemetry_row("<clock> Time In Cavern:", std::string(time_buf), Typography::COLOR_PRIMARY, Typography::COLOR_CYAN);
+        draw_telemetry_row("<voidite> Voidite Extracted:", std::to_string(inventory.voidite) + " / " + std::to_string(inventory.target_voidite) + " Crystals", Typography::COLOR_PRIMARY, Typography::COLOR_CYAN);
+        draw_telemetry_row("<titanium> Titanium Cores:", std::to_string(inventory.titanium) + " Cores", Typography::COLOR_PRIMARY, Typography::COLOR_AMBER);
+        draw_telemetry_row("<scrap> Scrap Metal Salvaged:", std::to_string(inventory.scrap_metal) + " Scrap", Typography::COLOR_PRIMARY, Typography::COLOR_PRIMARY);
+        draw_telemetry_row("<salvage> Mineral Salvage:", std::to_string(inventory.salvage_parts) + " Units", Typography::COLOR_PRIMARY, Typography::COLOR_PRIMARY);
 
         // Completion progress bar
         int completion = inventory.run_completion_rate;
-        std::string comp_label = "Expedition Progress: " + std::to_string(completion) + "%";
-        draw_text(comp_label, rx, in_y, 1.00f * ui_scale, Typography::COLOR_GREEN);
+        std::string comp_label = "<check> Expedition Progress: " + std::to_string(completion) + "%";
+        draw_text(comp_label, rx, in_y, 1.00f * ui_scale, Typography::COLOR_GREEN, FontType::Body);
         in_y += 16.0f * ui_scale;
 
         float pbar_w = row_w;
@@ -353,33 +353,11 @@ PauseMenuAction PauseMenu::render(
         float row_w = content_w - 2.0f * inner_pad;
         float in_y = cur_y + 12.0f * ui_scale;
 
-        // Carry weight telemetry
-        float cur_w = inventory.carry_weight();
-        float max_w = inventory.max_carry_weight(class_id);
-        bool over = inventory.is_overburdened(class_id);
-        float penalty = inventory.overburden_penalty(class_id);
-
-        char weight_header[64];
-        std::snprintf(weight_header, sizeof(weight_header), "DELVER CARGO RIG // LOAD: %.1f / %.1f KG", cur_w, max_w);
-        glm::vec4 w_col = over ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN;
-        draw_text(weight_header, rx, in_y, 1.15f * ui_scale, w_col);
+        // Cargo telemetry (unrestricted carry capacity)
+        draw_text("DELVER CARGO RIG // UNRESTRICTED CAPACITY", rx, in_y, 1.15f * ui_scale, Typography::COLOR_CYAN);
         in_y += 18.0f * ui_scale;
 
-        // Weight bar
-        float wbar_w = row_w;
-        float wbar_h = 7.0f * ui_scale;
-        draw_rect(rx, in_y, wbar_w, wbar_h, glm::vec4(0.08f, 0.14f, 0.20f, 0.9f));
-        float w_ratio = std::clamp(cur_w / max_w, 0.0f, 1.0f);
-        draw_rect(rx, in_y, wbar_w * w_ratio, wbar_h, over ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN);
-        in_y += wbar_h + 10.0f * ui_scale;
-
-        if (over) {
-            int slow_pct = static_cast<int>(std::round((1.0f - penalty) * 100.0f));
-            std::string status_msg = "! OVERBURDEN WARNING: -" + std::to_string(slow_pct) + "% SPEED | +67% THRUSTER BURN ! JETTISON CARGO TO RESTORE MOBILITY";
-            draw_text_fitted(status_msg, rx, in_y, row_w, 0.92f * ui_scale, Typography::COLOR_AMBER);
-        } else {
-            draw_text("MOBILITY STATUS: OPTIMAL (100% SPRINT & JETPACK POWER)", rx, in_y, 0.92f * ui_scale, Typography::COLOR_GREEN);
-        }
+        draw_text("MOBILITY STATUS: OPTIMAL (UNRESTRICTED INVENTORY / FULL MOBILITY)", rx, in_y, 0.92f * ui_scale, Typography::COLOR_GREEN);
         in_y += 18.0f * ui_scale;
         draw_rect(rx, in_y, row_w, 1.0f, glm::vec4(0.15f, 0.35f, 0.5f, 0.4f));
         in_y += 10.0f * ui_scale;
@@ -388,16 +366,15 @@ PauseMenuAction PauseMenu::render(
         struct InventoryRow {
             std::string name;
             int count;
-            float unit_weight;
             DropItemType item_type;
             glm::vec4 color;
         };
         InventoryRow items[] = {
-            {"Voidite Ore",         inventory.voidite,            1.0f, DropItemType::Voidite,          Typography::COLOR_CYAN},
-            {"Titanium Cores",      inventory.titanium,           2.5f, DropItemType::Titanium,         Typography::COLOR_AMBER},
-            {"Mineral Salvage",     inventory.salvage_parts,      0.4f, DropItemType::Salvage,          glm::vec4(0.85f, 0.85f, 0.95f, 1.0f)},
-            {"Bulkhead Barricades", inventory.bulkheads,          2.0f, DropItemType::Bulkhead,         Typography::COLOR_PRIMARY},
-            {"Demolition Charges",  inventory.demolition_charges, 1.5f, DropItemType::DemolitionCharge, Typography::COLOR_CRIMSON}
+            {"<voidite> Voidite Ore",         inventory.voidite,            DropItemType::Voidite,          Typography::COLOR_CYAN},
+            {"<titanium> Titanium Cores",      inventory.titanium,           DropItemType::Titanium,         Typography::COLOR_AMBER},
+            {"<salvage> Mineral Salvage",     inventory.salvage_parts,      DropItemType::Salvage,          glm::vec4(0.85f, 0.85f, 0.95f, 1.0f)},
+            {"<shield> Bulkhead Barricades", inventory.bulkheads,          DropItemType::Bulkhead,         Typography::COLOR_PRIMARY},
+            {"<hazard> Demolition Charges",  inventory.demolition_charges, DropItemType::DemolitionCharge, Typography::COLOR_CRIMSON}
         };
 
         float item_row_h = std::clamp((content_box_h - (in_y - cur_y) - 12.0f * ui_scale) / 5.0f, 26.0f * ui_scale, 38.0f * ui_scale);
@@ -410,13 +387,12 @@ PauseMenuAction PauseMenu::render(
                                    glm::vec4(0.04f, 0.08f, 0.12f, 0.80f),
                                    glm::vec4(0.12f, 0.25f, 0.35f, 0.50f), 1.0f);
 
-            float total_item_w = item.count * item.unit_weight;
             char info_buf[64];
-            std::snprintf(info_buf, sizeof(info_buf), "%s: %d  (%.1f kg ea | %.1f kg tot)",
-                          item.name.c_str(), item.count, item.unit_weight, total_item_w);
+            std::snprintf(info_buf, sizeof(info_buf), "%s: %d UNITS",
+                          item.name.c_str(), item.count);
 
-            float text_y = row_bg_y + (item_row_h - 2.0f * ui_scale - FontRenderer::get_rendered_height(0.98f * ui_scale)) * 0.5f;
-            draw_text_fitted(info_buf, rx + 10.0f * ui_scale, text_y, row_w - (drop_btn_w * 2.0f + 30.0f * ui_scale), 0.98f * ui_scale, item.color);
+            float text_y = row_bg_y + (item_row_h - 2.0f * ui_scale - FontRenderer::get_rendered_height(0.98f * ui_scale, FontType::Tech)) * 0.5f;
+            draw_text_fitted(info_buf, rx + 10.0f * ui_scale, text_y, row_w - (drop_btn_w * 2.0f + 30.0f * ui_scale), 0.98f * ui_scale, item.color, 0.65f * ui_scale, FontType::Tech);
 
             // [DROP 1] and [DROP 5] buttons
             float b1_x = rx + row_w - drop_btn_w * 2.0f - 8.0f * ui_scale;
@@ -436,7 +412,7 @@ PauseMenuAction PauseMenu::render(
                                   (hov1 ? glm::vec4(1.0f, 0.3f, 0.3f, 1.0f) : glm::vec4(0.7f, 0.2f, 0.2f, 0.6f));
             draw_panel_with_border(b1_x, btn_y, drop_btn_w, drop_btn_h, b1_bg, b1_border, 1.0f);
             draw_text_centered_fitted("[DROP 1]", b1_x, btn_y, drop_btn_w, drop_btn_h, 0.92f * ui_scale,
-                                      can_drop_1 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f));
+                                      can_drop_1 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f), 0.65f * ui_scale, FontType::Display);
 
             if (can_drop_1 && hov1 && mouse_clicked) {
                 m_requested_drop_item = item.item_type;
@@ -450,7 +426,7 @@ PauseMenuAction PauseMenu::render(
                                   (hov5 ? glm::vec4(1.0f, 0.2f, 0.2f, 1.0f) : glm::vec4(0.8f, 0.2f, 0.2f, 0.6f));
             draw_panel_with_border(b5_x, btn_y, drop_btn_w, drop_btn_h, b5_bg, b5_border, 1.0f);
             draw_text_centered_fitted("[DROP 5]", b5_x, btn_y, drop_btn_w, drop_btn_h, 0.92f * ui_scale,
-                                      can_drop_5 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f));
+                                      can_drop_5 ? glm::vec4(1.0f, 0.85f, 0.85f, 1.0f) : glm::vec4(0.4f, 0.45f, 0.5f, 0.5f), 0.65f * ui_scale, FontType::Display);
 
             if (can_drop_5 && hov5 && mouse_clicked) {
                 m_requested_drop_item = item.item_type;
@@ -648,7 +624,7 @@ PauseMenuAction PauseMenu::render(
 
         // Column 1: Keybindings Table
         float c1_y = cur_y + 10.0f * ui_scale;
-        draw_text("KEYBOARD CONTROLS & AVIONICS", col1_x, c1_y, 1.08f * ui_scale, Typography::COLOR_CYAN);
+        draw_text("KEYBOARD CONTROLS & AVIONICS", col1_x, c1_y, 1.08f * ui_scale, Typography::COLOR_CYAN, FontType::Display);
         c1_y += 18.0f * ui_scale;
         draw_rect(col1_x, c1_y, col_w, 1.0f, glm::vec4(0.15f, 0.35f, 0.5f, 0.4f));
         c1_y += 8.0f * ui_scale;
@@ -679,15 +655,15 @@ PauseMenuAction PauseMenu::render(
         float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 15.0f, 14.0f * ui_scale, 19.0f * ui_scale);
         float key_col_w = std::clamp(92.0f * ui_scale, 75.0f, 105.0f);
         for (const auto& b : bindings) {
-            draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.92f * ui_scale, Typography::COLOR_CYAN);
+            draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.92f * ui_scale, Typography::COLOR_CYAN, 0.65f * ui_scale, FontType::Tech);
             float act_max_w = col_w - key_col_w - 6.0f * ui_scale;
-            draw_text_fitted(b.action, col1_x + key_col_w + 6.0f * ui_scale, c1_y, act_max_w, 0.92f * ui_scale, b.color);
+            draw_text_fitted(b.action, col1_x + key_col_w + 6.0f * ui_scale, c1_y, act_max_w, 0.92f * ui_scale, b.color, 0.65f * ui_scale, FontType::Body);
             c1_y += b_step;
         }
 
         // Column 2: Tactical Field Directives (Properly Wrapped within col_w!)
         float c2_y = cur_y + 10.0f * ui_scale;
-        draw_text("FIELD DIRECTIVES & HAZARDS", col2_x, c2_y, 1.08f * ui_scale, Typography::COLOR_AMBER);
+        draw_text("FIELD DIRECTIVES & HAZARDS", col2_x, c2_y, 1.08f * ui_scale, Typography::COLOR_AMBER, FontType::Display);
         c2_y += 18.0f * ui_scale;
         draw_rect(col2_x, c2_y, col_w, 1.0f, glm::vec4(0.15f, 0.35f, 0.5f, 0.4f));
         c2_y += 8.0f * ui_scale;
@@ -706,11 +682,11 @@ PauseMenuAction PauseMenu::render(
 
         float dir_step = std::clamp((content_box_h - 45.0f * ui_scale) / 4.0f, 44.0f * ui_scale, 62.0f * ui_scale);
         for (const auto& d : directives) {
-            draw_text(d.title, col2_x, c2_y, 0.98f * ui_scale, d.color);
+            draw_text(d.title, col2_x, c2_y, 0.98f * ui_scale, d.color, FontType::Display);
             float d_line_y = c2_y + 14.0f * ui_scale;
-            auto wrapped = FontRenderer::wrap_text(d.desc, col_w - 8.0f * ui_scale, 0.90f * ui_scale);
+            auto wrapped = FontRenderer::wrap_text(d.desc, col_w - 8.0f * ui_scale, 0.90f * ui_scale, FontType::Body);
             for (const auto& line : wrapped) {
-                draw_text(line, col2_x + 6.0f * ui_scale, d_line_y, 0.90f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.90f));
+                draw_text(line, col2_x + 6.0f * ui_scale, d_line_y, 0.90f * ui_scale, glm::vec4(0.85f, 0.90f, 0.95f, 0.90f), FontType::Body);
                 d_line_y += 13.0f * ui_scale;
             }
             c2_y += dir_step;
@@ -727,7 +703,7 @@ PauseMenuAction PauseMenu::render(
                            res_hover ? 2.0f : 1.0f);
     draw_rect(panel_x + pad, res_y, 4.0f, btn_h, glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
     draw_text_centered_fitted(">> [RESUME EXPEDITION]", panel_x + pad, res_y, btn_w, btn_h, 1.20f * ui_scale,
-                              res_hover ? glm::vec4(1.0f) : glm::vec4(0.0f, 0.94f, 1.0f, 1.0f));
+                              res_hover ? glm::vec4(1.0f) : glm::vec4(0.0f, 0.94f, 1.0f, 1.0f), 0.65f * ui_scale, FontType::Display);
     if (res_hover && mouse_clicked) {
         action = PauseMenuAction::Resume;
     }
@@ -741,7 +717,7 @@ PauseMenuAction PauseMenu::render(
                            abn_hover ? 2.0f : 1.0f);
     draw_rect(panel_x + pad, abn_y, 4.0f, btn_h, glm::vec4(1.0f, 0.2f, 0.2f, 1.0f));
     draw_text_centered_fitted(">> [ABANDON EXPEDITION] (50% SALVAGE LOSS)", panel_x + pad, abn_y, btn_w, btn_h, 1.15f * ui_scale,
-                              abn_hover ? glm::vec4(1.0f) : glm::vec4(1.0f, 0.35f, 0.35f, 1.0f));
+                              abn_hover ? glm::vec4(1.0f) : glm::vec4(1.0f, 0.35f, 0.35f, 1.0f), 0.65f * ui_scale, FontType::Display);
     if (abn_hover && mouse_clicked) {
         action = PauseMenuAction::Abandon;
     }
@@ -755,7 +731,7 @@ PauseMenuAction PauseMenu::render(
                            hub_hover ? 2.0f : 1.0f);
     draw_rect(panel_x + pad, hub_y, 4.0f, btn_h, glm::vec4(0.4f, 0.6f, 0.75f, 0.8f));
     draw_text_centered_fitted(">> [RETURN TO ORBITAL HUB]", panel_x + pad, hub_y, btn_w, btn_h, 1.15f * ui_scale,
-                              hub_hover ? glm::vec4(1.0f) : glm::vec4(0.7f, 0.8f, 0.9f, 0.9f));
+                              hub_hover ? glm::vec4(1.0f) : glm::vec4(0.7f, 0.8f, 0.9f, 0.9f), 0.65f * ui_scale, FontType::Display);
     if (hub_hover && mouse_clicked) {
         action = PauseMenuAction::ReturnToStartup;
     }

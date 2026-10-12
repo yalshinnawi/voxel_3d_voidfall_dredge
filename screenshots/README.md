@@ -9,9 +9,28 @@ This directory stores automated visual playthrough captures, contact sheet monta
 ### 1. Gameplay Playthrough Suite (`--auto-play-test`)
 | File | Format | Description |
 | :--- | :--- | :--- |
-| `00_all_phases_montage.jpg` / `.png` | $1600 \times 675$ RGB | **Master 4x3 Contact Sheet**: Displays all 10 gameplay screens + system telemetry + health card. |
+| `00_all_phases_montage.jpg` / `.png` | $1600 \times 900$ RGB | **Master 4x4 Contact Sheet**: Displays all 16 gameplay screens, HUD gauges, menus, sliders, modals & debrief. |
 | `visual_report.txt` / `.json` | Text / JSON | Luminance, non-black ratios, timestamps, and pass/fail status. |
-| `01_main_menu.png` .. `10_mission_debrief.png` | $1600 \times 900$ PNG | Full-resolution master frames for each recorded phase. |
+| `01_main_menu.png` .. `16_mission_debrief.png` | $1600 \times 900$ PNG | Full-resolution master frames for each recorded phase. |
+
+#### Complete 16-Screen Phase Breakdown
+1. `01_main_menu.png`: Main Menu Title, Sector Selector & Rig Settings buttons
+2. `02_level_select.png`: Sector Select Carousel & Hazard/Reward Cards
+3. `03_character_select.png`: Delver Roster (Demolitionist, Vanguard, Scout)
+4. `04_upgrades_terminal.png`: Orbital Upgrade Terminal & Delver Skill Tree
+5. `05_hub_audio_settings.png`: Orbital Hub Audio & Rig Mixer with Channels & Sliders
+6. `06_gameplay_cavern.png`: Cavern Vitals, Reticle, Ammo & Compass HUD
+7. `07_field_manual.png`: Operations Field Manual 2-Column Instructions Modal (`[H]`)
+8. `08_tactical_map.png`: 2D Tactical Cartography Cave Topology & Legend (`[TAB]`)
+9. `09_drilling_cracks.png`: Mining Drill Viewmodel & Hardness Target Info
+10. `10_abilities_loot.png`: Plasma Carbine & Concurrent Loot Toasts
+11. `11_pause_mission.png`: In-Game Pause Tab 1 (Mission Telemetry & Objectives)
+12. `12_pause_inventory.png`: In-Game Pause Tab 2 (Cargo Inventory & Jettison)
+13. `13_pause_audio.png`: In-Game Pause Tab 3 (Audio Mixer & Rig Settings)
+14. `14_pause_controls.png`: In-Game Pause Tab 4 (Delver Controls Table)
+15. `15_extraction_beacon.png`: Extraction Beacon Defense, LZ Holdout & Siren Banner
+16. `16_mission_debrief.png`: Mission Debrief Modal, Extraction Rating & Rewards
+
 
 ### 2. Void Stalker FSM Enemy Suite (`--test-enemy`)
 | File | Format | Description |

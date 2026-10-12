@@ -15,9 +15,11 @@ uniform vec3 uHeadlampColor;
 uniform float uHeadlampInnerCutoff;
 uniform float uHeadlampOuterCutoff;
 uniform float uHeadlampIntensity;
+uniform float uHeadlampRange;
 
 uniform float uFogDensity;
 uniform float uToxicHazeFactor;
+uniform vec3 uHazardHazeColor;
 uniform float uTime;
 uniform int uSector;
 
@@ -108,28 +110,35 @@ void main() {
     } else if (uSector >= 3) {
         baseSectorHaze = vec3(0.05, 0.14, 0.08); // Sector 3: Toxic emerald
     }
-    vec3 hazeColor = mix(baseSectorHaze, vec3(0.12, 0.40, 0.15), uToxicHazeFactor);
+    vec3 targetHazardColor = (length(uHazardHazeColor) > 0.01) ? uHazardHazeColor : vec3(0.12, 0.65, 0.22);
+    vec3 hazeColor = mix(baseSectorHaze, targetHazardColor, uToxicHazeFactor);
 
     for (int i = 0; i < NUM_STEPS; ++i) {
         if (transmittance < 0.01) break;
 
-        // Density modulated by particulate subterranean dust
+        // Density modulated by particulate subterranean dust and hazard mist
         float localDust = 0.6 + 0.8 * dust_noise(currentPos);
-        float density = uFogDensity * localDust;
+        float hazardDensity = uToxicHazeFactor * 0.045;
+        float density = (uFogDensity + hazardDensity) * localDust;
 
         // 1. Headlamp illumination cone
         vec3 toLight = uHeadlampPos - currentPos;
         float distToLight = length(toLight);
-        vec3 lightDir = toLight / max(distToLight, 0.001);
+        float maxRange = uHeadlampRange > 0.0 ? uHeadlampRange : 22.0;
 
-        float theta = dot(lightDir, normalize(-uHeadlampDir));
-        float epsilon = uHeadlampInnerCutoff - uHeadlampOuterCutoff;
-        float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
+        if (distToLight < maxRange) {
+            vec3 lightDir = toLight / max(distToLight, 0.001);
 
-        if (spotFactor > 0.0) {
-            float attenuation = 1.0 / (1.0 + 0.08 * distToLight + 0.02 * distToLight * distToLight);
-            vec3 lightScatter = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor * phaseHeadlamp;
-            inscatter += lightScatter * density * transmittance * stepSize;
+            float theta = dot(lightDir, normalize(-uHeadlampDir));
+            float epsilon = uHeadlampInnerCutoff - uHeadlampOuterCutoff;
+            float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
+
+            if (spotFactor > 0.0) {
+                float rangeFactor = clamp(1.0 - (distToLight / maxRange), 0.0, 1.0);
+                float attenuation = (rangeFactor * rangeFactor) / (1.0 + 0.08 * distToLight + 0.02 * distToLight * distToLight);
+                vec3 lightScatter = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor * phaseHeadlamp;
+                inscatter += lightScatter * density * transmittance * stepSize;
+            }
         }
 
         // 2. Dynamic Point Lights (flares / beacon)
@@ -142,8 +151,9 @@ void main() {
             }
         }
 
-        // 3. Ambient subterranean mist (subtle presence without washing out cavern shadows)
-        inscatter += hazeColor * density * transmittance * stepSize * 0.035;
+        // 3. Ambient subterranean mist (illuminated by danger haze when in or near hazard sections)
+        float hazeScatterMul = 0.035 + uToxicHazeFactor * 0.075;
+        inscatter += hazeColor * density * transmittance * stepSize * hazeScatterMul;
 
         // Beer-Lambert transmittance extinction
         transmittance *= exp(-density * stepSize * 0.8);

@@ -7,6 +7,7 @@
 #include "../systems/extraction.hpp"
 #include "../systems/noise_meter.hpp"
 #include "../voxel/world.hpp"
+#include "font_atlas.hpp"
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
@@ -152,6 +153,14 @@ public:
         const std::vector<SeismicBurrower>* burrowers = nullptr
     ) const;
 
+    /// Checks direct line-of-sight to the vault bulkhead door or relic hyper-core.
+    /// Used to ensure vault objective text and waypoints only render in plain sight, not through walls.
+    bool has_vault_objective_los(
+        const glm::vec3& cam_pos,
+        const World& world,
+        const class MissionSystem& mission
+    ) const;
+
     void render(
         const PlayerController& player,
         const World& world,
@@ -177,10 +186,10 @@ private:
     void draw_pill(float x, float y, float w, float h, const glm::vec4& border_col = glm::vec4(0.0f, 0.95f, 1.0f, 0.35f));
     void draw_triangle(float x0, float y0, float x1, float y1, float x2, float y2, const glm::vec4& color);
     void draw_line_segment(float x0, float y0, float x1, float y1, float thickness, const glm::vec4& color);
-    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
-    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
-    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
-    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
+    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
+    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
     void render_crosshair(const PlayerController& player, const World& world, const class MissionSystem* mission = nullptr, const std::vector<VoidStalker>* stalkers = nullptr, const std::vector<SeismicBurrower>* burrowers = nullptr);
     void render_optical_scope_lens(const PlayerController& player, const World& world, const std::vector<VoidStalker>* stalkers = nullptr, const std::vector<SeismicBurrower>* burrowers = nullptr);
     void render_floating_loot(const glm::mat4& view, const glm::mat4& proj);

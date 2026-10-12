@@ -14,6 +14,8 @@ in float vAO;
 in float vEmissive;
 in float vDamage;
 in float vSonarIntensity;
+in float vIsVerticalFlow;
+in vec2 v_FlowDir;
 
 // PBR Texture Arrays
 uniform sampler2DArray uAlbedoArray;
@@ -30,6 +32,7 @@ uniform vec3 uHeadlampColor;
 uniform float uHeadlampInnerCutoff;
 uniform float uHeadlampOuterCutoff;
 uniform float uHeadlampIntensity;
+uniform float uHeadlampRange;
 
 // Point Lights Data & Clustered SSBOs
 struct PointLightData {
@@ -100,8 +103,10 @@ const uint MAT_STONE               = 8u; // Dredge Bedrock / Precursor Stone
 const uint MAT_DREDGE_BEDROCK      = 8u;
 const uint MAT_WATER               = 11u;
 const uint MAT_CRYSTAL_AQUIFER     = 11u;
-const uint MAT_COOLANT             = 11u;
-const uint MAT_ACID                = 6u;
+const uint MAT_COOLANT             = 16u;
+const uint MAT_ACID                = 15u;
+const uint MAT_LAVA                = 6u;
+const uint MAT_MOLTEN_MAGMA        = 6u;
 const uint MAT_FLORA               = 12u;
 const uint MAT_BIOLUMINESCENT_FLORA = 12u;
 const uint MAT_PRISMATIC_CRYSTAL   = 13u;
@@ -115,15 +120,17 @@ vec3 get_material_albedo(uint layer) {
         case MAT_GRANITE: return vec3(0.24, 0.22, 0.21); // Fractured Granite
         case MAT_BASALT: return vec3(0.12, 0.12, 0.14); // Volcanic Basalt
         case MAT_VOIDITE: return vec3(0.48, 0.12, 0.72); // Voidite Crystal
-        case MAT_BULKHEAD: return vec3(0.35, 0.38, 0.42); // Industrial Bulkhead
+        case MAT_BULKHEAD: return vec3(0.26, 0.28, 0.32); // Industrial Bulkhead (charcoal gunmetal)
         case MAT_VAULT_DOOR: return vec3(0.55, 0.45, 0.20); // Reinforced Vault Door
         case MAT_THERMITE_SLAG: return vec3(0.85, 0.35, 0.05); // Thermite Slag
         case MAT_RADIOACTIVE: return vec3(0.15, 0.65, 0.25); // Radioactive Ore
         case MAT_STONE: return vec3(0.06, 0.06, 0.08); // Dredge Bedrock
         case MAT_WATER: return vec3(0.12, 0.60, 0.85); // Crystal Aquifer Water
         case MAT_FLORA: return vec3(0.20, 0.85, 0.35); // Bioluminescent Flora
-        case MAT_PRISMATIC_CRYSTAL: return vec3(0.82, 0.38, 0.95); // Prismatic Crystal
+        case MAT_PRISMATIC_CRYSTAL: return vec3(0.25, 0.92, 0.96); // Prismatic Crystal (Radiant Diamond Cyan, distinctly non-objective)
         case MAT_OBSIDIAN: return vec3(0.22, 0.05, 0.08); // Crystalline Obsidian Spikes
+        case MAT_ACID: return vec3(0.18, 0.75, 0.10); // Bubbling Neon Green
+        case MAT_COOLANT: return vec3(0.70, 0.85, 0.95); // Frosted Cryo White/Pale Blue
         default: return vec3(0.30, 0.30, 0.30);
     }
 }
@@ -131,13 +138,15 @@ vec3 get_material_albedo(uint layer) {
 vec2 get_material_rough_metal(uint layer) {
     switch (layer) {
         case MAT_VOIDITE: return vec2(0.15, 0.20); // Voidite crystal (polished gemstone)
-        case MAT_BULKHEAD: return vec2(0.45, 0.88); // Industrial bulkhead (metallic satin)
+        case MAT_BULKHEAD: return vec2(0.70, 0.82); // Industrial bulkhead (matte alloy satin)
         case MAT_VAULT_DOOR: return vec2(0.25, 0.92); // Vault door (polished metal)
         case MAT_THERMITE_SLAG: return vec2(0.65, 0.30); // Molten slag
         case MAT_WATER: return vec2(0.06, 0.15); // Water / puddle (fluid polish)
         case MAT_FLORA: return vec2(0.65, 0.05); // Flora (soft moss)
         case MAT_PRISMATIC_CRYSTAL: return vec2(0.15, 0.35); // Prismatic crystal (faceted diamond)
         case MAT_OBSIDIAN: return vec2(0.15, 0.45); // Obsidian spikes (glossy mineral glass)
+        case MAT_ACID: return vec2(0.05, 0.05); // Acid
+        case MAT_COOLANT: return vec2(0.01, 0.05); // Coolant
         default: return vec2(0.85, 0.05); // Rock / granite / basalt
     }
 }
@@ -185,23 +194,74 @@ void main() {
 
     vec3 v_FragPos = vWorldPos;
     uint v_MaterialID = vTexLayer;
-    bool isLiquid = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT);
+    bool isLiquid = (v_MaterialID == MAT_WATER || v_MaterialID == MAT_ACID || v_MaterialID == MAT_COOLANT || v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG);
 
-    vec2 baseUV = fract(vUV);
-    // World-Space UV Mapping for Liquids:
-    // For liquid top surfaces, calculate texture UVs using world-space horizontal coordinates rather than quad-local [0, 1] UVs
-    if (isLiquid && geoN.y > 0.4) {
-        vec2 fluidUV = v_FragPos.xz * 0.25; // Continuous world scale across all blocks
-        baseUV = fluidUV;
+    if (isLiquid && abs(geoN.y) > 0.4) {
+        vec3 triN = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+        if (dot(triN, geoN) < 0.0) triN = -triN;
+        geoN = triN;
     }
 
-    // Dynamic material UV animations
-    if (vTexLayer == MAT_ACID || vTexLayer == MAT_THERMITE_SLAG) { // Thermite Slag molten magma / acid convection flow
-        vec2 flowOffset = vec2(sin(uTime * 0.35 + vWorldPos.x * 0.15), cos(uTime * 0.28 + vWorldPos.z * 0.15)) * 0.05;
-        baseUV = baseUV + flowOffset;
-    } else if (vTexLayer == MAT_WATER || vTexLayer == MAT_COOLANT) { // Crystal Aquifer water ripples
-        vec2 waveOffset = vec2(sin(uTime * 0.60 + vWorldPos.x * 0.35), cos(uTime * 0.50 + vWorldPos.z * 0.35)) * 0.03;
-        baseUV = baseUV + waveOffset;
+    vec2 baseUV = fract(vUV);
+    bool isStepCascade = (vIsVerticalFlow > 0.5) || (isLiquid && abs(geoN.y) <= 0.35);
+
+    // World-Space UV Mapping & Streaming Flow Motion for Liquids:
+    if (isLiquid) {
+        vec2 fluidUV;
+        if (isStepCascade) {
+            float lateralCoord = (abs(vNormal.x) > 0.5) ? v_FragPos.z : v_FragPos.x;
+            fluidUV = vec2(lateralCoord, v_FragPos.y) * 0.25;
+        } else {
+            fluidUV = v_FragPos.xz * 0.25;
+        }
+
+        bool isHorizontalFlow = (length(v_FlowDir) > 0.01);
+        vec2 flowOffset = vec2(0.0);
+
+        if (vTexLayer == MAT_WATER || vTexLayer == MAT_CRYSTAL_AQUIFER) {
+            if (isStepCascade) {
+                flowOffset = vec2(sin(uTime * 2.8 + v_FragPos.y * 1.8) * 0.02, -uTime * 0.70);
+            } else if (isHorizontalFlow) {
+                vec2 dir = normalize(v_FlowDir);
+                vec2 crossDir = vec2(-dir.y, dir.x);
+                flowOffset = -dir * (uTime * 0.38) + crossDir * sin(uTime * 2.5 + dot(v_FragPos.xz, vec2(1.4, 1.1))) * 0.025;
+            } else {
+                vec2 ripple = vec2(sin(uTime * 0.70 + v_FragPos.x * 0.38 + v_FragPos.z * 0.22), cos(uTime * 0.60 + v_FragPos.z * 0.38 - v_FragPos.x * 0.22)) * 0.035;
+                flowOffset = ripple + vec2(0.02, 0.01) * (uTime * 0.05);
+            }
+        } else if (vTexLayer == MAT_LAVA || vTexLayer == MAT_THERMITE_SLAG) {
+            if (isStepCascade) {
+                flowOffset = vec2(sin(uTime * 1.5 + v_FragPos.y) * 0.015, -uTime * 0.18);
+            } else if (isHorizontalFlow) {
+                vec2 dir = normalize(v_FlowDir);
+                vec2 crossDir = vec2(-dir.y, dir.x);
+                flowOffset = -dir * (uTime * 0.10) + crossDir * sin(uTime * 1.8 + dot(v_FragPos.xz, vec2(0.8, 0.6))) * 0.015;
+            } else {
+                flowOffset = vec2(sin(uTime * 0.30 + v_FragPos.x * 0.15), cos(uTime * 0.25 + v_FragPos.z * 0.15)) * 0.03 + vec2(0.008, 0.004) * (uTime * 0.02);
+            }
+        } else if (vTexLayer == MAT_ACID) {
+            if (isStepCascade) {
+                flowOffset = vec2(sin(uTime * 2.2 + v_FragPos.y * 1.5) * 0.02, -uTime * 0.50);
+            } else if (isHorizontalFlow) {
+                vec2 dir = normalize(v_FlowDir);
+                vec2 crossDir = vec2(-dir.y, dir.x);
+                flowOffset = -dir * (uTime * 0.30) + crossDir * sin(uTime * 2.2 + dot(v_FragPos.xz, vec2(1.2, 0.8))) * 0.025;
+            } else {
+                flowOffset = vec2(sin(uTime * 0.55 + v_FragPos.x * 0.30), cos(uTime * 0.45 + v_FragPos.z * 0.30)) * 0.035 + vec2(0.015, 0.015) * (uTime * 0.04);
+            }
+        } else if (vTexLayer == MAT_COOLANT) {
+            if (isStepCascade) {
+                flowOffset = vec2(sin(uTime * 2.0 + v_FragPos.y * 1.4) * 0.018, -uTime * 0.40);
+            } else if (isHorizontalFlow) {
+                vec2 dir = normalize(v_FlowDir);
+                vec2 crossDir = vec2(-dir.y, dir.x);
+                flowOffset = -dir * (uTime * 0.22) + crossDir * sin(uTime * 2.0 + dot(v_FragPos.xz, vec2(1.0, 0.9))) * 0.02;
+            } else {
+                flowOffset = vec2(sin(uTime * 0.45 + v_FragPos.x * 0.22), cos(uTime * 0.38 + v_FragPos.z * 0.22)) * 0.025 + vec2(0.01, 0.01) * (uTime * 0.03);
+            }
+        }
+
+        baseUV = fluidUV + flowOffset;
     }
 
     // LOD Distance-Gated Parallax Occlusion Mapping (POM)
@@ -329,8 +389,8 @@ void main() {
         emissive *= sheen;
     }
 
-    // Apply drilling / impact fracture overlay
-    if (vDamage > 0.05) {
+    // Apply drilling / impact fracture overlay (only on solid structures)
+    if (!isLiquid && vDamage > 0.05) {
         albedo = mix(albedo, vec3(0.08, 0.07, 0.06), vDamage * 0.7);
     }
 
@@ -341,6 +401,9 @@ void main() {
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
     float minEdge = min(edgeDist.x, edgeDist.y);
     vec3 v_Normal = vNormal;
+    if (isLiquid && abs(geoN.y) > 0.4) {
+        v_Normal = geoN;
+    }
 
     // Only bevel solid rock/metal edges; leave liquid surfaces perfectly smooth
     if (!isLiquid && minEdge < 0.045) {
@@ -358,22 +421,88 @@ void main() {
 
     float roughness = clamp(roughMetal.r, 0.04, 0.99);
     float metallic  = clamp(roughMetal.g, 0.0, 1.0);
+    float alpha = 1.0;
 
-    // World-Space Continuous UV Projection & Mirror Specular for Liquids:
+    // World-Space Continuous Flow-Aligned Shading, Multi-Layer Ripple Normals & Specular for Liquids:
     if (isLiquid) {
-        vec2 fluidUV = v_FragPos.xz * 0.25; // 4-meter repeat cycle across all chunks
-        vec2 flowOffset = vec2(uTime * 0.03, uTime * 0.015);
-
-        // Sample moving caustics/normals seamlessly
-        if (uUseTextureArray == 1) {
-            vec4 normalSample1 = texture(uNormalArray, vec3(fluidUV + flowOffset, float(v_MaterialID)));
-            vec4 normalSample2 = texture(uNormalArray, vec3(fluidUV * 1.4 - flowOffset * 0.7, float(v_MaterialID)));
-            normal = normalize(v_Normal + (normalSample1.rgb + normalSample2.rgb - 1.0) * 0.2);
-        } else {
-            float wave = sin(fluidUV.x * 6.28 + uTime * 2.0) * cos(fluidUV.y * 6.28 + uTime * 1.5) * 0.15;
-            normal = normalize(v_Normal + vec3(wave, 0.0, wave));
+        // Smooth rounded transition normal over step edges:
+        vec3 baseNormal = v_Normal;
+        if (isStepCascade) {
+            // Blend vertical drop face normal with +Y upward normal to round over the edge
+            baseNormal = normalize(mix(v_Normal, vec3(0.0, 1.0, 0.0), 0.50));
+        } else if (length(v_FlowDir) > 0.01) {
+            // Smoothly tilt horizontal surface normal towards the direction of flow
+            baseNormal = normalize(v_Normal + vec3(v_FlowDir.x, 0.0, v_FlowDir.y) * 0.20);
         }
-        roughness = 0.02; // Mirror specular reflection for water
+
+        // Multi-Layer Flowing Ripple Normal Perturbation
+        if (uUseTextureArray == 1) {
+            vec3 n1 = texture(uNormalArray, texCoord).rgb * 2.0 - 1.0;
+            // Secondary ripple wave layer counter-drifting for realistic surface wave interference
+            vec2 rippleLayer2 = quadUV * 1.6 + vec2(uTime * 0.08, -uTime * 0.06);
+            vec3 n2 = texture(uNormalArray, vec3(fract(rippleLayer2), float(vTexLayer))).rgb * 2.0 - 1.0;
+            vec3 waveN = normalize(n1 + n2 * 0.6);
+            normal = normalize(baseNormal + vec3(waveN.x, 0.0, waveN.y) * 0.26);
+        } else {
+            float wave = sin(quadUV.x * 20.0 + uTime * 2.5) * cos(quadUV.y * 20.0 + uTime * 2.0) * 0.18;
+            normal = normalize(baseNormal + vec3(wave, 0.0, wave));
+        }
+
+        if (v_MaterialID == MAT_WATER) {
+            // Preserve sampled caustic texture array colors so still pools and flowing streams stay 100% consistent
+            if (uUseTextureArray == 1) {
+                vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
+                // Subtle depth mix with translucent subterranean cyan while preserving caustic webs
+                albedo = mix(sampledAlbedo, vec3(0.04, 0.44, 0.65), 0.22);
+                emissive = texture(uEmissiveArray, texCoord).rgb * 0.40;
+            } else {
+                albedo = vec3(0.08, 0.48, 0.72);
+                emissive = vec3(0.03, 0.20, 0.35);
+            }
+            alpha = 0.75;
+            roughness = 0.025;
+            metallic = 0.02;
+        } 
+        else if (v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG) {
+            if (uUseTextureArray == 1) {
+                vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
+                albedo = sampledAlbedo;
+                emissive = texture(uEmissiveArray, texCoord).rgb * 3.2 + sampledAlbedo * 1.0;
+            } else {
+                albedo = vec3(0.85, 0.32, 0.05);
+                emissive = vec3(1.2, 0.45, 0.08);
+            }
+            alpha = 1.0; // Lava is completely opaque
+            roughness = 0.62;
+            metallic = 0.05;
+            normal = baseNormal; // Viscous lava maintains smooth bulk surface
+        }
+        else if (v_MaterialID == MAT_ACID) {
+            if (uUseTextureArray == 1) {
+                vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
+                albedo = mix(sampledAlbedo, vec3(0.16, 0.78, 0.12), 0.15);
+                emissive = texture(uEmissiveArray, texCoord).rgb * 1.6 + vec3(0.04, 0.18, 0.03);
+            } else {
+                albedo = vec3(0.18, 0.80, 0.12);
+                emissive = vec3(0.10, 0.35, 0.05);
+            }
+            alpha = 0.82;
+            roughness = 0.04;
+            metallic = 0.05;
+        }
+        else if (v_MaterialID == MAT_COOLANT) {
+            if (uUseTextureArray == 1) {
+                vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
+                albedo = mix(sampledAlbedo, vec3(0.70, 0.86, 0.96), 0.18);
+                emissive = texture(uEmissiveArray, texCoord).rgb * 0.90;
+            } else {
+                albedo = vec3(0.72, 0.88, 0.96);
+                emissive = vec3(0.15, 0.30, 0.45);
+            }
+            alpha = 0.65;
+            roughness = 0.02;
+            metallic = 0.10;
+        }
     }
     N = normal;
 
@@ -390,7 +519,7 @@ void main() {
     if (matType == MAT_STONE || matType == MAT_BASALT || matType == MAT_GRANITE) {
         roughness = max(roughness, 0.75); // Natural rock should be diffuse and matte
     } else if (matType == MAT_BULKHEAD) {
-        roughness = max(roughness, 0.45); // Industrial plating: dull satin sheen, not chrome
+        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy, eliminate plastic glare
     }
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
@@ -400,68 +529,87 @@ void main() {
     {
         vec3 lightDir = normalize(uHeadlampPos - vWorldPos);
         float dist = distance(uHeadlampPos, vWorldPos);
-        // Smooth inverse-square distance attenuation
-        float attenuation = 1.0 / (dist * dist + 1.0);
+        float maxRange = uHeadlampRange > 0.0 ? uHeadlampRange : 22.0;
 
-        // Smooth spotlight cone falloff between outer and inner cutoff (replaces hard cutoff)
-        float theta = dot(lightDir, normalize(-uHeadlampDir));
-        float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
+        if (dist < maxRange) {
+            // Tighter Beam: Quadratic distance attenuation clamped at maxRange (22m)
+            float rangeFactor = clamp(1.0 - (dist / maxRange), 0.0, 1.0);
+            float attenuation = (rangeFactor * rangeFactor) / (dist * dist + 1.0);
 
-        if (spotFactor > 0.0) {
-            vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
-            float NdotL = max(dot(N, lightDir), 0.0);
+            // Smooth spotlight cone falloff between outer and inner cutoff
+            float theta = dot(lightDir, normalize(-uHeadlampDir));
+            float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
 
-            if (isCrystal) {
-                // Prismatic Spectral Dispersion: Crystals split white light into rainbow facets
-                vec3 H_mid = normalize(V + lightDir);
-                vec3 disp = TBN * vec3(0.025, 0.015, 0.0);
-                vec3 H_R = normalize(V + lightDir + disp);
-                vec3 H_B = normalize(V + lightDir - disp);
+            if (spotFactor > 0.0) {
+                vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
+                float NdotL = max(dot(N, lightDir), 0.0);
 
-                float NDF_R = distribution_ggx(N, H_R, roughness);
-                float NDF_G = distribution_ggx(N, H_mid, roughness);
-                float NDF_B = distribution_ggx(N, H_B, roughness);
+                // Cavern Wall Glare Reduction:
+                // Lower specular factor on cavern walls (granite, basalt, bedrock) and wet/flat rock surfaces
+                // to eliminate blinding white hotspots from the collinear headlamp beam.
+                float headlampSpecFactor = 0.04; // Drastically lower specular factor on cavern walls & flat rock
+                if (isCrystal) {
+                    headlampSpecFactor = 0.18; // Preserves glistening chromatic facets on precious gemstones
+                } else if (matType == MAT_BULKHEAD) {
+                    headlampSpecFactor = 0.05; // Controlled matte dispersion on heavy industrial bulkhead metal
+                } else if (matType == MAT_VAULT_DOOR) {
+                    headlampSpecFactor = 0.10; // Controlled satin sheen on reinforced vault door
+                } else if (isPuddle || isLiquid) {
+                    headlampSpecFactor = 0.05; // Dampened sheen on wet pools to stop blinding reflection
+                }
 
-                float G = geometry_smith(N, V, lightDir, roughness);
-                vec3 F = fresnel_schlick(max(dot(H_mid, V), 0.0), F0);
+                if (isCrystal) {
+                    // Prismatic Spectral Dispersion: Crystals split white light into rainbow facets
+                    vec3 H_mid = normalize(V + lightDir);
+                    vec3 disp = TBN * vec3(0.025, 0.015, 0.0);
+                    vec3 H_R = normalize(V + lightDir + disp);
+                    vec3 H_B = normalize(V + lightDir - disp);
 
-                float denom = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
-                vec3 specularColor = (vec3(NDF_R, NDF_G, NDF_B) * G * F) / denom;
+                    float NDF_R = distribution_ggx(N, H_R, roughness);
+                    float NDF_G = distribution_ggx(N, H_mid, roughness);
+                    float NDF_B = distribution_ggx(N, H_B, roughness);
 
-                vec3 kS = F;
-                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+                    float G = geometry_smith(N, V, lightDir, roughness);
+                    vec3 F = fresnel_schlick(max(dot(H_mid, V), 0.0), F0);
 
-                // Attenuate specular intensity specifically for the suit headlamp
-                vec3 headlampSpecular = specularColor * 0.25; // Scale down headlamp specular contribution
-                Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
+                    float denom = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
+                    vec3 specularColor = (vec3(NDF_R, NDF_G, NDF_B) * G * F) / denom;
 
-                // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
-                vec2 sparkleCoord = floor(vUV * 64.0);
-                float sparkleRand = fract(sin(dot(sparkleCoord + floor(V.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
-                float sparkleGlint = pow(sparkleRand, 28.0) * pow(max(dot(N, H_mid), 0.0), 12.0) * 8.0;
-                vec3 sparkleColor = (vTexLayer == 3u) ? vec3(1.0, 0.7, 1.0) : vec3(0.9, 0.95, 1.0);
-                Lo += sparkleColor * sparkleGlint * radiance * NdotL;
+                    vec3 kS = F;
+                    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                // Subsurface Translucency Glow
-                float sss = pow(clamp(dot(V, -lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.5);
-                vec3 translucencyColor = (vTexLayer == 3u) ? vec3(0.65, 0.20, 0.85) : vec3(0.40, 0.75, 0.95);
-                Lo += translucencyColor * sss * radiance * 0.9;
-            } else {
-                vec3 H = normalize(V + lightDir);
-                float NDF = distribution_ggx(N, H, roughness);
-                float G = geometry_smith(N, V, lightDir, roughness);
-                vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
+                    // Attenuate specular intensity specifically for the suit headlamp
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.40));
+                    Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
 
-                vec3 kS = F;
-                vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+                    // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
+                    vec2 sparkleCoord = floor(vUV * 64.0);
+                    float sparkleRand = fract(sin(dot(sparkleCoord + floor(V.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
+                    float sparkleGlint = pow(sparkleRand, 28.0) * pow(max(dot(N, H_mid), 0.0), 12.0) * 8.0;
+                    vec3 sparkleColor = (vTexLayer == 3u) ? vec3(1.0, 0.7, 1.0) : vec3(0.9, 0.95, 1.0);
+                    Lo += sparkleColor * sparkleGlint * radiance * NdotL;
 
-                vec3 numerator = NDF * G * F;
-                float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
-                vec3 specularColor = numerator / denominator;
+                    // Subsurface Translucency Glow
+                    float sss = pow(clamp(dot(V, -lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.5);
+                    vec3 translucencyColor = (vTexLayer == 3u) ? vec3(0.65, 0.20, 0.85) : vec3(0.40, 0.75, 0.95);
+                    Lo += translucencyColor * sss * radiance * 0.9;
+                } else {
+                    vec3 H = normalize(V + lightDir);
+                    float NDF = distribution_ggx(N, H, roughness);
+                    float G = geometry_smith(N, V, lightDir, roughness);
+                    vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
 
-                // Attenuate specular intensity specifically for the suit headlamp
-                vec3 headlampSpecular = specularColor * 0.25; // Scale down headlamp specular contribution
-                Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
+                    vec3 kS = F;
+                    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+                    vec3 numerator = NDF * G * F;
+                    float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
+                    vec3 specularColor = numerator / denominator;
+
+                    // Attenuate specular intensity specifically for the suit headlamp
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.30));
+                    Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
+                }
             }
         }
     }
@@ -586,7 +734,7 @@ void main() {
         finalColor += sonarColor * vSonarIntensity * 2.0;
     }
 
-    FragColor = vec4(finalColor, 1.0);
+    FragColor = vec4(finalColor, alpha);
 
     // 6. Thresholded Bright Extraction for HDR Bloom
     // Bloom luminance cutoff threshold raised from 1.0 to 2.0 (1.8-2.2 range).
@@ -597,8 +745,8 @@ void main() {
     const float BLOOM_CUTOFF = 2.0;
 
     if (luminance > BLOOM_CUTOFF || emissivePeak > 1.8) {
-        BrightColor = vec4(finalColor, 1.0);
+        BrightColor = vec4(finalColor, alpha);
     } else {
-        BrightColor = vec4(0.0, 0.0, 0.0, 1.0);
+        BrightColor = vec4(0.0, 0.0, 0.0, alpha);
     }
 }

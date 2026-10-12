@@ -20,6 +20,23 @@ struct Ivec3Hash {
     }
 };
 
+struct ScheduledFluidUpdate {
+    glm::ivec3 pos;
+    uint8_t material;
+    int level;
+    int delayTicks; // Decremented each tick; spreads when <= 0
+};
+
+static inline int GetSpreadDelayTicks(uint8_t material) {
+    if (material == MAT_LAVA || material == MAT_THERMITE_SLAG || material == MAT_MOLTEN_MAGMA) {
+        return 12; // approx 1.0s at 12 Hz
+    }
+    if (material == MAT_ACID || material == MAT_COOLANT) {
+        return 4;
+    }
+    return 3; // Water: approx 0.25s at 12 Hz
+}
+
 class FluidSim {
 public:
     void WakeFluid(const glm::ivec3& pos) {
@@ -32,7 +49,8 @@ public:
     void SimulateFluidCell(const glm::ivec3& pos);
     void TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos, 
                              uint8_t liquidMat, int newLevel, 
-                             std::unordered_set<Chunk*>& dirtyChunks);
+                             std::unordered_set<Chunk*>& dirtyChunks,
+                             bool immediate = false);
     void Update(float dt, World& world);
 
     // Static test harness hooks
@@ -46,10 +64,14 @@ public:
     std::unordered_set<glm::ivec3, Ivec3Hash>& active_fluid_set() { return m_activeFluidSet; }
     const std::unordered_set<glm::ivec3, Ivec3Hash>& active_fluid_set() const { return m_activeFluidSet; }
 
+    std::deque<ScheduledFluidUpdate>& scheduled_spreads() { return m_scheduledSpreads; }
+    const std::deque<ScheduledFluidUpdate>& scheduled_spreads() const { return m_scheduledSpreads; }
+
     int last_steps_processed() const { return m_last_steps_processed; }
 
     std::deque<glm::ivec3> m_activeFluids;
     std::unordered_set<glm::ivec3, Ivec3Hash> m_activeFluidSet;
+    std::deque<ScheduledFluidUpdate> m_scheduledSpreads;
     float m_accumulator = 0.0f;
     int m_last_steps_processed = 0;
 };

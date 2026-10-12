@@ -91,8 +91,13 @@ void main() {
     float uDim       = float(d1 & 0x3Fu);
     float vDim       = float((d1 >> 6u) & 0x3Fu);
     uint cornerIdx   = (d1 >> 12u) & 0x3u;
-    vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
-    vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
+    if (fluidLvl == 6u) {
+        vDamage          = 0.0;
+        vEmissive        = 0.0;
+    } else {
+        vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
+        vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
+    }
     vIsVerticalFlow  = float((d1 >> 31u) & 0x1u);
 
     // Baked Ambient Occlusion multipliers: ao=0 -> 1.0, ao=1 -> 0.72, ao=2 -> 0.45, ao=3 -> 0.20
@@ -108,12 +113,8 @@ void main() {
     vTangent = normalize(normalMat * TANGENTS[normIdx]);
     vBitangent = normalize(normalMat * BITANGENTS[normIdx]);
 
-    // Texture UVs repeating across greedy meshed quad
-    vec2 cornerUV = vec2(0.0);
-    if (cornerIdx == 1u) cornerUV = vec2(uDim, 0.0);
-    else if (cornerIdx == 2u) cornerUV = vec2(uDim, vDim);
-    else if (cornerIdx == 3u) cornerUV = vec2(0.0, vDim);
-    vUV = cornerUV;
+    // World-aligned continuous texture UVs: mesh seamlessly with adjacent blocks of the same type in walls, floors, ceilings, and slopes
+    vUV = vec2(dot(vWorldPos, vTangent), dot(vWorldPos, vBitangent));
 
     // Seismic Sonar pulse ring calculation
     vSonarIntensity = 0.0;

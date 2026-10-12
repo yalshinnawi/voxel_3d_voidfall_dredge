@@ -12,16 +12,16 @@ The hazard clock activates the moment the player touches down in a sector. Envir
   - Baseline cavern acoustics and nominal tectonic stability.
   - Spatial proximity radiation active: approaching radioactive mineral veins (`MAT_RADIOACTIVE_ORE`) triggers authentic stochastic Geiger counter clicks and HUD millisievert dosimetry.
 - **Phase 2: Agitation (4:00 - 8:00)**:
-  - Background radiation accumulates ($+0.40\% / \text{sec}$ to $+0.65\% / \text{sec}$).
-  - Suit Geiger counter clicks increase with Poisson arrival distribution; subtle HUD chromatic aberration.
+  - Background radiation accumulates gently ($+0.05\% / \text{sec}$ to $+0.16\% / \text{sec}$). Safe buffer holds completely until $75\%$ exposure.
+  - Suit Geiger counter clicks increase with Poisson arrival distribution; subtle HUD emerald dosimetry telemetry.
 - **Phase 3: Critical (8:00 - 12:00)**:
-  - Cavern structural faults become volatile: aggressive rock mining and ballistic gunfire rapidly accumulate tectonic seismic strain.
-  - When strain exceeds $35\%$, further mining and gunfire roll probabilistic tremor collapses; reaching $100\%$ forces immediate fault failure.
-  - Pre-tremor acoustic warning triggers 1.0s before ceiling detachment, followed by screen trauma and falling `DynamicDebris`.
-  - Tremor completion relieves accumulated tectonic stress back to $0\%$.
+  - Cavern structural faults become volatile: aggressive rock mining and ballistic gunfire accumulate tectonic seismic strain.
+  - When strain exceeds $85\%$, further mining and gunfire roll low-probability tremor collapses; reaching $100\%$ forces fault failure.
+  - Pre-tremor acoustic warning triggers before ceiling detachment, followed by screen trauma and falling `DynamicDebris` (6-12 voxels).
+  - Tremor completion relieves accumulated tectonic stress back to $0\%$ with an extended $75\,\text{s}$ refractory recovery window.
 - **Phase 4: Catastrophic (12:00+)**:
-  - Radiation spikes ($>1.0\% / \text{sec}$), severe HUD glitching and static.
-  - Constant fault instability, relentless tremors, and rapid structural collapses make remaining underground fatal without swift extraction.
+  - Radiation crosses $75\% - 90\%$, initiating mild tissue corrosion ($0.15 - 0.85\,\text{HP/s}$, capped at $1.5\,\text{HP/s}$ max at $\ge 98\%$).
+  - Atmospheric emerald mist haze intensifies, telegraphed visually and auditorily without overwhelming disorientation. Swarms escalate and extraction becomes imperative.
 
 ---
 

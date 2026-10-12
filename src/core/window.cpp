@@ -1,8 +1,11 @@
 #include "window.hpp"
 #include "logger.hpp"
+#include "app_icon_data.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #ifdef _WIN32
+#undef APIENTRY
+#undef WINGDIAPI
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -84,6 +87,26 @@ Window::Window(const WindowConfig& config)
     if (config.auto_screen_size && !config.fullscreen) {
         glfwMaximizeWindow(m_window);
     }
+
+    // Set custom Voidfall: Dredge window and taskbar icons across all standard resolutions
+    GLFWimage window_icons[4];
+    window_icons[0].width = IconData::ICON_16_WIDTH;
+    window_icons[0].height = IconData::ICON_16_HEIGHT;
+    window_icons[0].pixels = const_cast<unsigned char*>(IconData::ICON_16_RGBA);
+
+    window_icons[1].width = IconData::ICON_32_WIDTH;
+    window_icons[1].height = IconData::ICON_32_HEIGHT;
+    window_icons[1].pixels = const_cast<unsigned char*>(IconData::ICON_32_RGBA);
+
+    window_icons[2].width = IconData::ICON_48_WIDTH;
+    window_icons[2].height = IconData::ICON_48_HEIGHT;
+    window_icons[2].pixels = const_cast<unsigned char*>(IconData::ICON_48_RGBA);
+
+    window_icons[3].width = IconData::ICON_64_WIDTH;
+    window_icons[3].height = IconData::ICON_64_HEIGHT;
+    window_icons[3].pixels = const_cast<unsigned char*>(IconData::ICON_64_RGBA);
+
+    glfwSetWindowIcon(m_window, 4, window_icons);
 
     int fb_w = 0, fb_h = 0;
     glfwGetFramebufferSize(m_window, &fb_w, &fb_h);

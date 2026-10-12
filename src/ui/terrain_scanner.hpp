@@ -51,6 +51,7 @@ public:
     /// Query active and fold animation states
     bool is_active() const { return m_active; }
     float fold_progress() const { return m_fold_progress; }
+    void set_fold_progress(float progress) { m_fold_progress = std::clamp(progress, 0.0f, 1.0f); }
 
     /// Re-samples local cavern boundary voxels into 2D map geometry
     void refresh_geometry(const World& world, const glm::vec3& player_pos,

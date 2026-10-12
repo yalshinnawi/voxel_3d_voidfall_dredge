@@ -1,5 +1,6 @@
 #include "carcass_manager.hpp"
 #include "../voxel/world.hpp"
+#include "../ai/aberrant_ai.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -82,29 +83,25 @@ void CarcassManager::update(float dt, World& world) {
             c.position += c.velocity * dt;
 
             // Check voxel ground collision
-            int ix = static_cast<int>(std::floor(c.position.x));
-            int iy = static_cast<int>(std::floor(c.position.y - 0.25f));
-            int iz = static_cast<int>(std::floor(c.position.z));
+            float ground_y = 0.0f;
+            if (AberrantAI::find_ground_surface(world, c.position, 0.5f, 1.5f, &ground_y)) {
+                if (c.position.y <= ground_y + 0.15f) {
+                    // Settled on solid cavern surface: freeze physics simulation to zero CPU overhead
+                    c.position.y = ground_y + 0.02f;
+                    c.velocity = glm::vec3(0.0f);
+                    c.is_sleeping = true;
 
-            Voxel floor_vox = world.get_voxel(ix, iy, iz);
-            if (floor_vox.material_id != MAT_AIR && floor_vox.material_id != MAT_GAS &&
-                floor_vox.material_id != MAT_VOLATILE_SMOKE)
-            {
-                // Settled on solid cavern voxel: freeze physics simulation to zero CPU overhead
-                c.position.y = static_cast<float>(iy + 1) + 0.05f;
-                c.velocity = glm::vec3(0.0f);
-                c.is_sleeping = true;
+                    // Flatten/collapse skeletal rig into limp death pose
+                    glm::vec3 flat_forward = glm::normalize(glm::vec3(c.lethal_hit_dir.x, 0.0f, c.lethal_hit_dir.z));
+                    if (glm::length(flat_forward) < 0.001f) flat_forward = glm::vec3(0.0f, 0.0f, 1.0f);
+                    glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), flat_forward));
 
-                // Flatten/collapse skeletal rig into limp death pose
-                glm::vec3 flat_forward = glm::normalize(glm::vec3(c.lethal_hit_dir.x, 0.0f, c.lethal_hit_dir.z));
-                if (glm::length(flat_forward) < 0.001f) flat_forward = glm::vec3(0.0f, 0.0f, 1.0f);
-                glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), flat_forward));
-
-                glm::mat3 flat_mat;
-                flat_mat[0] = right;
-                flat_mat[1] = glm::vec3(0.0f, 1.0f, 0.0f);
-                flat_mat[2] = flat_forward;
-                c.rotation = glm::quat_cast(flat_mat);
+                    glm::mat3 flat_mat;
+                    flat_mat[0] = right;
+                    flat_mat[1] = glm::vec3(0.0f, 1.0f, 0.0f);
+                    flat_mat[2] = flat_forward;
+                    c.rotation = glm::quat_cast(flat_mat);
+                }
             }
         }
     }

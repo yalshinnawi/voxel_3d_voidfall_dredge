@@ -65,6 +65,9 @@ public:
     VaultObjectiveState vault_state() const { return m_vault.state; }
     bool is_relic_retrieved() const { return m_vault.state == VaultObjectiveState::RelicRetrieved; }
     bool is_vault_breached() const { return m_vault.state == VaultObjectiveState::Breached || m_vault.state == VaultObjectiveState::RelicRetrieved; }
+    void force_complete_vault_objective() {
+        m_vault.state = VaultObjectiveState::RelicRetrieved;
+    }
 
     int total_bonus_xp() const { return is_relic_retrieved() ? VAULT_BONUS_XP : 0; }
     int total_bonus_titanium() const { return is_relic_retrieved() ? VAULT_BONUS_TITANIUM : 0; }

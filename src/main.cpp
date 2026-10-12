@@ -1,5 +1,6 @@
 #include "core/application.hpp"
 #include "core/logger.hpp"
+#include "core/save_system.hpp"
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -51,6 +52,7 @@ int main(int argc, char* argv[]) {
             config.port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if (arg == "--seed" && i + 1 < argc) {
             config.world_seed = static_cast<uint32_t>(std::stoul(argv[++i]));
+            config.has_explicit_seed = true;
         } else if (arg == "--name" && i + 1 < argc) {
             config.player_name = argv[++i];
         } else if (arg == "--auto-test" || arg == "--auto-play-test") {
@@ -85,9 +87,25 @@ int main(int argc, char* argv[]) {
             config.auto_screen_size = false;
             config.window_width = 1600;
             config.window_height = 900;
+        } else if (arg == "--test-relic" || arg == "--capture-relic") {
+            config.test_relic = true;
+            config.test_mode = true;
+            config.is_test_save = true;
+            config.fresh_save = true;
+            config.auto_screen_size = false;
+            config.window_width = 1600;
+            config.window_height = 900;
         } else if (arg == "--test" || arg == "--test-mode") {
             config.test_mode = true;
-        } else if (arg == "--fresh-save") {
+        } else if (arg == "--clear-save-only" || arg == "--reset-save-only") {
+            std::string target = (config.save_file_path.empty()) ? Voidfall::SaveSystem::DEFAULT_SAVE_FILE : config.save_file_path;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                target = argv[++i];
+            }
+            Voidfall::SaveSystem::clear_save(target);
+            std::cout << "[Voidfall Dredge] Profile at " << target << " successfully cleared and reset to fresh delver defaults.\n";
+            return 0;
+        } else if (arg == "--clear-save" || arg == "--reset-save" || arg == "--wipe-save" || arg == "--delete-save" || arg == "--fresh-save") {
             config.fresh_save = true;
         } else if (arg == "--test-save") {
             config.is_test_save = true;

@@ -90,6 +90,7 @@ static inline uint32_t get_emissive_intensity(uint32_t mat_id) {
         case MAT_THERMITE_SLAG: return 255;
         case MAT_RADIOACTIVE_ORE: return 180;
         case MAT_PRISMATIC_CRYSTAL: return 210;
+        case MAT_ASTRAL_ORE: return 245;
         case MAT_BIOLUMINESCENT_FLORA: return 175;
         case MAT_OBSIDIAN_SPIKES: return 190;
         case MAT_CRYSTAL_AQUIFER: return 80;
@@ -108,7 +109,7 @@ static inline bool is_face_occluded(Voxel current, Voxel neighbor) {
     if (current.shape() == SHAPE_CUBE) {
         return neighbor.is_solid() && (neighbor.shape() == SHAPE_CUBE);
     }
-    return neighbor.is_solid();
+    return neighbor.is_solid() && (neighbor.shape() == current.shape());
 }
 
 bool GreedyMesher::is_face_visible(
@@ -682,19 +683,19 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
 
                 if (s == SHAPE_SLAB_BOTTOM) {
                     // Top quad at Y = 0.5 (encoded with Y = y + 1, sub_y_half = 1)
-                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
-                    bool above_flush = above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_TOP);
-                    if (!above_flush) {
-                        emit_quad(
-                            glm::ivec3(x,     y + 1, z),
-                            glm::ivec3(x,     y + 1, z + 1),
-                            glm::ivec3(x + 1, y + 1, z + 1),
-                            glm::ivec3(x + 1, y + 1, z),
-                            2, mat_id, 1, 1, damage, emissive, aux, 1 /* sub_y_half = 1 */
-                        );
-                    }
+                    // Note: substance occupies Y in [y, y + 0.5]. It NEVER reaches cell (x, y + 1, z)
+                    // which starts at Y = y + 1.0. There is always open air within the top half of this
+                    // voxel cell, so the top face must ALWAYS be rendered and never culled by cell (y + 1).
+                    emit_quad(
+                        glm::ivec3(x,     y + 1, z),
+                        glm::ivec3(x,     y + 1, z + 1),
+                        glm::ivec3(x + 1, y + 1, z + 1),
+                        glm::ivec3(x + 1, y + 1, z),
+                        2, mat_id, 1, 1, damage, emissive, aux, 1 /* sub_y_half = 1 */
+                    );
 
                     // Bottom quad at Y = 0.0 (sub_y_half = 0)
+                    // Substance reaches Y = y. Culled ONLY if below touches Y = y flush (SHAPE_CUBE or SHAPE_SLAB_TOP).
                     Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
                     bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP);
                     if (!below_flush) {
@@ -753,6 +754,7 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                     }
                 } else { // SHAPE_SLAB_TOP
                     // Top quad at Y = 1.0 (sub_y_half = 0)
+                    // Substance reaches Y = y + 1.0. Culled ONLY if above touches Y = y + 1.0 flush (SHAPE_CUBE or SHAPE_SLAB_BOTTOM).
                     Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
                     bool above_flush = above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM);
                     if (!above_flush) {
@@ -766,17 +768,16 @@ std::vector<PackedVoxelVertex> GreedyMesher::generate_mesh(
                     }
 
                     // Bottom quad at Y = 0.5 (encoded as Y = y + 1, sub_y_half = 1)
-                    Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
-                    bool below_flush = below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_BOTTOM);
-                    if (!below_flush) {
-                        emit_quad(
-                            glm::ivec3(x,     y + 1, z),
-                            glm::ivec3(x + 1, y + 1, z),
-                            glm::ivec3(x + 1, y + 1, z + 1),
-                            glm::ivec3(x,     y + 1, z + 1),
-                            3, mat_id, 1, 1, damage, emissive, aux, 1
-                        );
-                    }
+                    // Note: substance occupies Y in [y + 0.5, y + 1.0]. It NEVER reaches cell (x, y - 1, z)
+                    // which ends at Y = y. The bottom face is ALWAYS exposed to the air within
+                    // this cell over [y, y + 0.5], so it must ALWAYS be rendered and never culled by cell (y - 1).
+                    emit_quad(
+                        glm::ivec3(x,     y + 1, z),
+                        glm::ivec3(x + 1, y + 1, z),
+                        glm::ivec3(x + 1, y + 1, z + 1),
+                        glm::ivec3(x,     y + 1, z + 1),
+                        3, mat_id, 1, 1, damage, emissive, aux, 1
+                    );
 
                     // 4 Side quads along upper [0.5, 1.0]:
                     // +X side:
@@ -951,6 +952,15 @@ void GreedyMesher::mesh_liquid_pass(
     };
     ChunkWorldView world_view{chunk, get_neighbor};
 
+    auto find_waterlogged_fluid_mat = [&](int vx, int vy, int vz) -> uint32_t {
+        const glm::ivec3 dirs[6] = {{0,1,0}, {0,-1,0}, {-1,0,0}, {1,0,0}, {0,0,-1}, {0,0,1}};
+        for (const auto& d : dirs) {
+            Voxel nb = sample_voxel(chunk, get_neighbor, vx + d.x, vy + d.y, vz + d.z);
+            if (nb.is_liquid()) return nb.material_id;
+        }
+        return MAT_WATER;
+    };
+
     for (int y = 0; y < CHUNK_SIZE; ++y) {
         for (int z = 0; z < CHUNK_SIZE; ++z) {
             for (int x = 0; x < CHUNK_SIZE; ++x) {
@@ -963,16 +973,11 @@ void GreedyMesher::mesh_liquid_pass(
                 }
 
                 Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
-                bool top_culled = (above.material_id == cur.material_id) ||
+                bool top_culled = (IsLiquid(above.material_id) || above.is_waterlogged()) ||
                                   (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
-                if (is_slab_waterlogged) {
-                    top_culled = IsLiquid(above.material_id) ||
-                                 (above.is_solid() && (above.shape() == SHAPE_CUBE || above.shape() == SHAPE_SLAB_BOTTOM));
-                }
-
                 if (top_culled) continue;
 
-                uint32_t mat_id = is_pure ? cur.material_id : MAT_WATER;
+                uint32_t mat_id = is_pure ? cur.material_id : find_waterlogged_fluid_mat(x, y, z);
 
                 float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
                 if (centerH < 0.0f) centerH = 0.88f;
@@ -990,8 +995,15 @@ void GreedyMesher::mesh_liquid_pass(
                     float nH = GetLiquidColumnHeight(world_view, nPos);
                     if (nH < 0.0f) {
                         if (world_view.GetBlockMaterial(nPos) == MAT_AIR) {
-                            flowDir.x += off.x * 1.5f;
-                            flowDir.y += off.z * 1.5f;
+                            glm::ivec3 nBelow = nPos - glm::ivec3(0, 1, 0);
+                            float nBelowH = (nPos.y > 0) ? GetLiquidColumnHeight(world_view, nBelow) : -1.0f;
+                            if (nBelowH >= 0.0f) {
+                                flowDir.x += off.x * 2.5f;
+                                flowDir.y += off.z * 2.5f;
+                            } else {
+                                flowDir.x += off.x * 1.5f;
+                                flowDir.y += off.z * 1.5f;
+                            }
                         }
                     } else {
                         flowDir.x += off.x * (centerH - nH);
@@ -1015,15 +1027,6 @@ void GreedyMesher::mesh_liquid_pass(
                 // Emit two triangles: (V0, V1, V2) and (V0, V2, V3)
                 emit_custom_triangle(V0, V1, V2);
                 emit_custom_triangle(V0, V2, V3);
-
-                if (is_slab_waterlogged) {
-                    // Internal contact interface at Y = 0.5m
-                    PackedVoxelVertex c0 = PackedVoxelVertex::encode(x,     y + 1, z,     2, 0, mat_id, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0);
-                    PackedVoxelVertex c1 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 2, 0, mat_id, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0);
-                    PackedVoxelVertex c2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 2, 0, mat_id, 1, 1, 2, 0, 0, 0, 1, 0, 0, 0);
-                    PackedVoxelVertex c3 = PackedVoxelVertex::encode(x + 1, y + 1, z,     2, 0, mat_id, 1, 1, 3, 0, 0, 0, 1, 0, 0, 0);
-                    emit_custom_quad(c0, c1, c2, c3);
-                }
             }
         }
     }
@@ -1044,11 +1047,10 @@ void GreedyMesher::mesh_liquid_pass(
                 uint32_t aux = cur.is_highlighted() ? 1 : 0;
                 uint8_t fluid_lvl = cur.fluid_level();
                 if (fluid_lvl == 0) fluid_lvl = 5;
-                float h_curr = static_cast<float>(y) + GetFluidHeight(static_cast<int>(fluid_lvl));
 
                 // Bottom face (-Y, normal_idx = 3)
                 Voxel below = sample_voxel(chunk, get_neighbor, x, y - 1, z);
-                bool bottom_culled = (below.material_id == cur.material_id) ||
+                bool bottom_culled = (IsLiquid(below.material_id) || below.is_waterlogged()) ||
                                      (below.is_solid() && (below.shape() == SHAPE_CUBE || below.shape() == SHAPE_SLAB_TOP));
                 if (!bottom_culled) {
                     emit_quad(
@@ -1060,10 +1062,55 @@ void GreedyMesher::mesh_liquid_pass(
                     );
                 }
 
+                Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
+                bool cell_submerged = (IsLiquid(above.material_id) || above.is_waterlogged());
+
+                float C00 = 1.0f;
+                float C10 = 1.0f;
+                float C11 = 1.0f;
+                float C01 = 1.0f;
+                glm::vec2 flowDir(0.0f);
+
+                if (!cell_submerged) {
+                    float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
+                    if (centerH < 0.0f) centerH = 0.88f;
+
+                    C00 = CalculateCornerHeight(world_view, x,     y, z,     centerH);
+                    C10 = CalculateCornerHeight(world_view, x + 1, y, z,     centerH);
+                    C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1, centerH);
+                    C01 = CalculateCornerHeight(world_view, x,     y, z + 1, centerH);
+
+                    const glm::ivec3 sideOffsets[4] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
+                    for (const auto& off : sideOffsets) {
+                        glm::ivec3 nPos = glm::ivec3(x, y, z) + off;
+                        float nH = GetLiquidColumnHeight(world_view, nPos);
+                        if (nH < 0.0f) {
+                            if (world_view.GetBlockMaterial(nPos) == MAT_AIR) {
+                                glm::ivec3 nBelow = nPos - glm::ivec3(0, 1, 0);
+                                float nBelowH = (nPos.y > 0) ? GetLiquidColumnHeight(world_view, nBelow) : -1.0f;
+                                if (nBelowH >= 0.0f) {
+                                    flowDir.x += off.x * 2.5f;
+                                    flowDir.y += off.z * 2.5f;
+                                } else {
+                                    flowDir.x += off.x * 1.5f;
+                                    flowDir.y += off.z * 1.5f;
+                                }
+                            }
+                        } else {
+                            flowDir.x += off.x * (centerH - nH);
+                            flowDir.y += off.z * (centerH - nH);
+                        }
+                    }
+                    if (glm::length(flowDir) > 0.001f) {
+                        flowDir = glm::normalize(flowDir);
+                    }
+                }
+
                 // Helper to mesh a vertical side boundary with interval culling & step skirts
                 auto mesh_side_boundary = [&](int nx, int nz, int norm_idx,
                                               const glm::ivec3& p0_base, const glm::ivec3& p1_base,
-                                              const glm::ivec3& p2_top, const glm::ivec3& p3_top) {
+                                              const glm::ivec3& p2_top, const glm::ivec3& p3_top,
+                                              float C_top_p2, float C_top_p3) {
                     Voxel nb = sample_voxel(chunk, get_neighbor, nx, y, nz);
 
                     // 1. Solid full cube covers boundary completely
@@ -1071,35 +1118,36 @@ void GreedyMesher::mesh_liquid_pass(
                         return;
                     }
 
-                    // 2. Neighbor is pure liquid or waterlogged sub-block: interval culling & step skirts
+                    // 2. Neighbor is pure liquid or waterlogged sub-block: internal boundary is fully culled
                     if (nb.is_liquid() || nb.is_waterlogged()) {
-                        uint8_t nb_lvl = nb.fluid_level();
-                        if (nb_lvl == 0) nb_lvl = 5;
-                        float h_nb = static_cast<float>(y) + GetFluidHeight(static_cast<int>(nb_lvl));
-
-                        if (h_curr > h_nb + 0.001f) {
-                            // Emit vertical step skirt from h_curr down to h_nb
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y + 1, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, nb_lvl, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y + 1, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, nb_lvl, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
-                        }
-                        return; // Submerged portion below h_nb is culled
+                        return; // Submerged interior between contiguous fluid cells is culled
                     }
 
                     // 3. Neighbor is solid sub-block (e.g., bottom slab)
                     if (nb.is_solid() && nb.shape() == SHAPE_SLAB_BOTTOM) {
                         // Non-waterlogged slab: seal down to slab surface (Y = y + 0.5)
-                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y + 1, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 1, 0, 0, 0, 1);
-                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y + 1, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 1, 0, 0, 0, 1);
-                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(p0_base.x, y, p0_base.z, 0.5f,     flowDir, mat_id, 0, norm_idx, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(p1_base.x, y, p1_base.z, 0.5f,     flowDir, mat_id, 1, norm_idx, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(p2_top.x,  y, p2_top.z,  C_top_p2, flowDir, mat_id, 2, norm_idx, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(p3_top.x,  y, p3_top.z,  C_top_p3, flowDir, mat_id, 3, norm_idx, 1);
                         emit_custom_quad(v0, v1, v2, v3);
                         return;
                     }
 
-                    // 4. Neighbor is AIR or downward cliff drop: check for receiving fluid below
+                    // 4. Check if neighbor directly below (y - 1) is a ramp sloping away from this face
+                    Voxel below_ramp = sample_voxel(chunk, get_neighbor, nx, y - 1, nz);
+                    if (below_ramp.is_ramp()) {
+                        bool crest_meets = false;
+                        if (norm_idx == 1 && below_ramp.shape() == SHAPE_RAMP_EAST)  crest_meets = true;
+                        if (norm_idx == 0 && below_ramp.shape() == SHAPE_RAMP_WEST)  crest_meets = true;
+                        if (norm_idx == 5 && below_ramp.shape() == SHAPE_RAMP_SOUTH) crest_meets = true;
+                        if (norm_idx == 4 && below_ramp.shape() == SHAPE_RAMP_NORTH) crest_meets = true;
+                        if (crest_meets) {
+                            return; // Fluid slopes seamlessly onto ramp crest; cull vertical separation wall!
+                        }
+                    }
+
+                    // 5. Neighbor is AIR or downward cliff drop: check for receiving fluid below
                     int cascade_dy = -1;
                     uint8_t lower_lvl = 5;
                     for (int dy = 1; dy <= 8; ++dy) {
@@ -1118,18 +1166,31 @@ void GreedyMesher::mesh_liquid_pass(
 
                     if (cascade_dy > 0) {
                         // Emit continuous vertical cascade curtain bridging down to receiving pool
-                        uint32_t bot_y = static_cast<uint32_t>((y - cascade_dy) + 1);
-                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, bot_y, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, lower_lvl, 1);
-                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, bot_y, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, lower_lvl, 1);
-                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                        emit_custom_quad(v0, v1, v2, v3);
+                        int y_recv = y - cascade_dy;
+                        if (y_recv >= 0) {
+                            float lowerCenterH = GetLiquidColumnHeight(world_view, glm::ivec3(nx, y_recv, nz));
+                            if (lowerCenterH < 0.0f) lowerCenterH = GetFluidHeight(lower_lvl);
+                            float C_bot_p0 = CalculateCornerHeight(world_view, p0_base.x, y_recv, p0_base.z, lowerCenterH);
+                            float C_bot_p1 = CalculateCornerHeight(world_view, p1_base.x, y_recv, p1_base.z, lowerCenterH);
+                            PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(p0_base.x, y_recv, p0_base.z, C_bot_p0, flowDir, mat_id, 0, norm_idx, 1);
+                            PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(p1_base.x, y_recv, p1_base.z, C_bot_p1, flowDir, mat_id, 1, norm_idx, 1);
+                            PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(p2_top.x,  y,      p2_top.z,  C_top_p2, flowDir, mat_id, 2, norm_idx, 1);
+                            PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(p3_top.x,  y,      p3_top.z,  C_top_p3, flowDir, mat_id, 3, norm_idx, 1);
+                            emit_custom_quad(v0, v1, v2, v3);
+                        } else {
+                            uint32_t bot_y = static_cast<uint32_t>((y - cascade_dy) + 1);
+                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, bot_y, p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, lower_lvl, 1);
+                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, bot_y, p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, lower_lvl, 1);
+                            PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(p2_top.x,  y,      p2_top.z,  C_top_p2, flowDir, mat_id, 2, norm_idx, 1);
+                            PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(p3_top.x,  y,      p3_top.z,  C_top_p3, flowDir, mat_id, 3, norm_idx, 1);
+                            emit_custom_quad(v0, v1, v2, v3);
+                        }
                     } else {
                         // Standard side boundary down to Y = y
-                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_base.x, y,     p0_base.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_base.x, y,     p1_base.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_top.x,  y + 1, p2_top.z,  norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
-                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_top.x,  y + 1, p3_top.z,  norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, fluid_lvl, 1);
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(p0_base.x, y, p0_base.z, 0.0f,     flowDir, mat_id, 0, norm_idx, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(p1_base.x, y, p1_base.z, 0.0f,     flowDir, mat_id, 1, norm_idx, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(p2_top.x,  y, p2_top.z,  C_top_p2, flowDir, mat_id, 2, norm_idx, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(p3_top.x,  y, p3_top.z,  C_top_p3, flowDir, mat_id, 3, norm_idx, 1);
                         emit_custom_quad(v0, v1, v2, v3);
                     }
                 };
@@ -1139,7 +1200,8 @@ void GreedyMesher::mesh_liquid_pass(
                     glm::ivec3(x + 1, y,     z + 1),
                     glm::ivec3(x + 1, y,     z),
                     glm::ivec3(x + 1, y + 1, z),
-                    glm::ivec3(x + 1, y + 1, z + 1)
+                    glm::ivec3(x + 1, y + 1, z + 1),
+                    C10, C11
                 );
 
                 // Side face: -X (normal_idx = 1)
@@ -1147,7 +1209,8 @@ void GreedyMesher::mesh_liquid_pass(
                     glm::ivec3(x, y,     z),
                     glm::ivec3(x, y,     z + 1),
                     glm::ivec3(x, y + 1, z + 1),
-                    glm::ivec3(x, y + 1, z)
+                    glm::ivec3(x, y + 1, z),
+                    C01, C00
                 );
 
                 // Side face: +Z (normal_idx = 4)
@@ -1155,7 +1218,8 @@ void GreedyMesher::mesh_liquid_pass(
                     glm::ivec3(x,     y,     z + 1),
                     glm::ivec3(x + 1, y,     z + 1),
                     glm::ivec3(x + 1, y + 1, z + 1),
-                    glm::ivec3(x,     y + 1, z + 1)
+                    glm::ivec3(x,     y + 1, z + 1),
+                    C11, C01
                 );
 
                 // Side face: -Z (normal_idx = 5)
@@ -1163,7 +1227,8 @@ void GreedyMesher::mesh_liquid_pass(
                     glm::ivec3(x + 1, y,     z),
                     glm::ivec3(x,     y,     z),
                     glm::ivec3(x,     y + 1, z),
-                    glm::ivec3(x + 1, y + 1, z)
+                    glm::ivec3(x + 1, y + 1, z),
+                    C00, C10
                 );
             }
         }
@@ -1180,63 +1245,70 @@ void GreedyMesher::mesh_liquid_pass(
                     continue;
                 }
 
-                uint32_t mat_id = MAT_WATER;
+                uint32_t mat_id = find_waterlogged_fluid_mat(x, y, z);
                 uint32_t emissive = get_emissive_intensity(mat_id);
                 uint32_t aux = cur.is_highlighted() ? 1 : 0;
                 VoxelShape shape = cur.shape();
 
-                // 3A. Waterlogged Bottom Slab: top fluid plane and 4 vertical flank seals
+                // 3A. Waterlogged Bottom Slab: 4 vertical flank seals
                 if (shape == SHAPE_SLAB_BOTTOM) {
-                    Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
-                    bool above_culled = IsLiquid(above.material_id) || (above.is_solid() && above.shape() == SHAPE_CUBE);
-                    if (!above_culled) {
-                        // Top liquid plane at Y = y + 0.88
-                        emit_quad(
-                            glm::ivec3(x,     y + 1, z),
-                            glm::ivec3(x,     y + 1, z + 1),
-                            glm::ivec3(x + 1, y + 1, z + 1),
-                            glm::ivec3(x + 1, y + 1, z),
-                            2, mat_id, 1, 1, 0, emissive, aux, 0, 0, 0, 5
-                        );
-                    }
+                    ChunkWorldView world_view{chunk, get_neighbor};
+                    float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
+                    if (centerH < 0.0f) centerH = 0.88f;
 
-                    // Flank seals on each of the 4 sides from Y = y + 0.5 to Y = y + 0.88
+                    float C00 = CalculateCornerHeight(world_view, x,     y, z,     centerH);
+                    float C10 = CalculateCornerHeight(world_view, x + 1, y, z,     centerH);
+                    float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1, centerH);
+                    float C01 = CalculateCornerHeight(world_view, x,     y, z + 1, centerH);
+
+                    // Flank seals on each of the 4 sides from Y = y + 0.5 to smooth waterline
                     auto emit_slab_flank = [&](int nx, int nz, int norm_idx,
                                                const glm::ivec3& p0_b, const glm::ivec3& p1_b,
-                                               const glm::ivec3& p2_t, const glm::ivec3& p3_t) {
+                                               const glm::ivec3& p2_t, const glm::ivec3& p3_t,
+                                               float C_top_p2, float C_top_p3) {
                         Voxel nb = sample_voxel(chunk, get_neighbor, nx, y, nz);
                         if (nb.is_solid() && nb.shape() == SHAPE_CUBE) return;
-                        if (nb.shape() == SHAPE_SLAB_BOTTOM && nb.is_waterlogged()) return;
-                        if (nb.is_liquid() && nb.fluid_level() >= 5) return;
+                        if (nb.is_liquid() || nb.is_waterlogged()) return;
 
-                        PackedVoxelVertex v0 = PackedVoxelVertex::encode(p0_b.x, y + 1, p0_b.z, norm_idx, 0, mat_id, 1, 1, 0, 0, emissive, aux, 1, 0, 0, 0, 1);
-                        PackedVoxelVertex v1 = PackedVoxelVertex::encode(p1_b.x, y + 1, p1_b.z, norm_idx, 0, mat_id, 1, 1, 1, 0, emissive, aux, 1, 0, 0, 0, 1);
-                        PackedVoxelVertex v2 = PackedVoxelVertex::encode(p2_t.x, y + 1, p2_t.z, norm_idx, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                        PackedVoxelVertex v3 = PackedVoxelVertex::encode(p3_t.x, y + 1, p3_t.z, norm_idx, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, 5, 1);
+                        PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(p0_b.x, y, p0_b.z, 0.5f,     glm::vec2(0.0f), mat_id, 0, norm_idx, 1);
+                        PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(p1_b.x, y, p1_b.z, 0.5f,     glm::vec2(0.0f), mat_id, 1, norm_idx, 1);
+                        PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(p2_t.x, y, p2_t.z, C_top_p2, glm::vec2(0.0f), mat_id, 2, norm_idx, 1);
+                        PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(p3_t.x, y, p3_t.z, C_top_p3, glm::vec2(0.0f), mat_id, 3, norm_idx, 1);
                         emit_custom_quad(v0, v1, v2, v3);
                     };
 
-                    emit_slab_flank(x + 1, z, 0, glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x + 1, 0, z), glm::ivec3(x + 1, 0, z), glm::ivec3(x + 1, 0, z + 1));
-                    emit_slab_flank(x - 1, z, 1, glm::ivec3(x, 0, z), glm::ivec3(x, 0, z + 1), glm::ivec3(x, 0, z + 1), glm::ivec3(x, 0, z));
-                    emit_slab_flank(x, z + 1, 4, glm::ivec3(x, 0, z + 1), glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x, 0, z + 1));
-                    emit_slab_flank(x, z - 1, 5, glm::ivec3(x + 1, 0, z), glm::ivec3(x, 0, z), glm::ivec3(x, 0, z), glm::ivec3(x + 1, 0, z));
+                    emit_slab_flank(x + 1, z, 0, glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x + 1, 0, z), glm::ivec3(x + 1, 0, z), glm::ivec3(x + 1, 0, z + 1), C10, C11);
+                    emit_slab_flank(x - 1, z, 1, glm::ivec3(x, 0, z), glm::ivec3(x, 0, z + 1), glm::ivec3(x, 0, z + 1), glm::ivec3(x, 0, z), C01, C00);
+                    emit_slab_flank(x, z + 1, 4, glm::ivec3(x, 0, z + 1), glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x + 1, 0, z + 1), glm::ivec3(x, 0, z + 1), C11, C01);
+                    emit_slab_flank(x, z - 1, 5, glm::ivec3(x + 1, 0, z), glm::ivec3(x, 0, z), glm::ivec3(x, 0, z), glm::ivec3(x + 1, 0, z), C00, C10);
                 }
 
                 // 3B. Waterlogged Ramps: diagonal liquid plane + triangular flank seals
                 if (cur.is_ramp()) {
+                    ChunkWorldView world_view{chunk, get_neighbor};
+                    float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
+                    if (centerH < 0.0f) centerH = 0.88f;
+
+                    int lvl = cur.fluid_level();
+                    if (centerH < 0.85f) {
+                        lvl = static_cast<int>(std::round((centerH - 0.16f) / 0.68f * 5.0f));
+                        lvl = std::clamp(lvl, 1, 5);
+                    }
+
                     Voxel above = sample_voxel(chunk, get_neighbor, x, y + 1, z);
                     bool above_solid = above.is_solid() && (above.shape() == SHAPE_CUBE);
                     bool above_liquid = IsLiquid(above.material_id);
 
                     if (!above_solid && !above_liquid) {
-                        ChunkWorldView world_view{chunk, get_neighbor};
-                        float centerH = GetLiquidColumnHeight(world_view, glm::ivec3(x, y, z));
-                        if (centerH < 0.0f) centerH = 0.88f;
-
                         float C00 = CalculateCornerHeight(world_view, x,     y, z,     centerH);
                         float C10 = CalculateCornerHeight(world_view, x + 1, y, z,     centerH);
                         float C11 = CalculateCornerHeight(world_view, x + 1, y, z + 1, centerH);
                         float C01 = CalculateCornerHeight(world_view, x,     y, z + 1, centerH);
+
+                        C00 = std::clamp(C00, 0.05f, 1.0f);
+                        C10 = std::clamp(C10, 0.05f, 1.0f);
+                        C11 = std::clamp(C11, 0.05f, 1.0f);
+                        C01 = std::clamp(C01, 0.05f, 1.0f);
 
                         glm::vec2 rampFlowDir(0.0f);
                         if (shape == SHAPE_RAMP_EAST)  rampFlowDir = glm::vec2(-1.0f, 0.0f);
@@ -1251,145 +1323,115 @@ void GreedyMesher::mesh_liquid_pass(
                         emit_custom_triangle(tv0, tv1, tv2);
                         emit_custom_triangle(tv0, tv2, tv3);
 
-                        if (shape == SHAPE_RAMP_EAST) {
-                            emit_quad(
-                                glm::ivec3(x,     y,     z),
-                                glm::ivec3(x,     y,     z + 1),
-                                glm::ivec3(x + 1, y + 1, z + 1),
-                                glm::ivec3(x + 1, y + 1, z),
-                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
-                            );
-                        } else if (shape == SHAPE_RAMP_WEST) {
-                            emit_quad(
-                                glm::ivec3(x + 1, y,     z + 1),
-                                glm::ivec3(x + 1, y,     z),
-                                glm::ivec3(x,     y + 1, z),
-                                glm::ivec3(x,     y + 1, z + 1),
-                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
-                            );
-                        } else if (shape == SHAPE_RAMP_SOUTH) {
-                            emit_quad(
-                                glm::ivec3(x + 1, y,     z),
-                                glm::ivec3(x,     y,     z),
-                                glm::ivec3(x,     y + 1, z + 1),
-                                glm::ivec3(x + 1, y + 1, z + 1),
-                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
-                            );
-                        } else if (shape == SHAPE_RAMP_NORTH) {
-                            emit_quad(
-                                glm::ivec3(x,     y,     z + 1),
-                                glm::ivec3(x + 1, y,     z + 1),
-                                glm::ivec3(x + 1, y + 1, z),
-                                glm::ivec3(x,     y + 1, z),
-                                2, mat_id, 1, 1, 0, emissive, aux, 0, 1 /* water_offset = 1 */
-                            );
-                        }
-                    }
+                        auto is_exposed = [](const Voxel& v) {
+                            return !v.is_solid() && !v.is_liquid() && !v.is_waterlogged();
+                        };
 
-                    // Triangular Flank Seals when adjacent to air
-                    if (shape == SHAPE_RAMP_EAST) {
-                        // Flank at -Z (norm 5)
-                        Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
-                        if (nb_nz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y,     z, 5, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Flank at +Z (norm 4)
-                        Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
-                        if (nb_pz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y,     z + 1, 4, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Low end at -X (norm 1)
-                        Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
-                        if (nb_nx.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x, y,     z,     1, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x, y,     z + 1, 1, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
-                        }
-                    } else if (shape == SHAPE_RAMP_WEST) {
-                        // Flank at -Z (norm 5)
-                        Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
-                        if (nb_nz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z, 5, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Flank at +Z (norm 4)
-                        Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
-                        if (nb_pz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 4, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Low end at +X (norm 0)
-                        Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
-                        if (nb_px.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 0, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z,     0, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
-                        }
-                    } else if (shape == SHAPE_RAMP_SOUTH) {
-                        // Flank at -X (norm 1)
-                        Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
-                        if (nb_nx.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x, y,     z,     1, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Flank at +X (norm 0)
-                        Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
-                        if (nb_px.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y,     z,     0, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Low end at -Z (norm 5)
-                        Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
-                        if (nb_nz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y,     z, 5, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x,     y,     z, 5, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x,     y + 1, z, 5, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(x + 1, y + 1, z, 5, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
-                        }
-                    } else if (shape == SHAPE_RAMP_NORTH) {
-                        // Flank at -X (norm 1)
-                        Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
-                        if (nb_nx.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x, y + 1, z,     1, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x, y + 1, z + 1, 1, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x, y,     z + 1, 1, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Flank at +X (norm 0)
-                        Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
-                        if (nb_px.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 0, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y + 1, z,     0, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 0, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            emit_custom_triangle(v0, v1, v2);
-                        }
-                        // Low end at +Z (norm 4)
-                        Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
-                        if (nb_pz.material_id == MAT_AIR) {
-                            PackedVoxelVertex v0 = PackedVoxelVertex::encode(x,     y,     z + 1, 4, 0, mat_id, 1, 1, 0, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v1 = PackedVoxelVertex::encode(x + 1, y,     z + 1, 4, 0, mat_id, 1, 1, 1, 0, emissive, aux, 0, 0, 0, 0, 1);
-                            PackedVoxelVertex v2 = PackedVoxelVertex::encode(x + 1, y + 1, z + 1, 4, 0, mat_id, 1, 1, 2, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            PackedVoxelVertex v3 = PackedVoxelVertex::encode(x,     y + 1, z + 1, 4, 0, mat_id, 1, 1, 3, 0, emissive, aux, 0, 0, 0, 5, 1);
-                            emit_custom_quad(v0, v1, v2, v3);
+                        // Triangular Flank Seals and Low-End Seal conforming to the actual waterline
+                        if (shape == SHAPE_RAMP_EAST) {
+                            // Flank at -Z (norm 5)
+                            Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                            if (is_exposed(nb_nz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z, C00,  rampFlowDir, mat_id, 0, 5);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z, C10,  rampFlowDir, mat_id, 1, 5);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z, 0.0f, rampFlowDir, mat_id, 0, 5);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Flank at +Z (norm 4)
+                            Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                            if (is_exposed(nb_pz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 2, 4);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01,  rampFlowDir, mat_id, 3, 4);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, 0.0f, rampFlowDir, mat_id, 3, 4);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Low end at -X (norm 1)
+                            Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                            if (is_exposed(nb_nx)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x, y, z,     0.0f, rampFlowDir, mat_id, 0, 1);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x, y, z + 1, 0.0f, rampFlowDir, mat_id, 1, 1);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x, y, z + 1, C01,  rampFlowDir, mat_id, 2, 1);
+                                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x, y, z,     C00,  rampFlowDir, mat_id, 3, 1);
+                                emit_custom_quad(v0, v1, v2, v3);
+                            }
+                        } else if (shape == SHAPE_RAMP_WEST) {
+                            // Flank at -Z (norm 5)
+                            Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                            if (is_exposed(nb_nz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z, C10,  rampFlowDir, mat_id, 1, 5);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z, 0.0f, rampFlowDir, mat_id, 1, 5);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z, C00,  rampFlowDir, mat_id, 0, 5);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Flank at +Z (norm 4)
+                            Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                            if (is_exposed(nb_pz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01,  rampFlowDir, mat_id, 3, 4);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, 0.0f, rampFlowDir, mat_id, 2, 4);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 2, 4);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Low end at +X (norm 0)
+                            Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                            if (is_exposed(nb_px)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, 0.0f, rampFlowDir, mat_id, 0, 0);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     0.0f, rampFlowDir, mat_id, 1, 0);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10,  rampFlowDir, mat_id, 2, 0);
+                                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 3, 0);
+                                emit_custom_quad(v0, v1, v2, v3);
+                            }
+                        } else if (shape == SHAPE_RAMP_SOUTH) {
+                            // Flank at -X (norm 1)
+                            Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                            if (is_exposed(nb_nx)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x, y, z + 1, C01,  rampFlowDir, mat_id, 3, 1);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x, y, z,     C00,  rampFlowDir, mat_id, 0, 1);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x, y, z,     0.0f, rampFlowDir, mat_id, 0, 1);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Flank at +X (norm 0)
+                            Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                            if (is_exposed(nb_px)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10,  rampFlowDir, mat_id, 1, 0);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 2, 0);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     0.0f, rampFlowDir, mat_id, 1, 0);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Low end at -Z (norm 5)
+                            Voxel nb_nz = sample_voxel(chunk, get_neighbor, x, y, z - 1);
+                            if (is_exposed(nb_nz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z, 0.0f, rampFlowDir, mat_id, 0, 5);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z, 0.0f, rampFlowDir, mat_id, 1, 5);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z, C00,  rampFlowDir, mat_id, 2, 5);
+                                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z, C10,  rampFlowDir, mat_id, 3, 5);
+                                emit_custom_quad(v0, v1, v2, v3);
+                            }
+                        } else if (shape == SHAPE_RAMP_NORTH) {
+                            // Flank at -X (norm 1)
+                            Voxel nb_nx = sample_voxel(chunk, get_neighbor, x - 1, y, z);
+                            if (is_exposed(nb_nx)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x, y, z + 1, 0.0f, rampFlowDir, mat_id, 3, 1);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x, y, z + 1, C01,  rampFlowDir, mat_id, 3, 1);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x, y, z,     C00,  rampFlowDir, mat_id, 0, 1);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Flank at +X (norm 0)
+                            Voxel nb_px = sample_voxel(chunk, get_neighbor, x + 1, y, z);
+                            if (is_exposed(nb_px)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, 0.0f, rampFlowDir, mat_id, 2, 0);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z,     C10,  rampFlowDir, mat_id, 1, 0);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 2, 0);
+                                emit_custom_triangle(v0, v1, v2);
+                            }
+                            // Low end at +Z (norm 4)
+                            Voxel nb_pz = sample_voxel(chunk, get_neighbor, x, y, z + 1);
+                            if (is_exposed(nb_pz)) {
+                                PackedVoxelVertex v0 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, 0.0f, rampFlowDir, mat_id, 0, 4);
+                                PackedVoxelVertex v1 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, 0.0f, rampFlowDir, mat_id, 1, 4);
+                                PackedVoxelVertex v2 = PackedVoxelVertex::encode_smooth_fluid(x + 1, y, z + 1, C11,  rampFlowDir, mat_id, 2, 4);
+                                PackedVoxelVertex v3 = PackedVoxelVertex::encode_smooth_fluid(x,     y, z + 1, C01,  rampFlowDir, mat_id, 3, 4);
+                                emit_custom_quad(v0, v1, v2, v3);
+                            }
                         }
                     }
                 }

@@ -9,13 +9,99 @@ namespace Voidfall {
 
 StalkerSurfaceState AberrantAI::classify_normal(const glm::vec3& normal, const glm::vec3& world_up) {
     float dot = glm::dot(normal, world_up);
-    if (dot > 0.7f) {
+    if (dot > 0.65f) { // 45-degree slopes (dot ~0.7071) and ramps classify as FLOOR
         return StalkerSurfaceState::FLOOR;
     }
     if (dot < -0.7f) {
         return StalkerSurfaceState::CEILING_CRAWLING;
     }
     return StalkerSurfaceState::WALL_CLIMBING;
+}
+
+bool AberrantAI::is_point_solid(const World& world, const glm::vec3& p) {
+    int bx = static_cast<int>(std::floor(p.x));
+    int by = static_cast<int>(std::floor(p.y));
+    int bz = static_cast<int>(std::floor(p.z));
+    Voxel v = world.get_voxel(bx, by, bz);
+    if (!v.is_solid()) return false;
+    VoxelShape s = v.shape();
+    if (s == SHAPE_CUBE) return true;
+    float u = std::clamp(p.x - static_cast<float>(bx), 0.0f, 1.0f);
+    float w = std::clamp(p.z - static_cast<float>(bz), 0.0f, 1.0f);
+    float local_y = p.y - static_cast<float>(by);
+    float top_h = ShapeGeometry::GetSolidHeightAt(s, u, w);
+    float base_h = ShapeGeometry::GetSolidBaseAt(s, u, w);
+    return (local_y >= base_h && local_y < top_h);
+}
+
+float AberrantAI::get_voxel_surface_y(const World& world, int bx, int by, int bz, float px, float pz) {
+    Voxel v = world.get_voxel(bx, by, bz);
+    if (!v.is_solid()) return -1000.0f;
+    VoxelShape s = v.shape();
+    if (s == SHAPE_CUBE || s == SHAPE_SLAB_TOP) {
+        return static_cast<float>(by + 1);
+    }
+    if (s == SHAPE_SLAB_BOTTOM) {
+        return static_cast<float>(by) + 0.5f;
+    }
+    float u = std::clamp(px - static_cast<float>(bx), 0.0f, 1.0f);
+    float w = std::clamp(pz - static_cast<float>(bz), 0.0f, 1.0f);
+    return static_cast<float>(by) + ShapeGeometry::GetSolidHeightAt(s, u, w);
+}
+
+glm::vec3 AberrantAI::get_voxel_surface_normal(const World& world, int bx, int by, int bz) {
+    Voxel v = world.get_voxel(bx, by, bz);
+    if (!v.is_solid()) return glm::vec3(0.0f, 1.0f, 0.0f);
+    VoxelShape s = v.shape();
+    constexpr float INV_SQRT2 = 0.7071067811865475f;
+    switch (s) {
+        case SHAPE_RAMP_EAST:       return glm::vec3(-INV_SQRT2, INV_SQRT2, 0.0f);
+        case SHAPE_RAMP_WEST:       return glm::vec3(INV_SQRT2, INV_SQRT2, 0.0f);
+        case SHAPE_RAMP_SOUTH:      return glm::vec3(0.0f, INV_SQRT2, -INV_SQRT2);
+        case SHAPE_RAMP_NORTH:      return glm::vec3(0.0f, INV_SQRT2, INV_SQRT2);
+        case SHAPE_CORNER_OUTER_NE: return glm::normalize(glm::vec3(-INV_SQRT2, INV_SQRT2, INV_SQRT2));
+        case SHAPE_CORNER_OUTER_NW: return glm::normalize(glm::vec3(INV_SQRT2, INV_SQRT2, INV_SQRT2));
+        case SHAPE_CORNER_OUTER_SE: return glm::normalize(glm::vec3(-INV_SQRT2, INV_SQRT2, -INV_SQRT2));
+        case SHAPE_CORNER_OUTER_SW: return glm::normalize(glm::vec3(INV_SQRT2, INV_SQRT2, -INV_SQRT2));
+        case SHAPE_CORNER_INNER_NE: return glm::normalize(glm::vec3(-INV_SQRT2, INV_SQRT2, INV_SQRT2));
+        case SHAPE_CORNER_INNER_NW: return glm::normalize(glm::vec3(INV_SQRT2, INV_SQRT2, INV_SQRT2));
+        case SHAPE_CORNER_INNER_SE: return glm::normalize(glm::vec3(-INV_SQRT2, INV_SQRT2, -INV_SQRT2));
+        case SHAPE_CORNER_INNER_SW: return glm::normalize(glm::vec3(INV_SQRT2, INV_SQRT2, -INV_SQRT2));
+        default:                    return glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+}
+
+bool AberrantAI::find_ground_surface(
+    const World& world,
+    const glm::vec3& pos,
+    float max_step_up,
+    float max_step_down,
+    float* out_surface_y,
+    glm::vec3* out_normal)
+{
+    int bx = static_cast<int>(std::floor(pos.x));
+    int bz = static_cast<int>(std::floor(pos.z));
+    int top_y = static_cast<int>(std::floor(pos.y + max_step_up));
+    int bottom_y = static_cast<int>(std::floor(pos.y - max_step_down));
+    top_y = std::clamp(top_y, 0, 31);
+    bottom_y = std::clamp(bottom_y, 0, 31);
+
+    for (int y = top_y; y >= bottom_y; --y) {
+        Voxel v = world.get_voxel(bx, y, bz);
+        if (v.is_solid()) {
+            float surf_y = get_voxel_surface_y(world, bx, y, bz, pos.x, pos.z);
+            if (surf_y <= pos.y + max_step_up + 0.05f) {
+                // Headroom check: ensure standing on this surface has open air
+                if (!is_point_solid(world, glm::vec3(pos.x, surf_y + 0.35f, pos.z)) &&
+                    !is_point_solid(world, glm::vec3(pos.x, surf_y + 0.80f, pos.z))) {
+                    if (out_surface_y) *out_surface_y = surf_y;
+                    if (out_normal) *out_normal = get_voxel_surface_normal(world, bx, y, bz);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 SurfaceContactSample AberrantAI::sample_surface_normal(
@@ -70,14 +156,34 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
 
             Voxel vox = world.get_voxel(ix, iy, iz);
             if (vox.material_id != MAT_AIR && vox.material_id != MAT_GAS && vox.material_id != MAT_VOLATILE_SMOKE) {
+                if (dir.y < -0.5f) {
+                    float surf_y = get_voxel_surface_y(world, ix, iy, iz, position.x, position.z);
+                    if (position.y >= surf_y - 0.20f) {
+                        float d = std::max(0.0f, position.y - surf_y);
+                        glm::vec3 face_normal = get_voxel_surface_normal(world, ix, iy, iz);
+                        has_down = true;
+                        down_dist = d;
+                        if (d < min_dist) {
+                            min_dist = d;
+                            best_normal = face_normal;
+                            result.has_contact = true;
+                        }
+                        break;
+                    }
+                    continue;
+                }
+
+                // For horizontal / upward probes, verify point is actually in solid geometry
+                if (!is_point_solid(world, p)) {
+                    continue;
+                }
+
                 // Voxel boundary face normal points back toward entity
                 glm::vec3 face_normal = -dir;
 
                 // Calculate exact plane distance to the face
                 float d = static_cast<float>(step) * step_size;
-                if (dir.y < -0.5f) {
-                    d = position.y - (static_cast<float>(iy) + 1.0f);
-                } else if (dir.y > 0.5f) {
+                if (dir.y > 0.5f) {
                     d = static_cast<float>(iy) - position.y;
                 } else if (dir.x < -0.5f) {
                     d = position.x - (static_cast<float>(ix) + 1.0f);
@@ -90,10 +196,7 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
                 }
                 d = std::max(0.0f, d);
 
-                if (i == 0) { // Down
-                    has_down = true;
-                    down_dist = d;
-                } else if (i >= 2) { // Side walls
+                if (i >= 2) { // Side walls
                     if (d < wall_dist) {
                         has_wall = true;
                         wall_dist = d;
@@ -112,10 +215,10 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
     }
 
     // Surface hysteresis selection:
-    // 1. If currently on FLOOR (or transitioning from floor) and floor contact is valid within reachable ground distance (<= 1.25m),
-    // prioritize FLOOR over adjacent side walls to prevent rapid 60Hz surface flipping/jitter.
-    if ((current_state == StalkerSurfaceState::FLOOR || current_state == StalkerSurfaceState::TRANSITIONING) && has_down && down_dist <= 1.25f) {
-        if (target_pos != nullptr && (target_pos->y > position.y + 1.8f) && has_wall && wall_dist <= 0.65f) {
+    // 1. If currently on FLOOR (or transitioning from floor) and floor contact is valid within reachable ground distance (<= 1.45m),
+    // prioritize FLOOR over ceiling to prevent flipping in gaps between top and bottom blocks.
+    if ((current_state == StalkerSurfaceState::FLOOR || current_state == StalkerSurfaceState::TRANSITIONING) && has_down && down_dist <= 1.45f) {
+        if (target_pos != nullptr && (target_pos->y > position.y + 1.5f) && has_wall && wall_dist <= 1.15f) {
             best_normal = wall_normal;
             min_dist = wall_dist;
             result.has_contact = true;
@@ -124,17 +227,26 @@ SurfaceContactSample AberrantAI::sample_surface_normal(
             min_dist = down_dist;
             result.has_contact = true;
         }
-    } else if (current_state == StalkerSurfaceState::WALL_CLIMBING && has_down && down_dist <= 0.65f) {
-        // Smoothly step down onto floor when reaching ground level
-        best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
-        min_dist = down_dist;
-        result.has_contact = true;
-    } else if (current_state == StalkerSurfaceState::CEILING_CRAWLING && has_wall && wall_dist <= 0.80f) {
-        // Ceiling stalker within reach of vertical wall: transfer to wall climbing to descend toward floor!
-        if (target_pos == nullptr || target_pos->y < position.y - 1.2f) {
-            best_normal = wall_normal;
-            min_dist = wall_dist;
+    } else if (current_state == StalkerSurfaceState::WALL_CLIMBING) {
+        if (has_down && down_dist <= 0.65f && (target_pos == nullptr || target_pos->y <= position.y + 0.5f)) {
+            // Smoothly step down onto floor when reaching ground level (only if target is not above)
+            best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            min_dist = down_dist;
             result.has_contact = true;
+        }
+    } else if (current_state == StalkerSurfaceState::CEILING_CRAWLING) {
+        if (has_down && down_dist <= 1.45f) {
+            // Drop onto floor if close to ground level (prevents getting trapped ceiling crawling on floor or in low gaps)
+            best_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            min_dist = down_dist;
+            result.has_contact = true;
+        } else if (has_wall && wall_dist <= 0.80f) {
+            // Ceiling stalker within reach of vertical wall: transfer to wall climbing to descend toward floor!
+            if (target_pos == nullptr || target_pos->y < position.y - 1.2f) {
+                best_normal = wall_normal;
+                min_dist = wall_dist;
+                result.has_contact = true;
+            }
         }
     }
 
@@ -498,6 +610,23 @@ PerceptionEvaluation AberrantAI::evaluate_acoustic_and_visual_perception(
     return best_result;
 }
 
+bool AberrantAI::is_in_vision_cone(
+    const glm::vec3& observer_pos,
+    const glm::vec3& observer_fwd,
+    const glm::vec3& target_pos,
+    float max_angle_rad)
+{
+    glm::vec3 to_target = target_pos - observer_pos;
+    float dist = glm::length(to_target);
+    if (dist < 0.001f) {
+        return true;
+    }
+    glm::vec3 dir_to_target = to_target / dist;
+    glm::vec3 fwd = (glm::length(observer_fwd) > 0.001f) ? glm::normalize(observer_fwd) : glm::vec3(0.0f, 0.0f, 1.0f);
+    float cos_angle = glm::dot(fwd, dir_to_target);
+    return cos_angle >= std::cos(max_angle_rad);
+}
+
 glm::vec3 AberrantAI::find_descending_wall_direction(
     const glm::vec3& enemy_pos,
     const glm::vec3& target_pos,
@@ -532,10 +661,15 @@ glm::vec3 AberrantAI::find_descending_wall_direction(
                 break;
             }
 
-            // CRITICAL: Check wall obstacles at enemy crawl level and below (py, py - 1).
+            // Check wall obstacles at enemy crawl level and below (py, py - 1).
             // Do NOT check py + 1, which is the solid ceiling right above the monster!
+            // Only consider py - 1 if the space directly underneath the enemy position has drop clearance,
+            // preventing low gap / tunnel floors from being misclassified as walls.
+            int e_x = static_cast<int>(std::floor(enemy_pos.x));
+            int e_z = static_cast<int>(std::floor(enemy_pos.z));
+            bool has_drop = (py - 1 >= 0) && !world.is_solid(glm::ivec3(e_x, py - 1, e_z));
             bool solid_at_level = world.is_solid(glm::ivec3(px, py, pz));
-            bool solid_below = world.is_solid(glm::ivec3(px, py - 1, pz));
+            bool solid_below = has_drop && (py - 1 >= 0) && world.is_solid(glm::ivec3(px, py - 1, pz));
             if (solid_at_level || solid_below) {
                 hit_dist = static_cast<float>(s) * step_size;
                 hit = true;
@@ -550,6 +684,79 @@ glm::vec3 AberrantAI::find_descending_wall_direction(
             
             // Total cost: travel across ceiling to wall + distance from wall base to target
             float cost = d_to_wall * 1.0f + d_wall_to_tgt * 1.25f;
+
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_dir = dir;
+                found_wall = true;
+            }
+        }
+    }
+
+    if (found_wall && glm::length(best_dir) > 0.001f) {
+        return glm::normalize(best_dir);
+    }
+
+    glm::vec3 to_tgt_xz(target_pos.x - enemy_pos.x, 0.0f, target_pos.z - enemy_pos.z);
+    if (glm::length(to_tgt_xz) > 0.1f) {
+        return glm::normalize(to_tgt_xz);
+    }
+    return glm::vec3(1.0f, 0.0f, 0.0f);
+}
+
+glm::vec3 AberrantAI::find_ascending_wall_direction(
+    const glm::vec3& enemy_pos,
+    const glm::vec3& target_pos,
+    const World& world,
+    float max_probe_dist)
+{
+    constexpr int NUM_DIRS = 24;
+    float best_cost = 1e9f;
+    glm::vec3 best_dir(0.0f);
+    bool found_wall = false;
+
+    int py = static_cast<int>(std::floor(enemy_pos.y));
+
+    for (int i = 0; i < NUM_DIRS; ++i) {
+        float angle = static_cast<float>(i) * (2.0f * glm::pi<float>() / static_cast<float>(NUM_DIRS));
+        glm::vec3 dir(std::cos(angle), 0.0f, std::sin(angle));
+
+        float hit_dist = max_probe_dist;
+        bool hit = false;
+        const float step_size = 0.4f;
+        int max_steps = static_cast<int>(max_probe_dist / step_size);
+
+        for (int s = 1; s <= max_steps; ++s) {
+            glm::vec3 probe_pos = enemy_pos + dir * (static_cast<float>(s) * step_size);
+            int px = static_cast<int>(std::floor(probe_pos.x));
+            int pz = static_cast<int>(std::floor(probe_pos.z));
+
+            // World boundary clamp (perimeter rock faces are climbable)
+            if (px <= 4 || px >= 68 || pz <= 4 || pz >= 68) {
+                hit_dist = static_cast<float>(s) * step_size;
+                hit = true;
+                break;
+            }
+
+            // Check if there is a vertical wall extending upward above floor level
+            bool solid_at_level = world.is_solid(glm::ivec3(px, py, pz));
+            bool solid_above_1  = (py + 1 < 32) && world.is_solid(glm::ivec3(px, py + 1, pz));
+            bool solid_above_2  = (py + 2 < 32) && world.is_solid(glm::ivec3(px, py + 2, pz));
+
+            if ((solid_at_level && solid_above_1) || (solid_above_1 && solid_above_2)) {
+                hit_dist = static_cast<float>(s) * step_size;
+                hit = true;
+                break;
+            }
+        }
+
+        if (hit) {
+            glm::vec3 wall_pos = enemy_pos + dir * hit_dist;
+            float d_to_wall = hit_dist;
+            float d_wall_to_tgt = glm::distance(glm::vec2(wall_pos.x, wall_pos.z), glm::vec2(target_pos.x, target_pos.z));
+
+            // Total cost: travel across floor to wall + distance from wall to elevated target
+            float cost = d_to_wall * 1.0f + d_wall_to_tgt * 1.30f;
 
             if (cost < best_cost) {
                 best_cost = cost;
@@ -607,20 +814,42 @@ glm::vec3 AberrantAI::steer_around_obstacles(
     if (glm::length(right) < 0.001f) return fwd;
     right = glm::normalize(right);
 
-    glm::vec3 probe_origin = enemy_pos + up * 0.40f;
+    glm::vec3 probe_origin = enemy_pos + up * 0.35f;
 
     auto is_blocked = [&](const glm::vec3& dir, float dist) -> bool {
         for (float d = 0.4f; d <= dist; d += 0.4f) {
             glm::vec3 pt = probe_origin + dir * d;
-            int cx = static_cast<int>(std::floor(pt.x));
-            int cy = static_cast<int>(std::floor(pt.y));
-            int cz = static_cast<int>(std::floor(pt.z));
-            if (world.is_solid(glm::ivec3(cx, cy, cz))) {
-                // If on floor and the space directly above is open, this is a clamberable 1-block step!
-                if (up.y > 0.7f && !world.get_voxel(cx, cy + 1, cz).is_solid()) {
-                    continue;
+            if (is_point_solid(world, pt)) {
+                // If on floor and the space directly above is open, this is a clamberable step / ramp / slab!
+                if (up.y > 0.65f) {
+                    int cx = static_cast<int>(std::floor(pt.x));
+                    int cy = static_cast<int>(std::floor(pt.y));
+                    int cz = static_cast<int>(std::floor(pt.z));
+                    float s_y = get_voxel_surface_y(world, cx, cy, cz, pt.x, pt.z);
+                    if (s_y - enemy_pos.y <= 1.35f) {
+                        if (!is_point_solid(world, glm::vec3(pt.x, s_y + 0.35f, pt.z)) &&
+                            !is_point_solid(world, glm::vec3(pt.x, s_y + 0.85f, pt.z))) {
+                            continue;
+                        }
+                    }
                 }
                 return true;
+            }
+
+            // Top block / headroom check on floor: prevent entering a gap where head would hit top block
+            if (up.y > 0.65f) {
+                glm::vec3 pt_head = pt + up * 0.45f;
+                if (is_point_solid(world, pt_head)) {
+                    int cx = static_cast<int>(std::floor(pt_head.x));
+                    int cy = static_cast<int>(std::floor(pt_head.y));
+                    int cz = static_cast<int>(std::floor(pt_head.z));
+                    float s_y = get_voxel_surface_y(world, cx, cy - 1, cz, pt_head.x, pt_head.z);
+                    float ceil_bottom = static_cast<float>(cy);
+                    // If vertical gap between ground and top block is under 0.70m, path is blocked
+                    if (ceil_bottom - s_y < 0.70f) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
@@ -630,8 +859,8 @@ glm::vec3 AberrantAI::steer_around_obstacles(
         return fwd;
     }
 
-    // Direct path blocked! Check whiskered deviation angles left and right
-    const float angles[] = { 0.52f, -0.52f, 0.96f, -0.96f, 1.40f, -1.40f, 1.92f, -1.92f };
+    // Direct path blocked! Check whiskered deviation angles left, right, and reverse
+    const float angles[] = { 0.52f, -0.52f, 0.96f, -0.96f, 1.40f, -1.40f, 1.92f, -1.92f, 2.50f, -2.50f, 3.1415f };
     for (float ang : angles) {
         glm::vec3 test_dir = glm::normalize(fwd * std::cos(ang) + right * std::sin(ang));
         if (!is_blocked(test_dir, probe_dist * 0.9f)) {
@@ -662,32 +891,73 @@ bool AberrantAI::resolve_voxel_collision(
     int cy = static_cast<int>(std::floor(pos.y));
     int cz = static_cast<int>(std::floor(pos.z));
 
-    // 0. ABSOLUTE PENETRATION RECOVERY:
-    // If the entity is genuinely embedded inside a solid rock wall (both body center and head are in solid blocks),
+    // 0. GROUND SURFACE CONFORMING (FLOOR / TRANSITIONING):
+    // Find walkable surface directly underneath or stepped onto by the entity (ramps, slabs, stairs)
+    if (surface_state == StalkerSurfaceState::FLOOR || surface_state == StalkerSurfaceState::TRANSITIONING) {
+        float ground_y = 0.0f;
+        glm::vec3 ground_n(0.0f, 1.0f, 0.0f);
+        if (find_ground_surface(world, pos, 1.35f, 1.5f, &ground_y, &ground_n)) {
+            if (pos.y < ground_y) {
+                pos.y = ground_y;
+            } else if (pos.y <= ground_y + 0.65f) {
+                // Smooth slope, ramp, and half-block hugging
+                pos.y = ground_y;
+            }
+        }
+
+        // 0b. TOP BLOCK & CEILING HEADROOM CLAMP:
+        // Prevent monster head from penetrating overhead top blocks or low ceiling slabs in gaps
+        int head_vox_y = static_cast<int>(std::floor(pos.y + height));
+        int cur_vox_y = static_cast<int>(std::floor(pos.y));
+        for (int ty = cur_vox_y + 1; ty <= head_vox_y + 1; ++ty) {
+            if (ty < 32 && world.is_solid(glm::ivec3(cx, ty, cz))) {
+                float ceil_bottom_y = static_cast<float>(ty);
+                if (pos.y + height >= ceil_bottom_y - 0.25f) {
+                    if (velocity.y > 0.0f) velocity.y = 0.0f;
+                }
+                if (pos.y + height > ceil_bottom_y) {
+                    collided = true;
+                    float max_allowed_y = ceil_bottom_y - height;
+                    if (pos.y > max_allowed_y) {
+                        pos.y = max_allowed_y;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // 1. ABSOLUTE PENETRATION RECOVERY:
+    // If the entity is genuinely embedded inside a solid rock wall (feet, center, or head are in solid blocks),
     // eject immediately to nearest open air so enemies never remain trapped inside walls.
+    glm::vec3 feet_pos = pos + glm::vec3(0.0f, 0.15f, 0.0f);
     glm::vec3 center_pos = pos + glm::vec3(0.0f, std::max(0.35f, height * 0.5f), 0.0f);
     glm::vec3 head_pos = pos + glm::vec3(0.0f, std::max(0.65f, height * 0.85f), 0.0f);
-    int center_x = static_cast<int>(std::floor(center_pos.x));
-    int center_y = static_cast<int>(std::floor(center_pos.y));
-    int center_z = static_cast<int>(std::floor(center_pos.z));
-    int head_x = static_cast<int>(std::floor(head_pos.x));
-    int head_y = static_cast<int>(std::floor(head_pos.y));
-    int head_z = static_cast<int>(std::floor(head_pos.z));
 
-    if (world.is_solid(glm::ivec3(center_x, center_y, center_z)) && world.is_solid(glm::ivec3(head_x, head_y, head_z))) {
+    bool center_solid = is_point_solid(world, center_pos);
+    bool head_solid = is_point_solid(world, head_pos);
+    bool feet_solid = is_point_solid(world, feet_pos);
+
+    if (center_solid || (feet_solid && head_solid)) {
         collided = true;
         bool found_air = false;
         glm::vec3 best_eject_pos = pos;
         float best_eject_dist_sq = 1e9f;
 
-        // Check upwards first (most common for wall/ceiling clipping)
-        for (int dy = 1; dy <= 4; ++dy) {
-            int ty = center_y + dy;
-            if (ty < 26 && !world.is_solid(glm::ivec3(center_x, ty, center_z))) {
-                best_eject_pos = glm::vec3(static_cast<float>(center_x) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(center_z) + 0.5f);
-                best_eject_dist_sq = static_cast<float>(dy * dy);
-                found_air = true;
-                break;
+        // Check upwards only if overhead space is open (not trapped under a top block / ceiling)
+        int center_x = static_cast<int>(std::floor(center_pos.x));
+        int center_y = static_cast<int>(std::floor(center_pos.y));
+        int center_z = static_cast<int>(std::floor(center_pos.z));
+        bool ceiling_solid = (center_y + 1 < 32) && world.is_solid(glm::ivec3(center_x, center_y + 1, center_z));
+        if (!ceiling_solid) {
+            for (int dy = 1; dy <= 4; ++dy) {
+                int ty = center_y + dy;
+                if (ty < 26 && !is_point_solid(world, glm::vec3(static_cast<float>(center_x) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(center_z) + 0.5f))) {
+                    best_eject_pos = glm::vec3(static_cast<float>(center_x) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(center_z) + 0.5f);
+                    best_eject_dist_sq = static_cast<float>(dy * dy);
+                    found_air = true;
+                    break;
+                }
             }
         }
 
@@ -701,11 +971,12 @@ bool AberrantAI::resolve_voxel_collision(
                             int ty = center_y + dy;
                             int tz = center_z + dz;
                             if (tx < 5 || tx > 67 || tz < 5 || tz > 67 || ty < 4 || ty > 25) continue;
-                            if (!world.is_solid(glm::ivec3(tx, ty, tz))) {
+                            glm::vec3 test_pt(static_cast<float>(tx) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(tz) + 0.5f);
+                            if (!is_point_solid(world, test_pt)) {
                                 float dist_sq = static_cast<float>(dx * dx + dy * dy + dz * dz);
                                 if (dist_sq < best_eject_dist_sq) {
                                     best_eject_dist_sq = dist_sq;
-                                    best_eject_pos = glm::vec3(static_cast<float>(tx) + 0.5f, static_cast<float>(ty) + 0.05f, static_cast<float>(tz) + 0.5f);
+                                    best_eject_pos = test_pt;
                                     found_air = true;
                                 }
                             }
@@ -735,53 +1006,59 @@ bool AberrantAI::resolve_voxel_collision(
     };
 
     if (surface_state == StalkerSurfaceState::FLOOR || surface_state == StalkerSurfaceState::TRANSITIONING) {
-        Voxel current_v = world.get_voxel(cx, cy, cz);
-        if (current_v.is_solid()) {
-            Voxel above_v = world.get_voxel(cx, cy + 1, cz);
-            if (!above_v.is_solid()) {
-                pos.y = static_cast<float>(cy + 1) + 0.05f;
-            } else {
-                collided = true;
-                float fx = pos.x - (static_cast<float>(cx) + 0.5f);
-                float fz = pos.z - (static_cast<float>(cz) + 0.5f);
-                if (std::abs(fx) > std::abs(fz)) {
-                    pos.x = static_cast<float>(cx) + (fx > 0.0f ? (1.0f + radius + 0.02f) : (-radius - 0.02f));
-                    velocity.x = 0.0f;
-                } else {
-                    pos.z = static_cast<float>(cz) + (fz > 0.0f ? (1.0f + radius + 0.02f) : (-radius - 0.02f));
-                    velocity.z = 0.0f;
-                }
-            }
-        }
 
-        // Test horizontal perimeter at feet level and mid-body
+        // Test horizontal perimeter at feet level and upper body/head level
+        const float check_heights[2] = { 0.25f, std::min(height * 0.80f, 0.75f) };
         for (const auto& off : offsets) {
-            glm::vec3 check_pos = pos + glm::vec3(off.x, 0.35f, off.y);
-            int ix = static_cast<int>(std::floor(check_pos.x));
-            int iy = static_cast<int>(std::floor(check_pos.y));
-            int iz = static_cast<int>(std::floor(check_pos.z));
+            for (float check_h : check_heights) {
+                glm::vec3 check_pos = pos + glm::vec3(off.x, check_h, off.y);
+                if (is_point_solid(world, check_pos)) {
+                    int ix = static_cast<int>(std::floor(check_pos.x));
+                    int iy = static_cast<int>(std::floor(check_pos.y));
+                    int iz = static_cast<int>(std::floor(check_pos.z));
 
-            if (world.is_solid(glm::ivec3(ix, iy, iz))) {
-                Voxel above_v = world.get_voxel(ix, iy + 1, iz);
-                // 1-block step clambering: only if there's clear space above!
-                if (!above_v.is_solid() && iy == cy) {
-                    pos.y = std::max(pos.y, static_cast<float>(iy + 1) + 0.05f);
-                    continue;
-                }
-                // Solid wall: push out along penetrating axis
-                collided = true;
-                float center_vx = static_cast<float>(ix) + 0.5f;
-                float center_vz = static_cast<float>(iz) + 0.5f;
-                float dx = pos.x - center_vx;
-                float dz = pos.z - center_vz;
-                if (std::abs(dx) > std::abs(dz)) {
-                    pos.x = static_cast<float>(ix) + (dx > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
-                    if (dx > 0.0f) velocity.x = std::max(0.0f, velocity.x);
-                    else velocity.x = std::min(0.0f, velocity.x);
-                } else {
-                    pos.z = static_cast<float>(iz) + (dz > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
-                    if (dz > 0.0f) velocity.z = std::max(0.0f, velocity.z);
-                    else velocity.z = std::min(0.0f, velocity.z);
+                    // Step clambering check: ONLY allowed if collision was at feet level (check_h < 0.35f)
+                    // and upper clearance is open!
+                    float step_surf_y = -1000.0f;
+                    bool can_step = false;
+                    if (check_h < 0.35f) {
+                        for (int ty = iy + 1; ty >= iy - 1; --ty) {
+                            Voxel tv = world.get_voxel(ix, ty, iz);
+                            if (tv.is_solid()) {
+                                float s_y = get_voxel_surface_y(world, ix, ty, iz, check_pos.x, check_pos.z);
+                                float step_h = s_y - pos.y;
+                                if (step_h > 0.0f && step_h <= 1.35f) {
+                                    if (!is_point_solid(world, glm::vec3(check_pos.x, s_y + 0.35f, check_pos.z)) &&
+                                        !is_point_solid(world, glm::vec3(check_pos.x, s_y + height * 0.75f, check_pos.z))) {
+                                        step_surf_y = s_y;
+                                        can_step = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (can_step) {
+                        pos.y = std::max(pos.y, step_surf_y);
+                        continue;
+                    }
+
+                    // Solid wall / top block: push out along penetrating axis
+                    collided = true;
+                    float center_vx = static_cast<float>(ix) + 0.5f;
+                    float center_vz = static_cast<float>(iz) + 0.5f;
+                    float dx = pos.x - center_vx;
+                    float dz = pos.z - center_vz;
+                    if (std::abs(dx) > std::abs(dz)) {
+                        pos.x = static_cast<float>(ix) + (dx > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                        if (dx > 0.0f) velocity.x = std::max(0.0f, velocity.x);
+                        else velocity.x = std::min(0.0f, velocity.x);
+                    } else {
+                        pos.z = static_cast<float>(iz) + (dz > 0.0f ? (1.0f + radius + 0.01f) : (-radius - 0.01f));
+                        if (dz > 0.0f) velocity.z = std::max(0.0f, velocity.z);
+                        else velocity.z = std::min(0.0f, velocity.z);
+                    }
                 }
             }
         }
@@ -793,7 +1070,7 @@ bool AberrantAI::resolve_voxel_collision(
         }
 
         // Center check
-        if (world.is_solid(glm::ivec3(cx, cy, cz))) {
+        if (is_point_solid(world, pos)) {
             collided = true;
             pos += n * 0.35f;
         }
@@ -804,10 +1081,7 @@ bool AberrantAI::resolve_voxel_collision(
             tangent_right = glm::normalize(tangent_right);
             for (float sign : { -1.0f, 1.0f }) {
                 glm::vec3 check_side = pos + tangent_right * (radius * sign);
-                int sx = static_cast<int>(std::floor(check_side.x));
-                int sy = static_cast<int>(std::floor(check_side.y));
-                int sz = static_cast<int>(std::floor(check_side.z));
-                if (world.is_solid(glm::ivec3(sx, sy, sz))) {
+                if (is_point_solid(world, check_side)) {
                     collided = true;
                     pos -= tangent_right * (sign * 0.15f);
                 }
@@ -816,18 +1090,17 @@ bool AberrantAI::resolve_voxel_collision(
     } else if (surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
         if (velocity.y > 0.0f) velocity.y = 0.0f;
 
-        if (world.is_solid(glm::ivec3(cx, cy, cz))) {
+        if (is_point_solid(world, pos)) {
             collided = true;
             pos.y = static_cast<float>(cy) - 0.15f;
         }
 
         for (const auto& off : offsets) {
             glm::vec3 check_pos = pos + glm::vec3(off.x, 0.0f, off.y);
-            int ix = static_cast<int>(std::floor(check_pos.x));
-            int iy = static_cast<int>(std::floor(check_pos.y));
-            int iz = static_cast<int>(std::floor(check_pos.z));
-            if (world.is_solid(glm::ivec3(ix, iy, iz))) {
+            if (is_point_solid(world, check_pos)) {
                 collided = true;
+                int ix = static_cast<int>(std::floor(check_pos.x));
+                int iz = static_cast<int>(std::floor(check_pos.z));
                 float center_vx = static_cast<float>(ix) + 0.5f;
                 float center_vz = static_cast<float>(iz) + 0.5f;
                 float dx = pos.x - center_vx;

@@ -95,10 +95,14 @@ void SwarmManager::Update(float dt) {
             m_enrageTimer = ENRAGE_DURATION;
             if (m_on_enrage_alert) m_on_enrage_alert();
             if (m_on_spawn_wave) m_on_spawn_wave();
-        } else if (m_agitation >= 0.40f) {
-            m_state = AgitationState::STIRRED;
         } else {
-            m_state = AgitationState::CALM;
+            // Natural ambient agitation decay when not in active combat enrage
+            m_agitation = std::max(0.0f, m_agitation - 0.025f * dt);
+            if (m_agitation >= 0.40f) {
+                m_state = AgitationState::STIRRED;
+            } else {
+                m_state = AgitationState::CALM;
+            }
         }
     }
 }

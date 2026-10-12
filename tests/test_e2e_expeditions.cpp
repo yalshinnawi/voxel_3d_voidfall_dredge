@@ -52,11 +52,13 @@ void run_e2e_sector1_scout_lifecycle() {
     profile.selected_class_id = static_cast<int>(CharacterClass::Scout);
     E2E_CHECK(profile.is_class_unlocked(CharacterClass::Scout), "Scout must be unlocked at Level 3");
 
-    // 2. Hub Terminal Upgrade Purchase: Thruster Tank & Sonar Frequency
-    bool buy_tank = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+    // 2. Hub Terminal Upgrade Purchase: Thruster Tank & Sonar Frequency (Uses EXP only)
+    bool buy_tank = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_exp);
     E2E_CHECK(buy_tank, "Scout must purchase Thruster Tank Tier 1");
-    bool buy_sonar = profile.upgrades.purchase(UpgradeType::SonarFrequency, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+    bool buy_sonar = profile.upgrades.purchase(UpgradeType::SonarFrequency, profile.get_player_level(), profile.total_exp);
     E2E_CHECK(buy_sonar, "Scout must purchase Sonar Frequency Tier 1");
+    E2E_CHECK(profile.total_exp == (750 - 100 - 100), "Scout EXP deduction mismatch (750 - 200 = 550)");
+    E2E_CHECK(profile.total_coins == 500, "Scout coins must not be spent on upgrades");
 
     // 3. Save profile to disk and reload
     const std::string e2e_save = "tests/e2e_scout_profile.json";
@@ -244,12 +246,18 @@ void run_e2e_sector3_vanguard_survival() {
     // Simulate falling debris hitting bulkhead
     E2E_CHECK(covered_by_bulkhead, "Player under placed bulkhead must be shielded from cave-in debris");
 
-    // 2. Direct Falling Debris Impact Damage Mitigation Test
+    // 2. Direct Falling Debris Impact Damage Mitigation & Shield Layer Test
     // Vanguard 50% + Plating Tier 2 (20%) = 70% total reduction
     float raw_damage = 50.0f;
     float applied_dmg = player.take_damage(raw_damage, true);
     E2E_CHECK(std::abs(applied_dmg - 15.0f) < 0.01f, "Vanguard 70% total debris damage mitigation mismatch");
-    E2E_CHECK(player.health() == (165.0f - 15.0f), "Player health after mitigated debris hit mismatch");
+    E2E_CHECK(player.shield() == (75.0f - 15.0f), "Kinetic shield layer must absorb mitigated debris damage first");
+    E2E_CHECK(player.health() == 165.0f, "Hitpoints must remain intact while protected by shield layer");
+
+    // Deplete shield to test direct impact damage to unregenerating hitpoints
+    player.set_shield(0.0f);
+    player.take_damage(raw_damage, true);
+    E2E_CHECK(player.health() == (165.0f - 15.0f), "Player health after mitigated debris hit with depleted shield mismatch");
 
     // 3. Level 3 180s Countdown Simulation
     float level3_timer = 180.0f;

@@ -8,8 +8,9 @@ namespace Voidfall {
 enum class ClutterType : uint8_t {
     CeilingStalactite = 0,
     FloorStalagmiteRubble = 1,
-    VoiditeCrystal = 2,
-    Count = 3
+    VoiditeCrystal = 2,    // Objective mineral cluster (vibrant violet amethyst spires)
+    PrismaticCrystal = 3,  // Decorative diamond/calcite cluster (radiant cyan ice shards)
+    Count = 4
 };
 
 struct ClutterInstance {
@@ -18,6 +19,8 @@ struct ClutterInstance {
     ClutterType type{ClutterType::CeilingStalactite};
     glm::vec4 color_tint{1.0f, 1.0f, 1.0f, 1.0f};
     float emissive_boost{1.0f};
+    glm::ivec3 host_voxel{0};     // World-space coordinates of host block
+    glm::ivec3 attach_normal{0, 1, 0}; // Direction towards attached surface face
 };
 
 } // namespace Voidfall

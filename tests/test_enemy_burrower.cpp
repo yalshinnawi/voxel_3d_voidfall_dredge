@@ -331,8 +331,212 @@ int main() {
         std::cout << " -> Acoustic awakening and shooter retaliation verified." << std::endl;
     }
 
+    // Test 11: Spawn Dormancy, Audio Rate-Limiting, and Stealth Safeguards
+    {
+        std::cout << "[Test 11] Testing Spawn Dormancy, Audio Rate-Limiting, and Proximity Safeguards..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 burrower_pos(20.0f, 20.0f, 20.0f);
+        manager.spawn_dormant_burrower(burrower_pos);
+
+        CHECK(manager.burrowers().size() == 1, "Expected 1 burrower spawned");
+        const auto& b = manager.burrowers()[0];
+        CHECK(b.is_dormant(), "Spawned burrower should initialize in Dormant state");
+        CHECK(b.is_unalerted(), "Dormant burrower must be unalerted");
+
+        // Player is 18m away, walking quietly without loud sounds
+        glm::vec3 player_pos(20.0f, 20.0f, 38.0f);
+        auto res = manager.update(0.2f, player_pos, world, {}, false);
+        CHECK(b.is_dormant(), "Burrower must remain dormant when player is 18m away");
+        CHECK(!res.any_roar, "Dormant burrower must NOT emit ambient subterranean roars");
+        CHECK(!res.any_grind, "Dormant burrower must NOT emit grind sounds");
+
+        // Player approaches within 6m (un-crouched) -> wakes up
+        glm::vec3 close_player(20.0f, 20.0f, 25.0f);
+        res = manager.update(0.2f, close_player, world, {}, false);
+        CHECK(!b.is_dormant(), "Burrower must awaken when player approaches within 6m without stealth");
+        CHECK(b.state == BurrowerState::Burrowing, "Awakened burrower should begin burrowing");
+
+        // Subsequent update immediately afterwards should not trigger another roar due to rate-limiting
+        res = manager.update(0.1f, close_player, world, {}, false);
+        CHECK(!res.any_roar, "Roar should be rate-limited and not spam back-to-back");
+
+        std::cout << " -> Spawn dormancy, proximity safeguards, and audio rate-limiting verified." << std::endl;
+    }
+
+    // Test 12: Breaching Emergence State, Rotary Cutter Teeth Spin & Kinetic Transition
+    {
+        std::cout << "[Test 12] Testing Breaching Emergence, High-RPM Rotary Cutter Spin & Kinetic Charge Transition..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(20.0f, 20.0f, 20.0f);
+        glm::vec3 breach_facing(0.0f, 0.0f, 1.0f);
+        manager.spawn_emerging_burrower(spawn_pos, breach_facing);
+
+        CHECK(manager.burrowers().size() == 1, "Expected 1 burrower spawned");
+        const auto& b = manager.burrowers()[0];
+        CHECK(b.state == BurrowerState::Breaching, "Emerging burrower must initialize in Breaching state");
+        CHECK(b.is_emerging(), "is_emerging() helper must return true during Breaching");
+        CHECK(b.just_roared, "Emerging breach should trigger subterranean roar event");
+        CHECK(b.just_ground, "Emerging breach should trigger initial grinding teeth event");
+
+        float initial_cutter = b.cutter_angle;
+        glm::vec3 player_pos(20.0f, 20.0f, 30.0f);
+        auto res = manager.update(0.4f, player_pos, world, {}, false);
+
+        CHECK(b.state == BurrowerState::Breaching, "Burrower should remain breaching at 0.4s (duration 1.2s)");
+        CHECK(b.cutter_angle > initial_cutter + 10.0f, "Rotary cutter head must spin at high RPM (dt * 32.0f) during emergence");
+        CHECK(res.any_grind, "Emergence grinding teeth events must be emitted");
+
+        // Advance past 1.2s breach threshold -> transitions into Charging
+        manager.update(0.9f, player_pos, world, {}, false); // total 1.3s
+        CHECK(b.state == BurrowerState::Charging, "Burrower must transition from Breaching to Charging after 1.2s");
+        CHECK(!b.is_emerging(), "is_emerging() should return false once in Charging state");
+
+        std::cout << " -> Breaching emergence, high-RPM cutter teeth spin, and kinetic charge transition verified." << std::endl;
+    }
+
+    // Test 13: Charging State Destroys Voxels in Path
+    {
+        std::cout << "[Test 13] Testing Charging State Destroys Voxels In Path..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(20.0f, 20.0f, 20.0f);
+        manager.spawn_burrower(spawn_pos);
+
+        auto& b = manager.burrowers_mut()[0];
+        b.state = BurrowerState::Charging;
+        b.yaw = 1.5707963f; // Facing +X
+        b.pitch = 0.0f;
+
+        // Place destructible basalt block in front of charge trajectory
+        world.set_voxel(22, 20, 20, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        world.set_voxel(23, 20, 20, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+
+        glm::vec3 player_pos(30.0f, 20.0f, 20.0f);
+        auto res = manager.update(0.3f, player_pos, world);
+
+        // Blocks in path should be destroyed / excavated during kinetic charge
+        Voxel v1 = world.get_voxel(22, 20, 20);
+        CHECK(v1.material_id == MAT_AIR, "Expected destructible basalt to be obliterated in charge path");
+        CHECK(!res.excavated_voxels.empty(), "Expected excavated voxel deltas emitted during charge destruction");
+        CHECK(res.any_grind, "Grinding cutter teeth cues should be emitted when smashing voxels during charge");
+
+        std::cout << " -> Charging state terrain destruction verified." << std::endl;
+    }
+
+    // Test 14: Relentless Non-Retreating Combat Tenacity (No Scare / No Flee)
+    {
+        std::cout << "[Test 14] Testing Relentless Non-Retreating Combat Tenacity..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(25.0f, 20.0f, 25.0f);
+        manager.spawn_burrower(spawn_pos);
+
+        auto& b = manager.burrowers_mut()[0];
+        b.state = BurrowerState::Breaching;
+        b.hp = 100.0f;
+
+        // Deal heavy damage bringing HP down to 25 (< 35 critical threshold)
+        glm::vec3 attacker(25.0f, 20.0f, 35.0f);
+        bool hit = manager.damage_nearest(spawn_pos, 3.0f, 75.0f, false, false, nullptr, nullptr, &attacker);
+        CHECK(hit, "Expected hit on burrower");
+        CHECK(b.hp == 25.0f, "Expected burrower HP to be 25.0");
+
+        // The burrower must NOT flee into retreat; it enrages instead!
+        CHECK(b.state == BurrowerState::Enraged, "Wounded burrower must NOT retreat into hiding; it should enter Enraged state");
+        CHECK(b.is_pursuing_attacker, "Burrower must remain locked onto attacker");
+
+        std::cout << " -> Relentless non-retreating combat tenacity verified." << std::endl;
+    }
+
+    // Test 15: 3D Vertical Elevation Targeting Accuracy
+    {
+        std::cout << "[Test 15] Testing 3D Vertical Elevation Targeting Accuracy..." << std::endl;
+        // 15a: Target elevated above burrower
+        {
+            SeismicBurrowerManager manager;
+            glm::vec3 spawn_pos(20.0f, 20.0f, 20.0f);
+            manager.spawn_burrower(spawn_pos);
+
+            world.set_voxel(20, 20, 20, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+            world.set_voxel(20, 21, 20, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+
+            glm::vec3 elevated_player(20.0f, 35.0f, 20.0f);
+            for (int i = 0; i < 5; ++i) {
+                manager.update(0.2f, elevated_player, world);
+            }
+
+            const auto& b_up = manager.burrowers()[0];
+            CHECK(b_up.forward().y > 0.8f, "Burrower forward direction Y must be positive when target is elevated above");
+            CHECK(b_up.velocity.y > 1.0f, "Burrower velocity Y must be positive when target is elevated above");
+        }
+
+        // 15b: Target located below burrower
+        {
+            SeismicBurrowerManager manager;
+            glm::vec3 spawn_pos(20.0f, 20.0f, 20.0f);
+            manager.spawn_burrower(spawn_pos);
+
+            world.set_voxel(20, 20, 20, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+            world.set_voxel(20, 19, 20, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+
+            glm::vec3 depressed_player(20.0f, 5.0f, 20.0f);
+            for (int i = 0; i < 5; ++i) {
+                manager.update(0.2f, depressed_player, world);
+            }
+
+            const auto& b_down = manager.burrowers()[0];
+            CHECK(b_down.forward().y < -0.8f, "Burrower forward direction Y must be negative when target is below");
+            CHECK(b_down.velocity.y < -1.0f, "Burrower velocity Y must be negative when target is below");
+        }
+
+        std::cout << " -> 3D vertical elevation targeting accuracy verified." << std::endl;
+    }
+
+    // Test 16: Crouched Delver Sneak Approach & Unalerted Point-Blank Sneak Critical
+    {
+        std::cout << "[Test 16] Testing Crouched Delver Sneak Approach & Point-Blank Sneak Critical..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(20.0f, 20.0f, 20.0f);
+        manager.spawn_burrower(spawn_pos);
+
+        auto& b = manager.burrowers_mut()[0];
+        b.state = BurrowerState::Dormant;
+        b.hp = 100.0f;
+
+        CHECK(b.is_unalerted(), "Initial dormant burrower must be unalerted");
+
+        // Player approaches closely (2.0m away) while crouched (player_is_crouching = true)
+        glm::vec3 crouch_delver_pos(20.0f, 20.0f, 22.0f); // 2m distance
+        manager.update(0.1f, crouch_delver_pos, world, {}, true);
+
+        // Must remain Dormant and unalerted because crouching delver generates 0 sound and is > 0.9m collision
+        CHECK(b.state == BurrowerState::Dormant, "Crouching delver at 2.0m must NOT alert or wake dormant burrower");
+        CHECK(b.is_unalerted(), "Burrower must remain unalerted when crept upon by crouching delver");
+
+        // Land a sneak attack melee strike with allow_crit = true
+        bool is_crit = false;
+        float damage_dealt = 0.0f;
+        bool hit = manager.damage_nearest(crouch_delver_pos, 3.0f, 20.0f, false, true, &is_crit, &damage_dealt);
+
+        CHECK(hit, "Expected melee strike to hit dormant burrower");
+        CHECK(is_crit, "Expected sneak attack critical hit on unalerted dormant burrower");
+        CHECK(damage_dealt == 20.0f * StealthSystem::SNEAK_ATTACK_CRIT_MULTIPLIER,
+              "Sneak attack must deal multiplier (2.5x) critical damage");
+
+        // Now test standing approach wakes dormant burrower:
+        SeismicBurrowerManager manager2;
+        manager2.spawn_burrower(spawn_pos);
+        auto& b2 = manager2.burrowers_mut()[0];
+        b2.state = BurrowerState::Dormant;
+
+        // Player standing at 4.0m (within 8.0m standing wake radius)
+        glm::vec3 standing_delver_pos(20.0f, 20.0f, 24.0f);
+        manager2.update(0.1f, standing_delver_pos, world, {}, false);
+        CHECK(b2.state != BurrowerState::Dormant, "Standing delver at 4.0m must awaken dormant burrower");
+
+        std::cout << " -> Crouched delver sneak approach & unalerted point-blank critical verified." << std::endl;
+    }
+
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (10/10)" << std::endl;
+    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (16/16)" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }

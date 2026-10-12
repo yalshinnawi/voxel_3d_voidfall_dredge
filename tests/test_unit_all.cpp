@@ -34,6 +34,8 @@
 #include "../src/ui/debrief_menu.hpp"
 #include "../src/graphics/particle_system.hpp"
 #include "../src/graphics/clustered_lighting.hpp"
+#include "../src/graphics/renderer.hpp"
+#include "../src/graphics/surface_clutter.hpp"
 
 using namespace Voidfall;
 
@@ -693,13 +695,19 @@ void test_skills_surveying_and_hazards() {
     log_pass("Skill Matrix XP accumulation, ranks and perk unlocks");
 
     // Surveying system pulse wave & clustering
+    // Surveying system pulse wave & clustering
     World world(1234);
     world.set_voxel(10, 10, 10, Voxel{MAT_VOIDITE_CRYSTAL, 0});
     world.set_voxel(10, 11, 10, Voxel{MAT_VOIDITE_CRYSTAL, 0});
-    world.set_voxel(18, 10, 10, Voxel{MAT_INDUSTRIAL_BULKHEAD, 0});
-    world.set_voxel(10, 18, 10, Voxel{MAT_RADIOACTIVE_ORE, 0});
+    world.set_voxel(18, 10, 10, Voxel{MAT_REINFORCED_VAULT_DOOR, 0});
+    world.set_voxel(10, 18, 10, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    // Non-objective blocks (titanium, radioactive, prismatic, astral) that MUST be ignored by sonar
+    world.set_voxel(10, 10, 18, Voxel{MAT_INDUSTRIAL_BULKHEAD, 0});
+    world.set_voxel(10, 10, 5, Voxel{MAT_RADIOACTIVE_ORE, 0});
+    world.set_voxel(5, 10, 10, Voxel{MAT_PRISMATIC_CRYSTAL, 0});
+    world.set_voxel(15, 10, 10, Voxel{MAT_ASTRAL_ORE, 0});
 
-    // Rank 0 Scan: detects minerals, but material identification is disabled
+    // Rank 0 Scan: detects objectives, but material identification is disabled
     SurveyingSystem surveying_raw;
     surveying_raw.trigger_scan(glm::vec3(10.0f, 10.0f, 10.0f), world, 25.0f, 0.0f, 0);
     TEST_CHECK(surveying_raw.is_active(), "Raw surveying scan must be active");
@@ -713,9 +721,93 @@ void test_skills_surveying_and_hazards() {
     TEST_CHECK(surveying.is_identifying_materials(), "Rank 2 scan must identify materials");
     TEST_CHECK(surveying.total_duration() == (1.8f + 0.6f + 1.0f), "Rank 2 duration must scale properly");
     surveying.update(0.5f);
-    TEST_CHECK(!surveying.surveyed_voxels().empty(), "Surveying pulse must detect nearby mineral voxels");
-    TEST_CHECK(surveying.clusters().size() >= 3, "Surveying pulse must group voxels into at least 3 distinct mineral clusters");
-    log_pass("Seismic Sonar wave query, mineral clustering and spectroscopic labels");
+    TEST_CHECK(!surveying.surveyed_voxels().empty(), "Surveying pulse must detect nearby objective voxels");
+    TEST_CHECK(surveying.clusters().size() >= 3, "Surveying pulse must group voxels into at least 3 distinct objective clusters");
+
+    bool has_non_objective = false;
+    for (const auto& sv : surveying.surveyed_voxels()) {
+        if (sv.material_id != MAT_VOIDITE &&
+            sv.material_id != MAT_VOIDITE_CRYSTAL &&
+            sv.material_id != MAT_VAULT_DOOR &&
+            sv.material_id != MAT_REINFORCED_VAULT_DOOR) {
+            has_non_objective = true;
+            break;
+        }
+    }
+    TEST_CHECK(!has_non_objective, "Sonar must only scan objective blocks (nothing else: titanium, radioactive, prismatic, astral excluded)");
+
+    // Monster Detection Validation
+    std::vector<VoidStalker> test_stalkers;
+    VoidStalker s1;
+    s1.id = 1;
+    s1.position = glm::vec3(12.0f, 10.0f, 10.0f);
+    test_stalkers.push_back(s1);
+
+    std::vector<SeismicBurrower> test_burrowers;
+    SeismicBurrower b1;
+    b1.id = 1;
+    b1.position = glm::vec3(10.0f, 14.0f, 10.0f);
+    test_burrowers.push_back(b1);
+
+    SurveyingSystem monster_scan;
+    monster_scan.trigger_scan(glm::vec3(10.0f, 10.0f, 10.0f), world, 25.0f, 0.0f, 2, &test_stalkers, &test_burrowers);
+    TEST_CHECK(monster_scan.monsters().size() == 2, "Sonar must detect and highlight both monsters within range");
+    TEST_CHECK(!monster_scan.monsters()[0].outline_lines.empty(), "Sonar monster must have wireframe outline");
+    TEST_CHECK(!monster_scan.monsters()[0].hull_triangles.empty(), "Sonar monster must have volumetric hull");
+    log_pass("Seismic Sonar wave query, objective clustering, monster detection and spectroscopic labels");
+
+    // Vein Clustering & Smooth Hull Validation:
+    // Create an explicit deposit vein of 4 touching Voidite blocks in an L-shape:
+    // (2, 2, 2), (2, 3, 2), (2, 4, 2), (3, 4, 2)
+    // Plus a disjoint single Voidite crystal at (15, 15, 15)
+    // Plus plain rocks and water that must be completely ignored by sonar
+    World vein_world(999);
+    for (int x = 0; x <= 20; ++x) {
+        for (int y = 0; y <= 20; ++y) {
+            for (int z = 0; z <= 20; ++z) {
+                vein_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+            }
+        }
+    }
+    vein_world.set_voxel(8, 8, 8, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    vein_world.set_voxel(8, 9, 8, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    vein_world.set_voxel(8, 10, 8, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    vein_world.set_voxel(9, 10, 8, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    vein_world.set_voxel(13, 13, 13, Voxel{MAT_VOIDITE_CRYSTAL, 0});
+    vein_world.set_voxel(8, 11, 8, Voxel{MAT_FRACTURED_GRANITE, 0});
+    vein_world.set_voxel(7, 8, 8, Voxel{MAT_VOLCANIC_BASALT, 0});
+    vein_world.set_voxel(8, 8, 9, Voxel{MAT_CRYSTAL_AQUIFER, 0});
+
+    SurveyingSystem vein_scan;
+    vein_scan.trigger_scan(glm::vec3(10.0f, 10.0f, 10.0f), vein_world, 7.5f, 0.0f, 2);
+
+    TEST_CHECK(vein_scan.surveyed_voxels().size() == 5, "Sonar must only scan valuable blocks (5 voidite, rock/water excluded)");
+    TEST_CHECK(vein_scan.clusters().size() == 2, "Flood fill must merge touching blocks into 1 vein and separate disjoint blocks");
+
+    const SurveyedCluster* merged_vein = nullptr;
+    const SurveyedCluster* lone_vein = nullptr;
+    for (const auto& cl : vein_scan.clusters()) {
+        if (cl.count == 4) merged_vein = &cl;
+        else if (cl.count == 1) lone_vein = &cl;
+    }
+
+    TEST_CHECK(merged_vein != nullptr, "Merged 4-block vein cluster must exist");
+    TEST_CHECK(lone_vein != nullptr, "Disjoint 1-block crystal cluster must exist");
+
+    if (merged_vein) {
+        TEST_CHECK(std::abs(merged_vein->centroid.x - 8.75f) < 0.01f, "Merged vein centroid X must be correct");
+        TEST_CHECK(std::abs(merged_vein->centroid.y - 9.75f) < 0.01f, "Merged vein centroid Y must be correct");
+        TEST_CHECK(std::abs(merged_vein->centroid.z - 8.50f) < 0.01f, "Merged vein centroid Z must be correct");
+        TEST_CHECK(!merged_vein->outline_lines.empty(), "Merged vein must generate glowing outline lines");
+        TEST_CHECK(!merged_vein->hull_triangles.empty(), "Merged vein must generate glowing hull triangles");
+        TEST_CHECK(merged_vein->outline_lines.size() < 96, "Internal edges between touching blocks must be excluded from outline");
+    }
+
+    if (lone_vein) {
+        TEST_CHECK(lone_vein->outline_lines.size() == 24, "Single block crystal outline must have 12 lines (24 vertices)");
+        TEST_CHECK(lone_vein->hull_triangles.size() == 36, "Single block crystal hull must have 12 triangles (36 vertices)");
+    }
+    log_pass("Vein Clustering: Flood-fill connected component merge & smooth hull/outline generation");
 
     // Sonar Cooldown & Anti-Spam Verification
     PlayerController player;
@@ -850,6 +942,17 @@ void test_inventory_and_anti_exploit() {
     TEST_CHECK(inv.is_abandoned, "is_abandoned flag must be set");
     TEST_CHECK(inv.voidite == 12, "Abandon penalty 50% voidite deduction mismatch");
     TEST_CHECK(inv.evaluate_outcome_badge(false, 30) == "ABANDONED (<50%)", "Abandoned badge mismatch");
+
+    // Late Level Astral Ore Collection & Completion Rating
+    PlayerInventory late_inv;
+    late_inv.reset(45, 5); // Sector 3 goal: 45 Voidite, 5 Astral Ore
+    late_inv.add_voidite(45);
+    late_inv.add_astral_ore(5);
+    late_inv.vault_breached = true;
+    int late_rate = late_inv.calculate_completion_rate(true);
+    TEST_CHECK(late_rate == 100, "Late level 100% completion rate with astral ore mismatch");
+    late_inv.finalize_run(3, true);
+    TEST_CHECK(late_inv.run_coins_earned > 100, "Finalized run must credit coins for astral ore extraction");
     log_pass("Inventory calculations, bulkhead fabrication, and completion rating");
 }
 
@@ -864,6 +967,7 @@ void test_save_persistence() {
     profile.total_coins = 950;
     profile.total_voidite = 120;
     profile.total_titanium = 75;
+    profile.total_astral_ore = 15;
     profile.selected_class_id = 2; // Scout
     profile.upgrades.drillSpeedTier = 4;
     profile.upgrades.thrusterTankTier = 3;
@@ -884,6 +988,7 @@ void test_save_persistence() {
     TEST_CHECK(loaded.get_player_level() == 5 || loaded.get_player_level() == 6, "Loaded player level valid");
     TEST_CHECK(loaded.total_voidite == 120, "Loaded total_voidite mismatch");
     TEST_CHECK(loaded.total_titanium == 75, "Loaded total_titanium mismatch");
+    TEST_CHECK(loaded.total_astral_ore == 15, "Loaded total_astral_ore mismatch");
     TEST_CHECK(loaded.selected_class_id == 2, "Loaded selected_class_id mismatch");
     TEST_CHECK(loaded.upgrades.drillSpeedTier == 4, "Loaded drillSpeedTier mismatch");
     TEST_CHECK(loaded.upgrades.thrusterTankTier == 3, "Loaded thrusterTankTier mismatch");
@@ -1330,41 +1435,38 @@ void test_noise_meter_and_void_stalkers() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 11. CARRY WEIGHT OVERBURDEN & CLASS TACTICAL ABILITIES
+// 11. UNRESTRICTED INVENTORY CAPACITY & CLASS TACTICAL ABILITIES
 // ─────────────────────────────────────────────────────────────
 void test_carry_weight_and_tactical_abilities() {
-    std::cout << "\n=== [MODULE 11] Carry Weight Overburden & Class Tactical Abilities ===" << std::endl;
+    std::cout << "\n=== [MODULE 11] Unrestricted Inventory Capacity & Class Tactical Abilities ===" << std::endl;
 
-    // 1. Inventory Carry Weight Calculation
+    // 1. Unrestricted Inventory Capacity (Carry Weight Removed)
     PlayerInventory inv;
     inv.bulkheads = 0;
     inv.demolition_charges = 0;
-    TEST_CHECK(inv.carry_weight() == 0.0f, "Empty inventory must have 0 carry weight");
+    TEST_CHECK(inv.carry_weight() == 0.0f, "Carry weight must remain 0 (weight system removed)");
     TEST_CHECK(!inv.is_overburdened(0), "Empty inventory cannot be overburdened");
 
-    inv.add_voidite(10);      // 10 * 1.0 = 10.0kg
-    inv.add_titanium(5);      // 5 * 2.5 = 12.5kg
-    inv.add_salvage(10);      // 10 * 0.4 = 4.0kg
-    inv.bulkheads = 5;        // 5 * 2.0 = 10.0kg
-    inv.demolition_charges = 2; // 2 * 1.5 = 3.0kg
-    float expected_w = 10.0f + 12.5f + 4.0f + 10.0f + 3.0f; // 39.5kg
-    TEST_CHECK(std::abs(inv.carry_weight() - expected_w) < 0.001f, "Carry weight must correctly tally all minerals and materials");
+    inv.add_voidite(10);
+    inv.add_titanium(5);
+    inv.add_salvage(10);
+    inv.bulkheads = 5;
+    inv.demolition_charges = 2;
 
-    // Check thresholds: Vanguard (85kg), Demolitionist (60kg), Scout (42kg)
-    TEST_CHECK(!inv.is_overburdened(1), "39.5kg is under Vanguard 85kg capacity");
-    TEST_CHECK(!inv.is_overburdened(0), "39.5kg is under Demolitionist 60kg capacity");
-    TEST_CHECK(!inv.is_overburdened(2), "39.5kg is under Scout 42kg capacity");
-    TEST_CHECK(inv.overburden_penalty(2) == 1.0f, "No overburden penalty when under max weight");
+    // Verify unencumbered regardless of cargo haul
+    TEST_CHECK(!inv.is_overburdened(1), "Heavy mineral load does not overburden Vanguard");
+    TEST_CHECK(!inv.is_overburdened(0), "Heavy mineral load does not overburden Demolitionist");
+    TEST_CHECK(!inv.is_overburdened(2), "Heavy mineral load does not overburden Scout");
+    TEST_CHECK(inv.overburden_penalty(0) == 1.0f, "Demolitionist has full 1.0 speed multiplier");
+    TEST_CHECK(inv.overburden_penalty(1) == 1.0f, "Vanguard has full 1.0 speed multiplier");
+    TEST_CHECK(inv.overburden_penalty(2) == 1.0f, "Scout has full 1.0 speed multiplier");
 
-    // Add Relic (10.0kg) -> total = 49.5kg
+    // Add Relic -> still unrestricted
     inv.add_relic();
-    TEST_CHECK(std::abs(inv.carry_weight() - (expected_w + 10.0f)) < 0.001f, "Relic hyper-core must add 10kg weight");
-    TEST_CHECK(inv.is_overburdened(2), "49.5kg must overburden Scout (42kg max)");
-    TEST_CHECK(!inv.is_overburdened(0), "49.5kg is still within Demolitionist capacity (60kg max)");
-
-    float penalty = inv.overburden_penalty(2);
-    TEST_CHECK(penalty < 1.0f && penalty >= 0.55f, "Overburden penalty must degrade speed linearly down to min 0.55");
-    log_pass("Dynamic Mineral Carry Weight & Class Overburden Limits");
+    TEST_CHECK(!inv.is_overburdened(2), "Relic extraction does not overburden Scout");
+    TEST_CHECK(!inv.is_overburdened(0), "Relic extraction does not overburden Demolitionist");
+    TEST_CHECK(inv.overburden_penalty(2) == 1.0f, "Overburden penalty remains 1.0 (zero speed loss)");
+    log_pass("Unrestricted Cargo Capacity & Zero Overburden Penalty");
 
     // 2. PlayerController Tactical Abilities
     World world(42);
@@ -1456,7 +1558,10 @@ void test_cavern_luminaries_and_lighting() {
         RoomShapeType::ColossalVaultedDredgeCathedral,
         RoomShapeType::TectonicAbyssalSinkhole,
         RoomShapeType::CyclopeanExcavationSilo,
-        RoomShapeType::BioluminescentFirmamentAbyss
+        RoomShapeType::BioluminescentFirmamentAbyss,
+        RoomShapeType::PrecursorSanctumVault,
+        RoomShapeType::SubterraneanVaultBastion,
+        RoomShapeType::AbyssalVaultChasm
     };
 
     for (RoomShapeType t : types) {
@@ -1881,6 +1986,29 @@ void test_flares_aberrants_and_mission_objectives() {
     Voxel door_vox = world.get_voxel(mission.vault().door_pos.x, mission.vault().door_pos.y, mission.vault().door_pos.z);
     TEST_CHECK(door_vox.material_id == MAT_REINFORCED_VAULT_DOOR, "Embedded vault door must be MAT_REINFORCED_VAULT_DOOR");
 
+    // Line of sight verification: Vault text must NEVER appear through walls
+    HUD vault_hud(1600, 900, true);
+    glm::vec3 door_pos_f = glm::vec3(mission.vault().door_pos) + glm::vec3(0.5f, 1.5f, 0.5f);
+    glm::vec3 relic_pos_f = glm::vec3(mission.vault().relic_pos) + glm::vec3(0.5f, 1.0f, 0.5f);
+    glm::vec3 out_dir = door_pos_f - relic_pos_f;
+    out_dir.y = 0.0f;
+    if (glm::length(out_dir) > 0.01f) out_dir = glm::normalize(out_dir);
+    else out_dir = glm::vec3(0.0f, 0.0f, -1.0f);
+
+    // Carve corridor directly outside the door along out_dir
+    glm::vec3 open_sight_pos = door_pos_f + out_dir * 3.0f;
+    for (float d = 0.5f; d <= 3.5f; d += 0.5f) {
+        glm::ivec3 cp = glm::floor(door_pos_f + out_dir * d);
+        world.set_voxel(cp.x, cp.y, cp.z, Voxel{MAT_AIR, 0}, false);
+    }
+    TEST_CHECK(vault_hud.has_vault_objective_los(open_sight_pos, world, mission), "Player with clear line of sight to vault door must see objective marker");
+
+    // Place solid rock wall 4m out, and position occluded player 7m out
+    glm::ivec3 wall_block = glm::floor(door_pos_f + out_dir * 4.0f);
+    world.set_voxel(wall_block.x, wall_block.y, wall_block.z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+    glm::vec3 occluded_pos = door_pos_f + out_dir * 7.0f;
+    TEST_CHECK(!vault_hud.has_vault_objective_los(occluded_pos, world, mission), "Player separated by solid wall must NOT see vault objective text through walls");
+
     // Detonate satchel charge near vault door
     bool breach_notified = false;
     mission.set_on_notification([&](const std::string& msg, float) {
@@ -1892,6 +2020,11 @@ void test_flares_aberrants_and_mission_objectives() {
     TEST_CHECK(mission.is_vault_breached(), "Vault state must be breached");
     TEST_CHECK(world.get_voxel(mission.vault().door_pos.x, mission.vault().door_pos.y, mission.vault().door_pos.z).material_id == MAT_AIR, "Breached door voxel must be removed from world");
 
+    // Breached relic visibility: plain sight inside chamber vs occluded behind outer rock wall
+    glm::vec3 in_chamber_pos = relic_pos_f - out_dir * 2.0f;
+    TEST_CHECK(vault_hud.has_vault_objective_los(in_chamber_pos, world, mission), "Player in plain sight to breached relic chamber must see objective text");
+    TEST_CHECK(!vault_hud.has_vault_objective_los(occluded_pos, world, mission), "Player separated by solid wall must NOT see relic objective text through walls");
+
     // Retrieve Relic Hyper-Core (player stands near relic and interacts via [E])
     glm::vec3 relic_world = glm::vec3(mission.vault().relic_pos) + glm::vec3(0.5f);
     mission.update(0.1f, world, relic_world);
@@ -1900,6 +2033,7 @@ void test_flares_aberrants_and_mission_objectives() {
     bool relic_interacted = mission.interact_relic(world, relic_world);
     TEST_CHECK(relic_interacted, "Interacting with relic must retrieve it");
     TEST_CHECK(mission.is_relic_retrieved(), "Relic state must be retrieved after [E] interaction");
+    TEST_CHECK(!vault_hud.has_vault_objective_los(in_chamber_pos, world, mission), "Retrieved relic must no longer show active objective LOS");
     TEST_CHECK(world.get_voxel(mission.vault().relic_pos.x, mission.vault().relic_pos.y, mission.vault().relic_pos.z).material_id == MAT_AIR, "Retrieved relic voxel must be removed from pedestal");
     TEST_CHECK(mission.total_bonus_xp() == 350, "Relic extraction bonus must award +350 EXP");
     TEST_CHECK(mission.total_bonus_titanium() == 5, "Relic extraction bonus must award +5 Titanium Cores");
@@ -1972,6 +2106,13 @@ void test_headlamp_briefing_melee_and_loot_systems() {
     player.toggle_headlamp();
     TEST_CHECK(player.is_headlamp_on(), "Headlamp must toggle back to ON");
     log_pass("Headlamp toggle state and suit vitals telemetry");
+
+    // 1b. Headlamp debuffed optics: tighter beam (18 deg inner, 28 deg outer) and 22m clamped range
+    Headlamp hl;
+    TEST_CHECK(std::abs(hl.inner_cutoff - glm::cos(glm::radians(18.0f))) < 0.001f, "Headlamp inner cutoff must be 18 degrees");
+    TEST_CHECK(std::abs(hl.outer_cutoff - glm::cos(glm::radians(28.0f))) < 0.001f, "Headlamp outer cutoff must be 28 degrees");
+    TEST_CHECK(std::abs(hl.max_range - 22.0f) < 0.001f, "Headlamp max range must be clamped to 22.0m");
+    log_pass("Headlamp optics: 18-28 deg cone angles and 22m quadratic falloff range");
 
     // 2. Headlamp notification debounce & overwrite
     HUD hud(1600, 900, true);
@@ -2053,9 +2194,11 @@ void test_headlamp_briefing_melee_and_loot_systems() {
     debrief.SetCurrentSectorIndex(3);
     DebriefAction act_redeploy = debrief.ProcessClick("[RE-DEPLOY EXPEDITION]");
     TEST_CHECK(act_redeploy == DebriefAction::RedeployExpedition, "Clicking [RE-DEPLOY EXPEDITION] must return RedeployExpedition action");
+    DebriefAction act_continue = debrief.ProcessClick("[CONTINUE TO NEXT ROUND]");
+    TEST_CHECK(act_continue == DebriefAction::LaunchNextSector, "Clicking [CONTINUE TO NEXT ROUND] must return LaunchNextSector action");
     DebriefAction act_hub = debrief.ProcessClick("[RETURN TO ORBITAL HUB]");
     TEST_CHECK(act_hub == DebriefAction::ReturnToHub, "Clicking [RETURN TO ORBITAL HUB] must return ReturnToHub action");
-    log_pass("Debrief menu [RE-DEPLOY EXPEDITION] immediate sector restart routing");
+    log_pass("Debrief menu [RE-DEPLOY EXPEDITION] and [CONTINUE TO NEXT ROUND] sector routing");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2281,18 +2424,18 @@ void test_cellular_fluid_simulation() {
     }
     spread_world.set_fluid_cell(glm::ivec3(16, 11, 16), MAT_WATER, 3, false);
     spread_world.WakeFluid(glm::ivec3(16, 11, 16));
-    spread_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) spread_world.update_fluids(0.085f);
 
     Voxel east = spread_world.get_voxel(17, 11, 16);
     TEST_CHECK(IsLiquid(east.material_id), "East neighbor must receive liquid");
     TEST_CHECK(east.fluid_level() == 2, "Lateral spreading must decay level by 1 (3 -> 2)");
 
-    spread_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) spread_world.update_fluids(0.085f);
     Voxel east2 = spread_world.get_voxel(18, 11, 16);
     TEST_CHECK(IsLiquid(east2.material_id), "Secondary spread must reach distance 2");
     TEST_CHECK(east2.fluid_level() == 1, "Level must decay to 1 (2 -> 1)");
 
-    spread_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) spread_world.update_fluids(0.085f);
     Voxel east3 = spread_world.get_voxel(19, 11, 16);
     TEST_CHECK(!IsLiquid(east3.material_id), "Terminal trickle level 1 must terminate spreading");
     log_pass("Lateral Spreading with Linear Level Cascade & Shallow Boundary Clamping");
@@ -2312,7 +2455,7 @@ void test_cellular_fluid_simulation() {
     TEST_CHECK(ramp_vox.is_waterlogged(), "Ramp cell under liquid must be flagged waterlogged");
     TEST_CHECK(ramp_vox.shape() == SHAPE_RAMP_EAST, "Waterlogged ramp must preserve geometry");
 
-    slope_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) slope_world.update_fluids(0.085f);
     Voxel downhill_vox = slope_world.get_voxel(15, 10, 16);
     TEST_CHECK(IsLiquid(downhill_vox.material_id), "Water must flow downhill off ramp base");
     log_pass("Sub-Block Waterlogging & Downhill Surface Flow Conformance");
@@ -2337,7 +2480,7 @@ void test_cellular_fluid_simulation() {
     res_world.DestroyBlock(glm::ivec3(17, 10, 16));
     TEST_CHECK(res_world.ActiveFluidCount() >= 1, "Drilling retaining wall must wake dormant reservoir");
 
-    res_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) res_world.update_fluids(0.085f);
     Voxel breach_vox = res_world.get_voxel(17, 10, 16);
     TEST_CHECK(IsLiquid(breach_vox.material_id), "Liquid must flood excavated cavity");
 
@@ -2347,7 +2490,7 @@ void test_cellular_fluid_simulation() {
     TEST_CHECK(res_world.ActiveFluidCount() == 0, "Dormant reservoir must have 0 active fluids");
     res_world.SetBlock(glm::ivec3(15, 10, 16), MAT_AIR);
     TEST_CHECK(res_world.ActiveFluidCount() >= 1, "SetBlock(MAT_AIR) must wake dormant reservoir");
-    res_world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) res_world.update_fluids(0.085f);
     TEST_CHECK(IsLiquid(res_world.get_voxel(15, 10, 16).material_id), "Liquid must flood SetBlock excavated cavity");
     log_pass("Zero-CPU Dormant Reservoir Sleep & Excavation Breach Wake-Up");
 
@@ -2369,23 +2512,24 @@ void test_cellular_fluid_simulation() {
     for (const auto& v : mesh) {
         uint32_t layer = (v.data0 >> 23u) & 0xFFu;
         uint32_t norm = (v.data0 >> 18u) & 0x7u;
+        uint32_t fluid_lvl = (v.data1 >> 28u) & 0x7u;
         uint32_t water_offset = (v.data1 >> 27u) & 0x1u;
-        uint32_t sub_y_half = (v.data1 >> 26u) & 0x1u;
 
-        if (layer == MAT_WATER && norm == 2 && water_offset == 1) {
-            found_ramp_plane = true;
+        if (layer == MAT_WATER && norm == 2 && (fluid_lvl == 6 || water_offset == 1)) {
             glm::vec3 pos = v.position();
-            TEST_CHECK(std::abs(pos.y - std::floor(pos.y) - 0.04f) < 0.01f, "Ramp liquid plane must be offset +0.04m to prevent z-fighting");
-        }
-        if (layer == MAT_WATER && norm == 2 && sub_y_half == 1 && water_offset == 0) {
-            found_slab_plane = true;
-            glm::vec3 pos = v.position();
-            TEST_CHECK(std::abs(pos.y - 2.5f) < 0.01f, "Waterlogged slab top quad must sit at Y=0.5m");
+            if (pos.x >= 2.0f && pos.x <= 3.0f && pos.z >= 2.0f && pos.z <= 3.0f) {
+                found_ramp_plane = true;
+                TEST_CHECK(pos.y >= 2.0f && pos.y <= 3.0f, "Ramp liquid surface must contour within block bounds");
+            }
+            if (pos.x >= 4.0f && pos.x <= 5.0f && pos.z >= 4.0f && pos.z <= 5.0f) {
+                found_slab_plane = true;
+                TEST_CHECK(pos.y >= 2.5f && pos.y <= 3.0f, "Slab liquid surface must sit above slab base");
+            }
         }
     }
-    TEST_CHECK(found_ramp_plane, "Mesher must generate +0.04m diagonal quad for waterlogged ramp");
-    TEST_CHECK(found_slab_plane, "Mesher must generate Y=0.5m top quad for waterlogged bottom slab");
-    log_pass("Greedy Mesher Sub-Block Liquid Passes & Diagonal +0.04m Anti-Z-Fight Plane");
+    TEST_CHECK(found_ramp_plane, "Mesher must generate conforming fluid surface for waterlogged ramp");
+    TEST_CHECK(found_slab_plane, "Mesher must generate conforming fluid surface for waterlogged bottom slab");
+    log_pass("Greedy Mesher Sub-Block Liquid Passes & Conforming Fluid Surfaces");
 
     // 7. Player Waterlogged Immersion
     World player_world(1337, false);
@@ -2401,6 +2545,236 @@ void test_cellular_fluid_simulation() {
     TEST_CHECK(player.is_in_liquid(), "Player wading on waterlogged slab must report in liquid");
     TEST_CHECK(player.current_liquid_material() == MAT_CRYSTAL_AQUIFER, "Liquid material must match water/aquifer");
     log_pass("Delver Underfoot Wading & Sub-Block Waterlogged Submersion Tracking");
+}
+
+// ─────────────────────────────────────────────────────────────
+// 19. CLUTTER ANCHOR DEPENDENCY & AUTO-DESPAWN UNIT TESTS
+// ─────────────────────────────────────────────────────────────
+void test_clutter_anchor_dependency_and_auto_despawn() {
+    std::cout << "\n=== [MODULE 19] Clutter Anchor Dependency & Auto-Despawn ===" << std::endl;
+
+    World world(1337, false);
+
+    // 1. Floor Stalagmite & Rubble Anchor Dependency
+    glm::ivec3 floor_block(10, 10, 10);
+    world.SetBlock(floor_block.x, floor_block.y, floor_block.z, MAT_FRACTURED_GRANITE, 0);
+
+    Chunk* chunk = world.GetChunkFromBlockPos(floor_block);
+    TEST_CHECK(chunk != nullptr, "Chunk for floor_block must exist");
+
+    glm::vec3 stalagmite_anchor(10.5f, 11.0f, 10.5f); // Top face (+Y)
+    chunk->clutter_instances_mut().push_back({
+        stalagmite_anchor,
+        glm::mat4(1.0f),
+        ClutterType::FloorStalagmiteRubble,
+        glm::vec4(1.0f),
+        0.0f,
+        floor_block,
+        glm::ivec3(0, 1, 0)
+    });
+    TEST_CHECK(chunk->clutter_instances().size() == 1, "Chunk must have 1 clutter instance");
+
+    // Track particle callbacks
+    int clutter_particle_bursts = 0;
+    glm::vec3 last_burst_pos(0.0f);
+    ClutterType last_burst_type = ClutterType::Count;
+    ParticleSystem::SetCallbacks(
+        nullptr,
+        [&](const glm::vec3& pos, ClutterType type, const glm::vec4& tint) {
+            clutter_particle_bursts++;
+            last_burst_pos = pos;
+            last_burst_type = type;
+        }
+    );
+
+    // Breaking the underlying host block must automatically despawn the floor stalagmite
+    world.SetBlock(floor_block.x, floor_block.y, floor_block.z, MAT_AIR, 0);
+    TEST_CHECK(chunk->clutter_instances().empty(), "Floor stalagmite must auto-despawn when underlying block breaks");
+    TEST_CHECK(clutter_particle_bursts == 1, "Break-particle burst must trigger for auto-despawned clutter");
+    TEST_CHECK(last_burst_type == ClutterType::FloorStalagmiteRubble, "Burst type must match FloorStalagmiteRubble");
+    TEST_CHECK(glm::distance(last_burst_pos, stalagmite_anchor) < 0.001f, "Burst position must match clutter anchor");
+    log_pass("Floor Stalagmite & Rubble Anchor Dependency & Particle Burst");
+
+    // 2. Ceiling Stalactite Anchor Dependency
+    glm::ivec3 ceiling_block(15, 20, 15);
+    world.SetBlock(ceiling_block.x, ceiling_block.y, ceiling_block.z, MAT_VOLCANIC_BASALT, 0);
+    Chunk* chunk_ceiling = world.GetChunkFromBlockPos(ceiling_block);
+    TEST_CHECK(chunk_ceiling != nullptr, "Chunk for ceiling_block must exist");
+
+    glm::vec3 stalactite_anchor(15.5f, 20.0f, 15.5f); // Bottom face (-Y)
+    chunk_ceiling->clutter_instances_mut().push_back({
+        stalactite_anchor,
+        glm::mat4(1.0f),
+        ClutterType::CeilingStalactite,
+        glm::vec4(1.0f),
+        0.0f,
+        ceiling_block,
+        glm::ivec3(0, -1, 0)
+    });
+    TEST_CHECK(!chunk_ceiling->clutter_instances().empty(), "Ceiling stalactite must be present");
+
+    // Breaking the ceiling host block clears the hanging stalactite
+    clutter_particle_bursts = 0;
+    world.set_voxel(ceiling_block.x, ceiling_block.y, ceiling_block.z, Voxel{MAT_AIR, 0});
+    TEST_CHECK(chunk_ceiling->clutter_instances().empty(), "Ceiling stalactite must auto-despawn when host block breaks");
+    TEST_CHECK(clutter_particle_bursts == 1, "Break-particle burst must trigger for ceiling stalactite");
+    TEST_CHECK(last_burst_type == ClutterType::CeilingStalactite, "Burst type must match CeilingStalactite");
+    log_pass("Ceiling Stalactite Anchor Dependency & Disconnection Despawn");
+
+    // 3. Multi-Face Crystal Cluster Auto-Despawn & Selective Preservation
+    glm::ivec3 vein_block(8, 8, 8);
+    world.SetBlock(vein_block.x, vein_block.y, vein_block.z, MAT_VOIDITE_CRYSTAL, 0);
+
+    glm::ivec3 neighbor_block(12, 12, 12);
+    world.SetBlock(neighbor_block.x, neighbor_block.y, neighbor_block.z, MAT_FRACTURED_GRANITE, 0);
+
+    Chunk* chunk_vein = world.GetChunkFromBlockPos(vein_block);
+    // Add 3 crystal clusters on faces +X, -X, and +Z of vein_block
+    chunk_vein->clutter_instances_mut().push_back({
+        glm::vec3(8.5f, 8.5f, 8.5f) + glm::vec3(0.5f, 0.0f, 0.0f),
+        glm::mat4(1.0f),
+        ClutterType::VoiditeCrystal,
+        glm::vec4(0.85f, 0.3f, 1.0f, 1.0f),
+        1.0f,
+        vein_block,
+        glm::ivec3(1, 0, 0)
+    });
+    chunk_vein->clutter_instances_mut().push_back({
+        glm::vec3(8.5f, 8.5f, 8.5f) + glm::vec3(-0.5f, 0.0f, 0.0f),
+        glm::mat4(1.0f),
+        ClutterType::VoiditeCrystal,
+        glm::vec4(0.85f, 0.3f, 1.0f, 1.0f),
+        1.0f,
+        vein_block,
+        glm::ivec3(-1, 0, 0)
+    });
+    chunk_vein->clutter_instances_mut().push_back({
+        glm::vec3(8.5f, 8.5f, 8.5f) + glm::vec3(0.0f, 0.0f, 0.5f),
+        glm::mat4(1.0f),
+        ClutterType::VoiditeCrystal,
+        glm::vec4(0.85f, 0.3f, 1.0f, 1.0f),
+        1.0f,
+        vein_block,
+        glm::ivec3(0, 0, 1)
+    });
+
+    // Add independent prop on neighbor_block
+    chunk_vein->clutter_instances_mut().push_back({
+        glm::vec3(12.5f, 13.0f, 12.5f),
+        glm::mat4(1.0f),
+        ClutterType::FloorStalagmiteRubble,
+        glm::vec4(1.0f),
+        0.0f,
+        neighbor_block,
+        glm::ivec3(0, 1, 0)
+    });
+    TEST_CHECK(chunk_vein->clutter_instances().size() == 4, "Chunk must contain 4 props total");
+
+    clutter_particle_bursts = 0;
+    world.SetBlock(vein_block.x, vein_block.y, vein_block.z, MAT_AIR, 0);
+
+    // 3 crystal clusters on vein_block should be removed, 1 independent prop preserved
+    TEST_CHECK(chunk_vein->clutter_instances().size() == 1, "Only neighbor prop should remain after vein break");
+    TEST_CHECK(chunk_vein->clutter_instances()[0].type == ClutterType::FloorStalagmiteRubble, "Preserved prop must be FloorStalagmiteRubble");
+    TEST_CHECK(clutter_particle_bursts == 3, "Exactly 3 particle bursts should fire for 3 crystal faces");
+    log_pass("Multi-Face Crystal Cluster Auto-Despawn & Selective Preservation");
+
+    // 4. Geometric Fallback Detection (props created without explicit host_voxel)
+    glm::ivec3 stone_block(5, 5, 5);
+    world.SetBlock(stone_block.x, stone_block.y, stone_block.z, MAT_FRACTURED_GRANITE, 0);
+    Chunk* chunk_stone = world.GetChunkFromBlockPos(stone_block);
+    chunk_stone->clutter_instances_mut().push_back({
+        glm::vec3(5.5f, 6.0f, 5.5f), // Top face (+Y)
+        glm::mat4(1.0f),
+        ClutterType::FloorStalagmiteRubble,
+        glm::vec4(1.0f),
+        0.0f,
+        glm::ivec3(0), // No explicit host_voxel set
+        glm::ivec3(0, 1, 0)
+    });
+    TEST_CHECK(Chunk::is_clutter_attached_to_face(chunk_stone->clutter_instances().back(), stone_block),
+               "Geometric fallback face check must identify attached prop");
+    world.SetBlock(stone_block.x, stone_block.y, stone_block.z, MAT_AIR, 0);
+    TEST_CHECK(chunk_stone->clutter_instances().size() == 1, "Stone prop removed, neighbor prop remains");
+    log_pass("Geometric Adjacent Face Fallback Tolerance");
+
+    // 5. Organic Crystal Voxels: 3D Faceted Cluster Mesh Spawns on Exposed Surfaces By Default
+    Chunk standalone_chunk(ChunkPos{0, 0, 0});
+    // Place a single Voidite Crystal block surrounded by air at (10, 10, 10)
+    standalone_chunk.set_voxel(10, 10, 10, Voxel{MAT_VOIDITE_CRYSTAL, VOXEL_FLAG_EMISSIVE});
+    auto generated_clutter = SurfaceClutterSystem::generate_chunk_clutter(standalone_chunk, 9999);
+    // All 6 exposed faces of the isolated voidite block must spawn a 3D faceted cluster mesh by default!
+    int crystal_clutter_count = 0;
+    for (const auto& cl : generated_clutter) {
+        if (cl.type == ClutterType::VoiditeCrystal && cl.host_voxel == glm::ivec3(10, 10, 10)) {
+            crystal_clutter_count++;
+            // Emissive boost must be 1.0f (or higher) to produce radiant brilliance
+            TEST_CHECK(cl.emissive_boost >= 1.0f, "Actionable voidite crystals must maintain full radiant emissive boost");
+        }
+    }
+    TEST_CHECK(crystal_clutter_count == 6, "All 6 exposed surfaces of MAT_VOIDITE block must spawn 3D cluster mesh by default");
+    log_pass("Organic Crystal Voxels Default Exposed Surface Spawning (6/6 Faces)");
+
+    // Dynamic exposure check via world mining
+    glm::ivec3 hidden_vein(20, 10, 20);
+    glm::ivec3 cover_rock(21, 10, 20);
+    world.SetBlock(hidden_vein.x, hidden_vein.y, hidden_vein.z, MAT_VOIDITE_CRYSTAL, 0);
+    world.SetBlock(cover_rock.x, cover_rock.y, cover_rock.z, MAT_FRACTURED_GRANITE, 0);
+    Chunk* hidden_chunk = world.GetChunkFromBlockPos(hidden_vein);
+    TEST_CHECK(hidden_chunk != nullptr, "Chunk for hidden_vein must exist");
+    // Mining the cover rock must dynamically expose the face and spawn the 3D crystal cluster!
+    world.SetBlock(cover_rock.x, cover_rock.y, cover_rock.z, MAT_AIR, 0);
+    bool spawned_dynamic_face = false;
+    for (const auto& cl : hidden_chunk->clutter_instances()) {
+        if (cl.host_voxel == hidden_vein && cl.attach_normal == glm::ivec3(1, 0, 0)) {
+            spawned_dynamic_face = true;
+            TEST_CHECK(cl.type == ClutterType::VoiditeCrystal, "Dynamically exposed prop must be VoiditeCrystal");
+            break;
+        }
+    }
+    TEST_CHECK(spawned_dynamic_face, "Dynamically exposed face (+X) must sprout 3D crystal cluster upon mining neighbor rock");
+    log_pass("Dynamic Organic Crystal Spawning on Newly Exposed Face");
+
+    // 6. Subtle Detritus: 40-50% Size Reduction & Clamped Non-Interactive Specular Shine
+    Chunk detritus_chunk(ChunkPos{0, 0, 0});
+    // Create an exposed ceiling block and floor block
+    detritus_chunk.set_voxel(5, 20, 5, Voxel{MAT_VOLCANIC_BASALT, 0}); // Solid with air beneath at (5, 19, 5)
+    detritus_chunk.set_voxel(5, 5, 5, Voxel{MAT_FRACTURED_GRANITE, 0}); // Solid with air above at (5, 6, 5)
+    auto detritus_props = SurfaceClutterSystem::generate_chunk_clutter(detritus_chunk, 12345);
+    for (const auto& cl : detritus_props) {
+        if (cl.type == ClutterType::CeilingStalactite || cl.type == ClutterType::FloorStalagmiteRubble) {
+            // Non-interactive detritus must have zero emissive boost (clamping specular in shader)
+            TEST_CHECK(cl.emissive_boost == 0.0f, "Non-interactive detritus must have 0.0 emissive boost");
+            // Check model matrix scaling column lengths: must be <= 0.70f (confirming 40-50% size reduction)
+            float scale_x = glm::length(glm::vec3(cl.model_matrix[0]));
+            float scale_y = glm::length(glm::vec3(cl.model_matrix[1]));
+            float scale_z = glm::length(glm::vec3(cl.model_matrix[2]));
+            TEST_CHECK(scale_x <= 0.70f && scale_y <= 0.70f && scale_z <= 0.70f,
+                       "Non-interactive detritus props must be reduced by 40-50% in scale (scale <= 0.70f)");
+        }
+    }
+    // 7. Visual Decoupling: Decorative Crystals vs Objective Minerals
+    Chunk deco_chunk(ChunkPos{0, 0, 0});
+    deco_chunk.set_voxel(10, 10, 10, Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE});
+    auto deco_clutter = SurfaceClutterSystem::generate_chunk_clutter(deco_chunk, 54321);
+    int prismatic_prop_count = 0;
+    for (const auto& cl : deco_clutter) {
+        if (cl.host_voxel == glm::ivec3(10, 10, 10)) {
+            TEST_CHECK(cl.type == ClutterType::PrismaticCrystal,
+                       "Decorative crystal voxels must spawn PrismaticCrystal clutter, NOT VoiditeCrystal");
+            TEST_CHECK(cl.type != ClutterType::VoiditeCrystal,
+                       "Decorative crystal clutter must be strictly decoupled from objective Voidite clutter");
+            // Cyan tint verification (high green/blue, low red)
+            TEST_CHECK(cl.color_tint.b > 0.8f && cl.color_tint.g > 0.8f && cl.color_tint.r < 0.5f,
+                       "PrismaticCrystal clutter must have radiant cyan tint to avoid player confusion with violet Voidite");
+            prismatic_prop_count++;
+        }
+    }
+    TEST_CHECK(prismatic_prop_count == 6, "All 6 faces of decorative crystal block must sprout PrismaticCrystal clutter");
+    log_pass("Decorative Clutter Visual Decoupling & Cyan Palette Verification");
+
+    // Clean up callbacks
+    ParticleSystem::Reset();
 }
 
 int main() {
@@ -2426,6 +2800,7 @@ int main() {
     test_headlamp_briefing_melee_and_loot_systems();
     test_clustered_forward_lighting();
     test_cellular_fluid_simulation();
+    test_clutter_anchor_dependency_and_auto_despawn();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_total_unit_tests << " UNIT TESTS PASSED SUCCESSFULLY WITH 0 ERRORS!" << std::endl;

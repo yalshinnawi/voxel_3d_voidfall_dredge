@@ -68,11 +68,13 @@ void main() {
         vec3 L = normalize(toLight);
         float diff = max(dot(N, L), 0.0);
         float spotDot = dot(normalize(-uHeadlampDir), L);
-        float spotAngle = cos(radians(24.0));
+        float spotAngle = cos(radians(28.0));
 
-        if (spotDot > spotAngle) {
+        const float MAX_HEADLAMP_RANGE = 22.0;
+        if (spotDot > spotAngle && dist < MAX_HEADLAMP_RANGE) {
             float spotFalloff = smoothstep(spotAngle, spotAngle + 0.08, spotDot);
-            float atten = 1.0 / (1.0 + 0.08 * dist + 0.015 * dist * dist);
+            float rangeFactor = clamp(1.0 - (dist / MAX_HEADLAMP_RANGE), 0.0, 1.0);
+            float atten = (rangeFactor * rangeFactor) / (1.0 + 0.08 * dist + 0.015 * dist * dist);
 
             // Specular GGX / Blinn-Phong highlight on chitinous carapace
             vec3 H = normalize(L + V);

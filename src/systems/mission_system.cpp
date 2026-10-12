@@ -22,7 +22,21 @@ void MissionSystem::embed_precursor_vault(World& world, int level) {
     m_vault = PrecursorVault{};
     m_vault.exists = true;
 
-    // Anchor the vault chamber in rock formation
+    // Check if LevelGenerator already embedded a designated vault in an authentic room
+    if (world.level_generator() && world.level_generator()->has_vault()) {
+        const auto& vp = world.level_generator()->vault_placement();
+        m_vault.chamber_min = vp.chamber_min;
+        m_vault.chamber_max = vp.chamber_max;
+        m_vault.door_pos = vp.door_pos;
+        m_vault.relic_pos = vp.relic_pos;
+        m_vault.state = VaultObjectiveState::Undiscovered;
+        VF_LOG_INFO("MissionSystem", "Precursor Vault synchronized with LevelGenerator at chamber center ("
+                    << vp.chamber_center.x << ", " << vp.chamber_center.y << ", " << vp.chamber_center.z
+                    << ") door at (" << vp.door_pos.x << ", " << vp.door_pos.y << ", " << vp.door_pos.z << ")");
+        return;
+    }
+
+    // Anchor the vault chamber in rock formation (legacy standalone fallback)
     int vx = (level == 1) ? 46 : (level == 2 ? 40 : 48);
     int vy = 12;
     int vz = (level == 1) ? 44 : (level == 2 ? 48 : 38);
@@ -57,9 +71,9 @@ void MissionSystem::embed_precursor_vault(World& world, int level) {
         }
     }
 
-    // Place Relic Pedestal & Relic Hyper-Core
+    // Place Relic Pedestal & Relic Hyper-Core (dynamic animated 3D model)
     world.set_voxel(vx, vy, vz, Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_ANCHORED}, false);
-    world.set_voxel(vx, vy + 1, vz, Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE}, false);
+    world.set_voxel(vx, vy + 1, vz, Voxel{MAT_PRISMATIC_CRYSTAL, static_cast<uint8_t>(VOXEL_FLAG_EMISSIVE | VOXEL_FLAG_CUSTOM_MODEL)}, false);
 
     VF_LOG_INFO("MissionSystem", "Precursor Vault embedded at (" << vx << ", " << vy << ", " << vz
                 << ") with reinforced vault door at X=" << m_vault.door_pos.x);
@@ -78,8 +92,13 @@ bool MissionSystem::check_satchel_vault_breach(World& world, const glm::vec3& bl
         int vz = m_vault.door_pos.z;
 
         for (int dy = 0; dy < 3; ++dy) {
-            for (int dz = -1; dz <= 0; ++dz) {
-                world.set_voxel(vx, vy + dy, vz + dz, Voxel{MAT_AIR, 0}, true);
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    uint8_t mid = world.get_voxel(vx + dx, vy + dy, vz + dz).material_id;
+                    if (mid == MAT_REINFORCED_VAULT_DOOR || mid == MAT_VAULT_DOOR) {
+                        world.set_voxel(vx + dx, vy + dy, vz + dz, Voxel{MAT_AIR, 0}, true);
+                    }
+                }
             }
         }
 

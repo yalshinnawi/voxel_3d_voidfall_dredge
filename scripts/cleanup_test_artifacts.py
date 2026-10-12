@@ -91,6 +91,7 @@ def clean_test_dump_files():
 def main():
     parser = argparse.ArgumentParser(description="Voidfall Dredge - Test Artifacts & Screenshots Cleaner")
     parser.add_argument("--all", action="store_true", help="Run full cleanup across all directories")
+    parser.add_argument("--clear-save", action="store_true", help="Also reset saves/save_data.json to clean defaults")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -100,6 +101,10 @@ def main():
     p_cnt, p_sz = clean_previews()
     s_cnt, s_sz = clean_stale_screenshots()
     m_cnt, m_sz = clean_models_directory()
+
+    if args.clear_save:
+        import subprocess
+        subprocess.run([sys.executable, "scripts/clear_save.py"], check=False)
 
     total_removed = p_cnt + s_cnt + m_cnt
     total_freed_kb = (p_sz + s_sz + m_sz) / 1024.0

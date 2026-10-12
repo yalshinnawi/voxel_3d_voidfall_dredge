@@ -120,7 +120,7 @@ void SpawnManager::update(float dt, World& world, VoidStalkerManager& stalker_mg
         if (it->timer <= 0.0f) {
             // Emerge entity into the world
             if (can_spawn(stalker_mgr.active_count(), it->position)) {
-                stalker_mgr.spawn_stalker(it->position, 1.0f, it->role);
+                stalker_mgr.spawn_emerging(it->position, it->normal, 1.0f, it->role);
             }
             it = m_pending_spawns.erase(it);
         } else {

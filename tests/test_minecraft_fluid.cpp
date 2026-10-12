@@ -189,7 +189,7 @@ TEST(MinecraftFluid, WaterStreamsDownhillOnRamp) {
     world.WakeFluid(rampPos);
 
     // Step simulation
-    world.update_fluids(0.085f);
+    for (int t = 0; t < 4; ++t) world.update_fluids(0.085f);
 
     Voxel footVox = world.get_voxel(footPos.x, footPos.y, footPos.z);
     ASSERT_TRUE(IsLiquid(footVox.material_id));
@@ -267,7 +267,7 @@ TEST(MinecraftFluid, NonFullBlockSubBlockWaterloggingWithoutReplacingMaterial) {
     world.SetBlockWithFlags(glm::ivec3(10, 5, 10), MAT_VOLCANIC_BASALT, static_cast<uint8_t>(SHAPE_SLAB_BOTTOM));
 
     std::unordered_set<Chunk*> dirty;
-    world.m_fluidSim.TrySpreadToNeighbor(world, glm::ivec3(10, 5, 10), MAT_WATER, 4, dirty);
+    world.m_fluidSim.TrySpreadToNeighbor(world, glm::ivec3(10, 5, 10), MAT_WATER, 4, dirty, true);
 
     Voxel target = world.get_voxel(10, 5, 10);
     ASSERT_EQ(target.material_id, MAT_VOLCANIC_BASALT); // Material NOT replaced!

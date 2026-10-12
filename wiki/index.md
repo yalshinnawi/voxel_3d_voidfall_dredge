@@ -7,7 +7,7 @@ Welcome to the central design, mechanics, and systems knowledge base for **Voidf
 ## 🧭 Systems & Mechanics
 
 - **[Delver Contractors & Archetypes](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/delvers_and_classes.md)**: Specifications, traits, loadouts, and 3D suit models for Demolitionist, Vanguard, and Scout.
-- **[Modular Level Design & Generation](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/level_design_and_generation.md)**: Predetermined room shapes (15 archetypes), progressive sector scaling ($3\times3 \to 4\times4 \to 5\times5$), connected corridor graph, and collision boundaries.
+- **[Modular Level Design & Generation](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/level_design_and_generation.md)**: Predetermined room shapes (30 archetypes across 7 thematic categories), progressive sector scaling ($3\times3 \to 4\times4 \to 5\times5$), connected corridor graph, and collision boundaries.
 - **[Environmental Hazards & Parkour Mechanics](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/environmental_hazards.md)**: Molten thermite slag lakes, punji spike trenches, bottomless void rifts, toxic gas vents, radioactive moats, and parkour traversal systems.
 - **[Hazard Clock & Expedition Loop](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/hazard_clock.md)**: 4-phase radiation escalation, seismic tremors, and 40-second extraction beacon holdout.
 - **[Progression & Economy Architecture](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/mechanics/progression_and_economy.md)**: Decoupled EXP (Player Level / Delver Rank) and Coins (skill upgrades), exponential cost curves ($100 \times 1.6^{\text{tier}-1}$), and level-gated sectors and classes.
@@ -21,7 +21,7 @@ Welcome to the central design, mechanics, and systems knowledge base for **Voidf
 
 - **[Enemy Threats & Behaviors](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/entities/enemies.md)**: Void Stalker, Seismic Burrower, and Volatile Crystalline Leech profiles.
 - **[3D Model & Roster Catalog](file:///d:/Projects/voxel_3d_voidfall_dredge/docs/models/README.md)**: Canonical, up-to-date visual reference captures and specifications for all character, enemy, and tool models.
-- **[Voxel Material Specifications](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/entities/voxel_materials.md)**: Hardness, drops, emissives, and structural anchor definitions for all 11 voxel tiers.
+- **[Voxel Material Specifications](file:///d:/Projects/voxel_3d_voidfall_dredge/wiki/entities/voxel_materials.md)**: Hardness, drops, emissives, and structural anchor definitions for all 18 voxel tiers.
 - **[Dynamic Debris Physics](file:///d:/Projects/voxel_3d_voidfall_dredge/src/entities/README.md)**: Rigid-body simulation of unanchored cave-in boulders.
 
 ---

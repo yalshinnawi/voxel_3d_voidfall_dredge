@@ -2,6 +2,7 @@
 #include "../graphics/shader.hpp"
 #include "../player/loadout.hpp"
 #include "../core/settings.hpp"
+#include "font_atlas.hpp"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -70,10 +71,10 @@ private:
     void init_gl();
     void init_font_atlas();
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
-    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
-    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color);
-    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
-    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color);
+    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
+    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
     void draw_panel_with_border(float x, float y, float w, float h, const glm::vec4& bg_col, const glm::vec4& border_col, float border_thick = 1.0f);
 
     int m_width{1600};

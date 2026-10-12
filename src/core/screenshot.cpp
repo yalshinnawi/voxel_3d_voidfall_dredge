@@ -248,12 +248,18 @@ void VisualTestHarness::record_phase(int slot, const std::string& phase_label, c
     // 5. Draw Sleek Compact Telemetry Tag (Avoids obscuring center HUD and menus)
     std::string short_label = phase_label;
     if (phase_label == "LEVEL SELECT" || phase_label == "SECTOR SELECT") short_label = "SECTORS";
-    else if (phase_label == "CHAR SELECT" || phase_label == "CHARACTER SELECT") short_label = "DELVERS";
+    else if (phase_label == "CHAR SELECT" || phase_label == "CHARACTER SELECT" || phase_label == "DELVER ROSTER") short_label = "DELVERS";
     else if (phase_label == "UPGRADES TERMINAL" || phase_label == "UPGRADES MENU" || phase_label == "UPGRADES") short_label = "UPGRADES";
-    else if (phase_label == "GAMEPLAY CAVERN") short_label = "CAVERN";
-    else if (phase_label == "DRILL CRACKS") short_label = "DRILLING";
-    else if (phase_label == "ABILITIES & LOOT") short_label = "ABILITIES";
-    else if (phase_label == "ESC MENU" || phase_label == "PAUSE MENU") short_label = "ESC MENU";
+    else if (phase_label == "HUB AUDIO RIG" || phase_label == "HUB AUDIO SETTINGS" || phase_label == "SETTINGS") short_label = "HUB AUDIO";
+    else if (phase_label == "GAMEPLAY CAVERN" || phase_label == "GAMEPLAY HUD") short_label = "HUD";
+    else if (phase_label == "FIELD MANUAL" || phase_label == "MANUAL BRIEFING" || phase_label == "OPERATIONS MANUAL") short_label = "MANUAL [H]";
+    else if (phase_label == "TACTICAL MAP" || phase_label == "CARTOGRAPHY MAP") short_label = "MAP [TAB]";
+    else if (phase_label == "DRILL CRACKS" || phase_label == "DRILL & VOXEL FX") short_label = "DRILLING";
+    else if (phase_label == "ABILITIES & LOOT" || phase_label == "COMBAT & LOOT") short_label = "COMBAT";
+    else if (phase_label == "PAUSE MISSION" || phase_label == "ESC MISSION" || phase_label == "ESC MENU" || phase_label == "PAUSE MENU") short_label = "ESC MISSION";
+    else if (phase_label == "PAUSE INVENTORY" || phase_label == "ESC INVENTORY" || phase_label == "CARGO INVENTORY") short_label = "INVENTORY";
+    else if (phase_label == "PAUSE AUDIO RIG" || phase_label == "ESC AUDIO SETTINGS" || phase_label == "ESC AUDIO") short_label = "ESC AUDIO";
+    else if (phase_label == "PAUSE CONTROLS" || phase_label == "ESC CONTROLS" || phase_label == "CONTROLS BRIEFING") short_label = "CONTROLS";
     else if (phase_label == "EXTRACTION BEACON") short_label = "EXTRACTION";
     else if (phase_label == "MISSION DEBRIEF") short_label = "DEBRIEF";
 
@@ -346,125 +352,32 @@ void VisualTestHarness::record_phase(int slot, const std::string& phase_label, c
 void VisualTestHarness::finalize(const std::string& montage_png_path,
                                 const std::string& report_txt_path,
                                 const std::string& report_json_path) {
-    // 1. Draw Slot 10: System Integration Telemetry Card (Row 2, Col 2)
-    int sys_x = 2 * TILE_W;
-    int sys_y = 2 * TILE_H;
+    // 1. If any slots remain unfilled up to NUM_SLOTS (16), render a sleek placeholder card
+    for (int empty_slot = static_cast<int>(m_metrics.size()); empty_slot < NUM_SLOTS; ++empty_slot) {
+        int slot_col = empty_slot % 4;
+        int slot_row = empty_slot / 4;
+        int tile_x = slot_col * TILE_W;
+        int tile_y = slot_row * TILE_H;
 
-    for (int dy = 0; dy < TILE_H; ++dy) {
-        for (int dx = 0; dx < TILE_W; ++dx) {
-            size_t idx = static_cast<size_t>((sys_y + dy) * MONTAGE_W + (sys_x + dx)) * 3;
-            m_montage_buffer[idx + 0] = 14;
-            m_montage_buffer[idx + 1] = 18;
-            m_montage_buffer[idx + 2] = 26;
+        for (int dy = 0; dy < TILE_H; ++dy) {
+            for (int dx = 0; dx < TILE_W; ++dx) {
+                size_t idx = static_cast<size_t>((tile_y + dy) * MONTAGE_W + (tile_x + dx)) * 3;
+                m_montage_buffer[idx + 0] = 16;
+                m_montage_buffer[idx + 1] = 20;
+                m_montage_buffer[idx + 2] = 28;
+            }
         }
+        std::string empty_txt = "[" + std::to_string(empty_slot + 1) + "] UNUSED SLOT";
+        draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, tile_x + 14, tile_y + 14, empty_txt, 90, 110, 130);
     }
-    for (int dx = 0; dx < TILE_W; ++dx) {
-        size_t top_idx = static_cast<size_t>(sys_y * MONTAGE_W + (sys_x + dx)) * 3;
-        size_t bot_idx = static_cast<size_t>((sys_y + TILE_H - 1) * MONTAGE_W + (sys_x + dx)) * 3;
-        m_montage_buffer[top_idx + 0] = m_montage_buffer[bot_idx + 0] = 0;
-        m_montage_buffer[top_idx + 1] = m_montage_buffer[bot_idx + 1] = 160;
-        m_montage_buffer[top_idx + 2] = m_montage_buffer[bot_idx + 2] = 200;
-    }
-    for (int dy = 0; dy < TILE_H; ++dy) {
-        size_t left_idx = static_cast<size_t>((sys_y + dy) * MONTAGE_W + sys_x) * 3;
-        size_t right_idx = static_cast<size_t>((sys_y + dy) * MONTAGE_W + (sys_x + TILE_W - 1)) * 3;
-        m_montage_buffer[left_idx + 0] = m_montage_buffer[right_idx + 0] = 0;
-        m_montage_buffer[left_idx + 1] = m_montage_buffer[right_idx + 1] = 160;
-        m_montage_buffer[left_idx + 2] = m_montage_buffer[right_idx + 2] = 200;
-    }
-
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 8, "[11] SYSTEM INTEGRATION", 0, 230, 255);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 24, "SUBSYSTEM             STATUS   HEALTH", 150, 160, 180);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 34, "------------------------------------", 70, 80, 100);
-
-    struct SysStatus { const char* name; const char* status; const char* health; uint8_t r; uint8_t g; uint8_t b; };
-    SysStatus sys_list[] = {
-        {"VOXEL PBR RENDERER   ", "ACTIVE ", "100%", 80, 240, 120},
-        {"VOLUMETRIC FOG COMPUTE", "LINKED ", "100%", 80, 240, 120},
-        {"GREEDY CHUNK MESHER  ", "ACTIVE ", "100%", 80, 240, 120},
-        {"CAVE-IN BFS SOLVER   ", "ACTIVE ", "100%", 80, 240, 120},
-        {"EXO LOCOMOTION & JUMP", "ACTIVE ", "100%", 80, 240, 120},
-        {"SEISMIC HAZARD CLOCK ", "ACTIVE ", "100%", 80, 240, 120},
-        {"EXTRACTION BEACON    ", "ACTIVE ", "100%", 80, 240, 120},
-        {"ORBITAL HUB & MENUS  ", "ACTIVE ", "100%", 80, 240, 120},
-        {"UDP HOST/CLIENT SYNC ", "ACTIVE ", "100%", 80, 240, 120},
-        {"PROFILE & SAVE ENGINE", "ACTIVE ", "100%", 80, 240, 120}
-    };
-    for (int s = 0; s < 10; ++s) {
-        std::string row = std::string(sys_list[s].name).substr(0, 21) + " " + sys_list[s].status + "  " + sys_list[s].health;
-        draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 44 + s * 12, row, sys_list[s].r, sys_list[s].g, sys_list[s].b);
-    }
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 172, "------------------------------------", 70, 80, 100);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 186, "ALL 10 SUBSYSTEMS FULLY INTEGRATED", 80, 255, 120);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, sys_x + 10, sys_y + 204, "ARCHITECTURE: C++20 / OPENGL 4.5", 100, 180, 220);
-
-    // 2. Draw Slot 11: Integrated Visual Health Matrix Card (Row 2, Col 3)
-    int diag_x = 3 * TILE_W;
-    int diag_y = 2 * TILE_H;
-
-    // Fill diagnostic card background
-    for (int dy = 0; dy < TILE_H; ++dy) {
-        for (int dx = 0; dx < TILE_W; ++dx) {
-            size_t idx = static_cast<size_t>((diag_y + dy) * MONTAGE_W + (diag_x + dx)) * 3;
-            m_montage_buffer[idx + 0] = 16;
-            m_montage_buffer[idx + 1] = 20;
-            m_montage_buffer[idx + 2] = 28;
-        }
-    }
-
-    // Border around diagnostic card
-    for (int dx = 0; dx < TILE_W; ++dx) {
-        size_t top_idx = static_cast<size_t>(diag_y * MONTAGE_W + (diag_x + dx)) * 3;
-        size_t bot_idx = static_cast<size_t>((diag_y + TILE_H - 1) * MONTAGE_W + (diag_x + dx)) * 3;
-        m_montage_buffer[top_idx + 0] = m_montage_buffer[bot_idx + 0] = 0;
-        m_montage_buffer[top_idx + 1] = m_montage_buffer[bot_idx + 1] = 180;
-        m_montage_buffer[top_idx + 2] = m_montage_buffer[bot_idx + 2] = 220;
-    }
-    for (int dy = 0; dy < TILE_H; ++dy) {
-        size_t left_idx = static_cast<size_t>((diag_y + dy) * MONTAGE_W + diag_x) * 3;
-        size_t right_idx = static_cast<size_t>((diag_y + dy) * MONTAGE_W + (diag_x + TILE_W - 1)) * 3;
-        m_montage_buffer[left_idx + 0] = m_montage_buffer[right_idx + 0] = 0;
-        m_montage_buffer[left_idx + 1] = m_montage_buffer[right_idx + 1] = 180;
-        m_montage_buffer[left_idx + 2] = m_montage_buffer[right_idx + 2] = 220;
-    }
-
-    // Draw Diagnostics Header
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 8, "[12] VISUAL HEALTH MATRIX", 0, 230, 255);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 24, "PHASE                 LUM    STATUS", 150, 160, 180);
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 34, "------------------------------------", 70, 80, 100);
 
     bool all_healthy = true;
-    for (size_t i = 0; i < m_metrics.size() && i < 10; ++i) {
-        const auto& m = m_metrics[i];
-        if (!m.is_healthy) all_healthy = false;
-
-        std::string name_col = m.phase_id;
-        if (name_col.size() > 18) name_col = name_col.substr(0, 18);
-        while (name_col.size() < 19) name_col += " ";
-
-        std::ostringstream lum_ss;
-        lum_ss << std::fixed << std::setprecision(2) << m.mean_luminance;
-        std::string lum_str = lum_ss.str();
-        while (lum_str.size() < 7) lum_str += " ";
-
-        std::string slot_idx = (m.slot + 1 < 10) ? ("0" + std::to_string(m.slot + 1)) : std::to_string(m.slot + 1);
-        std::string row_str = "P" + slot_idx + " " + name_col + lum_str + m.status_str;
-        int row_y = diag_y + 44 + static_cast<int>(i) * 12;
-
-        uint8_t r = m.is_healthy ? (m.status_str == "PASS" ? 80 : 255) : 255;
-        uint8_t g = m.is_healthy ? (m.status_str == "PASS" ? 240 : 200) : 60;
-        uint8_t b = m.is_healthy ? (m.status_str == "PASS" ? 120 : 50) : 60;
-
-        draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, row_y, row_str, r, g, b);
+    for (const auto& m : m_metrics) {
+        if (!m.is_healthy) {
+            all_healthy = false;
+            break;
+        }
     }
-
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 172, "------------------------------------", 70, 80, 100);
-    if (all_healthy) {
-        draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 186, "OVERALL: 10/10 PHASES HEALTHY [PASS]", 80, 255, 120);
-    } else {
-        draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 186, "OVERALL: VISUAL ANOMALIES DETECTED", 255, 80, 80);
-    }
-    draw_text(m_montage_buffer, MONTAGE_W, MONTAGE_H, diag_x + 10, diag_y + 204, "TILES: 400x225 (16:9) | GRID: 4x3", 100, 180, 220);
 
     // 2. Save Consolidated Montage (PNG & JPG)
     try {
@@ -502,7 +415,7 @@ void VisualTestHarness::finalize(const std::string& montage_png_path,
             txt << "================================================================================\n";
             txt << "FAST AGENT REVIEW INSTRUCTION:\n";
             txt << "Inspect 'screenshots/00_all_phases_montage.png' in a SINGLE view_file call\n";
-            txt << "to review all 7 screens at once instead of loading individual PNGs.\n";
+            txt << "to review all " << NUM_SLOTS << " screens at once instead of loading individual PNGs.\n";
             txt << "================================================================================\n";
         }
     } catch (...) {}

@@ -37,6 +37,12 @@
     ```bash
     ./build/Release/VoidfallDredge.exe
     ```
+- **Clear Save & Reset Profile (Testing & Fresh Playthroughs)**:
+  - **Python Utility**: `python scripts/clear_save.py` (creates automatic `.bak` backup, resets to level 1 defaults; supports `--all`, `--test`, `--delete`).
+  - **Launch Fresh**: `./build/Release/VoidfallDredge.exe --clear-save` (wipes save and launches game).
+  - **Instant Headless Reset**: `./build/Release/VoidfallDredge.exe --clear-save-only` (resets save and returns immediately).
+  - **In-Game Hotkey**: Press **F4** anytime on the Main Menu or in Test Mode to instantly reset profile.
+  - **In-Game UI**: Click **`[ RESET SAVE DATA ]`** on the Main Menu (or in Audio/Rig Settings) with built-in 2-step click confirmation.
 - **Run Test Suites (Fastest TDD Commands)**:
   - **Single Command High-Speed Parallel Runner (MANDATORY FOR AGENTS)**:
     ```bash
@@ -45,6 +51,12 @@
     *(Builds incrementally and executes ALL 10 test suites in parallel in ~1s)*
     > [!IMPORTANT]
     > **Agent Test Policy**: Agents must always run `python scripts/tdd.py` (with no flags) when validating feature changes. Flags like `--fast` and `--no-build` are strictly developer conveniences. Even if `--no-build` is passed, `tdd.py` contains an automated **Mtime Staleness Guard** that automatically forces a fresh incremental build if any source file is newer than the binaries.
+    >
+    > [!WARNING]
+    > **Test Runtime & Hang Prevention Policy**: If any test suite, test executable, or `tdd.py` execution is taking unusually long (e.g., more than a few seconds or exceeding expected thresholds), agents must NOT wait idly or ignore the slowdown.
+    > - **Investigate Immediately**: Determine the exact hanging or lagging suite (inspect task logs, process lists, or run the test executable directly).
+    > - **Root-Cause Analysis**: Check for infinite loops, unbounded BFS/spatial search iterations, thread contention, missing parallel compilation flags (`--parallel`), or redundant allocations.
+    > - **Optimize & Fix**: Surgically optimize the algorithm, bound loop iterations, eliminate stalling conditions, and ensure the test finishes rapidly (the entire parallel suite should execute in under ~3-5 seconds).
   - **Parallel CTest**:
     ```bash
     ctest --test-dir build -C Release -j 3 --output-on-failure
@@ -59,6 +71,8 @@
     ./build/Release/test_e2e_expeditions.exe
     ./build/Release/test_progression.exe
     ./build/Release/test_level_collision.exe
+    ./build/Release/test_level_generation.exe
+    ./build/Release/test_level_structural.exe
     ./build/Release/test_enemy_stalker.exe
     ./build/Release/test_enemy_burrower.exe
     ./build/Release/test_audio.exe
@@ -66,6 +80,8 @@
     ./build/Release/test_combat_omni_ai.exe
     ./build/Release/test_gameplay_mechanics.exe
     ./build/Release/test_spawn_safety.exe
+    ./build/Release/test_fluid_geometry.exe
+    ./build/Release/test_fluid_containment.exe
     ```
 - **Asset Synchronization**:
   - CMake copies [assets/](file:///d:/Projects/voxel_3d_voidfall_dredge/assets/) to `<TARGET_FILE_DIR>/assets` as a post-build step. When editing shaders or textures, rebuild the target or update the build output directory so changes reflect in the running executable.
@@ -81,19 +97,20 @@ The engine includes an automated playthrough and visual test harness ([src/core/
   ```
 - **Accelerated Screenshot Analysis Protocol (Fastest Method)**:
   Instead of sequentially inspecting multi-megabyte PNG files across separate tool calls:
-  1. **Instant Metrics & Preview Auto-Cleanup**: Run `python scripts/analyze_screenshots.py` (completes in 0.1s). This parses all 10 phase metrics, verifies luminance, and automatically cleans up temporary files in `screenshots/previews/` to save disk space (pass `--keep-previews` to retain them).
-  2. **Single-Turn Visual Verification**: Call `view_file` on `screenshots/00_all_phases_montage.jpg` (or `.png`). This displays all 10 screens side-by-side in a 4x3 grid with slot labels, subsystem health, and visual matrix in a single instant glance!
+  1. **Instant Metrics & Preview Auto-Cleanup**: Run `python scripts/analyze_screenshots.py` (completes in 0.1s). This parses all 16 phase metrics, verifies luminance, and automatically cleans up temporary files in `screenshots/previews/` to save disk space (pass `--keep-previews` to retain them).
+  2. **Single-Turn Visual Verification**: Call `view_file` on `screenshots/00_all_phases_montage.jpg` (or `.png`). This displays all 16 screens side-by-side in a 4x4 grid with slot labels and subsystem telemetry in a single instant glance!
   3. **Targeted Deep-Dive**: If a specific anomaly is spotted in a phase, inspect that frame's lightweight preview in `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg` (~40KB, stamped with in-image date/time label) using `--keep-previews`.
 - **Master Captured Files**:
-  - `screenshots/00_all_phases_montage.jpg` / `.png`: 4x3 contact sheet of all 10 game screens + system telemetry + visual matrix card.
+  - `screenshots/00_all_phases_montage.jpg` / `.png`: 4x4 contact sheet of all 16 game screens (1600x900 native resolution).
   - `screenshots/visual_report.txt` / `.json`: Luminance, timestamp, and non-black sanity check reports.
   - `screenshots/previews/<phase>_YYYYMMDD_HHMMSS.jpg`: Lightweight 800x450 previews stamped with date/time banners (auto-cleaned after analysis).
-  - `screenshots/01_main_menu.png` to `10_mission_debrief.png`: Uncompressed 1600x900 masters.
+  - `screenshots/01_main_menu.png` to `16_mission_debrief.png`: Uncompressed 1600x900 masters.
 - **Single Screenshot Capture Flag**:
   ```bash
   ./build/Release/VoidfallDredge.exe --screenshot screenshots/target_view.png
   ```
-- **Live In-Game Testing Hotkeys (Active ONLY in Test Mode via `--test`, `--test-save`, or `--auto-play-test`)**:
+- **Live In-Game Testing Hotkeys (Active in Test Mode via `--test`, `--test-save`, or `--auto-play-test`; F4 also active in Main Menu)**:
+  - **F4**: Clear Save & Reset Delver Profile (resets EXP, unlocked sectors, minerals, and upgrades to pristine baseline).
   - **F5**: Grant Testing EXP & Resources (+1000 EXP, +25 Voidite, +10 Titanium).
   - **F6**: Execute Diagnostic Upgrade & Respec Cycle (purchases upgrades, validates stats, tests 85% refund).
   - **F7**: Force Seismic Tremor (triggers screen trauma, HUD warning, ceiling debris).
@@ -138,9 +155,9 @@ All automated tests and visual playthroughs run **strictly non-audible (silent h
 All visual outputs, test screenshots, and 3D reference catalogs follow strict repository integrity rules:
 
 - **Canonical File Inventory for `screenshots/`**:
-  - **10 Gameplay Phase Masters**: `01_main_menu.png` through `10_mission_debrief.png` (1600x900 full-res).
+  - **16 Gameplay Phase Masters**: `01_main_menu.png` through `16_mission_debrief.png` (1600x900 full-res).
   - **6 Void Stalker FSM Test Frames**: `enemy_01_floor_crawl.png` through `enemy_06_sonar_stun.png`.
-  - **Master Contact Sheet Montages**: `00_all_phases_montage.jpg` / `.png` (4x3 gameplay grid) and `enemy_visual_montage.jpg` / `.png` (3x2 combat grid).
+  - **Master Contact Sheet Montages**: `00_all_phases_montage.jpg` / `.png` (4x4 gameplay grid: 1600x900) and `enemy_visual_montage.jpg` / `.png` (3x2 combat grid).
   - **Reports & Samples**: `visual_report.*`, `enemy_visual_report.*`, `audio_safety_report.json`, and `audio_samples/*.wav`.
   - **No Stale or Duplicate Files**: Do not commit legacy naming variants (e.g., `02_sector_select.png`, `03_upgrades_menu.png`, `06_loot_toasts.png`, `enemy_01_shadow_stalk.png`).
 - **Dedicated 3D Model Catalog (`docs/models/`)**:

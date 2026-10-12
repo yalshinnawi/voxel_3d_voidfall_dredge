@@ -352,6 +352,12 @@ void PlayerController::execute_melee_shove() {
     m_melee_shove_cooldown = 0.8f;
     m_melee_shove_timer = 0.35f;
     add_trauma(0.15f);
+
+    if (m_upgrades.berserkerOverdriveTier > 0) {
+        m_shield = std::min(m_max_shield, m_shield + m_upgrades.berserkerOverdriveTier * 12.0f);
+        m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
+    }
+
     if (m_on_melee_shove) {
         m_on_melee_shove(eye_position(), m_front);
     }
@@ -372,6 +378,9 @@ void PlayerController::update_physics(float dt, World& world) {
     m_current_world = &world;
 
     m_insertionShieldTimer = std::max(0.0f, m_insertionShieldTimer - dt);
+    if (m_defibrillator_timer > 0.0f) {
+        m_defibrillator_timer = std::max(0.0f, m_defibrillator_timer - dt);
+    }
     if (m_spawn_shoot_pause_timer > 0.0f) {
         m_spawn_shoot_pause_timer = std::max(0.0f, m_spawn_shoot_pause_timer - dt);
     }
@@ -495,7 +504,7 @@ void PlayerController::update_physics(float dt, World& world) {
                     in_lava = true;
                     float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
                     max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT) {
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT || v.material_id == MAT_ACID) {
                     in_water = true;
                     float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
                     max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
@@ -518,7 +527,7 @@ void PlayerController::update_physics(float dt, World& world) {
                     in_lava = true;
                     float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
                     max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT) {
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT || v.material_id == MAT_ACID) {
                     in_water = true;
                     float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
                     max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
@@ -593,21 +602,21 @@ void PlayerController::update_physics(float dt, World& world) {
     }
 
     if (m_is_in_lava) {
-        float lava_dmg = 28.0f * dt;
+        float lava_dmg = 12.0f * dt;
         take_damage(lava_dmg, DamageSource::ThermalLava);
-        m_exo.heat = std::min(100.0f, m_exo.heat + 50.0f * dt);
+        m_exo.heat = std::min(100.0f, m_exo.heat + 40.0f * dt);
         if (m_exo.heat >= 100.0f) {
             m_exo.overheated = true;
         }
         static float s_lava_warn = 0.0f;
         s_lava_warn += dt;
-        if (s_lava_warn >= 0.8f) {
+        if (s_lava_warn >= 1.2f) {
             s_lava_warn = 0.0f;
             if (m_on_warning) {
                 if (m_health <= 0.0f) {
                     m_on_warning("VITAL SIGNS LOST: DELVER INCINERATED IN THERMITE SLAG");
                 } else {
-                    m_on_warning("CRITICAL: THERMAL BURNS / LAVA CONTACT (-28 HP/s)");
+                    m_on_warning("CRITICAL: THERMAL BURNS / LAVA CONTACT (-12 HP/s)");
                 }
             }
         }
@@ -627,7 +636,7 @@ void PlayerController::update_physics(float dt, World& world) {
     Voxel lower_body = world.get_voxel(center_x, torso_y, center_z);
 
     if (underfoot.material_id == MAT_TOXIC_GAS || lower_body.material_id == MAT_TOXIC_GAS) {
-        take_damage(22.0f * dt, DamageSource::ToxicGas);
+        take_damage(3.0f * dt, DamageSource::ToxicGas);
     }
 
     bool is_spikes_underfoot = (underfoot.material_id == MAT_OBSIDIAN_SPIKES || lower_body.material_id == MAT_OBSIDIAN_SPIKES);
@@ -638,9 +647,9 @@ void PlayerController::update_physics(float dt, World& world) {
         m_velocity.z *= std::max(0.0f, 1.0f - 7.0f * dt);
 
         if (m_spike_damage_timer <= 0.0f) {
-            m_spike_damage_timer = 0.65f;
+            m_spike_damage_timer = 1.4f;
             take_damage(25.0f, DamageSource::Spikes);
-            add_trauma(0.45f);
+            add_trauma(0.35f);
             m_velocity.y = std::max(m_velocity.y, 2.2f); // Sharp hop recoil, not trampoline escape
             if (m_on_warning) {
                 if (m_health <= 0.0f) {
@@ -659,13 +668,13 @@ void PlayerController::update_physics(float dt, World& world) {
         int check_by = static_cast<int>(std::floor(foot_y));
         if (!world.is_solid(glm::ivec3(check_bx, check_by, check_bz)) &&
             !world.is_solid(glm::ivec3(check_bx, check_by - 1, check_bz))) {
-            take_damage(35.0f, DamageSource::VoidSingularity);
-            add_trauma(0.60f);
+            take_damage(25.0f, DamageSource::VoidSingularity);
+            add_trauma(0.40f);
             if (m_health > 0.0f) {
                 m_position.y = 6.5f;
                 m_velocity = glm::vec3(0.0f, 4.0f, 0.0f);
                 if (m_on_warning) {
-                    m_on_warning("VOID RIFT: GRAVITATIONAL REPULSION (-35 HP)");
+                    m_on_warning("VOID RIFT: GRAVITATIONAL REPULSION (-25 HP)");
                 }
             } else {
                 m_velocity = glm::vec3(0.0f, -8.0f, 0.0f);
@@ -676,13 +685,9 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
-    // 3c. Suit Nanite Field Stabilizer (Out-of-combat triage recuperation up to 75% max health)
-    m_time_since_damage += dt;
-    if (m_time_since_damage >= 12.0f && m_health > 0.0f && m_health < m_max_health * 0.75f) {
-        float heal_amount = 2.5f * dt;
-        m_health = std::min(m_max_health * 0.75f, m_health + heal_amount);
-        m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
-    }
+    // 3c. Kinetic Shield Layer Recharge (Recharges as long as player isn't taking damage)
+    // Note: Hitpoints once taken damage CANNOT be regenerated.
+    update_shield_recharge(dt);
 
     // 4. Mining / Drilling Handling (Progressive cumulative damage with 1.0s decay)
     MineBlock(dt, world);
@@ -944,6 +949,8 @@ void PlayerController::UpdatePhysics(float dt) {
         } else {
             m_zoom_progress = std::max(0.0f, m_zoom_progress - dt * ads_speed);
         }
+
+        update_shield_recharge(dt);
     }
 }
 
@@ -1906,6 +1913,16 @@ void PlayerController::resolve_voxel_collisions(World& world, glm::vec3& pos, gl
 
         // 4. Depenetrate static overlaps
         depenetrate(half_extents, world);
+
+        // 5. Depenetrate rigid extraction pod
+        if (m_pod_collider.active) {
+            resolve_extraction_pod_collision(
+                m_pod_collider.position,
+                m_pod_collider.drill_progress,
+                m_pod_collider.ramp_extension,
+                m_pod_collider.is_anchored
+            );
+        }
     }
 
     // Ground support probe: ensure m_on_ground stays true while standing, walking, or ascending on floor/ramp
@@ -2058,14 +2075,21 @@ void PlayerController::apply_attributes_and_upgrades(const CharacterAttributes& 
 
     m_max_health = attr.suitIntegrity + (upg.reinforcedPlatingTier * 15.0f);
     m_health = m_max_health;
+    m_max_shield = attr.baseShield + (upg.kineticShieldingTier * 12.0f);
+    m_shield = m_max_shield;
+    m_shield_recharge_delay = std::max(1.5f, 4.0f - (upg.kineticShieldingTier * 0.5f));
     m_exo.max_power = 100.0f * (1.0f + upg.thrusterTankTier * 0.20f);
     m_exo.power = m_exo.max_power;
     m_exo.integrity = 100.0f;
+    m_exo.shield = 100.0f;
     m_sonar_max_cooldown = std::max(4.0f, attr.sonarCooldown - (upg.sonarFrequencyTier * 1.0f));
     m_tactical_max_cooldown = (attr.classType == CharacterClass::Demolitionist) ? 18.0f :
                               (attr.classType == CharacterClass::Vanguard) ? 20.0f : 12.0f;
 
     m_weapon_stats = get_class_weapon_stats(attr.classType);
+    m_weapon_stats.damage_per_pellet *= (1.0f + upg.hyperVelocitySlugsTier * 0.12f);
+    m_weapon_stats.fire_rate *= std::max(0.4f, 1.0f - upg.rapidCyclingTier * 0.08f);
+    m_weapon_stats.reload_time *= std::max(0.4f, 1.0f - upg.rapidCyclingTier * 0.10f);
     m_weapon_ammo = m_weapon_stats.max_ammo;
     m_reload_timer = 0.0f;
     m_fire_cooldown = 0.0f;
@@ -2086,10 +2110,35 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
         dmg *= (1.0f - reduction);
     }
     if (dmg <= 0.0f) return 0.0f;
-    m_health = std::max(0.0f, m_health - dmg);
-    m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
+
     m_last_damage_source = source;
     m_time_since_damage = 0.0f;
+
+    // Shield layer absorbs incoming damage first; any excess punctures into unregenerating hitpoints
+    float remaining_dmg = dmg;
+    if (m_shield > 0.0f) {
+        float absorbed = std::min(m_shield, remaining_dmg);
+        m_shield -= absorbed;
+        remaining_dmg -= absorbed;
+    }
+
+    if (remaining_dmg > 0.0f) {
+        if (m_health <= remaining_dmg && m_upgrades.defibrillatorTier > 0 && m_defibrillator_timer <= 0.0f) {
+            // Emergency Second Wind triggers!
+            m_health = 35.0f;
+            m_shield = m_max_shield;
+            m_insertionShieldTimer = 2.0f; // 2 seconds invulnerability buffer
+            m_defibrillator_timer = 150.0f - m_upgrades.defibrillatorTier * 30.0f;
+            if (m_on_warning) {
+                m_on_warning("DEFIBRILLATOR ACTIVATED: SECOND WIND (SURVIVED LETHAL TRAUMA)!");
+            }
+        } else {
+            m_health = std::max(0.0f, m_health - remaining_dmg);
+        }
+    }
+
+    m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
+    m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
 
     // Apply trauma screen shake based on specific damage scenario:
     // - Radiation causes invisible cellular breakdown -> ZERO screen shaking! (Telegraphed by Geiger counter & groaning)
@@ -2124,6 +2173,36 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
 
 float PlayerController::take_damage(float dmg, bool is_falling_debris) {
     return take_damage(dmg, is_falling_debris ? DamageSource::FallingDebris : DamageSource::Kinetic);
+}
+
+void PlayerController::set_health(float h) {
+    m_health = glm::clamp(h, 0.0f, m_max_health);
+    m_exo.integrity = (m_max_health > 0.0f) ? (m_health / m_max_health * 100.0f) : 0.0f;
+}
+
+void PlayerController::set_shield(float s) {
+    m_shield = glm::clamp(s, 0.0f, m_max_shield);
+    m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
+}
+
+void PlayerController::set_max_shield(float ms) {
+    m_max_shield = std::max(0.0f, ms);
+    m_shield = glm::clamp(m_shield, 0.0f, m_max_shield);
+    m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
+}
+
+void PlayerController::reset_shield() {
+    m_shield = m_max_shield;
+    m_exo.shield = (m_max_shield > 0.0f) ? 100.0f : 0.0f;
+}
+
+void PlayerController::update_shield_recharge(float dt) {
+    m_time_since_damage += dt;
+    if (m_time_since_damage >= m_shield_recharge_delay && m_shield < m_max_shield && m_health > 0.0f) {
+        float recharge = m_shield_recharge_rate * dt;
+        m_shield = std::min(m_max_shield, m_shield + recharge);
+        m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
+    }
 }
 
 void PlayerController::reload_weapon() {
@@ -2182,7 +2261,8 @@ bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts,
 
         PlayerPlasmaBolt bolt;
         bolt.position = base_origin;
-        bolt.velocity = fire_dir * m_weapon_stats.projectile_speed;
+        // Projectile ballistics inherit player platform velocity so lateral motion doesn't skew sightline relative to shooter
+        bolt.velocity = fire_dir * m_weapon_stats.projectile_speed + m_velocity;
         bolt.lifetime = m_weapon_stats.projectile_lifetime;
         bolt.damage = m_weapon_stats.damage_per_pellet;
         bolt.color = m_weapon_stats.tracer_color;
@@ -2234,6 +2314,124 @@ float PlayerController::current_fov(float base_fov) const {
     }
     float target_fov = base_fov * m_weapon_stats.zoom_fov_multiplier;
     return glm::mix(base_fov, target_fov, m_zoom_progress);
+}
+
+void PlayerController::set_pod_collider(const glm::vec3& pod_pos, float drill_progress, float ramp_extension, bool is_anchored) {
+    m_pod_collider.active = true;
+    m_pod_collider.position = pod_pos;
+    m_pod_collider.drill_progress = drill_progress;
+    m_pod_collider.ramp_extension = ramp_extension;
+    m_pod_collider.is_anchored = is_anchored;
+}
+
+void PlayerController::clear_pod_collider() {
+    m_pod_collider.active = false;
+}
+
+bool PlayerController::resolve_extraction_pod_collision(
+    const glm::vec3& pod_pos,
+    float drill_progress,
+    float ramp_extension,
+    bool is_anchored
+) {
+    float descent_y = pod_pos.y + (1.0f - glm::clamp(drill_progress, 0.0f, 1.0f)) * 16.0f;
+    glm::vec3 pod_base = glm::vec3(pod_pos.x, descent_y, pod_pos.z);
+
+    const float HULL_RADIUS = 1.45f;
+    const float HULL_BOTTOM = 0.45f;
+    const float HULL_TOP = 4.20f;
+    const float POD_ROOF_Y = descent_y + HULL_TOP;
+
+    glm::vec3 he = half_extents();
+    float foot_y = m_position.y - he.y;
+    float head_y = m_position.y + he.y;
+
+    float dx = m_position.x - pod_base.x;
+    float dz = m_position.z - pod_base.z;
+    float horiz_dist = std::sqrt(dx * dx + dz * dz);
+
+    // 1. Roof Support: If player is standing on or landing on the top deck
+    if (horiz_dist <= HULL_RADIUS + 0.2f && foot_y >= POD_ROOF_Y - 0.35f && foot_y <= POD_ROOF_Y + 0.5f) {
+        m_position.y = POD_ROOF_Y + he.y;
+        if (m_velocity.y < 0.0f) {
+            m_velocity.y = 0.0f;
+        }
+        m_on_ground = true;
+        m_isGrounded = true;
+        return true;
+    }
+
+    // Check vertical overlap with the pod structure
+    if (head_y < descent_y || foot_y > POD_ROOF_Y + 0.5f) {
+        return false;
+    }
+
+    // 2. Boarding Ramp Interaction (+Z direction from pod)
+    bool ramp_active = (is_anchored && ramp_extension >= 0.1f);
+    if (ramp_active) {
+        float ramp_len = 2.4f * ramp_extension;
+        float ramp_start_z = HULL_RADIUS * 0.90f; // ~1.30m
+        float ramp_end_z = ramp_start_z + ramp_len; // ~3.70m
+
+        if (dz >= ramp_start_z - 0.2f && dz <= ramp_end_z + 0.4f && std::abs(dx) <= 0.85f) {
+            float t = glm::clamp((dz - ramp_start_z) / std::max(0.01f, ramp_len), 0.0f, 1.0f);
+            float ramp_surf_y = descent_y + (1.0f - t) * HULL_BOTTOM;
+
+            // Constrain player feet onto ramp deck
+            if (foot_y <= ramp_surf_y + 0.25f && foot_y >= ramp_surf_y - 0.6f) {
+                m_position.y = ramp_surf_y + he.y;
+                if (m_velocity.y < 0.0f) {
+                    m_velocity.y = 0.0f;
+                }
+                m_on_ground = true;
+                m_isGrounded = true;
+            }
+
+            // Ramp side handrails (at |dx| = 0.52m): keep player on the ramp
+            const float HALF_RAMP_WIDTH = 0.52f;
+            if (dx > HALF_RAMP_WIDTH) {
+                m_position.x = pod_base.x + HALF_RAMP_WIDTH;
+                if (m_velocity.x < 0.0f) m_velocity.x = 0.0f;
+            } else if (dx < -HALF_RAMP_WIDTH) {
+                m_position.x = pod_base.x - HALF_RAMP_WIDTH;
+                if (m_velocity.x > 0.0f) m_velocity.x = 0.0f;
+            }
+
+            // Doorway threshold header
+            float header_y = descent_y + HULL_TOP - 0.35f;
+            if (head_y > header_y && dz < ramp_start_z + 0.3f) {
+                m_position.y = header_y - he.y - 0.01f;
+                if (m_velocity.y > 0.0f) m_velocity.y = 0.0f;
+            }
+
+            return true;
+        }
+    }
+
+    // 3. Rigid Hull & Outrigger Bulkhead Collision (Radial Depenetration)
+    const float MIN_COLLISION_DIST = HULL_RADIUS + he.x + 0.05f; // 1.45 + 0.30 + 0.05 = 1.80m
+
+    if (horiz_dist < MIN_COLLISION_DIST) {
+        glm::vec2 normal;
+        if (horiz_dist > 0.001f) {
+            normal = glm::vec2(dx, dz) / horiz_dist;
+        } else {
+            normal = glm::vec2(0.0f, -1.0f);
+        }
+
+        m_position.x = pod_base.x + normal.x * MIN_COLLISION_DIST;
+        m_position.z = pod_base.z + normal.y * MIN_COLLISION_DIST;
+
+        float inward_v = m_velocity.x * normal.x + m_velocity.z * normal.y;
+        if (inward_v < 0.0f) {
+            m_velocity.x -= inward_v * normal.x;
+            m_velocity.z -= inward_v * normal.y;
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 } // namespace Voidfall

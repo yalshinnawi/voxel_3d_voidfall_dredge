@@ -298,13 +298,13 @@ public:
         emit_sound(SoundEventType::VoxelFracture, pos, intensity, radius, 0.65f);
     }
 
-    /// Gunshot muzzle blast
+    /// Gunshot muzzle blast - tuned to tactical engagement radius
     void add_gunshot_sound(const glm::vec3& muzzle_pos, int weapon_archetype = 0) {
-        float intensity = 20.0f;
-        float radius = 42.0f;
-        if (weapon_archetype == 0) { intensity = 28.0f; radius = 50.0f; } // Magma Scattergun
-        else if (weapon_archetype == 2) { intensity = 35.0f; radius = 58.0f; } // Needler Railgun
-        emit_sound(SoundEventType::Gunshot, muzzle_pos, intensity, radius, 0.85f);
+        float intensity = 18.0f;
+        float radius = 24.0f;
+        if (weapon_archetype == 0) { intensity = 22.0f; radius = 28.0f; } // Magma Scattergun
+        else if (weapon_archetype == 2) { intensity = 26.0f; radius = 34.0f; } // Needler Railgun
+        emit_sound(SoundEventType::Gunshot, muzzle_pos, intensity, radius, 0.65f);
     }
 
     /// Weapon reload mechanical clack (quiet, short-range)

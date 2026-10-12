@@ -37,29 +37,29 @@ Every subterranean hazard is strictly designed with multi-sensory **pre-damage t
 
 ### 2.4 Toxic Gas Vents & Spore Pockets (`MAT_GAS`)
 - **Visuals & Atmosphere**: Continuous buoyant yellowish-green vapor plumes (`spawn_toxic_gas_cloud`) with aerodynamic drag and upward drift ($g < 0$). On-screen visor toxic condensation droplets (`OnScreenToxicDroplet`) and sickly vapor vignette.
-- **Pre-Damage Telegraph**: High-pressure chemical venting hiss (`SoundCue::ToxicGasHiss`) audible within $6\,\text{m}$. Proactive HUD warning on approach: `"CAUTION: TOXIC ATMOSPHERE AHEAD - VENTILATE OR CIRCUMVENT"`.
-- **Damage Profile**: Respiratory chemical burn dealing **$3.5\,\text{HP/s}$** (`DamageSource::ToxicGas`).
-- **Physical Effects & Audio**: Delver vocal asphyxiation coughing spasms and inspiratory wheeze (`SoundCue::PlayerAsphyxiation`) repeating every $\sim 1.35\,\text{s}$.
+- **Pre-Damage Telegraph**: High-pressure chemical venting hiss (`SoundCue::ToxicGasHiss`) audible within $6\,\text{m}$. Visible yellow-green sulfur mist haze hovering over gas basins. Proactive HUD warning on approach: `"CAUTION: TOXIC ATMOSPHERE AHEAD // BIO-GAS ESCAPING"`.
+- **Damage Profile**: Respiratory chemical burn dealing **$1.0\,\text{HP/s}$** (`DamageSource::ToxicGas`).
+- **Physical Effects & Audio**: Delver vocal asphyxiation coughing spasms and inspiratory wheeze (`SoundCue::PlayerAsphyxiation`) repeating every $\sim 2.0\,\text{s}$.
 - **Screen Shake Isolation**: **Subtle cough shudder only** ($\text{trauma} \le 0.02$). **Zero violent screen shaking** so the delver can see exit paths and read HUD telemetry.
-- **Encounter Locations**: `FaultLineCrevasse`, `FungoidBioGrotto`.
+- **Encounter Locations**: `FaultLineCrevasse`, `FungoidBioGrotto`, `ToxicMiasmaSwamp`.
 - **Counterplay & Parkour**: Elevated mushroom cap platforms and perimeter rock catwalks bypassing the gas-filled floor basin; clearing pockets with explosive charges or drill suction.
 
 ### 2.5 Radioactive Ore Moats & Irradiated Cores (`MAT_RADIOACTIVE_ORE`)
-- **Visuals & Atmosphere**: Pulsing phosphorescent green luminescence, energetic green ionization sparks (`spawn_radiation_glimmer`), and HUD emerald scanline static vignette (`trigger_radiation_flash`).
-- **Pre-Damage Telegraph**: Calibrated audio Geiger counter clicks whose frequency accelerates with proximity ($0\,\text{mSv/h} \to 1200\,\text{mSv/h}$). Proactive pre-damage advisory at $25\% - 50\%$ radiation: `"WARNING: ELEVATED RADIATION FIELD - EXOSUIT UNDER STRESS"` before tissue corrosion damage begins at $50\%$. Proactive room entry banner: `"RADIATION HAZARD: RADIOACTIVE CORE SANCTUARY"`.
-- **Damage Profile**: Deep tissue corrosion dealing up to **$5\,\text{HP/s}$** at $\ge 50\%$ radiation exposure (`DamageSource::Radiation`).
-- **Physical Effects & Audio**: Delver groans in physical distress (`SoundCue::PlayerGroan`) repeating every $\sim 1.75\,\text{s}$.
+- **Visuals & Atmosphere**: Luminous toxic emerald volumetric mist haze rolling through the chamber (`uToxicHazeFactor`), buoyant phosphorescent green ionization mist wisps (`spawn_radiation_glimmer`), and subtle HUD emerald scanline vignette (`trigger_radiation_flash`).
+- **Pre-Damage Telegraph**: Calibrated audio Geiger counter clicks whose frequency accelerates with proximity ($0\,\text{mSv/h} \to 1200\,\text{mSv/h}$). Proactive pre-damage advisory at $25\% - 50\%$ radiation: `"WARNING: ELEVATED RADIATION FIELD - EXOSUIT UNDER STRESS"`. Proactive room entry banner: `"<< HAZARD SECTION: IONIZING RADIATION FIELD DETECTED >>"`.
+- **Damage Profile**: Safe buffer up to $74\%$ radiation ($0\,\text{HP/s}$ damage). Gentle warning corrosion begins at $\ge 75\%$ ($0.15 - 0.42\,\text{HP/s}$), scaling moderately to $0.85\,\text{HP/s}$ at $95\%$, and capped at **$1.5\,\text{HP/s}$** at critical $\ge 98\%$ exposure (`DamageSource::Radiation`). Extraction landing zone provides $85\% - 90\%$ radiation shielding resistance.
+- **Physical Effects & Audio**: Delver groans in physical distress (`SoundCue::PlayerGroan`) rate-limited to every $\sim 4.5\,\text{s}$.
 - **Screen Shake Isolation**: **STRICTLY ZERO SCREEN SHAKING** ($\text{trauma} = 0.0$). Radiation damage causes cellular breakdown, not kinetic blunt force. Camera remains perfectly steady while Geiger counter clicks and groans telegraph the hazard.
 - **Encounter Locations**: `RadioactiveCoreSanctuary`.
 - **Counterplay & Parkour**: Stepping stone paths across the irradiated mineral moat to reach the central Voidite monolith; retreating to low-radiation zones to vent dosimeter buildup.
 
 ### 2.6 Falling Debris & Seismic Collapses (`DamageSource::FallingDebris`)
-- **Localized Stress & Fault Rupture**: Seismic stress accumulates specifically in excavation zones where rock was mined, drilled, or blasted. Remote zones remain completely stable ($0\%$ stress). Screen shake, dust kickup, and ceiling spall particles only affect the delver if they are inside or near the destabilized zone.
-- **Massive Primary Cave-in Wave**: Upon fault rupture, the ceiling undergoes a catastrophic collapse, detaching **$18 - 36$ physical solid voxels** across a $15\,\text{m}$ radius. Blocks tumble with punchy downward velocity ($v_y \le -5.0\,\text{m/s}$), high angular spin, and particle trails.
-- **Sustained Tremor & Aftershock Cascades**: During the 5-second sustained tremor rumble, periodic secondary aftershock waves collapse **$4 - 8$ additional ceiling blocks every $0.85\,\text{s}$**, creating continuous structural disintegration throughout the event.
+- **Localized Stress & Fault Rupture**: Seismic stress accumulates specifically in excavation zones where rock was mined, drilled, or blasted. Remote zones remain completely stable ($0\%$ stress). Screen shake, dust kickup, and ceiling spall particles only affect the delver if they are inside or near the destabilized zone. Extended $75\,\text{s}$ refractory cooldown prevents repetitive tremor loops.
+- **Controlled Primary Cave-in Wave**: Upon fault rupture, the ceiling undergoes a controlled localized collapse, detaching **$6 - 12$ physical solid voxels** across the affected zone. Blocks tumble with punchy downward velocity ($v_y \le -5.0\,\text{m/s}$), high angular spin, and particle trails.
+- **Sustained Tremor & Aftershock Cascades**: During the 5-second sustained tremor rumble, localized dust kickup and ceiling spall warn the delver of falling rock trajectories.
 - **Physical Rubble Placement & Cavern Geometry**: Every falling block that strikes the cavern floor permanently settles into the voxel grid as physical rubble, altering cavern navigability and creating dynamic cover or obstacles.
-- **Hostile Crushing Impact**: Crashing blocks deal **$40 - 45\,\text{HP}$ crushing impact damage** to nearby hostiles (Void Stalkers, Seismic Burrowers within $2.4 - 2.6\,\text{m}$), rewarding players who lure enemies into destabilized fault zones.
-- **Delver Damage & Shelter Counterplay**: Falling debris deals **$18\,\text{HP}$** suit integrity damage upon direct impact. Players sheltered beneath player-placed Industrial Bulkheads take $0$ damage as falling blocks shatter harmlessly against the plating (`TITANIUM BULKHEAD DEFLECTED FALLING DEBRIS!`). In Sector 1, extraction landing zones are fully shielded during evacuation defense.
+- **Hostile Crushing Impact**: Crashing blocks deal **$20 - 50\,\text{HP}$ crushing impact damage** to nearby hostiles (Void Stalkers, Seismic Burrowers within $2.4 - 2.6\,\text{m}$), rewarding players who lure enemies into destabilized fault zones.
+- **Delver Damage & Shelter Counterplay**: Falling debris deals balanced **$7 - 17.5\,\text{HP}$** damage to the player upon direct impact with a $1.2\,\text{s}$ multi-hit debouncing window to prevent instant cluster deaths. Players sheltered beneath player-placed Industrial Bulkheads take $0$ damage (`TITANIUM BULKHEAD DEFLECTED FALLING DEBRIS!`). In Sector 1, extraction landing zones are fully shielded during evacuation defense.
 - **Physical Effects & Audio**: Cavern groaning structural strain (`SoundCue::CavernGroan`), concussive explosive blast cracks (`SoundCue::ExplosiveBlast`), and heavy stone crushing impacts (`SoundCue::DebrisArmorImpact`).
 - **Blood Splatter Policy**: **STRICTLY ZERO BLOOD SPLATTERS**. Debris impacts damage exosuit bulkheads and mineral plating without lacerating organic tissue through the suit.
 
@@ -98,6 +98,16 @@ Every subterranean hazard is strictly designed with multi-sensory **pre-damage t
   | **Thermal Lava Slag** | `SoundCue::LavaBubble` + `SoundCue::ThermalHiss` | **NO** (Amber heat distortion) | Moderate ($\le 0.35$) |
   | **Spike Pit Puncture** | `SoundCue::SpikeRattle` + metallic impact | **NO** (Zero splatters) | High ($\ge 0.25$ + vertical impulse) |
   | **Aquifer Water Drag** | `SoundCue::WaterSplash` + bubbling | **NO** (Visor water mist beads) | **ZERO** ($0.0$ - soothing cooling) |
+
+### 2.11 Precursor Vault Obstacles & Guardian Boss Encounters
+Subterranean Precursor Vaults feature dedicated level-scaled obstacles guarding the approach to the breach blast door:
+- **Sector 1: Crystal Aquifer Moat & Stepping Stones (`AquiferSteppingStones`)**:
+  - Encircles the sanctum dais with deep bioluminescent flora and crystal water. Delvers must navigate a 4-way cross of stepping stones while under attack by an agitated Stalker Melee Guardian.
+- **Sector 2: Molten Slag Trench & Obsidian Spikes (`HazardTrenchSlag`)**:
+  - Sunken defense perimeter lined with razor obsidian spikes and molten slag flumes. Delvers must cross via a narrow titanium balance beam while Stalker Shooter Guardians snipe from elevated catwalk perches.
+- **Sector 3: Abyssal Chasm, Radiation & Chitin Goliath (`ChasmAbyssRadiation`)**:
+  - A sheer 10-meter drop plunging into molten slag and punji pits with ionizing radioactive seams embedded in the cliff faces. Delvers must hop floating precursor stepping monoliths ($y=14$) across open airspace to reach the isolated vault dais.
+  - **Boss Guardian (Chitin Goliath)**: A towering apex aberrant boss monster with massive armor plating, heavy ground pounds triggering localized ceiling cave-ins, and high-damage melee strikes guarding the Sector 3 vault treasure.
 
 ---
 

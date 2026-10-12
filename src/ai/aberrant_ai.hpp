@@ -23,10 +23,13 @@ enum class StalkerState : uint8_t {
     Dying,              // Death animation collapse & tumbling before carcass transition
     Dead,               // Marked for removal
     Roosting,           // Initial dormant state, clamped to surfaces with closed eyes/retracted limbs
+    Emerging,           // Physical burrowing emergence animation from rock/floor/ceiling (spawning in)
 
     // Uppercase aliases for compatibility with AIState enum conventions
     IDLE = Idle,
     ROOSTING = Roosting,
+    EMERGING = Emerging,
+    BURROWING_IN = Emerging,
     INVESTIGATING = Investigating,
     STALKING = Stalking,
     PURSUIT = Stalking,
@@ -158,6 +161,15 @@ public:
         const std::vector<AcousticNoiseEvent>& acoustic_events,
         bool has_los = true
     );
+
+    /// Evaluates if target position is within the creature's forward vision cone (field of view)
+    static bool is_in_vision_cone(
+        const glm::vec3& observer_pos,
+        const glm::vec3& observer_fwd,
+        const glm::vec3& target_pos,
+        float max_angle_rad = 1.04719755f // 60 degrees half-angle (120 degrees total vision cone, cos = 0.5)
+    );
+
     /// Classifies contact normal into FLOOR, WALL_CLIMBING, or CEILING_CRAWLING based on:
     /// - Floor:   n · up > 0.7
     /// - Wall:    |n · up| <= 0.7
@@ -253,6 +265,15 @@ public:
         float max_probe_dist = 24.0f
     );
 
+    /// When on the floor or below target (e.g. directly below player), finds the optimal
+    /// horizontal heading towards an adjacent climbable wall to scale up to the player's elevation.
+    static glm::vec3 find_ascending_wall_direction(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& target_pos,
+        const World& world,
+        float max_probe_dist = 24.0f
+    );
+
     /// Calculates 3D traversal direction along a climbing wall (tangent plane) towards target,
     /// enabling vertical climbing up/down the wall as well as horizontal wall-crawling.
     static glm::vec3 calculate_wall_traversal_direction(
@@ -270,9 +291,30 @@ public:
         float probe_dist = 1.6f
     );
 
+    /// Checks if a 3D point in world space is inside solid voxel geometry,
+    /// correctly evaluating sub-block shapes (slabs, ramps, corner wedges).
+    static bool is_point_solid(const World& world, const glm::vec3& p);
+
+    /// Computes the exact top surface elevation Y of a voxel at horizontal coordinate (px, pz).
+    static float get_voxel_surface_y(const World& world, int bx, int by, int bz, float px, float pz);
+
+    /// Returns the surface normal for a voxel at (bx, by, bz), including 45-degree ramp normals.
+    static glm::vec3 get_voxel_surface_normal(const World& world, int bx, int by, int bz);
+
+    /// Finds the walkable ground surface immediately below or stepped onto by an entity at pos.
+    /// Returns true if a valid surface with clear headroom was found.
+    static bool find_ground_surface(
+        const World& world,
+        const glm::vec3& pos,
+        float max_step_up = 1.35f,
+        float max_step_down = 1.5f,
+        float* out_surface_y = nullptr,
+        glm::vec3* out_normal = nullptr
+    );
+
     /// Robust swept voxel collision resolving against walls/geometry.
-    /// Clamps movement to prevent clipping/moving through walls, while allowing 1-block step clambering
-    /// on floors when headroom is clear.
+    /// Clamps movement to prevent clipping/moving through walls, while allowing 1-block step clambering,
+    /// smooth ramp slope conformance, and half-slab traversal on floors when headroom is clear.
     static bool resolve_voxel_collision(
         glm::vec3& pos,
         glm::vec3& velocity,

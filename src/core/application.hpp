@@ -38,6 +38,7 @@ struct AppConfig {
     std::string connect_ip{"127.0.0.1"};
     uint16_t port{27015};
     uint32_t world_seed{1337};
+    bool has_explicit_seed{false};
     std::string player_name{"Delver"};
     bool auto_play_test{false};
     bool hidden_window{false};
@@ -47,6 +48,7 @@ struct AppConfig {
     bool is_test_save{false};
     bool test_mode{false};
     bool test_enemy{false};
+    bool test_relic{false};
     bool capture_models{false};
     bool capture_level_shapes{false};
     bool mute_audio{false};
@@ -77,13 +79,17 @@ public:
     void TransitionState(GameState newState);
     GameState current_state() const { return m_state; }
     const std::string& active_save_file() const { return m_active_save_file; }
-    bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.capture_level_shapes; }
+    bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.test_relic || m_config.capture_level_shapes; }
     static Application* instance();
+    void clear_save_and_reset();
     void LaunchSector(int sector_index);
     int current_sector_index() const { return m_selected_level; }
+    uint32_t current_level_seed() const { return m_current_level_seed; }
     AudioEngine* audio() { return m_audio.get(); }
     const MissionSystem& mission() const { return m_mission; }
     MissionSystem& mission_mut() { return m_mission; }
+    void grant_expedition_objectives();
+    void complete_and_extract_instantly();
 
 private:
     void init_systems();
@@ -172,9 +178,12 @@ private:
     float m_level3_timer{180.0f};
     float m_proximity_radiation{0.0f};
     float m_effective_radiation{0.0f};
+    float m_nearest_gas_distance{999.0f};
+    float m_nearest_lava_distance{999.0f};
     bool m_expedition_success{false};
     bool m_mouse_down_last{false};
     int m_auto_test_frame{0};
+    uint32_t m_current_level_seed{0};
     std::string m_active_save_file{SaveSystem::DEFAULT_SAVE_FILE};
 
     // 3D Model Showcase Staging

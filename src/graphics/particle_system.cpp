@@ -1,17 +1,29 @@
 #include "particle_system.hpp"
-#include "renderer.hpp"
 
 namespace Voidfall {
 
-static Renderer* s_particle_renderer = nullptr;
+static ParticleSystem::BlockBreakCallback s_block_cb = nullptr;
+static ParticleSystem::ClutterBreakCallback s_clutter_cb = nullptr;
 
-void ParticleSystem::SetRenderer(Renderer* renderer) {
-    s_particle_renderer = renderer;
+void ParticleSystem::SetCallbacks(BlockBreakCallback block_cb, ClutterBreakCallback clutter_cb) {
+    s_block_cb = std::move(block_cb);
+    s_clutter_cb = std::move(clutter_cb);
+}
+
+void ParticleSystem::Reset() {
+    s_block_cb = nullptr;
+    s_clutter_cb = nullptr;
 }
 
 void ParticleSystem::SpawnBlockBreakDebris(const glm::vec3& pos, uint8_t mat) {
-    if (s_particle_renderer) {
-        s_particle_renderer->spawn_break_particles(pos, glm::ivec3(0, 1, 0), mat);
+    if (s_block_cb) {
+        s_block_cb(pos, mat);
+    }
+}
+
+void ParticleSystem::SpawnClutterBreakDebris(const glm::vec3& pos, ClutterType type, const glm::vec4& tint) {
+    if (s_clutter_cb) {
+        s_clutter_cb(pos, type, tint);
     }
 }
 

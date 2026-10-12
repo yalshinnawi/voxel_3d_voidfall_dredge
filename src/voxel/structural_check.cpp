@@ -7,9 +7,10 @@ namespace Voidfall {
 struct Vec3Hash {
     std::size_t operator()(const glm::ivec3& v) const noexcept {
         std::size_t h = 2166136261u;
-        h = (h ^ static_cast<std::size_t>(v.x)) * 16777619u;
-        h = (h ^ static_cast<std::size_t>(v.y)) * 16777619u;
-        h = (h ^ static_cast<std::size_t>(v.z)) * 16777619u;
+        std::size_t mult = 16777619u;
+        h = (h ^ static_cast<std::size_t>(v.x)) * mult;
+        h = (h ^ static_cast<std::size_t>(v.y)) * mult;
+        h = (h ^ static_cast<std::size_t>(v.z)) * mult;
         return h;
     }
 };
@@ -75,7 +76,7 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
                 if (island_visited.count(next)) continue;
 
                 Voxel next_vox = world.get_voxel(next.x, next.y, next.z);
-                if (next_vox.is_solid()) {
+                if (are_voxels_face_connected(cur_vox, next_vox, ndir.x, ndir.y, ndir.z)) {
                     island_visited.insert(next);
                     island_blocks.push_back(next);
                     queue.push(next);
@@ -201,6 +202,430 @@ std::vector<glm::ivec3> StructuralCheck::query_seismic_detachment_blocks(
     }
 
     return selected;
+}
+
+int StructuralCheck::count_unanchored_blocks(const World& world) {
+    int w = world.world_width();
+    int h = world.world_height();
+    int d = world.world_depth();
+    if (w <= 0 || h <= 0 || d <= 0) return 0;
+
+    int total_voxels = w * h * d;
+    std::vector<uint8_t> visited(total_voxels, 0);
+
+    auto to_idx = [w, h](int x, int y, int z) -> int {
+        return x + y * w + z * (w * h);
+    };
+
+    std::vector<int> queue;
+    queue.reserve(total_voxels / 4);
+
+    int ceil_y = std::min(h - 4, world.chunk_ceiling());
+
+    // Multi-source BFS from foundational anchors
+    for (int z = 0; z < d; ++z) {
+        for (int x = 0; x < w; ++x) {
+            for (int y = 0; y < h; ++y) {
+                Voxel v = world.get_voxel(x, y, z);
+                if (!v.is_solid()) continue;
+
+                bool is_anchor = (y <= 3) || (y >= ceil_y) ||
+                                 (x <= 3) || (x >= w - 4) ||
+                                 (z <= 3) || (z >= d - 4) ||
+                                 v.is_anchored() ||
+                                 (v.material_id == MAT_DREDGE_BEDROCK);
+
+                if (is_anchor) {
+                    int idx = to_idx(x, y, z);
+                    visited[idx] = 1;
+                    queue.push_back(idx);
+                }
+            }
+        }
+    }
+
+    const int dxs[6] = {1, -1, 0, 0, 0, 0};
+    const int dys[6] = {0, 0, 1, -1, 0, 0};
+    const int dzs[6] = {0, 0, 0, 0, 1, -1};
+
+    size_t q_head = 0;
+    while (q_head < queue.size()) {
+        int cur_idx = queue[q_head++];
+        int cz = cur_idx / (w * h);
+        int rem = cur_idx % (w * h);
+        int cy = rem / w;
+        int cx = rem % w;
+
+        Voxel cur_vox = world.get_voxel(cx, cy, cz);
+
+        for (int i = 0; i < 6; ++i) {
+            int nx = cx + dxs[i];
+            int ny = cy + dys[i];
+            int nz = cz + dzs[i];
+
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d) {
+                int n_idx = to_idx(nx, ny, nz);
+                if (!visited[n_idx]) {
+                    Voxel nv = world.get_voxel(nx, ny, nz);
+                    if (are_voxels_face_connected(cur_vox, nv, dxs[i], dys[i], dzs[i])) {
+                        visited[n_idx] = 1;
+                        queue.push_back(n_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    int unanchored_count = 0;
+    for (int z = 0; z < d; ++z) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int idx = to_idx(x, y, z);
+                if (!visited[idx]) {
+                    Voxel v = world.get_voxel(x, y, z);
+                    if (v.is_solid()) {
+                        unanchored_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    return unanchored_count;
+}
+
+int StructuralCheck::ensure_world_connectivity(World& world) {
+    int w = world.world_width();
+    int h = world.world_height();
+    int d = world.world_depth();
+    if (w <= 0 || h <= 0 || d <= 0) return 0;
+
+    int total_voxels = w * h * d;
+    std::vector<uint8_t> visited(total_voxels, 0);
+
+    auto to_idx = [w, h](int x, int y, int z) -> int {
+        return x + y * w + z * (w * h);
+    };
+
+    std::vector<int> queue;
+    queue.reserve(total_voxels / 4);
+
+    int ceil_y = std::min(h - 4, world.chunk_ceiling());
+
+    // 1. Multi-source BFS from all foundational anchors
+    for (int z = 0; z < d; ++z) {
+        for (int x = 0; x < w; ++x) {
+            for (int y = 0; y < h; ++y) {
+                Voxel v = world.get_voxel(x, y, z);
+                if (!v.is_solid()) continue;
+
+                bool is_anchor = (y <= 3) || (y >= ceil_y) ||
+                                 (x <= 3) || (x >= w - 4) ||
+                                 (z <= 3) || (z >= d - 4) ||
+                                 v.is_anchored() ||
+                                 (v.material_id == MAT_DREDGE_BEDROCK);
+
+                if (is_anchor) {
+                    int idx = to_idx(x, y, z);
+                    visited[idx] = 1;
+                    queue.push_back(idx);
+                }
+            }
+        }
+    }
+
+    const int dxs[6] = {1, -1, 0, 0, 0, 0};
+    const int dys[6] = {0, 0, 1, -1, 0, 0};
+    const int dzs[6] = {0, 0, 0, 0, 1, -1};
+
+    size_t q_head = 0;
+    while (q_head < queue.size()) {
+        int cur_idx = queue[q_head++];
+        int cz = cur_idx / (w * h);
+        int rem = cur_idx % (w * h);
+        int cy = rem / w;
+        int cx = rem % w;
+
+        Voxel cur_vox = world.get_voxel(cx, cy, cz);
+
+        for (int i = 0; i < 6; ++i) {
+            int nx = cx + dxs[i];
+            int ny = cy + dys[i];
+            int nz = cz + dzs[i];
+
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d) {
+                int n_idx = to_idx(nx, ny, nz);
+                if (!visited[n_idx]) {
+                    Voxel nv = world.get_voxel(nx, ny, nz);
+                    if (are_voxels_face_connected(cur_vox, nv, dxs[i], dys[i], dzs[i])) {
+                        visited[n_idx] = 1;
+                        queue.push_back(n_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Group all unanchored solid voxels into connected components (islands)
+    std::vector<std::vector<glm::ivec3>> islands;
+    std::vector<uint8_t> island_visited(total_voxels, 0);
+
+    for (int z = 0; z < d; ++z) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int idx = to_idx(x, y, z);
+                if (!visited[idx] && !island_visited[idx]) {
+                    Voxel v = world.get_voxel(x, y, z);
+                    if (!v.is_solid()) continue;
+
+                    std::vector<glm::ivec3> component;
+                    std::vector<int> comp_queue;
+                    comp_queue.push_back(idx);
+                    island_visited[idx] = 1;
+
+                    size_t c_head = 0;
+                    while (c_head < comp_queue.size()) {
+                        int c_idx = comp_queue[c_head++];
+                        int iz = c_idx / (w * h);
+                        int irem = c_idx % (w * h);
+                        int iy = irem / w;
+                        int ix = irem % w;
+                        component.push_back(glm::ivec3(ix, iy, iz));
+
+                        Voxel cur_vox = world.get_voxel(ix, iy, iz);
+
+                        for (int i = 0; i < 6; ++i) {
+                            int nx = ix + dxs[i];
+                            int ny = iy + dys[i];
+                            int nz = iz + dzs[i];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d) {
+                                int n_idx = to_idx(nx, ny, nz);
+                                if (!visited[n_idx] && !island_visited[n_idx]) {
+                                    Voxel nv = world.get_voxel(nx, ny, nz);
+                                    if (are_voxels_face_connected(cur_vox, nv, dxs[i], dys[i], dzs[i])) {
+                                        island_visited[n_idx] = 1;
+                                        comp_queue.push_back(n_idx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    islands.push_back(std::move(component));
+                }
+            }
+        }
+    }
+
+    if (islands.empty()) {
+        // Still ensure any disconnected clutter props are purged
+        for (auto& [cpos, chunk] : world.chunks_mut()) {
+            if (chunk) {
+                world.cleanup_all_disconnected_clutter(*chunk);
+            }
+        }
+        return 0;
+    }
+
+    // 3. Connect unanchored islands to solid anchor foundations
+    int connected_count = 0;
+    for (const auto& island : islands) {
+        if (island.empty()) continue;
+
+        std::unordered_map<int, std::pair<int, int>> col_bounds; // key = x + z * w -> min_y, max_y
+        uint8_t primary_mat = MAT_VOLCANIC_BASALT;
+        for (const auto& pos : island) {
+            int key = pos.x + pos.z * w;
+            auto it = col_bounds.find(key);
+            if (it == col_bounds.end()) {
+                col_bounds[key] = {pos.y, pos.y};
+            } else {
+                it->second.first = std::min(it->second.first, pos.y);
+                it->second.second = std::max(it->second.second, pos.y);
+            }
+            Voxel iv = world.get_voxel(pos.x, pos.y, pos.z);
+            if (iv.material_id != MAT_AIR) {
+                primary_mat = iv.material_id;
+            }
+        }
+
+        uint8_t pillar_mat = MAT_VOLCANIC_BASALT;
+        if (primary_mat == MAT_TITANIUM || primary_mat == MAT_INDUSTRIAL_BULKHEAD || primary_mat == MAT_REINFORCED_VAULT_DOOR) {
+            pillar_mat = MAT_INDUSTRIAL_BULKHEAD;
+        } else if (primary_mat == MAT_FRACTURED_GRANITE) {
+            pillar_mat = MAT_FRACTURED_GRANITE;
+        } else if (primary_mat == MAT_PRECURSOR_STONE) {
+            pillar_mat = MAT_PRECURSOR_STONE;
+        }
+
+        bool is_tiny_stray = (island.size() <= 2);
+        int lowest_y = 999;
+        int highest_y = -999;
+        for (const auto& pos : island) {
+            lowest_y = std::min(lowest_y, pos.y);
+            highest_y = std::max(highest_y, pos.y);
+        }
+
+        int best_floor_y = -1;
+        int best_col_x = island[0].x;
+        int best_col_z = island[0].z;
+        int min_drop = 999;
+
+        for (const auto& [key, y_range] : col_bounds) {
+            int cx = key % w;
+            int cz = key / w;
+            int y_low = y_range.first;
+
+            for (int scan_y = y_low - 1; scan_y >= 0; --scan_y) {
+                Voxel sv = world.get_voxel(cx, scan_y, cz);
+                if (sv.is_solid() && visited[to_idx(cx, scan_y, cz)]) {
+                    int drop = y_low - scan_y;
+                    if (drop < min_drop) {
+                        min_drop = drop;
+                        best_floor_y = scan_y;
+                        best_col_x = cx;
+                        best_col_z = cz;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (is_tiny_stray) {
+            // Check if near ceiling (e.g. stalactite fragment)
+            int min_rise = 999;
+            int best_ceil_y = -1;
+            for (const auto& [key, y_range] : col_bounds) {
+                int cx = key % w;
+                int cz = key / w;
+                int y_high = y_range.second;
+                for (int scan_y = y_high + 1; scan_y < h; ++scan_y) {
+                    Voxel sv = world.get_voxel(cx, scan_y, cz);
+                    if (sv.is_solid() && visited[to_idx(cx, scan_y, cz)]) {
+                        int rise = scan_y - y_high;
+                        if (rise < min_rise) {
+                            min_rise = rise;
+                            best_ceil_y = scan_y;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (min_rise <= 2 && best_ceil_y > 0) {
+                // Connect up to ceiling as hanging stalactite
+                for (const auto& [key, y_range] : col_bounds) {
+                    int cx = key % w;
+                    int cz = key / w;
+                    for (int sy = y_range.second + 1; sy < best_ceil_y; ++sy) {
+                        world.set_voxel(cx, sy, cz, Voxel{pillar_mat, VOXEL_FLAG_ANCHORED}, false);
+                        visited[to_idx(cx, sy, cz)] = 1;
+                    }
+                }
+                for (const auto& pos : island) {
+                    visited[to_idx(pos.x, pos.y, pos.z)] = 1;
+                }
+                connected_count++;
+                continue;
+            } else {
+                // Remove stray floating speck so the space looks clean and natural
+                for (const auto& pos : island) {
+                    world.set_voxel(pos.x, pos.y, pos.z, Voxel{MAT_AIR, 0}, false);
+                }
+                continue;
+            }
+        }
+
+        // Structural connection: Place support pillars down to the solid floor below
+        bool island_connected = false;
+        for (const auto& [key, y_range] : col_bounds) {
+            int cx = key % w;
+            int cz = key / w;
+            int y_low = y_range.first;
+
+            bool is_pylon_loc = (cx == best_col_x && cz == best_col_z);
+
+            if (!is_pylon_loc) continue;
+
+            for (int scan_y = y_low - 1; scan_y >= 0; --scan_y) {
+                Voxel sv = world.get_voxel(cx, scan_y, cz);
+                if (sv.is_solid() && visited[to_idx(cx, scan_y, cz)]) {
+                    if (sv.shape() != SHAPE_CUBE) {
+                        sv.set_shape(SHAPE_CUBE);
+                        world.set_voxel(cx, scan_y, cz, sv, false);
+                    }
+                    for (int sy = scan_y + 1; sy < y_low; ++sy) {
+                        world.set_voxel(cx, sy, cz, Voxel{pillar_mat, 0}, false);
+                        visited[to_idx(cx, sy, cz)] = 1;
+                    }
+                    island_connected = true;
+                    break;
+                }
+            }
+        }
+
+        // If not connected downward (e.g. over deep chasm/void), connect upward to ceiling
+        if (!island_connected) {
+            for (const auto& [key, y_range] : col_bounds) {
+                int cx = key % w;
+                int cz = key / w;
+                int y_high = y_range.second;
+                for (int scan_y = y_high + 1; scan_y < h; ++scan_y) {
+                    Voxel sv = world.get_voxel(cx, scan_y, cz);
+                    if (sv.is_solid() && visited[to_idx(cx, scan_y, cz)]) {
+                        for (int sy = y_high + 1; sy < scan_y; ++sy) {
+                            world.set_voxel(cx, sy, cz, Voxel{pillar_mat, VOXEL_FLAG_ANCHORED}, false);
+                            visited[to_idx(cx, sy, cz)] = 1;
+                        }
+                        island_connected = true;
+                        break;
+                    }
+                }
+                if (island_connected) break;
+            }
+        }
+
+        // If still not connected (e.g. over deep void without ceiling), anchor to bedrock at y = 1
+        if (!island_connected) {
+            int cx = best_col_x;
+            int cz = best_col_z;
+            for (int sy = lowest_y - 1; sy >= 1; --sy) {
+                world.set_voxel(cx, sy, cz, Voxel{pillar_mat, static_cast<uint8_t>((sy <= 3) ? VOXEL_FLAG_ANCHORED : 0)}, false);
+                visited[to_idx(cx, sy, cz)] = 1;
+            }
+            island_connected = true;
+        }
+
+        for (const auto& pos : island) {
+            visited[to_idx(pos.x, pos.y, pos.z)] = 1;
+        }
+        connected_count++;
+    }
+
+    // 4. Ensure that any slab or ramp supporting solid blocks above is restored to full cube
+    for (int cz = 0; cz < d; ++cz) {
+        for (int cx = 0; cx < w; ++cx) {
+            for (int cy = 0; cy < h - 1; ++cy) {
+                Voxel v = world.get_voxel(cx, cy, cz);
+                if (v.is_solid() && (v.is_slab() || v.is_ramp())) {
+                    Voxel above = world.get_voxel(cx, cy + 1, cz);
+                    if (above.is_solid()) {
+                        v.set_shape(SHAPE_CUBE);
+                        world.set_voxel(cx, cy, cz, v, false);
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Ensure all clutter props across all chunks are connected to solid host blocks
+    for (auto& [cpos, chunk] : world.chunks_mut()) {
+        if (chunk) {
+            world.cleanup_all_disconnected_clutter(*chunk);
+        }
+    }
+
+    return connected_count;
 }
 
 } // namespace Voidfall

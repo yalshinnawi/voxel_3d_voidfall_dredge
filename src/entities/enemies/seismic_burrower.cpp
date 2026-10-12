@@ -1,31 +1,68 @@
 #include "seismic_burrower.hpp"
 #include "../../voxel/world.hpp"
 #include "../../core/logger.hpp"
+#include "../../ai/aberrant_ai.hpp"
 #include <glm/gtc/constants.hpp>
 #include <algorithm>
 #include <cmath>
 
 namespace Voidfall {
 
-void SeismicBurrowerManager::spawn_burrower(const glm::vec3& pos, float hp_multiplier) {
+void SeismicBurrowerManager::spawn_burrower(const glm::vec3& pos, float hp_multiplier, bool emerging) {
     SeismicBurrower b;
     b.id = m_next_id++;
     b.position = pos;
     b.target_pos = pos;
     b.hp = 120.0f * hp_multiplier;
     b.max_hp = b.hp;
-    b.state = BurrowerState::Burrowing;
+    b.state = emerging ? BurrowerState::Breaching : BurrowerState::Burrowing;
     b.state_timer = 0.0f;
     b.yaw = 0.0f;
     b.pitch = 0.0f;
     b.roar_timer = 5.0f + static_cast<float>((b.id * 37) % 110) * 0.1f; // Staggered initial roar
-    b.grind_timer = 1.5f + static_cast<float>((b.id * 17) % 30) * 0.1f;
+    b.grind_timer = emerging ? 0.15f : (1.5f + static_cast<float>((b.id * 17) % 30) * 0.1f);
     b.chatter_timer = 2.0f + static_cast<float>((b.id * 29) % 35) * 0.1f;
+    b.just_roared = emerging;
+    b.just_ground = emerging;
+    b.just_chattered = false;
+    b.just_breached = emerging;
+    m_burrowers.push_back(b);
+    VF_LOG_INFO("SeismicBurrower", "Spawned Seismic Burrower " << b.id << " at ("
+                << pos.x << ", " << pos.y << ", " << pos.z << ") with HP=" << b.hp
+                << (emerging ? " (Emerging Breach)" : ""));
+}
+
+void SeismicBurrowerManager::spawn_emerging_burrower(const glm::vec3& pos, const glm::vec3& facing_dir, float hp_multiplier) {
+    spawn_burrower(pos, hp_multiplier, true);
+    if (!m_burrowers.empty()) {
+        auto& b = m_burrowers.back();
+        glm::vec3 fwd = facing_dir;
+        if (glm::length(fwd) < 0.01f) fwd = glm::vec3(0.0f, 0.0f, 1.0f);
+        else fwd = glm::normalize(fwd);
+        b.yaw = std::atan2(fwd.x, fwd.z);
+        b.pitch = -std::asin(std::clamp(fwd.y, -1.0f, 1.0f));
+    }
+}
+
+void SeismicBurrowerManager::spawn_dormant_burrower(const glm::vec3& pos, float hp_multiplier) {
+    SeismicBurrower b;
+    b.id = m_next_id++;
+    b.position = pos;
+    b.target_pos = pos;
+    b.hp = 120.0f * hp_multiplier;
+    b.max_hp = b.hp;
+    b.state = BurrowerState::Dormant;
+    b.state_timer = 0.0f;
+    b.yaw = 0.0f;
+    b.pitch = 0.0f;
+    b.roar_timer = 14.0f + static_cast<float>((b.id * 37) % 110) * 0.1f;
+    b.grind_timer = 2.0f;
+    b.chatter_timer = 3.5f;
     b.just_roared = false;
     b.just_ground = false;
     b.just_chattered = false;
     m_burrowers.push_back(b);
-    VF_LOG_INFO("SeismicBurrower", "Spawned Seismic Burrower " << b.id << " at ("
+    VF_LOG_INFO("SeismicBurrower", "Spawned Dormant Seismic Burrower " << b.id << " at ("
                 << pos.x << ", " << pos.y << ", " << pos.z << ") with HP=" << b.hp);
 }
 
@@ -52,6 +89,15 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
     if (m_spawn_cooldown > 0.0f) {
         m_spawn_cooldown -= dt;
     }
+    if (m_global_roar_cooldown > 0.0f) {
+        m_global_roar_cooldown -= dt;
+    }
+    if (m_global_grind_cooldown > 0.0f) {
+        m_global_grind_cooldown -= dt;
+    }
+    if (m_global_chatter_cooldown > 0.0f) {
+        m_global_chatter_cooldown -= dt;
+    }
 
     for (auto& b : m_burrowers) {
         b.just_roared = false;
@@ -65,13 +111,14 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
 
         if (b.is_dead()) continue;
 
-        // Ambient Subterranean Roars echoing through caverns
-        if (b.state != BurrowerState::Dead && b.state != BurrowerState::Stunned) {
+        // Ambient Subterranean Roars echoing through caverns (Only when actively moving/burrowing, not dormant)
+        if (b.state != BurrowerState::Dead && b.state != BurrowerState::Stunned && b.state != BurrowerState::Dormant) {
             b.roar_timer -= dt;
-            if (b.roar_timer <= 0.0f) {
-                b.roar_timer = 13.0f + static_cast<float>((b.id * 43 + static_cast<int>(b.state_timer * 100)) % 140) * 0.1f;
+            if (b.roar_timer <= 0.0f && m_global_roar_cooldown <= 0.0f) {
+                b.roar_timer = 14.0f + static_cast<float>((b.id * 43 + static_cast<int>(b.state_timer * 100)) % 140) * 0.1f;
                 b.just_roared = true;
                 result.any_roar = true;
+                m_global_roar_cooldown = 8.0f;
                 VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " emitted subterranean roar at ("
                             << b.position.x << ", " << b.position.y << ", " << b.position.z << ")");
             }
@@ -121,25 +168,35 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         // Retaliation pursuit and escape tracking
         float dist_to_player = glm::distance(b.position, player_pos);
         if (b.is_pursuing_attacker) {
-            if (dist_to_player > b.pursuit_break_dist || (player_is_crouching && dist_to_player > 14.0f)) {
-                float flee_rate = player_is_crouching ? 2.5f : 1.0f;
-                b.pursuit_lost_timer += dt * flee_rate;
+            // Relentless pursuit: Once set on killing the player, the burrower does NOT lose interest easily
+            // It only breaks pursuit if the player flees to extreme distance (> 35m) for extended time (15s)
+            if (dist_to_player > b.pursuit_break_dist) {
+                b.pursuit_lost_timer += dt;
                 if (b.pursuit_lost_timer >= b.pursuit_break_time) {
                     b.is_pursuing_attacker = false;
                     b.pursuit_lost_timer = 0.0f;
-                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " lost interest after player fled in stealth for "
-                                << b.pursuit_break_time << "s (dist=" << dist_to_player << "m)");
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " lost interest after player fled to distant cavern ("
+                                << b.pursuit_break_time << "s, dist=" << dist_to_player << "m)");
                 }
             } else {
                 b.pursuit_lost_timer = 0.0f;
             }
         }
 
-        // Target selection: If pursuing an attacker, lock relentlessly onto player_pos.
-        // Otherwise, if burrowing or breaching, steer towards latest sound disturbance; else towards player.
+        // Target selection: If pursuing player, locked on, or player is detected within seismic proximity,
+        // lock authoritatively onto player_pos!
         glm::vec3 active_target = player_pos;
-        if (!b.is_pursuing_attacker && b.has_sound_target && (b.state == BurrowerState::Burrowing || b.state == BurrowerState::Breaching)) {
+        bool is_locked_on_player = b.is_pursuing_attacker ||
+                                   b.state == BurrowerState::Charging ||
+                                   b.state == BurrowerState::Breaching ||
+                                   b.state == BurrowerState::Enraged ||
+                                   (!player_is_crouching && dist_to_player < 18.0f);
+
+        if (!is_locked_on_player && b.has_sound_target && b.state == BurrowerState::Burrowing) {
             active_target = b.sound_target;
+            if (glm::distance(b.position, b.sound_target) < 3.0f) {
+                b.has_sound_target = false;
+            }
         }
         b.target_pos = active_target;
 
@@ -151,109 +208,161 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         float target_yaw = std::atan2(dir_to_target.x, dir_to_target.z);
         float target_pitch = -std::asin(std::clamp(dir_to_target.y, -1.0f, 1.0f));
 
-        // Smooth angle tracking (amplified when aggressively pursuing attacker)
-        float eff_turn_rate = b.is_pursuing_attacker ? 3.6f : b.turn_rate;
+        // Smooth angle tracking (amplified when aggressively pursuing / charging target)
+        float eff_turn_rate = (b.is_pursuing_attacker || b.state == BurrowerState::Charging) ? 4.2f : b.turn_rate;
+        if (dist_to_target < 10.0f) {
+            eff_turn_rate = std::max(eff_turn_rate, 4.8f);
+        }
         float yaw_diff = target_yaw - b.yaw;
         while (yaw_diff > glm::pi<float>()) yaw_diff -= 2.0f * glm::pi<float>();
         while (yaw_diff < -glm::pi<float>()) yaw_diff += 2.0f * glm::pi<float>();
         b.yaw += std::clamp(yaw_diff, -eff_turn_rate * dt, eff_turn_rate * dt);
         b.pitch += std::clamp(target_pitch - b.pitch, -eff_turn_rate * dt, eff_turn_rate * dt);
 
+        // Accurate 3D forward facing orientation (pitch: -sin(pitch) points UP when target is above)
         glm::vec3 facing(
-            std::sin(b.yaw) * std::cos(-b.pitch),
-            -std::sin(-b.pitch),
-            std::cos(b.yaw) * std::cos(-b.pitch)
+            std::sin(b.yaw) * std::cos(b.pitch),
+            -std::sin(b.pitch),
+            std::cos(b.yaw) * std::cos(b.pitch)
         );
 
-        // Check if head voxel is inside solid rock or open air
+        // Check if head position is inside solid rock or open air
         glm::ivec3 head_vox(
             static_cast<int>(std::floor(b.position.x)),
             static_cast<int>(std::floor(b.position.y)),
             static_cast<int>(std::floor(b.position.z))
         );
-        bool in_solid = world.is_solid(head_vox);
+        bool in_solid = AberrantAI::is_point_solid(world, b.position);
 
         // State Machine
         switch (b.state) {
             case BurrowerState::Dormant: {
-                if (b.has_sound_target || dist_to_player < 26.0f) {
+                // Dormant burrower deep in rock: only wake if loud sound occurs, damaged/pursued, or physical collision
+                float wake_dist = player_is_crouching ? 0.9f : 8.0f;
+                if (b.has_sound_target || b.is_pursuing_attacker || dist_to_player < wake_dist) {
                     b.state = BurrowerState::Burrowing;
                     b.state_timer = 0.0f;
-                    b.just_roared = true;
-                    VF_LOG_INFO("SeismicBurrower", "Dormant Burrower " << b.id << " AWAKENED by acoustic disturbance!");
+                    if (m_global_roar_cooldown <= 0.0f) {
+                        b.just_roared = true;
+                        result.any_roar = true;
+                        m_global_roar_cooldown = 10.0f;
+                    }
+                    VF_LOG_INFO("SeismicBurrower", "Dormant Burrower " << b.id << " AWAKENED (sound=" << b.has_sound_target
+                                << ", pursuing=" << b.is_pursuing_attacker << ", dist=" << dist_to_player << "m)!");
                 }
                 break;
             }
 
             case BurrowerState::Burrowing: {
-                b.rumble_intensity = std::clamp(1.0f - (dist_to_player / 20.0f), 0.0f, 1.0f);
+                // Ground tremor / rumble based on proximity to player
+                float rumble_dist = b.is_pursuing_attacker ? 26.0f : 20.0f;
+                b.rumble_intensity = std::clamp(1.0f - (dist_to_player / rumble_dist), 0.0f, 1.0f);
                 result.max_rumble = std::max(result.max_rumble, b.rumble_intensity);
 
                 // Periodic drilling & digging noises as borer cutter spins through rock walls
                 b.grind_timer -= dt;
                 if (b.grind_timer <= 0.0f) {
-                    b.grind_timer = 1.0f + static_cast<float>((b.id * 19) % 15) * 0.05f;
-                    b.just_ground = true;
-                    result.any_grind = true;
+                    b.grind_timer = 1.2f + static_cast<float>((b.id * 19) % 15) * 0.05f;
+                    if (m_global_grind_cooldown <= 0.0f) {
+                        b.just_ground = true;
+                        result.any_grind = true;
+                        m_global_grind_cooldown = 0.8f;
+                    }
                 }
 
                 // Chattering clicks as cutter teeth and mandibles chatter against rock strata
                 b.chatter_timer -= dt;
                 if (b.chatter_timer <= 0.0f) {
-                    b.chatter_timer = 2.8f + static_cast<float>((b.id * 23) % 25) * 0.1f;
-                    b.just_chattered = true;
-                    result.any_chatter = true;
+                    b.chatter_timer = 3.0f + static_cast<float>((b.id * 23) % 25) * 0.1f;
+                    if (m_global_chatter_cooldown <= 0.0f) {
+                        b.just_chattered = true;
+                        result.any_chatter = true;
+                        m_global_chatter_cooldown = 2.0f;
+                    }
                 }
 
                 // Move forward through ground (surging speed when pursuing attacker)
                 float eff_burrow_speed = b.is_pursuing_attacker ? 4.5f : b.burrow_speed;
+                glm::vec3 old_pos = b.position;
+                float move_dist = eff_burrow_speed * dt;
                 b.velocity = facing * eff_burrow_speed;
                 b.position += b.velocity * dt;
 
-                // Excavate soft terrain in front of cutter head
-                glm::ivec3 center = glm::ivec3(glm::floor(b.position + facing * 1.0f));
-                for (int dx = -1; dx <= 1; ++dx) {
-                    for (int dy = -1; dy <= 1; ++dy) {
-                        for (int dz = -1; dz <= 1; ++dz) {
-                            glm::ivec3 p = center + glm::ivec3(dx, dy, dz);
-                            Voxel v = world.get_voxel(p.x, p.y, p.z);
-                            if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
-                                world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, true);
-                                result.excavated_voxels.push_back({p, v.material_id});
+                // Swept excavation along movement path from old_pos to new position
+                for (float step = 0.0f; step <= move_dist + 0.8f; step += 0.8f) {
+                    glm::ivec3 center = glm::ivec3(glm::floor(old_pos + facing * (step + 1.0f)));
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dz = -1; dz <= 1; ++dz) {
+                                glm::ivec3 p = center + glm::ivec3(dx, dy, dz);
+                                Voxel v = world.get_voxel(p.x, p.y, p.z);
+                                if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
+                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, true);
+                                    result.excavated_voxels.push_back({p, v.material_id});
+                                }
                             }
                         }
                     }
                 }
 
                 // If emerged into open cavern with line of sight to player, transition to Breaching!
-                if (!in_solid && dist_to_player < 14.0f) {
+                bool can_breach = dist_to_player < 14.0f;
+                if (player_is_crouching && !b.is_pursuing_attacker && !b.has_sound_target) {
+                    // When player is sneaking and burrower is unalerted, only breach on close physical contact or direct line-of-sight in front
+                    float fwd_dot = glm::dot(facing, dir_to_target);
+                    can_breach = (dist_to_player < 0.9f) || (dist_to_player <= 4.5f && fwd_dot >= 0.5f);
+                }
+                if (!in_solid && can_breach) {
                     b.state = BurrowerState::Breaching;
                     b.state_timer = 0.0f;
                     b.just_breached = true;
-                    b.just_roared = true; // Terrifying breach roar!
+                    b.is_pursuing_attacker = true;
+                    if (m_global_roar_cooldown <= 0.0f) {
+                        b.just_roared = true; // Terrifying breach roar!
+                        result.any_roar = true;
+                        m_global_roar_cooldown = 8.0f;
+                    }
                     result.any_breach = true;
-                    result.any_roar = true;
-                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " BREACHED into open cavern with ROAR!");
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " BREACHED into open cavern!");
                 }
                 break;
             }
 
             case BurrowerState::Breaching: {
-                // Short dramatic pause while emerging into the cave
+                // Physical rotary emergence into the cave
                 b.velocity *= 0.85f;
-                if (b.state_timer > 0.8f) {
+                b.cutter_angle += dt * 36.0f; // High-RPM cutter drill spin during breach
+                b.grind_timer -= dt;
+                if (b.grind_timer <= 0.0f) {
+                    b.grind_timer = 0.20f;
+                    b.just_ground = true;
+                    result.any_grind = true;
+                }
+                b.rumble_intensity = std::clamp(1.2f - (dist_to_player / 22.0f), 0.0f, 1.0f);
+                result.max_rumble = std::max(result.max_rumble, b.rumble_intensity);
+
+                if (b.state_timer > 1.2f) {
                     b.state = BurrowerState::Charging;
                     b.state_timer = 0.0f;
                     b.yaw = target_yaw;
                     b.pitch = target_pitch;
                     result.any_charge = true;
+                    if (m_global_roar_cooldown <= 0.0f) {
+                        b.just_roared = true;
+                        result.any_roar = true;
+                        m_global_roar_cooldown = 6.0f;
+                    }
                     VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " INITIATES KINETIC CHARGE!");
                 }
                 break;
             }
 
             case BurrowerState::Charging: {
-                // High-speed open cavern ramming charge with swept collision check
+                // High-speed open cavern ramming charge with swept collision & destruction
+                b.cutter_angle += dt * 48.0f;
+                b.rumble_intensity = std::clamp((1.0f - (dist_to_player / 28.0f)) * 1.5f, 0.0f, 1.0f);
+                result.max_rumble = std::max(result.max_rumble, b.rumble_intensity);
+
                 glm::vec3 old_pos = b.position;
                 float move_dist = b.charge_speed * dt;
                 glm::vec3 next_pos = b.position + facing * move_dist;
@@ -278,6 +387,24 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 } else {
                     b.velocity = facing * b.charge_speed;
                     b.position = next_pos;
+
+                    // DESTROY THINGS IN ITS PATH:
+                    // Obliterate any destructible voxels around the cutter head during kinetic charge!
+                    glm::ivec3 charge_center = glm::ivec3(glm::floor(next_pos + facing * 1.0f));
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dz = -1; dz <= 1; ++dz) {
+                                glm::ivec3 p = charge_center + glm::ivec3(dx, dy, dz);
+                                Voxel v = world.get_voxel(p.x, p.y, p.z);
+                                if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
+                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, true);
+                                    result.excavated_voxels.push_back({p, v.material_id});
+                                    b.just_ground = true;
+                                    result.any_grind = true;
+                                }
+                            }
+                        }
+                    }
 
                     // Collision with player
                     if (dist_to_player < 2.5f && b.attack_cooldown <= 0.0f) {
@@ -403,12 +530,15 @@ bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radiu
             nearest->pitch = -std::asin(std::clamp(to_attacker.y / std::max(0.1f, glm::length(to_attacker)), -1.0f, 1.0f));
         }
 
-        if (nearest->hp <= 35.0f && nearest->state != BurrowerState::Burrowing) {
-            // Critically damaged in open cavern -> decisively burrow into bedrock to retreat
-            nearest->state = BurrowerState::Burrowing;
-            nearest->state_timer = 0.0f;
-            nearest->just_roared = true;
-            VF_LOG_INFO("SeismicBurrower", "Wounded Burrower " << nearest->id << " (HP=" << nearest->hp << ") DECISIVELY BURROWS into rock to retreat!");
+        if (nearest->hp <= 35.0f) {
+            // Critically damaged -> Never retreat or scare! Enrages into relentless berserk attack!
+            if (nearest->state != BurrowerState::Charging && nearest->state != BurrowerState::Enraged) {
+                nearest->state = BurrowerState::Enraged;
+                nearest->state_timer = 0.0f;
+                nearest->just_roared = true;
+                VF_LOG_INFO("SeismicBurrower", "Wounded Burrower " << nearest->id << " (HP=" << nearest->hp
+                            << ") DOES NOT SCARE OR RETREAT - ENRAGED BERSERK PURSUIT!");
+            }
         } else if (nearest->state == BurrowerState::Dormant) {
             nearest->state = BurrowerState::Burrowing;
             nearest->state_timer = 0.0f;
@@ -458,6 +588,9 @@ void SeismicBurrowerManager::reset() {
     m_burrowers.clear();
     m_next_id = 1001;
     m_spawn_cooldown = 0.0f;
+    m_global_roar_cooldown = 0.0f;
+    m_global_grind_cooldown = 0.0f;
+    m_global_chatter_cooldown = 0.0f;
 }
 
 } // namespace Voidfall

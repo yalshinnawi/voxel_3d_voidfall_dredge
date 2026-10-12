@@ -109,18 +109,28 @@ public:
                mat == MAT_ACID || 
                mat == MAT_COOLANT || 
                mat == MAT_THERMITE_SLAG || 
-               mat == MAT_LAVA || 
-               mat == MAT_RADIOACTIVE_SLUDGE;
+               mat == MAT_LAVA;
     }
     inline bool IsWaterlogged(int x, int y, int z) const {
         return get_voxel(x, y, z).is_waterlogged();
     }
     inline void SetWaterlogged(int x, int y, int z, bool state) {
         uint8_t flags = GetFlags(x, y, z);
-        SetFlags(x, y, z, state ? (flags | VOXEL_FLAG_WATERLOGGED) : (flags & ~VOXEL_FLAG_WATERLOGGED));
+        if (state) {
+            uint8_t lvl = flags & VOXEL_FLUID_LEVEL_MASK;
+            if (lvl == 0 || lvl == VOXEL_FLAG_WATERLOGGED) lvl = VOXEL_FLUID_LEVEL_SOURCE;
+            SetFlags(x, y, z, (flags & ~VOXEL_FLUID_LEVEL_MASK) | lvl | VOXEL_FLAG_WATERLOGGED);
+        } else {
+            SetFlags(x, y, z, flags & ~(VOXEL_FLAG_WATERLOGGED | VOXEL_FLUID_LEVEL_MASK));
+        }
     }
-    inline bool is_waterlogged(int x, int y, int z) const { return IsWaterlogged(x, y, z); }
     inline void set_waterlogged(int x, int y, int z, bool state) { SetWaterlogged(x, y, z, state); }
+    inline void SetFluidLevel(int x, int y, int z, uint8_t lvl) {
+        Voxel v = get_voxel(x, y, z);
+        v.set_fluid_level(lvl);
+        set_voxel(x, y, z, v);
+    }
+    inline void set_fluid_level(int x, int y, int z, uint8_t lvl) { SetFluidLevel(x, y, z, lvl); }
 
     inline Voxel get_voxel_idx(size_t idx) const {
         if (idx < m_voxels.size()) {
@@ -178,6 +188,12 @@ public:
     const std::vector<ClutterInstance>& clutter_instances() const { return m_clutter_instances; }
     std::vector<ClutterInstance>& clutter_instances_mut() { return m_clutter_instances; }
     void set_clutter_instances(std::vector<ClutterInstance> instances) { m_clutter_instances = std::move(instances); }
+
+    // Anchor dependency check: returns true if the prop is attached to the specified host block face
+    static bool is_clutter_attached_to_face(const ClutterInstance& inst, const glm::ivec3& host_block);
+
+    // Auto-despawn: removes any clutter instances anchored to the host block or its faces
+    int remove_clutter_hosted_at(const glm::ivec3& host_block, std::vector<ClutterInstance>* out_removed = nullptr);
 
 private:
     ChunkPos m_pos;

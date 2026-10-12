@@ -83,6 +83,7 @@ struct SeismicBurrower {
 
     bool is_dead() const { return state == BurrowerState::Dead; }
     bool is_dormant() const { return state == BurrowerState::Dormant; }
+    bool is_emerging() const { return state == BurrowerState::Breaching; }
 
     /// Forward direction vector based on velocity heading or pitch/yaw orientation
     glm::vec3 forward() const {
@@ -141,7 +142,20 @@ public:
     SeismicBurrowerManager() = default;
 
     /// Spawn a burrower near target (usually deep in rock wall)
-    void spawn_burrower(const glm::vec3& pos, float hp_multiplier = 1.0f);
+    void spawn_burrower(const glm::vec3& pos, float hp_multiplier = 1.0f, bool emerging = false);
+
+    /// Spawn an emerging burrower breaking out from rock face directly into the cavern
+    void spawn_emerging_burrower(const glm::vec3& pos, const glm::vec3& facing_dir = glm::vec3(0, 0, 1), float hp_multiplier = 1.0f);
+
+    /// Spawn a dormant unalerted burrower embedded in rock (wakes on acoustic disturbance or intrusion)
+    void spawn_dormant_burrower(const glm::vec3& pos, float hp_multiplier = 1.0f);
+
+    /// Reset and initialize global audio cooldowns to prevent sound spam
+    void reset_audio_cooldowns(float cd = 10.0f) {
+        m_global_roar_cooldown = cd;
+        m_global_grind_cooldown = cd * 0.5f;
+        m_global_chatter_cooldown = cd * 0.5f;
+    }
 
     /// Spawn burrower during hazard Phase 3/4 or holdout
     void spawn_hazard_wave(const glm::vec3& player_pos, const World& world);
@@ -187,6 +201,9 @@ private:
     std::vector<SeismicBurrower> m_burrowers;
     uint32_t m_next_id{1001};
     float m_spawn_cooldown{0.0f};
+    float m_global_roar_cooldown{0.0f};
+    float m_global_grind_cooldown{0.0f};
+    float m_global_chatter_cooldown{0.0f};
 };
 
 } // namespace Voidfall

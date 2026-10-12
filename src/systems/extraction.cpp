@@ -1,4 +1,5 @@
 #include "extraction.hpp"
+#include "../voxel/world.hpp"
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -6,6 +7,109 @@
 namespace Voidfall {
 
 ExtractionSystem::ExtractionSystem() {
+}
+
+bool ExtractionSystem::check_landing_clearance(const World& world, const glm::vec3& target_pos, float& out_ground_y, std::string* out_reason) {
+    int center_x = static_cast<int>(std::floor(target_pos.x));
+    int center_z = static_cast<int>(std::floor(target_pos.z));
+    int start_y = static_cast<int>(std::floor(target_pos.y));
+
+    // 1. Sample ground levels across footprint to determine true baseline floor
+    std::vector<int> floor_samples;
+    floor_samples.reserve(9);
+
+    auto find_ground_at = [&](int sx, int sz) -> int {
+        for (int y = start_y; y >= 1; --y) {
+            if (world.is_solid(glm::ivec3(sx, y, sz))) {
+                return y;
+            }
+        }
+        for (int y = 25; y >= 1; --y) {
+            if (world.is_solid(glm::ivec3(sx, y, sz))) {
+                return y;
+            }
+        }
+        return -1;
+    };
+
+    int center_gy = find_ground_at(center_x, center_z);
+    if (center_gy >= 1) floor_samples.push_back(center_gy);
+
+    const int offsets[8][2] = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1},
+        {-1, -1}, {-1, 1}, {1, -1}, {1, 1}
+    };
+    for (const auto& off : offsets) {
+        int gy = find_ground_at(center_x + off[0], center_z + off[1]);
+        if (gy >= 1) {
+            floor_samples.push_back(gy);
+        }
+    }
+
+    if (floor_samples.size() < 4) {
+        if (out_reason) *out_reason = "EXTRACTION BLOCKED: NO SOLID GROUND FOUND BENEATH LANDING ZONE";
+        return false;
+    }
+
+    // Determine baseline floor using median
+    std::sort(floor_samples.begin(), floor_samples.end());
+    int base_gy = floor_samples[floor_samples.size() / 2];
+
+    Voxel ground_vox = world.get_voxel(center_x, base_gy, center_z);
+    float surf_y = static_cast<float>(base_gy + 1);
+    if (ground_vox.shape() == SHAPE_SLAB_BOTTOM) {
+        surf_y = static_cast<float>(base_gy) + 0.5f;
+    }
+    out_ground_y = surf_y;
+
+    // 2. Foundation support check: verify footprint has solid footing
+    int solid_footing_count = 0;
+    int total_footing_samples = 0;
+    for (int dx = -2; dx <= 2; ++dx) {
+        for (int dz = -2; dz <= 2; ++dz) {
+            if (dx * dx + dz * dz > 4) continue;
+            total_footing_samples++;
+            bool has_foot = false;
+            for (int dy = -1; dy <= 0; ++dy) {
+                if (world.is_solid(glm::ivec3(center_x + dx, base_gy + dy, center_z + dz))) {
+                    has_foot = true;
+                    break;
+                }
+            }
+            if (has_foot) solid_footing_count++;
+        }
+    }
+    if (total_footing_samples > 0 && solid_footing_count < total_footing_samples / 2) {
+        if (out_reason) *out_reason = "EXTRACTION BLOCKED: UNSTABLE FOOTING // SOLID BEDROCK FOUNDATION REQUIRED";
+        return false;
+    }
+
+    // 3. Vertical headroom check directly overhead (at least 5.0m vertical clearance above base_gy)
+    for (int y = base_gy + 1; y <= base_gy + 5; ++y) {
+        if (world.is_solid(glm::ivec3(center_x, y, center_z))) {
+            if (y > base_gy + 2) {
+                if (out_reason) *out_reason = "EXTRACTION BLOCKED: LOW CEILING // MIN 5m VERTICAL HEADROOM REQUIRED";
+            } else {
+                if (out_reason) *out_reason = "EXTRACTION BLOCKED: LANDING ZONE OBSTRUCTED // CLEAR 4m DIAMETER AREA";
+            }
+            return false;
+        }
+    }
+
+    // 4. Cylinder clearance check (radius ~1.8m) from base_gy + 1 up to base_gy + 4
+    for (int dx = -2; dx <= 2; ++dx) {
+        for (int dz = -2; dz <= 2; ++dz) {
+            if (dx * dx + dz * dz > 3) continue; // within ~1.73m radius
+            for (int y = base_gy + 1; y <= base_gy + 4; ++y) {
+                if (world.is_solid(glm::ivec3(center_x + dx, y, center_z + dz))) {
+                    if (out_reason) *out_reason = "EXTRACTION BLOCKED: LANDING ZONE OBSTRUCTED // CLEAR 4m DIAMETER AREA";
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
 }
 
 void ExtractionSystem::deploy_beacon(const glm::vec3& beacon_pos, float holdout_time) {
@@ -38,6 +142,9 @@ void ExtractionSystem::update(float dt, const glm::vec3& player_pos) {
             m_ceiling_drill_active = true;
             if (!m_ceiling_drill_started) {
                 m_ceiling_drill_started = true;
+                if (m_on_clearance_verify) {
+                    m_on_clearance_verify(m_beacon_pos, nullptr);
+                }
                 if (m_on_ceiling_warning) {
                     m_on_ceiling_warning(m_beacon_pos);
                 }
@@ -46,6 +153,9 @@ void ExtractionSystem::update(float dt, const glm::vec3& player_pos) {
 
         // At 0 seconds: spawn 3D extraction capsule drilling down from ceiling
         if (m_countdown <= 0.0f) {
+            if (m_on_clearance_verify) {
+                m_on_clearance_verify(m_beacon_pos, nullptr);
+            }
             m_phase = ExtractionPhase::PodLanded;
             m_ceiling_drill_active = false;
             m_pod_drill_progress = 0.0f;

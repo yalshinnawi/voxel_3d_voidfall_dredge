@@ -51,129 +51,114 @@ int main() {
         std::cout << " -> All 3 Archetype attributes verified successfully." << std::endl;
     }
 
-    // Test 2: Exponential Coin Cost Formula, Level Gating & Branch Prerequisite Progression
+    // Test 2: Exponential EXP Cost Formula, Level Gating & Branch Prerequisite Progression
     {
-        std::cout << "[Test 2] Testing Coin Cost Formula, Level Gating & Branch Prerequisites..." << std::endl;
-        CHECK(UpgradeTree::get_coin_cost(0) == 100, "Tier 0 coin cost mismatch");
-        CHECK(UpgradeTree::get_coin_cost(1) == 160, "Tier 1 coin cost mismatch");
-        CHECK(UpgradeTree::get_coin_cost(2) == 256, "Tier 2 coin cost mismatch");
-        CHECK(UpgradeTree::get_coin_cost(3) == 410, "Tier 3 coin cost mismatch");
-        CHECK(UpgradeTree::get_coin_cost(4) == 656, "Tier 4 coin cost mismatch");
-        CHECK(UpgradeTree::get_coin_cost(5) == 0, "Tier 5 (max) coin cost mismatch");
+        std::cout << "[Test 2] Testing EXP Cost Formula, Level Gating & Branch Prerequisites..." << std::endl;
+        CHECK(UpgradeTree::get_exp_cost(0) == 100, "Tier 0 exp cost mismatch");
+        CHECK(UpgradeTree::get_exp_cost(1) == 160, "Tier 1 exp cost mismatch");
+        CHECK(UpgradeTree::get_exp_cost(2) == 256, "Tier 2 exp cost mismatch");
+        CHECK(UpgradeTree::get_exp_cost(3) == 410, "Tier 3 exp cost mismatch");
+        CHECK(UpgradeTree::get_exp_cost(4) == 656, "Tier 4 exp cost mismatch");
+        CHECK(UpgradeTree::get_exp_cost(5) == 0, "Tier 5 (max) exp cost mismatch");
 
-        std::cout << " -> Exponential coin costs matched: 100 -> 160 -> 256 -> 410 -> 656 Coins." << std::endl;
+        std::cout << " -> Exponential EXP costs matched: 100 -> 160 -> 256 -> 410 -> 656 EXP." << std::endl;
 
         UpgradeTree tree;
-        int coins = 1000;
+        int exp = 1000;
+        int coins = 500;
         int voidite = 100;
         int titanium = 100;
         int player_level = 1;
 
         // Verify Branch Prerequisite: DrillDurability requires DrillSpeed >= 1
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 0, "Initial drill speed tier not 0");
-        CHECK(!tree.can_purchase(UpgradeType::DrillDurability, player_level, coins, voidite, titanium),
+        CHECK(!tree.can_purchase(UpgradeType::DrillDurability, player_level, exp),
               "DrillDurability must not be purchasable before DrillSpeed T1 prerequisite is unlocked");
-        CHECK(tree.get_lock_reason(UpgradeType::DrillDurability, player_level, coins, voidite, titanium) == UpgradeLockReason::PrerequisiteLocked,
+        CHECK(tree.get_lock_reason(UpgradeType::DrillDurability, player_level, exp) == UpgradeLockReason::PrerequisiteLocked,
               "Lock reason must be PrerequisiteLocked");
+        CHECK(tree.get_node_web_state(UpgradeType::DrillDurability, player_level, exp) == NodeWebState::GreyedOutLocked,
+              "Node web state must be GreyedOutLocked");
 
-        // Level 1: Can purchase Root DrillSpeed Tier 1 (requires Level 1)
-        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Cannot purchase tier 1 at level 1");
-        bool bought = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        // Level 1: Can purchase Root DrillSpeed Tier 1 (requires Level 1, 100 EXP)
+        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, exp), "Cannot purchase tier 1 at level 1");
+        bool bought = tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
         CHECK(bought, "Purchase tier 1 failed");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 1, "Tier not 1 after purchase");
-        CHECK(coins == 900, "Coins not deducted correctly (1000 - 100)");
-        CHECK(voidite == 96, "Voidite not deducted correctly (100 - 4)");
-        CHECK(titanium == 97, "Titanium not deducted correctly (100 - 3)");
+        CHECK(exp == 900, "EXP not deducted correctly (1000 - 100)");
 
-        // Now that DrillSpeed T1 is acquired, DrillDurability prerequisite is MET!
-        CHECK(tree.can_purchase(UpgradeType::DrillDurability, player_level, coins, voidite, titanium),
-              "DrillDurability should now be purchasable after prerequisite is met");
+        // CRITICAL CHECK: Upgrades must ONLY consume EXP! Coins, Voidite, Titanium must remain untouched!
+        CHECK(coins == 500, "Coins must not be touched by upgrades");
+        CHECK(voidite == 100, "Voidite must not be touched by upgrades");
+        CHECK(titanium == 100, "Titanium must not be touched by upgrades");
+
+        // Now that DrillSpeed T1 is acquired, DrillDurability prerequisite is MET and it awakens from GreyedOut!
+        CHECK(tree.get_node_web_state(UpgradeType::DrillDurability, player_level, exp) != NodeWebState::GreyedOutLocked,
+              "DrillDurability must no longer be greyed out after prerequisite is met");
 
         // At Level 1, cannot purchase Tier 2 (requires Level 2)
-        CHECK(!tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Should not allow Tier 2 at Level 1");
-        CHECK(tree.get_lock_reason(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium) == UpgradeLockReason::LevelLocked,
+        CHECK(!tree.can_purchase(UpgradeType::DrillSpeed, player_level, exp), "Should not allow Tier 2 at Level 1");
+        CHECK(tree.get_lock_reason(UpgradeType::DrillSpeed, player_level, exp) == UpgradeLockReason::LevelLocked,
               "Lock reason should be LevelLocked");
-        bool bought_fail = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        bool bought_fail = tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
         CHECK(!bought_fail, "Purchase Tier 2 should fail at Level 1");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 1, "Tier should remain 1");
 
         // Level up to Level 2: Now Tier 2 purchase succeeds!
         player_level = 2;
-        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium), "Cannot purchase Tier 2 at Level 2");
-        bought = tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        CHECK(tree.can_purchase(UpgradeType::DrillSpeed, player_level, exp), "Cannot purchase Tier 2 at Level 2");
+        bought = tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
         CHECK(bought, "Purchase tier 2 failed at Level 2");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 2, "Tier not 2 after purchase");
-        CHECK(coins == 740, "Coins not deducted correctly for tier 2 (900 - 160)");
-        CHECK(voidite == 88, "Voidite not deducted correctly for tier 2 (96 - 8)");
-        CHECK(titanium == 91, "Titanium not deducted correctly for tier 2 (97 - 6)");
+        CHECK(exp == 740, "EXP not deducted correctly for tier 2 (900 - 160)");
 
-        std::cout << " -> Branch prerequisites, level gating, and multi-resource deduction verified." << std::endl;
+        std::cout << " -> Branch prerequisites, level gating, and EXP-only deduction verified." << std::endl;
     }
 
-    // Test 3: Respec Feature (100% Points & Materials Refund + Immediate Re-Upgrade Verification)
+    // Test 3: Respec Feature (100% EXP Refund + Immediate Re-Upgrade Verification)
     {
-        std::cout << "[Test 3] Testing Respec with 100% Full Refund & Re-Upgrade Capability..." << std::endl;
+        std::cout << "[Test 3] Testing Respec with 100% EXP Full Refund & Re-Upgrade Capability..." << std::endl;
         UpgradeTree tree;
-        int coins = 2000;
-        int voidite = 100;
-        int titanium = 100;
+        int exp = 2000;
         int player_level = 5;
 
         // Buy 3 tiers of DrillSpeed:
-        // T0: 100c, 4v, 3t
-        // T1: 160c, 8v, 6t
-        // T2: 256c, 12v, 9t
-        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
-        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
-        tree.purchase(UpgradeType::DrillSpeed, player_level, coins, voidite, titanium);
+        // T0: 100 EXP
+        // T1: 160 EXP
+        // T2: 256 EXP
+        tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
+        tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
+        tree.purchase(UpgradeType::DrillSpeed, player_level, exp);
 
-        // Buy 1 tier of ReinforcedPlating (T0: 100c, 4v, 3t)
-        tree.purchase(UpgradeType::ReinforcedPlating, player_level, coins, voidite, titanium);
+        // Buy 1 tier of ReinforcedPlating (T0: 100 EXP)
+        tree.purchase(UpgradeType::ReinforcedPlating, player_level, exp);
 
-        int total_spent_coins = tree.get_total_spent_coins();
-        int total_spent_voidite = tree.get_total_spent_voidite();
-        int total_spent_titanium = tree.get_total_spent_titanium();
-
-        // 100 + 160 + 256 + 100 = 616 coins
-        CHECK(total_spent_coins == 616, "Total spent Coins mismatch");
-        // 4 + 8 + 12 + 4 = 28 voidite
-        CHECK(total_spent_voidite == 28, "Total spent Voidite mismatch");
-        // 3 + 6 + 9 + 3 = 21 titanium
-        CHECK(total_spent_titanium == 21, "Total spent Titanium mismatch");
-
-        // Verify remaining currency balances
-        CHECK(coins == (2000 - 616), "Coins balance mismatch");
-        CHECK(voidite == (100 - 28), "Voidite balance mismatch");
-        CHECK(titanium == (100 - 21), "Titanium balance mismatch");
+        int total_spent_exp = tree.get_total_spent_exp();
+        // 100 + 160 + 256 + 100 = 616 EXP
+        CHECK(total_spent_exp == 616, "Total spent EXP mismatch");
+        CHECK(exp == (2000 - 616), "EXP balance mismatch");
 
         // Execute Respec (100% full refund)
-        int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
-        tree.respec(ref_coins, ref_voidite, ref_titanium);
+        int ref_exp = 0;
+        tree.respec(ref_exp);
 
-        CHECK(ref_coins == 616, "100% coins refund mismatch");
-        CHECK(ref_voidite == 28, "100% voidite refund mismatch");
-        CHECK(ref_titanium == 21, "100% titanium refund mismatch");
+        CHECK(ref_exp == 616, "100% EXP refund mismatch");
         CHECK(tree.get_tier(UpgradeType::DrillSpeed) == 0, "DrillSpeed tier not reset to 0");
         CHECK(tree.get_tier(UpgradeType::ReinforcedPlating) == 0, "ReinforcedPlating tier not reset to 0");
 
-        // Restore refunded currencies into player inventory
-        coins += ref_coins;
-        voidite += ref_voidite;
-        titanium += ref_titanium;
-        CHECK(coins == 2000, "Coins not restored to initial 2000");
-        CHECK(voidite == 100, "Voidite not restored to initial 100");
-        CHECK(titanium == 100, "Titanium not restored to initial 100");
+        // Restore refunded EXP into player pool
+        exp += ref_exp;
+        CHECK(exp == 2000, "EXP not restored to initial 2000");
 
-        // Crucial test: Re-upgrade verification! The player can now re-spend points freely!
-        bool re_p1 = tree.purchase(UpgradeType::ThrusterTank, player_level, coins, voidite, titanium);
+        // Crucial test: Re-upgrade verification! The player can now re-spend EXP freely!
+        bool re_p1 = tree.purchase(UpgradeType::ThrusterTank, player_level, exp);
         CHECK(re_p1, "Failed to re-upgrade into ThrusterTank after respec");
         CHECK(tree.get_tier(UpgradeType::ThrusterTank) == 1, "ThrusterTank tier not 1 after re-upgrade");
 
-        bool re_p2 = tree.purchase(UpgradeType::KineticDynamo, player_level, coins, voidite, titanium);
+        bool re_p2 = tree.purchase(UpgradeType::KineticDynamo, player_level, exp);
         CHECK(re_p2, "Failed to re-upgrade into KineticDynamo after ThrusterTank T1 prerequisite met");
         CHECK(tree.get_tier(UpgradeType::KineticDynamo) == 1, "KineticDynamo tier not 1 after re-upgrade");
 
-        std::cout << " -> Respec 100% full point/material recovery (616C, 28V, 21T) and immediate re-upgrade verified." << std::endl;
+        std::cout << " -> Respec 100% full EXP recovery (616 EXP) and immediate re-upgrade verified." << std::endl;
     }
 
     // Test 4: Save & Load Persistence
@@ -259,12 +244,18 @@ int main() {
         // Tier 2 unlocks HUD material labels
         CHECK(player.can_identify_materials() == true, "Material identification should be unlocked at Tier 2");
 
-        // 7. Debris Damage Mitigation:
+        // 7. Debris Damage Mitigation & Shield Layer Absorption:
         // Vanguard base 50% + tier 2 (2 * 10% = 20%) = 70% reduction!
         float raw_debris_damage = 50.0f;
         float taken = player.take_damage(raw_debris_damage, true);
         CHECK(std::abs(taken - 15.0f) < 0.01f, "Debris damage taken mismatch");
-        CHECK(std::abs(player.health() - 150.0f) < 0.01f, "Health after debris mismatch");
+        CHECK(std::abs(player.shield() - 60.0f) < 0.01f, "Shield should absorb debris damage first (75 -> 60)");
+        CHECK(std::abs(player.health() - 165.0f) < 0.01f, "Health must remain intact while shield absorbs impact");
+
+        // Deplete shield to verify damage penetrates directly to unregenerating health:
+        player.set_shield(0.0f);
+        player.take_damage(raw_debris_damage, true);
+        CHECK(std::abs(player.health() - 150.0f) < 0.01f, "Health after debris mismatch with depleted shield");
 
         std::cout << " -> All 6 skills confirmed applying directly to player stats, mining, heat, sonar, and defense." << std::endl;
     }
@@ -288,39 +279,38 @@ int main() {
         CHECK(profile.get_player_level() == 2, "Level should now be 2");
         CHECK(profile.total_coins == 350, "Coins should be 200 + 150 = 350");
 
-        // Grant materials to test multi-resource purchase and respec
+        // Grant materials to verify that materials are NEVER consumed by upgrades
         profile.grant_resources(0, 0, 50, 50);
 
-        // Buy DrillSpeed Tier 1 (100 Coins, 4 Voidite, 3 Titanium)
-        bool p1 = profile.upgrades.purchase(UpgradeType::DrillSpeed, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+        // Buy DrillSpeed Tier 1 (100 EXP)
+        bool p1 = profile.upgrades.purchase(UpgradeType::DrillSpeed, profile.get_player_level(), profile.total_exp);
         CHECK(p1, "Purchase DrillSpeed Tier 1 failed");
         CHECK(profile.upgrades.drillSpeedTier == 1, "DrillSpeed tier not 1");
-        CHECK(profile.total_coins == 250, "Coins deduction mismatch (350 - 100)");
-        CHECK(profile.total_voidite == 46, "Voidite deduction mismatch (50 - 4)");
-        CHECK(profile.total_titanium == 47, "Titanium deduction mismatch (50 - 3)");
+        CHECK(profile.total_exp == 250, "EXP deduction mismatch (350 - 100)");
+        CHECK(profile.total_coins == 350, "Coins must not be deducted (should remain 350)");
+        CHECK(profile.total_voidite == 50, "Voidite must not be deducted (should remain 50)");
+        CHECK(profile.total_titanium == 50, "Titanium must not be deducted (should remain 50)");
 
-        // Buy ThrusterTank Tier 1 (100 Coins, 4 Voidite, 3 Titanium)
-        bool p2 = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_coins, profile.total_voidite, profile.total_titanium);
+        // Buy ThrusterTank Tier 1 (100 EXP)
+        bool p2 = profile.upgrades.purchase(UpgradeType::ThrusterTank, profile.get_player_level(), profile.total_exp);
         CHECK(p2, "Purchase ThrusterTank Tier 1 failed");
         CHECK(profile.upgrades.thrusterTankTier == 1, "ThrusterTank tier not 1");
-        CHECK(profile.total_coins == 150, "Coins deduction mismatch (250 - 100)");
-        CHECK(profile.total_voidite == 42, "Voidite deduction mismatch (46 - 4)");
-        CHECK(profile.total_titanium == 44, "Titanium deduction mismatch (47 - 3)");
+        CHECK(profile.total_exp == 150, "EXP deduction mismatch (250 - 100)");
+        CHECK(profile.total_coins == 350, "Coins must not be deducted");
+        CHECK(profile.total_voidite == 50, "Voidite must not be deducted");
+        CHECK(profile.total_titanium == 50, "Titanium must not be deducted");
 
-        int total_spent = profile.upgrades.get_total_spent_coins();
-        CHECK(total_spent == 200, "Total spent coins mismatch");
+        int total_spent = profile.upgrades.get_total_spent_exp();
+        CHECK(total_spent == 200, "Total spent EXP mismatch");
 
-        // Execute Respec (100% full refund)
-        int ref_coins = 0, ref_voidite = 0, ref_titanium = 0;
-        profile.upgrades.respec(ref_coins, ref_voidite, ref_titanium);
-        CHECK(ref_coins == 200, "Refund coins mismatch");
-        CHECK(ref_voidite == 8, "Refund voidite mismatch");
-        CHECK(ref_titanium == 6, "Refund titanium mismatch");
+        // Execute Respec (100% full refund of EXP)
+        int ref_exp = 0;
+        profile.upgrades.respec(ref_exp);
+        CHECK(ref_exp == 200, "Refund EXP mismatch");
 
-        profile.total_coins += ref_coins;
-        profile.total_voidite += ref_voidite;
-        profile.total_titanium += ref_titanium;
+        profile.total_exp += ref_exp;
 
+        CHECK(profile.total_exp == 350, "Total EXP after respec mismatch (should be restored to 350)");
         CHECK(profile.total_coins == 350, "Total Coins after respec mismatch (should be restored to 350)");
         CHECK(profile.total_voidite == 50, "Total Voidite after respec mismatch (should be restored to 50)");
         CHECK(profile.total_titanium == 50, "Total Titanium after respec mismatch (should be restored to 50)");
@@ -328,45 +318,41 @@ int main() {
         CHECK(profile.upgrades.drillSpeedTier == 0, "DrillSpeed tier not reset to 0");
         CHECK(profile.upgrades.thrusterTankTier == 0, "ThrusterTank tier not reset to 0");
 
-        std::cout << " -> Profile level progression, level-up coins, and 100% full resource respec recovery verified." << std::endl;
+        std::cout << " -> Profile level progression, level-up coins, and 100% full EXP respec recovery verified." << std::endl;
     }
 
     // Test 7: Complete Tier Cost Matrix & Progression Roadmap
     {
         std::cout << "[Test 7] Testing 5-Tier Cost Matrix & Progression Roadmap..." << std::endl;
 
-        // Verify exact cost info for each of the 5 tiers
+        // Verify exact cost info for each of the 5 tiers (EXP-only, materials = 0)
         auto t1 = UpgradeTree::get_tier_cost_info(1);
-        CHECK(t1.tier == 1 && t1.required_level == 1 && t1.coin_cost == 100 && t1.voidite_cost == 4 && t1.titanium_cost == 3, "Tier 1 cost info mismatch");
+        CHECK(t1.tier == 1 && t1.required_level == 1 && t1.exp_cost == 100 && t1.voidite_cost == 0 && t1.titanium_cost == 0, "Tier 1 cost info mismatch");
 
         auto t2 = UpgradeTree::get_tier_cost_info(2);
-        CHECK(t2.tier == 2 && t2.required_level == 2 && t2.coin_cost == 160 && t2.voidite_cost == 8 && t2.titanium_cost == 6, "Tier 2 cost info mismatch");
+        CHECK(t2.tier == 2 && t2.required_level == 2 && t2.exp_cost == 160 && t2.voidite_cost == 0 && t2.titanium_cost == 0, "Tier 2 cost info mismatch");
 
         auto t3 = UpgradeTree::get_tier_cost_info(3);
-        CHECK(t3.tier == 3 && t3.required_level == 3 && t3.coin_cost == 256 && t3.voidite_cost == 12 && t3.titanium_cost == 9, "Tier 3 cost info mismatch");
+        CHECK(t3.tier == 3 && t3.required_level == 3 && t3.exp_cost == 256 && t3.voidite_cost == 0 && t3.titanium_cost == 0, "Tier 3 cost info mismatch");
 
         auto t4 = UpgradeTree::get_tier_cost_info(4);
-        CHECK(t4.tier == 4 && t4.required_level == 4 && t4.coin_cost == 410 && t4.voidite_cost == 16 && t4.titanium_cost == 12, "Tier 4 cost info mismatch");
+        CHECK(t4.tier == 4 && t4.required_level == 4 && t4.exp_cost == 410 && t4.voidite_cost == 0 && t4.titanium_cost == 0, "Tier 4 cost info mismatch");
 
         auto t5 = UpgradeTree::get_tier_cost_info(5);
-        CHECK(t5.tier == 5 && t5.required_level == 5 && t5.coin_cost == 656 && t5.voidite_cost == 20 && t5.titanium_cost == 15, "Tier 5 cost info mismatch");
+        CHECK(t5.tier == 5 && t5.required_level == 5 && t5.exp_cost == 656 && t5.voidite_cost == 0 && t5.titanium_cost == 0, "Tier 5 cost info mismatch");
 
         // Verify Lock Reasons for clear UI messaging
         UpgradeTree test_tree;
         // Level locked
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 0, 1000, 100, 100) == UpgradeLockReason::LevelLocked, "Should be LevelLocked at Lv 0");
+        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 0, 1000) == UpgradeLockReason::LevelLocked, "Should be LevelLocked at Lv 0");
         // Prerequisite locked
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillDurability, 5, 1000, 100, 100) == UpgradeLockReason::PrerequisiteLocked, "Should be PrerequisiteLocked without DrillSpeed T1");
-        // Insufficient coins
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 50, 100, 100) == UpgradeLockReason::InsufficientCoins, "Should be InsufficientCoins");
-        // Insufficient voidite
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 100, 2, 100) == UpgradeLockReason::InsufficientVoidite, "Should be InsufficientVoidite");
-        // Insufficient titanium
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 100, 10, 1) == UpgradeLockReason::InsufficientTitanium, "Should be InsufficientTitanium");
+        CHECK(test_tree.get_lock_reason(UpgradeType::DrillDurability, 5, 1000) == UpgradeLockReason::PrerequisiteLocked, "Should be PrerequisiteLocked without DrillSpeed T1");
+        // Insufficient exp
+        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 50) == UpgradeLockReason::InsufficientEXP, "Should be InsufficientEXP");
         // Unlocked and ready
-        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 100, 10, 10) == UpgradeLockReason::Unlocked, "Should be Unlocked");
+        CHECK(test_tree.get_lock_reason(UpgradeType::DrillSpeed, 1, 100) == UpgradeLockReason::Unlocked, "Should be Unlocked");
 
-        std::cout << " -> All 5 Tier cost records (100->656 Coins, 4->20 Voidite, 3->15 Titanium) & lock reasons verified." << std::endl;
+        std::cout << " -> All 5 Tier cost records (100->656 EXP) & lock reasons verified." << std::endl;
     }
 
     // Test 8: Sector Progression, Uncharted Territory Gating & Save Persistence
@@ -420,6 +406,464 @@ int main() {
 
         std::filesystem::remove(test_save_path);
         std::cout << " -> Uncharted territory unlock, level gating, clear prereqs & save persistence verified." << std::endl;
+    }
+
+    // Test 9: Skill Tree Web Grid Architecture & Greyed-Out Sector States
+    {
+        std::cout << "[Test 9] Testing Skill Tree Web Grid Architecture & Greyed-Out Node States..." << std::endl;
+        UpgradeTree web_tree;
+
+        // 1. Initial Web State at Level 1, 0 EXP:
+        // Root nodes have no prerequisite: accessible but lacking EXP
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillSpeed, 1, 0) == NodeWebState::InsufficientEXP,
+              "DrillSpeed root node should be InsufficientEXP when player has 0 EXP");
+        CHECK(web_tree.get_node_web_state(UpgradeType::ThrusterTank, 1, 0) == NodeWebState::InsufficientEXP,
+              "ThrusterTank root node should be InsufficientEXP when player has 0 EXP");
+        CHECK(web_tree.get_node_web_state(UpgradeType::ReinforcedPlating, 1, 0) == NodeWebState::InsufficientEXP,
+              "ReinforcedPlating root node should be InsufficientEXP when player has 0 EXP");
+        CHECK(web_tree.get_node_web_state(UpgradeType::SonarFrequency, 1, 0) == NodeWebState::InsufficientEXP,
+              "SonarFrequency root node should be InsufficientEXP when player has 0 EXP");
+
+        // Dependent child nodes on the grid must be strictly GREYED OUT (GreyedOutLocked) because root branches are unpowered!
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillDurability, 1, 500) == NodeWebState::GreyedOutLocked,
+              "DrillDurability branch sector MUST be GreyedOutLocked until DrillSpeed T1 is energized");
+        CHECK(web_tree.get_node_web_state(UpgradeType::KineticDynamo, 1, 500) == NodeWebState::GreyedOutLocked,
+              "KineticDynamo branch sector MUST be GreyedOutLocked until ThrusterTank T1 is energized");
+
+        // 2. Awakening Root Nodes with EXP:
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillSpeed, 1, 100) == NodeWebState::Available,
+              "DrillSpeed should be Available when player has 100 EXP at Level 1");
+
+        // 3. Purchasing Root Node & Web State Transitions:
+        int exp_pool = 5000;
+        bool b_root = web_tree.purchase(UpgradeType::DrillSpeed, 1, exp_pool);
+        CHECK(b_root, "Purchase DrillSpeed T1 failed");
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillSpeed, 1, exp_pool) == NodeWebState::Purchased,
+              "DrillSpeed should now be in Purchased state");
+
+        // Now that DrillSpeed T1 is acquired, DrillDurability prerequisite is satisfied!
+        // At Level 0 it is LevelGated; at Level 1 with sufficient EXP it is Available!
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillDurability, 0, exp_pool) == NodeWebState::LevelGated,
+              "DrillDurability should be LevelGated at Level 0 once prereq is met");
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillDurability, 1, exp_pool) == NodeWebState::Available,
+              "DrillDurability should be Available at Level 1 with sufficient EXP");
+
+        // 4. Purchase child node:
+        bool b_child = web_tree.purchase(UpgradeType::DrillDurability, 1, exp_pool);
+        CHECK(b_child, "Purchase DrillDurability T1 failed");
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillDurability, 1, exp_pool) == NodeWebState::Purchased,
+              "DrillDurability should now be in Purchased state");
+
+        // 6. Max Tier Mastering (T5):
+        for (int t = 2; t <= 5; ++t) {
+            web_tree.purchase(UpgradeType::DrillSpeed, 5, exp_pool);
+        }
+        CHECK(web_tree.get_tier(UpgradeType::DrillSpeed) == 5, "DrillSpeed should be Tier 5");
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillSpeed, 5, exp_pool) == NodeWebState::Mastered,
+              "DrillSpeed should be Mastered at Tier 5");
+        CHECK(!web_tree.can_purchase(UpgradeType::DrillSpeed, 5, exp_pool),
+              "Cannot purchase beyond Tier 5");
+
+        // 7. Respec resets all web nodes back to foundational states (children become GreyedOutLocked again):
+        int refunded_exp = 0;
+        web_tree.respec(refunded_exp);
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillDurability, 5, exp_pool) == NodeWebState::GreyedOutLocked,
+              "DrillDurability must return to GreyedOutLocked state after full respec");
+        CHECK(web_tree.get_node_web_state(UpgradeType::DrillSpeed, 5, exp_pool) == NodeWebState::Available,
+              "DrillSpeed returns to Available state at Level 5 with EXP");
+
+        std::cout << " -> Skill tree web states (GreyedOutLocked, LevelGated, Available, Purchased, Mastered) fully validated." << std::endl;
+    }
+
+    // Test 9: Random Level Generation & Completed Level Seed Persistence
+    {
+        std::cout << "\n[Test 9] Testing Random Level Generation & Completed Level Seed Persistence..." << std::endl;
+
+        // 1. Uncompleted levels generate distinct random seeds on each opening
+        uint32_t seed_a = SaveSystem::generate_random_seed(1);
+        uint32_t seed_b = SaveSystem::generate_random_seed(1);
+        CHECK(seed_a != 0, "Generated seed must be non-zero");
+        CHECK(seed_b != 0, "Generated seed must be non-zero");
+        // Verify entropy produces different seeds
+        CHECK(seed_a != seed_b, "Consecutive random level openings must generate distinct seeds");
+
+        // 2. Uncompleted level lifecycle: Failed/abandoned runs do not lock in seed
+        PlayerInventory inv;
+        UserProfile user;
+        const int test_sector = 2;
+
+        CHECK(!user.is_sector_completed(test_sector), "Sector must start uncompleted");
+        CHECK(user.get_sector_seed(test_sector) == 0, "Uncompleted sector seed must be 0");
+
+        // Attempt 1: Player launches with seed_a but fails/dies
+        inv.reset(30);
+        inv.active_seed = seed_a;
+        inv.suit_failed = true;
+        inv.finalize_run(test_sector, false); // Failed extraction
+        CHECK(!inv.sector_records[test_sector].is_completed(), "Failed run must not mark sector completed");
+        CHECK(inv.sector_records[test_sector].saved_seed == 0, "Failed run must not save persistent seed");
+
+        // Attempt 2: Player launches with fresh random seed_b and successfully evacuates!
+        inv.reset(30);
+        inv.active_seed = seed_b;
+        inv.voidite = 30; // Target met
+        inv.vault_breached = true;
+        inv.finalize_run(test_sector, true); // Safe extraction!
+
+        CHECK(inv.sector_records[test_sector].is_completed(), "Safe extraction must mark sector completed");
+        CHECK(inv.sector_records[test_sector].saved_seed == seed_b, "Winning seed must be locked into saved_seed");
+
+        // Sync to UserProfile and save
+        user.mark_sector_completed(test_sector, inv.sector_records[test_sector].saved_seed);
+        CHECK(user.is_sector_completed(test_sector), "UserProfile must reflect sector completion");
+        CHECK(user.get_sector_seed(test_sector) == seed_b, "UserProfile must store exact completed seed");
+
+        const std::string level_seed_file = "tests/test_level_seed_persistence.json";
+        bool save_ok = SaveSystem::save_profile(user, level_seed_file);
+        CHECK(save_ok, "Saving profile with completed level seed must succeed");
+
+        // 3. Persistence round-trip: Reload profile and verify seed does NOT change
+        UserProfile reloaded;
+        bool load_ok = SaveSystem::load_profile(reloaded, level_seed_file);
+        CHECK(load_ok, "Loading profile with completed level seed must succeed");
+        CHECK(reloaded.is_sector_completed(test_sector), "Loaded profile must have completed sector");
+        CHECK(reloaded.get_sector_seed(test_sector) == seed_b, "Loaded profile must retain exact saved seed");
+
+        // 4. Replay completed level: Replaying should preserve the saved seed even on subsequent runs
+        inv.reset(30);
+        inv.active_seed = reloaded.get_sector_seed(test_sector);
+        CHECK(inv.active_seed == seed_b, "Opening completed level must use saved seed");
+        inv.finalize_run(test_sector, true);
+        CHECK(inv.sector_records[test_sector].saved_seed == seed_b, "Replaying completed level must not alter saved seed");
+
+        // 5. Backward compatibility: Legacy save with high completion rate but 0 seed gets assigned deterministic persistent seed
+        UserProfile legacy;
+        legacy.sector_records[3].highest_completion_rate = 85;
+        legacy.sector_records[3].best_badge = "PARTIAL (50–99%)";
+        legacy.sector_records[3].saved_seed = 0;
+        legacy.sector_records[3].completed = false;
+
+        const std::string legacy_file = "tests/test_legacy_sector_migration.json";
+        SaveSystem::save_profile(legacy, legacy_file);
+
+        UserProfile migrated;
+        SaveSystem::load_profile(migrated, legacy_file);
+        CHECK(migrated.is_sector_completed(3), "Migrated legacy cleared sector must be marked completed");
+        CHECK(migrated.get_sector_seed(3) != 0, "Migrated legacy cleared sector must have non-zero seed established");
+        uint32_t established_seed = migrated.get_sector_seed(3);
+
+        // Verify that re-saving and re-loading preserves this established seed
+        SaveSystem::save_profile(migrated, legacy_file);
+        UserProfile migrated_reloaded;
+        SaveSystem::load_profile(migrated_reloaded, legacy_file);
+        CHECK(migrated_reloaded.get_sector_seed(3) == established_seed, "Established legacy seed must remain immutable");
+
+        std::cout << " -> Random level generation and persistent completed seed immutability verified!" << std::endl;
+    }
+
+    // Test 9: Save System Clearance, Profile Reset, and Deletion Lifecycle
+    {
+        std::cout << "[Test 9] Testing Save Clearing, Profile Reset, and Deletion Lifecycle..." << std::endl;
+
+        const std::string test_clear_file = "tests/test_clear_save_profile.json";
+
+        // 1. Populate an advanced profile
+        UserProfile advanced_profile;
+        advanced_profile.player_name = "VeteranDelver";
+        advanced_profile.total_exp = 55000;
+        advanced_profile.lifetime_exp = 65000;
+        advanced_profile.total_coins = 4200;
+        advanced_profile.total_voidite = 150;
+        advanced_profile.total_titanium = 45;
+        advanced_profile.upgrades.drillSpeedTier = 4;
+        advanced_profile.upgrades.thrusterTankTier = 3;
+        advanced_profile.mark_sector_completed(1, 111111);
+        advanced_profile.mark_sector_completed(2, 222222);
+        advanced_profile.highest_cleared_sector = 3;
+        advanced_profile.settings.master_volume = 0.65f;
+
+        bool saved = SaveSystem::save_profile(advanced_profile, test_clear_file);
+        CHECK(saved, "Saving advanced profile for clear test must succeed");
+        CHECK(std::filesystem::exists(test_clear_file), "Save file must exist on disk");
+
+        // 2. Clear save file via SaveSystem::clear_save
+        bool cleared = SaveSystem::clear_save(test_clear_file);
+        CHECK(cleared, "SaveSystem::clear_save must return true");
+        CHECK(std::filesystem::exists(test_clear_file), "Cleared save file must be rewritten with fresh defaults");
+
+        // 3. Reload profile from cleared file and verify pristine state
+        UserProfile reloaded_fresh;
+        bool loaded = SaveSystem::load_profile(reloaded_fresh, test_clear_file);
+        CHECK(loaded, "Loading cleared save file must succeed");
+        CHECK(reloaded_fresh.total_exp == 0, "Cleared profile must have 0 spendable EXP");
+        CHECK(reloaded_fresh.lifetime_exp == 0, "Cleared profile must have 0 lifetime EXP");
+        CHECK(reloaded_fresh.total_coins == 200, "Cleared profile must have base starting coins (200)");
+        CHECK(reloaded_fresh.total_voidite == 12, "Cleared profile must have base starting voidite (12)");
+        CHECK(reloaded_fresh.total_titanium == 8, "Cleared profile must have base starting titanium (8)");
+        CHECK(reloaded_fresh.upgrades.drillSpeedTier == 0, "Cleared profile must have 0 drill speed upgrades");
+        CHECK(reloaded_fresh.upgrades.thrusterTankTier == 0, "Cleared profile must have 0 thruster upgrades");
+        CHECK(!reloaded_fresh.is_sector_completed(1), "Sector 1 must not be marked completed on fresh profile");
+        CHECK(!reloaded_fresh.is_sector_completed(2), "Sector 2 must not be marked completed on fresh profile");
+        CHECK(reloaded_fresh.highest_cleared_sector == 1, "Cleared profile highest cleared sector must be 1");
+
+        // 4. Test SaveSystem::reset_profile (in-memory object reset preserving user audio/graphics settings)
+        UserProfile active_mem_profile = advanced_profile;
+        active_mem_profile.settings.fov = 90.0f;
+        bool mem_reset = SaveSystem::reset_profile(active_mem_profile, test_clear_file, true);
+        CHECK(mem_reset, "SaveSystem::reset_profile must succeed");
+        CHECK(active_mem_profile.total_exp == 0, "In-memory profile must be reset to 0 EXP");
+        CHECK(active_mem_profile.settings.fov == 90.0f, "reset_profile must preserve user settings when preserve_settings is true");
+        CHECK(active_mem_profile.player_name == "VeteranDelver", "reset_profile must retain player name");
+
+        // 5. Test SaveSystem::delete_save_file
+        bool deleted = SaveSystem::delete_save_file(test_clear_file);
+        CHECK(deleted, "SaveSystem::delete_save_file must return true for existing file");
+        CHECK(!std::filesystem::exists(test_clear_file), "Deleted save file must no longer exist on disk");
+
+        std::cout << " -> Save clearance, fresh profile re-initialization, and deletion verified!" << std::endl;
+    }
+
+    // Test 10: Sector Charting, Prerequisite Gating & Lock Badge Messages
+    {
+        std::cout << "[Test 10] Testing Sector Charting, Prior Clear Status & Lock Badge Details..." << std::endl;
+
+        UserProfile p;
+        p.player_name = "Cadet";
+        p.total_exp = 0; // Level 1
+
+        // Fresh profile: Sector 1 is unlocked and ready
+        CHECK(p.is_sector_unlocked(1), "Sector 1 must be unlocked on fresh profile");
+        CHECK(!p.is_sector_completed(1), "Sector 1 must not be completed initially");
+        CHECK(!p.is_sector_charted(1), "Sector 1 must not be charted initially");
+        CHECK(p.is_prior_sector_cleared(1), "Sector 1 has no prior prerequisite");
+
+        // Sector 2 requires Level 2 (sectors 1-3 are classic introductory sectors gated by rank)
+        CHECK(!p.is_sector_unlocked(2), "Sector 2 must be locked for level 1 cadet");
+        CHECK(p.get_sector_lock_badge(2) == "[ LOCKED // REQUIRES LEVEL 2 ]", "Sector 2 lock badge mismatch");
+        CHECK(p.get_sector_lock_detail(2) == "SECTOR 2 LOCKED: REQUIRES DELVER LEVEL 2 (CURRENT RANK: 1)", "Sector 2 lock detail mismatch");
+
+        // Sector 5 requires Level 8 AND Sector 4 completed ("need to complete level 4 before doing level 5")
+        // Level up player to level 10 without clearing Sector 4:
+        p.total_exp = 25000; // High level delver (> Level 10)
+        CHECK(p.get_player_level() >= 8, "Player level must be >= 8");
+        CHECK(!p.is_prior_sector_cleared(5), "Sector 5 prior sector (4) must not be cleared yet");
+        CHECK(!p.is_sector_unlocked(5), "Sector 5 must remain locked because Sector 4 is uncleared");
+        CHECK(p.get_sector_lock_badge(5) == "[ LOCKED // CLEAR SECTOR 4 FIRST ]", "Sector 5 must show prior clear badge for sector 4");
+        CHECK(p.get_sector_lock_detail(5) == "SECTOR 5 LOCKED: MUST COMPLETE SECTOR 4 BEFORE COMMENCING SECTOR 5", "Sector 5 detail text mismatch");
+
+        // Now mark Sector 1 completed with 100% completion rate & "SURVIVED" badge
+        p.mark_sector_completed(1, 100, "100% VOIDITE RECOVERED", 987654);
+        CHECK(p.is_sector_completed(1), "Sector 1 must now be marked completed");
+        CHECK(p.is_sector_charted(1), "Sector 1 must now be marked charted");
+        CHECK(p.get_sector_completion_rate(1) == 100, "Sector 1 completion rate must be 100");
+        CHECK(p.get_sector_badge(1) == "100% VOIDITE RECOVERED", "Sector 1 badge must match");
+        CHECK(p.highest_cleared_sector >= 1, "highest_cleared_sector must be at least 1");
+        CHECK(p.is_prior_sector_cleared(2), "Sector 2 prior sector must now be cleared");
+
+        // Complete sectors 2 and 3 sequentially
+        p.mark_sector_completed(2, 85, "CLEARED", 2222);
+        CHECK(p.is_sector_charted(2), "Sector 2 must be charted");
+        CHECK(!p.is_prior_sector_cleared(5), "Sector 5 prior sector (4) still not cleared");
+
+        p.mark_sector_completed(3, 90, "CLEARED", 3333);
+        CHECK(p.is_sector_charted(3), "Sector 3 must be charted");
+        CHECK(p.highest_cleared_sector >= 3, "highest_cleared_sector must advance to 3");
+        CHECK(!p.is_prior_sector_cleared(5), "Sector 5 prior sector (4) still not cleared");
+
+        // Now complete sector 4
+        p.mark_sector_completed(4, 95, "CLEARED", 4444);
+        CHECK(p.is_sector_charted(4), "Sector 4 must be charted");
+        CHECK(p.highest_cleared_sector >= 4, "highest_cleared_sector must advance to 4");
+        CHECK(p.is_prior_sector_cleared(5), "Sector 5 prior sector (4) must now be cleared");
+        CHECK(p.is_sector_unlocked(5), "Sector 5 must now be unlocked (level >= 8 and sector 4 cleared)");
+        CHECK(p.get_sector_lock_badge(5).empty(), "Unlocked sector 5 must have empty lock badge");
+
+        // Verify persistence of completion rate, badge, and charting status
+        const std::string test_chart_file = "tests/test_sector_charting.json";
+        bool saved = SaveSystem::save_profile(p, test_chart_file);
+        CHECK(saved, "Saving profile with charted sectors must succeed");
+
+        UserProfile loaded_p;
+        bool loaded = SaveSystem::load_profile(loaded_p, test_chart_file);
+        CHECK(loaded, "Loading profile with charted sectors must succeed");
+        CHECK(loaded_p.is_sector_completed(1), "Loaded profile sector 1 must be completed");
+        CHECK(loaded_p.is_sector_charted(1), "Loaded profile sector 1 must be charted");
+        CHECK(loaded_p.get_sector_completion_rate(1) == 100, "Loaded profile sector 1 completion rate mismatch");
+        CHECK(loaded_p.get_sector_badge(1) == "100% VOIDITE RECOVERED", "Loaded profile sector 1 badge mismatch");
+        CHECK(loaded_p.is_sector_charted(2), "Loaded profile sector 2 must be charted");
+        CHECK(loaded_p.is_sector_charted(3), "Loaded profile sector 3 must be charted");
+        CHECK(loaded_p.is_sector_charted(4), "Loaded profile sector 4 must be charted");
+        CHECK(loaded_p.is_sector_unlocked(5), "Loaded profile sector 5 must remain unlocked");
+        CHECK(loaded_p.highest_cleared_sector >= 4, "Loaded profile highest_cleared_sector mismatch");
+
+        SaveSystem::delete_save_file(test_chart_file);
+        std::cout << " -> Sector charting, prerequisite gating, and lock messages verified!" << std::endl;
+    }
+
+    // Test 11: 6-Discipline Progressive Skill Tree, Campaign Cap, 100% Respec, and Post-Game Grandmaster Unlock
+    {
+        std::cout << "[Test 11] Testing 6-Discipline Skill Tree, 24-Pt Campaign Cap, Respec & Post-Game Unlock..." << std::endl;
+
+        // 1. Verify 18 upgrades, 6 disciplines, and 60 total points
+        CHECK(static_cast<int>(UpgradeType::COUNT) == 18, "Tree must have exactly 18 upgrades");
+        CHECK(UpgradeTree::CAMPAIGN_POINT_CAP == 24, "Pre-completion campaign cap must be 24 points");
+        CHECK(UpgradeTree::TOTAL_TREE_POINTS == 60, "Total skill tree must have 60 points");
+
+        // Verify tier allocations: Foundation (5) + Specialization (3) + Capstone (2) = 10 pts per branch
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::DrillSpeed) == 5, "Excavation Foundation max tier must be 5");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::DrillDurability) == 3, "Excavation Specialization max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::MicroCharges) == 2, "Excavation Capstone max tier must be 2");
+
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::AcousticDampening) == 5, "Stealth Foundation max tier must be 5");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::ShadowVeil) == 3, "Stealth Specialization max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::AmbushProtocol) == 2, "Stealth Capstone max tier must be 2");
+
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::PneumaticImpact) == 5, "Melee Foundation max tier must be 5");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::CleaveShockwave) == 3, "Melee Specialization max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::BerserkerOverdrive) == 2, "Melee Capstone max tier must be 2");
+
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::HyperVelocitySlugs) == 5, "Gun Damage Foundation max tier must be 5");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::RapidCycling) == 3, "Gun Damage Specialization max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::CriticalWeakpoint) == 2, "Gun Damage Capstone max tier must be 2");
+
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::ReinforcedPlating) == 5, "Defense Foundation max tier must be 5");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::KineticShielding) == 3, "Defense Specialization max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::Defibrillator) == 2, "Defense Capstone max tier must be 2");
+
+        // 2. Sequential Branch Prerequisites: Specialization requires Foundation; Capstone requires Specialization
+        UpgradeTree branch_tree;
+        int exp_pool = 100000;
+        int player_lvl = 20;
+
+        // Stealth branch prerequisite check
+        CHECK(branch_tree.get_lock_reason(UpgradeType::ShadowVeil, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "ShadowVeil must require AcousticDampening >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::AmbushProtocol, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "AmbushProtocol must require ShadowVeil >= 1");
+
+        // Melee branch prerequisite check
+        CHECK(branch_tree.get_lock_reason(UpgradeType::CleaveShockwave, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "CleaveShockwave must require PneumaticImpact >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::BerserkerOverdrive, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "BerserkerOverdrive must require CleaveShockwave >= 1");
+
+        // Gun Damage branch prerequisite check
+        CHECK(branch_tree.get_lock_reason(UpgradeType::RapidCycling, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "RapidCycling must require HyperVelocitySlugs >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::CriticalWeakpoint, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "CriticalWeakpoint must require RapidCycling >= 1");
+
+        // Defense branch prerequisite check
+        CHECK(branch_tree.get_lock_reason(UpgradeType::KineticShielding, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "KineticShielding must require ReinforcedPlating >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::Defibrillator, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "Defibrillator must require KineticShielding >= 1");
+
+        // 3. Campaign Point Cap Enforcement (24 points)
+        UserProfile camp_profile;
+        camp_profile.total_exp = 50000;
+        camp_profile.lifetime_exp = 50000;
+        CHECK(!camp_profile.is_game_completed(), "Fresh campaign must not be marked completed");
+        CHECK(camp_profile.get_max_assignable_points() == 24, "Pre-completion max points must be 24");
+
+        // Allocate points: Max Excavation (5 + 3 + 2 = 10 pts)
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillSpeed, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillDurability, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::MicroCharges, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 10, "Should have 10 points allocated");
+
+        // Allocate points: Max Gun Damage (5 + 3 + 2 = 10 pts) -> 20 pts total
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::HyperVelocitySlugs, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::RapidCycling, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::CriticalWeakpoint, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 20, "Should have 20 points allocated");
+
+        // Allocate 4 points into Defense (ReinforcedPlating T4) -> Exactly 24 points (CAP REACHED!)
+        for (int i = 0; i < 4; ++i) camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 24, "Should be capped at 24 points");
+
+        // Attempting to buy a 25th point must fail because of CampaignCapReached even with abundant EXP!
+        CHECK(!camp_profile.upgrades.can_purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()),
+              "Cannot purchase beyond 24 points during campaign");
+        CHECK(camp_profile.upgrades.get_lock_reason(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == UpgradeLockReason::CampaignCapReached,
+              "Lock reason must be CampaignCapReached");
+        CHECK(camp_profile.upgrades.get_node_web_state(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == NodeWebState::CampaignCapped,
+              "Web node state must be CampaignCapped");
+
+        bool extra_purchase = camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(!extra_purchase, "25th point purchase must return false");
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 24, "Points must remain strictly at 24");
+
+        // 4. Respec Necessity: To spec into Stealth or Melee, player MUST respec!
+        int spent_exp_before_respec = camp_profile.upgrades.get_total_spent_exp();
+        CHECK(spent_exp_before_respec > 0, "Spent EXP must be > 0");
+        int refund = 0;
+        camp_profile.upgrades.respec(refund);
+        CHECK(refund == spent_exp_before_respec, "Respec must refund 100% spent EXP");
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 0, "Assigned points must reset to 0");
+        camp_profile.total_exp += refund;
+
+        // Now specialize down Stealth (10 pts) and Melee (10 pts) + 4 pts Defense!
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::AcousticDampening, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::ShadowVeil, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::AmbushProtocol, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.ambushProtocolTier == 2, "Ambush protocol capstone acquired");
+
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::PneumaticImpact, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::CleaveShockwave, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::BerserkerOverdrive, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.berserkerOverdriveTier == 2, "Berserker overdrive capstone acquired");
+
+        // 5. Post-Game Grandmaster Unlock (Beating Sector 3 Void Cradle expands cap to 60)
+        camp_profile.mark_sector_completed(3, 100, "CLEARED", 99999);
+        CHECK(camp_profile.is_game_completed(), "Profile must now be marked game completed");
+        CHECK(camp_profile.get_max_assignable_points() == 60, "Post-game max assignable points must expand to 60");
+
+        // Now the player can unlock additional points beyond 24, progressing all the way to 60!
+        camp_profile.total_exp = 500000; // Abundant post-game EXP
+        int cur_level = camp_profile.get_player_level();
+
+        // Fill remaining 4 disciplines
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillSpeed, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillDurability, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::MicroCharges, cur_level, camp_profile.total_exp, true);
+
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ThrusterTank, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::KineticDynamo, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::SonarFrequency, cur_level, camp_profile.total_exp, true);
+
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::KineticShielding, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::Defibrillator, cur_level, camp_profile.total_exp, true);
+
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::HyperVelocitySlugs, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::RapidCycling, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::CriticalWeakpoint, cur_level, camp_profile.total_exp, true);
+
+        // Entire tree is now 100% complete: exactly 60/60 points!
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 60, "Must reach exactly 60/60 points post-game");
+
+        // 6. PlayerController Combat & Attribute Integration
+        PlayerController test_delver(glm::vec3(0.0f));
+        test_delver.apply_attributes_and_upgrades(CharacterClass::Demolitionist, camp_profile.upgrades);
+
+        // Stealth bonuses
+        CHECK(std::abs(test_delver.stealth_noise_multiplier() - 0.20f) < 0.01f, "Stealth noise should be dampened to minimum 0.20x");
+        CHECK(std::abs(test_delver.optical_detection_multiplier() - 0.55f) < 0.01f, "Optical detection should be reduced by 45% (0.55x)");
+        CHECK(std::abs(test_delver.ambush_damage_multiplier() - 1.70f) < 0.01f, "Ambush damage should be +70% (1.70x)");
+
+        // Melee & Weapon bonuses
+        CHECK(std::abs(test_delver.melee_damage_multiplier() - 2.50f) < 0.01f, "Melee damage should be +150% (2.50x)");
+        CHECK(std::abs(test_delver.weakpoint_critical_multiplier() - 1.70f) < 0.01f, "Weakpoint critical damage should be +70% (1.70x)");
+        CHECK(std::abs(test_delver.mineral_yield_multiplier() - 1.40f) < 0.01f, "Mineral harvest yield should be +40% (1.40x)");
+
+        // Defibrillator emergency second wind upon lethal damage
+        test_delver.take_damage(9999.0f, PlayerController::DamageSource::Kinetic);
+        CHECK(test_delver.health() == 35.0f, "Defibrillator should preserve player at 35 HP on fatal trauma");
+        CHECK(test_delver.shield() > 0.0f, "Defibrillator should restore shield barrier");
+        CHECK(test_delver.defibrillator_timer() > 0.0f, "Defibrillator cooldown must be triggered");
+
+        std::cout << " -> Progressive 6-discipline skill tree, 24-pt campaign cap, respec, and post-game Grandmaster unlock verified!" << std::endl;
     }
 
     std::cout << "========================================" << std::endl;

@@ -1,9 +1,11 @@
 #pragma once
 #include "chunk.hpp"
+#include "material_scarcity.hpp"
 #include <vector>
 #include <string>
 #include <memory>
 #include <array>
+#include <random>
 #include <glm/glm.hpp>
 #include <cstdint>
 
@@ -43,14 +45,84 @@ enum class RoomShapeType {
     ColossalVaultedDredgeCathedral, // Towering vaulted mega-hall, soaring ribbed arches, high gantry catwalk, vast verticality (All levels)
     TectonicAbyssalSinkhole,        // Staggering tectonic sinkhole drop, high rim overlook, spiral terraces, glowing fissure bed (Level 2+)
     CyclopeanExcavationSilo,        // Titanic precursor excavation shaft, double-tiered maintenance rings, crane gantry (Level 1+)
-    BioluminescentFirmamentAbyss    // Vast underground celestial cavern, starry crystal canopy at y=25, soaring stone arch bridge (All levels)
+    BioluminescentFirmamentAbyss,   // Vast underground celestial cavern, starry crystal canopy at y=25, soaring stone arch bridge (All levels)
+
+    // ── DEDICATED PRECURSOR VAULT ROOMS & SANCTUARIES ──
+    PrecursorSanctumVault,          // Grand precursor sanctum with vaulted archways, runic dais & sealed relic portal (Level 1+)
+    SubterraneanVaultBastion,       // Fortified precursor military bastion with observation catwalks, slag trench & blast gate portal (Level 2+)
+    AbyssalVaultChasm               // Deep tectonic vault chasm with lethal drops, molten/radiation moat & boss roost (Level 3)
 };
+
+// ─────────────────────────────────────────────────────────────
+// ROOM CATEGORIES & THEMATIC CLUSTERING
+// ─────────────────────────────────────────────────────────────
+enum class RoomCategory : uint8_t {
+    SafeTerminal = 0,       // Spawn Staging, Extraction Landing
+    NaturalCrystalline,     // Mining Pillar Hall, Crystalline Geode, Prismatic Cathedral, Aquifer Oasis, Firmament Abyss, Glowworm Grotto
+    BioOrganic,             // Fungoid Bio-Grotto, Toxic Miasma Swamp
+    PrecursorIndustrial,    // Industrial Vault Bunker, Laser Defense Foundry, Coolant Reservoir, Excavation Silo, Terraced Quarry, Sanctum Vault, Vault Bastion
+    VolcanicThermal,        // Magma Caldera Lake, Molten Magma Foundry
+    TectonicChasm,          // Fault-Line Crevasse, Crumbling Arch Canyon, Spike Trench Arena, Ancient Titan Necropolis, Tectonic Sinkhole
+    CosmicVoidAbyss         // Abyssal Vertical Chasm, Colossal Abyssal Chasm, Void Singularity Rift, Radioactive Core Sanctuary, Vaulted Cathedral, Abyssal Vault Chasm
+};
+
+RoomCategory get_room_category(RoomShapeType type);
+const char* get_room_category_name(RoomCategory cat);
+bool is_harsh_hazard_room(RoomShapeType type);
+bool is_extreme_spawn_hazard(RoomShapeType type);
+bool is_extraction_climax_room(RoomShapeType type);
+bool is_colossal_or_massive_room(RoomShapeType type);
+float get_room_adjacency_affinity(RoomShapeType typeA, RoomShapeType typeB);
 
 enum class CorridorType {
     Standard,       // Traditional axis-aligned mining artery
     Diagonal,       // Organic diagonal passage connecting diagonal rooms
     Ravine,         // Deep jagged tectonic fissure with modulated rock walls
     SlopingRamp     // Smooth stepped ramp/stairway transitioning between floors
+};
+
+enum class FluidStructureType : uint8_t {
+    ContainedPool = 0,       // Natural enclosed circular/oval basin with decorative rim
+    SteppingStonePool = 1,   // Grotto pool with central island and hop-across stepping stones
+    WallCascade = 2,         // Small fall / wall niche cascade pouring down into splash basin
+    CascadingTwinPools = 3,  // Tiered double terrace pools with weir overflow step
+    HazardTrench = 4,        // Dangerous room obstacle trench with crossing stepping stones
+    DropChasmSump = 5        // Plunge pool / hazard sump at the bottom of large drop shafts
+};
+
+// ─────────────────────────────────────────────────────────────
+// VAULT PLACEMENT & LEVEL-SCALED OBSTACLE CONFIGURATION
+// ─────────────────────────────────────────────────────────────
+enum class VaultObstacleType : uint8_t {
+    None = 0,
+    AquiferSteppingStones,  // Level 1: Scenic aquifer moat with stepping stones & mild sentry
+    HazardTrenchSlag,       // Level 2: Boiling molten slag / corrosive acid trench with basalt steps & hardened sentries
+    ChasmAbyssRadiation    // Level 3+: Deep lethal drop chasm with radiation field & Chitin Goliath boss guardian
+};
+
+enum class VaultGuardianRole : uint8_t {
+    None = 0,
+    StalkerMelee,
+    StalkerShooter,
+    ChitinGoliath           // Boss Monster for deep/late sectors
+};
+
+struct VaultPlacement {
+    bool exists{false};
+    int room_index{-1};
+    RoomShapeType room_type{RoomShapeType::PrecursorSanctumVault};
+    glm::ivec3 chamber_center{0};
+    glm::ivec3 chamber_min{0};
+    glm::ivec3 chamber_max{0};
+    glm::ivec3 door_pos{0};
+    glm::ivec3 relic_pos{0};
+    int door_height{3};
+    glm::ivec3 approach_pos{0};
+    VaultObstacleType obstacle_type{VaultObstacleType::None};
+    bool has_guardian{false};
+    bool is_boss_guardian{false};
+    VaultGuardianRole guardian_role{VaultGuardianRole::None};
+    glm::vec3 guardian_spawn_pos{0.0f};
 };
 
 struct RoomPlacement {
@@ -73,6 +145,19 @@ struct RoomPlacement {
     bool connected_nw{false};    // -X, +Z diagonal
     bool connected_se{false};    // +X, -Z diagonal
     bool connected_sw{false};    // -X, -Z diagonal
+    bool has_random_fluid{false};
+    FluidStructureType fluid_structure_type{FluidStructureType::ContainedPool};
+    uint8_t random_fluid_material{MAT_CRYSTAL_AQUIFER};
+    uint8_t random_fluid_rim_material{MAT_BIOLUMINESCENT_FLORA};
+    float random_fluid_offset_x{0.0f};
+    float random_fluid_offset_z{0.0f};
+    float random_fluid_radius{2.0f};
+    float random_fluid_length{5.0f};
+    int fluid_orientation{0};
+    int objective_deposit_count{0};
+    int spawned_objective_voxels{0};
+    bool has_vault{false};
+    VaultPlacement vault;
 };
 
 struct CorridorPlacement {
@@ -147,10 +232,10 @@ public:
     static constexpr int WORLD_DEPTH = GRID_CELL_SIZE * GRID_DEPTH; // 72 voxels
     static constexpr int WORLD_HEIGHT = 32;                         // 32 voxels (1 chunk: 0)
 
-    LevelGenerator(int sector_index, uint32_t seed, int vertical_chunks = 1);
+    LevelGenerator(int sector_index, uint32_t seed, int vertical_chunks = 1, int target_objective = -1);
 
     void generate_layout();
-    Voxel sample_voxel(int x, int y, int z) const;
+    Voxel sample_voxel(int x, int y, int z, bool* out_is_vein = nullptr) const;
     bool is_in_bounds(int x, int y, int z) const;
 
     int grid_width() const { return m_grid_w; }
@@ -165,19 +250,83 @@ public:
     const RoomPlacement* get_room_at_grid(int gx, int gz) const;
     const RoomPlacement* get_room_at_position(const glm::vec3& pos) const;
 
+    // ── Precursor Vault Placement Accessors ──
+    const VaultPlacement& vault_placement() const { return m_vault_placement; }
+    VaultPlacement& vault_placement_mut() { return m_vault_placement; }
+    bool has_vault() const { return m_vault_placement.exists; }
+
     glm::vec3 spawn_position() const;
     glm::vec3 extraction_position() const;
 
     int sector_index() const { return m_sector_index; }
     uint32_t seed() const { return m_seed; }
 
+struct RoomValidationReport {
+    bool valid{true};
+    int spawned_voxels{0};
+    int deposit_count{0};
+    bool is_near_spawn{false};
+    bool exceeds_capacity{false};
+    std::string details;
+};
+
+    // ── Objective Resource Scarcity, Balancing & Completeness Validation ──
+    int target_objective_amount() const { return m_target_objective; }
+    int total_objective_material_count() const { return static_cast<int>(m_objective_positions.size()); }
+    int objective_room_spread_count() const;
+    int rooms_with_zero_objective_count() const;
+    bool validate_resource_compleatability() const;
+    bool validate_level_resources() const;
+    RoomValidationReport validate_room_resources(const RoomPlacement& room) const;
+    bool is_objective_voxel(int x, int y, int z) const;
+    const std::vector<glm::ivec3>& objective_deposit_locations() const { return m_objective_positions; }
+    std::vector<glm::ivec3> get_room_candidate_spawn_offsets(RoomShapeType type, int half_w, int half_d, int floor_y, int ceil_y) const;
+    Voxel sample_base_voxel(int x, int y, int z, bool* out_is_vein = nullptr) const;
+    bool find_wall_surface_voxel(const glm::ivec3& anchor, const RoomPlacement* room,
+                                 glm::ivec3& out_surface, glm::ivec3& out_inward_normal) const;
+
+    // ── Material Scarcity & Vein Sampling ──
+    float get_material_scarcity(uint8_t material_id) const {
+        return MaterialScarcitySystem::instance().get_scarcity(material_id, m_sector_index);
+    }
+    float get_material_spawn_weight(uint8_t material_id) const {
+        return MaterialScarcitySystem::instance().get_spawn_weight(material_id, m_sector_index);
+    }
+    uint8_t sample_vein_material(uint32_t vein_hash) const {
+        return MaterialScarcitySystem::instance().sample_vein_ore(m_sector_index, vein_hash);
+    }
+    bool is_vein_voxel(int x, int y, int z) const {
+        bool is_vein = false;
+        sample_voxel(x, y, z, &is_vein);
+        return is_vein;
+    }
+
     void create_single_room_test_layout(RoomShapeType type);
     void create_corridor_test_layout();
     void set_room_type(int gx, int gz, RoomShapeType type);
 
+    // ── Room Adjacency, Compatibility & Diversity Validation ──
+    static RoomCategory get_room_category_static(RoomShapeType type) { return get_room_category(type); }
+    static float get_adjacency_affinity_static(RoomShapeType typeA, RoomShapeType typeB) {
+        return get_room_adjacency_affinity(typeA, typeB);
+    }
+    float get_adjacency_affinity(RoomShapeType typeA, RoomShapeType typeB) const {
+        return get_room_adjacency_affinity(typeA, typeB);
+    }
+    bool are_rooms_adjacent(int gx1, int gz1, int gx2, int gz2, bool allow_diagonal = false) const;
+    bool validate_room_adjacency_rules() const;
+    int count_adjacent_same_type_violations() const;
+    int count_diagonal_same_type_violations() const;
+
 private:
     uint32_t hash_coord(int x, int y, int z, uint32_t salt = 0) const;
     float pseudo_rand(int x, int y, int z, uint32_t salt = 0) const;
+
+    // Objective deposit placement & level validation
+    void place_objective_resources();
+    void validate_and_balance_objectives();
+    void add_objective_voxel(int x, int y, int z);
+    void add_objective_deposit(const glm::ivec3& anchor, int deposit_size, RoomPlacement* room = nullptr);
 
     // Shape-specific carving methods
     void sample_spawn_cavern(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
@@ -214,6 +363,24 @@ private:
     void sample_cyclopean_silo(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
     void sample_firmament_abyss(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
 
+    // Dedicated Precursor Vault Chambers & Shapes
+    void sample_precursor_sanctum_vault(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_subterranean_vault_bastion(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    void sample_abyssal_vault_chasm(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_vault_structure(int x, int y, int z, Voxel& out) const;
+    void configure_vault_placement(std::mt19937& rng);
+
+    bool sample_random_fluid_structure(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_random_fluid_pool(const RoomPlacement& room, int x, int y, int z, Voxel& out) const {
+        return sample_random_fluid_structure(room, x, y, z, out);
+    }
+    bool sample_fluid_contained_pool(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_fluid_stepping_stone_pool(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_fluid_wall_cascade(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_fluid_cascading_twin_pools(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_fluid_hazard_trench(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+    bool sample_fluid_drop_chasm_sump(const RoomPlacement& room, int x, int y, int z, Voxel& out) const;
+
     void generate_luminaries();
 
     int m_sector_index{1};
@@ -221,10 +388,15 @@ private:
     int m_grid_w{3};
     int m_grid_d{3};
     int m_world_h{WORLD_HEIGHT};
+    int m_target_objective{25};
+    bool m_validation_passed{false};
+    std::vector<glm::ivec3> m_objective_positions;
+    std::vector<uint8_t> m_objective_bitset;
     std::vector<RoomPlacement> m_rooms;
     std::vector<CorridorPlacement> m_corridors;
     std::vector<CavernLuminary> m_luminaries;
     std::array<std::array<int, MAX_GRID_SIZE>, MAX_GRID_SIZE> m_grid_room_indices;
+    VaultPlacement m_vault_placement;
 };
 
 } // namespace Voidfall

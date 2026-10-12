@@ -24,6 +24,8 @@ out float vAO;
 out float vEmissive;
 out float vDamage;
 out float vSonarIntensity;
+out float vIsVerticalFlow;
+out vec2 v_FlowDir;
 
 const vec3 NORMALS[6] = vec3[6](
     vec3( 1.0,  0.0,  0.0), // +X
@@ -60,8 +62,25 @@ void main() {
     float localX = float(d0 & 0x3Fu);
     uint subYHalf = (d1 >> 26u) & 0x1u;
     uint slopeWaterOffset = (d1 >> 27u) & 0x1u;
-    uint waterRecess = (d1 >> 28u) & 0x1u;
-    float localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04 - float(waterRecess) * 0.10;
+    uint fluidLvl = (d1 >> 28u) & 0x7u;
+    v_FlowDir = vec2(0.0);
+    float localY;
+    if (fluidLvl == 6u) {
+        float cornerH = float((d1 >> 14u) & 0x7Fu) / 127.0;
+        localY = float((d0 >> 6u) & 0x3Fu) + cornerH;
+        uint flowPacked = (d1 >> 21u) & 0x1Fu;
+        if (flowPacked > 0u) {
+            float angle = (float(flowPacked - 1u) / 30.0) * 6.2831853 - 3.14159265;
+            v_FlowDir = vec2(cos(angle), sin(angle));
+        }
+    } else {
+        float recess = 0.0;
+        if (fluidLvl > 0u) {
+            float liquidHeight = (fluidLvl >= 5u) ? 0.88 : (0.16 + (float(fluidLvl) / 5.0) * 0.68);
+            recess = 1.0 - liquidHeight;
+        }
+        localY = float((d0 >> 6u) & 0x3Fu) - float(subYHalf) * 0.5 + float(slopeWaterOffset) * 0.04 - recess;
+    }
     float localZ = float((d0 >> 12u) & 0x3Fu);
     uint normIdx = (d0 >> 18u) & 0x7u;
     uint aoIdx   = (d0 >> 21u) & 0x3u;
@@ -71,9 +90,14 @@ void main() {
     // Unpack data1
     float uDim       = float(d1 & 0x3Fu);
     float vDim       = float((d1 >> 6u) & 0x3Fu);
-    uint cornerIdx   = (d1 >> 12u) & 0x3u;
-    vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
-    vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
+    if (fluidLvl == 6u) {
+        vDamage          = 0.0;
+        vEmissive        = 0.0;
+    } else {
+        vDamage          = float((d1 >> 14u) & 0xFu) / 15.0;
+        vEmissive        = float((d1 >> 18u) & 0xFFu) / 255.0;
+    }
+    vIsVerticalFlow  = float((d1 >> 31u) & 0x1u);
 
     // Baked Ambient Occlusion multipliers: ao=0 -> 1.0, ao=1 -> 0.72, ao=2 -> 0.45, ao=3 -> 0.20
     const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);

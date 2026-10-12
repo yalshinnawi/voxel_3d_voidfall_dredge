@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <functional>
 #include "../voxel/clutter_types.hpp"
 #include "../voxel/chunk.hpp"
 #include "shader.hpp"
@@ -45,7 +46,19 @@ public:
     void cleanup();
 
     // Procedural decoration pass: scans chunk faces and spawns anchored non-cubic props
-    static std::vector<ClutterInstance> generate_chunk_clutter(const Chunk& chunk, uint32_t seed);
+    static std::vector<ClutterInstance> generate_chunk_clutter(
+        const Chunk& chunk,
+        uint32_t seed,
+        const std::function<Voxel(int, int, int)>& get_world_voxel = nullptr
+    );
+
+    // Creates an organic 3D faceted crystal cluster instance for an exposed mineral face
+    static ClutterInstance create_crystal_instance(
+        const glm::ivec3& host_block,
+        const glm::ivec3& face_dir,
+        uint8_t mat_id,
+        uint32_t seed
+    );
 
     // Instanced GPU rendering per chunk, distance-gated at 32 meters from the player
     void render_chunk_clutter(
@@ -67,6 +80,7 @@ private:
     void build_stalactite_mesh(ClutterMeshPrototype& proto);
     void build_stalagmite_mesh(ClutterMeshPrototype& proto);
     void build_crystal_mesh(ClutterMeshPrototype& proto);
+    void build_prismatic_crystal_mesh(ClutterMeshPrototype& proto);
 
     Shader m_shader;
     std::array<ClutterMeshPrototype, static_cast<size_t>(ClutterType::Count)> m_prototypes{};

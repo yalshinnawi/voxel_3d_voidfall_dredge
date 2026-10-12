@@ -30,5 +30,7 @@ The `skills` subsystem manages player proficiency trees, specialized perks, and 
 ## 📡 Seismic Sonar Pulse Mechanics
 
 - **Activation (`Key Q`)**: Emits a spherical acoustic wave from the player's position.
-- **Occluded Mineral Reveal**: High-value materials (`MAT_VOIDITE_CRYSTAL`, `MAT_RADIOACTIVE_ORE`, `MAT_REINFORCED_VAULT_DOOR`) within the scan radius have their bounding boxes captured into `m_surveyed`.
-- **Holographic Rendering**: The renderer passes surveyed voxel coordinates to [`Renderer::render_sonar_wireframes()`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp#L440), drawing glowing wireframe outlines visible through solid rock walls.
+- **Objectives & Monsters Only**: Strictly detects primary mission objectives (`MAT_VOIDITE_CRYSTAL`, `MAT_VOIDITE`), subterranean vault doors (`MAT_REINFORCED_VAULT_DOOR`, `MAT_VAULT_DOOR`), and hostile monsters (`VoidStalker`, `SeismicBurrower`). All other non-objective materials (granite, basalt, titanium, radioactive ores, astral minerals, prismatic crystals) are excluded.
+- **Vein Clustering**: 26-connectivity flood-fill merges touching target voxels into unified objective clusters (`SurveyedCluster`), eliminating noisy individual block cubes.
+- **Smooth Holographic Hulls**: The renderer passes surveyed clusters to [`Renderer::render_sonar_clusters()`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp), generating a smooth Laplacian-smoothed glowing outline and translucent volumetric hull around objective deposits visible through solid rock walls.
+- **Hostile Monster Wireframes**: Passes detected monsters to [`Renderer::render_sonar_monsters()`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp), projecting luminous glowing 3D wireframe cages and acoustic waist rings visible through rock strata.

@@ -12,7 +12,8 @@ namespace Voidfall {
 // ─── VoidStalkerManager ──────────────────────────────────────────────
 
 void VoidStalkerManager::spawn_stalker(const glm::vec3 &pos,
-                                       float difficulty_mul, StalkerRole role) {
+                                       float difficulty_mul, StalkerRole role,
+                                       bool emerging) {
   VoidStalker s;
   s.id = m_next_id++;
   s.role = role;
@@ -35,12 +36,20 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3 &pos,
     s.move_speed = 2.4f;
   }
 
-  s.state = StalkerState::Idle;
+  s.state = emerging ? StalkerState::Emerging : StalkerState::Idle;
   s.state_timer = 0.0f;
   s.glow_phase = static_cast<float>(m_next_id) * 1.7f; // Offset pulsing
-  s.screech_timer = 4.0f + static_cast<float>((m_next_id * 31) % 110) *
-                               0.1f; // Staggered initial screech
+  s.screech_timer = 0.0f; // Alert frame screech available on first sighting
+  s.spawn_grace_timer = 0.0f; // Baseline live/test spawn grace timer (set to 4.0s for roosting)
+  s.stuck_checkpoint_pos = pos;
+  s.stuck_checkpoint_timer = 0.0f;
   s.just_screeched = false;
+  s.burrow_entry = pos;
+  s.burrow_duration = (role == StalkerRole::ChitinGoliath) ? 2.2f :
+                      (role == StalkerRole::Shooter) ? 1.5f : 1.2f;
+  s.drill_timer = 0.0f;
+  s.chitter_timer = 0.15f;
+  s.just_dug = emerging;
 
   // Stagger player-tracking path calculations across a 10 Hz accumulator (m_pathTimer >= 0.10f)
   // with randomized initial phase per enemy [0.0f, 0.10f)
@@ -64,6 +73,33 @@ void VoidStalkerManager::spawn_stalker(const glm::vec3 &pos,
   m_stalkers.push_back(s);
 }
 
+void VoidStalkerManager::spawn_emerging(const glm::vec3 &pos, const glm::vec3 &normal,
+                                        float difficulty_mul, StalkerRole role) {
+  spawn_stalker(pos, difficulty_mul, role, true);
+  if (!m_stalkers.empty()) {
+    auto &s = m_stalkers.back();
+    glm::vec3 n = normal;
+    if (glm::length(n) < 0.01f) n = glm::vec3(0.0f, 1.0f, 0.0f);
+    else n = glm::normalize(n);
+
+    s.contact_normal = n;
+    s.m_targetUpVector = n;
+    s.burrow_entry = pos;
+    s.burrow_dir = -n; // burrowing in from behind the rock face
+    s.surface_state = AberrantAI::classify_normal(n);
+    s.target_surface_state = s.surface_state;
+    s.prev_surface_state = s.surface_state;
+
+    glm::vec3 fwd(0.0f, 0.0f, 1.0f);
+    if (std::abs(glm::dot(n, fwd)) > 0.85f) {
+      fwd = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+    s.m_targetRotation = AberrantAI::calculate_orientation(fwd, n, fwd);
+    s.m_currentRotation = s.m_targetRotation;
+    s.anim_controller.set_immediate_state(s.surface_state);
+  }
+}
+
 void VoidStalkerManager::spawn_roosting(const glm::vec3 &pos, StalkerRole role,
                                         float difficulty_mul) {
   spawn_stalker(pos, difficulty_mul, role);
@@ -72,19 +108,27 @@ void VoidStalkerManager::spawn_roosting(const glm::vec3 &pos, StalkerRole role,
     s.state = StalkerState::Roosting;
     s.state_timer = 0.0f;
     s.velocity = glm::vec3(0.0f);
-    // Pre-spawned enemies initialize in AIState::ROOSTING dormant state on
-    // cavern walls/ceilings
-    s.surface_state = (role == StalkerRole::Shooter)
-                          ? StalkerSurfaceState::CEILING_CRAWLING
-                          : StalkerSurfaceState::WALL_CLIMBING;
-    s.target_surface_state = s.surface_state;
-    if (s.surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
+    s.screech_timer = 0.0f; // Alert screech ready if triggered
+    s.spawn_grace_timer = 4.0f; // Initial dormancy grace window
+
+    // Pre-spawned cavern fauna initialize dormant on cavern walls or ceilings
+    if (pos.y >= 7.0f) {
+      s.surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+      s.target_surface_state = StalkerSurfaceState::CEILING_CRAWLING;
       s.contact_normal = glm::vec3(0.0f, -1.0f, 0.0f);
       s.m_targetUpVector = glm::vec3(0.0f, -1.0f, 0.0f);
     } else {
+      s.surface_state = StalkerSurfaceState::WALL_CLIMBING;
+      s.target_surface_state = StalkerSurfaceState::WALL_CLIMBING;
       s.contact_normal = glm::vec3(1.0f, 0.0f, 0.0f);
       s.m_targetUpVector = glm::vec3(1.0f, 0.0f, 0.0f);
     }
+
+    glm::vec3 init_fwd(0.0f, 0.0f, 1.0f);
+    s.m_targetRotation = AberrantAI::calculate_orientation(
+        init_fwd, s.contact_normal, glm::vec3(0.0f, 0.0f, 1.0f));
+    s.m_currentRotation = s.m_targetRotation;
+    s.anim_controller.set_immediate_state(s.surface_state);
   }
 }
 
@@ -109,8 +153,9 @@ void VoidStalkerManager::spawn_ambient_stalker(const glm::vec3 &room_center,
          y >= static_cast<int>(candidate.y) - 3; --y) {
       if (world.get_voxel(ix, y, iz).material_id == MAT_AIR &&
           world.get_voxel(ix, y - 1, iz).material_id != MAT_AIR) {
+        float surf_y = AberrantAI::get_voxel_surface_y(world, ix, y - 1, iz, candidate.x, candidate.z);
         spawn_pos =
-            glm::vec3(ix + 0.5f, static_cast<float>(y) + 0.1f, iz + 0.5f);
+            glm::vec3(candidate.x, surf_y + 0.05f, candidate.z);
         break;
       }
     }
@@ -130,16 +175,23 @@ void VoidStalkerManager::spawn_ambient_stalker(const glm::vec3 &room_center,
 }
 
 void VoidStalkerManager::spawn_wave(const glm::vec3 &player_pos, int count,
-                                    const World &world) {
+                                    const World &world, bool emerging) {
   if (m_spawn_cooldown > 0.0f)
     return;
 
+  float base_angle = static_cast<float>(m_next_id % 8) * (glm::two_pi<float>() / 8.0f);
   for (int i = 0; i < count; ++i) {
-    glm::vec3 spawn = find_spawn_pos(player_pos, world);
+    float wave_angle = base_angle + static_cast<float>(i) * (glm::two_pi<float>() / std::max(1, count));
+    glm::vec3 surface_normal(0.0f, 1.0f, 0.0f);
+    glm::vec3 spawn = find_spawn_pos(player_pos, world, wave_angle, &surface_normal);
     // Tactical wave composition: Even index is Melee (Red), Odd index is
     // Shooter (Green)
     StalkerRole role = (i % 2 == 0) ? StalkerRole::Melee : StalkerRole::Shooter;
-    spawn_stalker(spawn, 1.0f, role);
+    if (emerging) {
+      spawn_emerging(spawn, surface_normal, 1.0f, role);
+    } else {
+      spawn_stalker(spawn, 1.0f, role, false);
+    }
   }
   m_spawn_cooldown = 8.0f; // Minimum 8s between spawned waves
   VF_LOG_INFO("VoidStalker",
@@ -149,20 +201,27 @@ void VoidStalkerManager::spawn_wave(const glm::vec3 &player_pos, int count,
 }
 
 glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
-                                             const World &world) {
+                                             const World &world,
+                                             float preferred_angle,
+                                             glm::vec3 *out_normal) {
+  if (out_normal) {
+    *out_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+  }
   // Smart Spawning: Spawn 18–32m away from player, preferring positions with NO
   // direct line-of-sight (out from behind corners, rock pillars, or cavern
   // bends) so enemies stalk in naturally
   static std::mt19937 rng(42);
   std::uniform_real_distribution<float> angle_dist(0.0f, glm::two_pi<float>());
+  std::uniform_real_distribution<float> angle_jitter(-0.35f, 0.35f);
   std::uniform_real_distribution<float> dist_range(18.0f, 32.0f);
   std::uniform_real_distribution<float> height_dist(-2.0f, 5.0f);
 
   glm::vec3 fallback_candidate = near;
   bool found_any_valid = false;
+  glm::vec3 found_normal(0.0f, 1.0f, 0.0f);
 
   for (int attempt = 0; attempt < 25; ++attempt) {
-    float angle = angle_dist(rng);
+    float angle = (preferred_angle >= 0.0f) ? (preferred_angle + angle_jitter(rng)) : angle_dist(rng);
     float dist = dist_range(rng);
     float dy = height_dist(rng);
 
@@ -210,13 +269,27 @@ glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
           glm::vec3 surface_pos =
               glm::vec3(ix + 0.5f, iy + 0.5f, iz + 0.5f) + sfc.normal * 0.35f;
           if (!world.is_solid(glm::ivec3(std::floor(surface_pos.x), std::floor(surface_pos.y), std::floor(surface_pos.z)))) {
+            // Enforce minimum 6.5m separation between active stalkers
+            bool too_close = false;
+            for (const auto &s : m_stalkers) {
+              if (s.state != StalkerState::Dead && glm::distance(surface_pos, s.position) < 6.5f) {
+                too_close = true;
+                break;
+              }
+            }
+            if (too_close) {
+              continue;
+            }
+
             bool los =
                 has_line_of_sight(surface_pos + glm::vec3(0.0f, 0.5f, 0.0f),
                                   near + glm::vec3(0.0f, 1.5f, 0.0f), world);
             if (!los) {
+              if (out_normal) *out_normal = sfc.normal;
               return surface_pos;
             }
             fallback_candidate = surface_pos;
+            found_normal = sfc.normal;
             found_any_valid = true;
             break;
           }
@@ -226,11 +299,12 @@ glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
   }
 
   if (found_any_valid) {
+    if (out_normal) *out_normal = found_normal;
     return fallback_candidate;
   }
 
   // Fallback systematic search: never spawn inside solid rock walls
-  for (float r = 18.0f; r <= 32.0f; r += 4.0f) {
+  for (float r = 8.0f; r <= 32.0f; r += 3.0f) {
     for (int a = 0; a < 16; ++a) {
       float ang = a * (glm::two_pi<float>() / 16.0f);
       int sx = static_cast<int>(std::floor(near.x + std::cos(ang) * r));
@@ -241,13 +315,25 @@ glm::vec3 VoidStalkerManager::find_spawn_pos(const glm::vec3 &near,
         if (!world.is_solid(glm::ivec3(sx, sy, sz)) &&
             !world.is_solid(glm::ivec3(sx, sy + 1, sz)) &&
             world.is_solid(glm::ivec3(sx, sy - 1, sz))) {
-          return glm::vec3(sx + 0.5f, sy + 0.1f, sz + 0.5f);
+          glm::vec3 cand(sx + 0.5f, sy + 0.1f, sz + 0.5f);
+          bool too_close = false;
+          for (const auto &s : m_stalkers) {
+            if (s.state != StalkerState::Dead && glm::distance(cand, s.position) < 5.0f) {
+              too_close = true;
+              break;
+            }
+          }
+          if (!too_close) {
+            return cand;
+          }
         }
       }
     }
   }
 
-  return near + glm::vec3(0.0f, 0.1f, 2.5f);
+  // Stagger final emergency fallback position so multiple stalkers never stack on the exact same coordinate
+  float fallback_ang = static_cast<float>(m_stalkers.size()) * 1.57f;
+  return near + glm::vec3(std::cos(fallback_ang) * 5.0f, 0.1f, std::sin(fallback_ang) * 5.0f);
 }
 
 bool VoidStalkerManager::has_line_of_sight(const glm::vec3 &from,
@@ -266,13 +352,7 @@ bool VoidStalkerManager::has_line_of_sight(const glm::vec3 &from,
 
   for (int i = 1; i < steps; ++i) {
     glm::vec3 sample = from + dir * (step_size * static_cast<float>(i));
-    int sx = static_cast<int>(std::floor(sample.x));
-    int sy = static_cast<int>(std::floor(sample.y));
-    int sz = static_cast<int>(std::floor(sample.z));
-
-    Voxel v = world.get_voxel(sx, sy, sz);
-    if (v.material_id != MAT_AIR && v.material_id != MAT_GAS &&
-        v.material_id != MAT_VOLATILE_SMOKE) {
+    if (AberrantAI::is_point_solid(world, sample)) {
       return false;
     }
   }
@@ -296,7 +376,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     const std::vector<SoundEvent> &sound_events, bool player_is_crouching) {
   FrameResult result;
   m_spawn_cooldown = std::max(0.0f, m_spawn_cooldown - dt);
+  m_combat_recovery_timer = std::max(0.0f, m_combat_recovery_timer - dt);
   m_global_screech_cooldown = std::max(0.0f, m_global_screech_cooldown - dt);
+  m_alert_screech_cooldown = std::max(0.0f, m_alert_screech_cooldown - dt);
+  m_global_hiss_cooldown = std::max(0.0f, m_global_hiss_cooldown - dt);
+  m_global_chitter_cooldown = std::max(0.0f, m_global_chitter_cooldown - dt);
 
   // Compute player velocity for predictive leading attacks
   glm::vec3 player_vel(0.0f);
@@ -322,6 +406,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
   for (auto &s : m_stalkers) {
     // Reset per-frame one-shot notification flags for all entities
+    s.screech_timer = std::max(0.0f, s.screech_timer - dt);
+    s.spawn_grace_timer = std::max(0.0f, s.spawn_grace_timer - dt);
     s.just_screeched = false;
     s.just_chittered = false;
     s.just_dug = false;
@@ -332,6 +418,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     s.just_hit_player = false;
     s.just_fired_spine = false;
     s.just_died = false;
+    s.just_emerged = false;
 
     if (s.state == StalkerState::Dead)
       continue;
@@ -343,12 +430,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       s.position += s.velocity * dt;
 
       // Ground collision clamp
-      int ix = static_cast<int>(std::floor(s.position.x));
-      int iy = static_cast<int>(std::floor(s.position.y));
-      int iz = static_cast<int>(std::floor(s.position.z));
-      if (world.get_voxel(ix, iy, iz).material_id != MAT_AIR) {
-        s.position.y = static_cast<float>(iy + 1);
-        s.velocity = glm::vec3(0.0f);
+      float dead_ground = 0.0f;
+      if (AberrantAI::find_ground_surface(world, s.position, 0.5f, 2.0f, &dead_ground)) {
+        if (s.position.y <= dead_ground + 0.1f) {
+          s.position.y = dead_ground;
+          s.velocity = glm::vec3(0.0f);
+        }
       }
 
       // Tumble rotation
@@ -361,6 +448,8 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
       if (s.death_timer >= s.death_duration) {
         s.state = StalkerState::Dead;
+        result.stalkers_killed++;
+        trigger_combat_recovery((m_sector_level <= 1) ? 6.0f : ((m_sector_level == 2) ? 5.0f : 4.0f));
         CarcassManager::instance().spawn_carcass(
             s.position, s.m_currentRotation, s.death_hit_dir, s.role, s.scale);
       }
@@ -491,15 +580,17 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       s.surface_offset = glm::vec3(0.0f);
     }
 
-    // Ambient Cavern Echo Screeches (subtle, rare & atmospheric - minimum 35s
+    // Ambient Cavern Echo Screeches (subtle, rare & atmospheric - minimum 60s
     // global cooldown)
     if (s.state != StalkerState::Dead && s.state != StalkerState::Stunned) {
-      if (m_global_screech_cooldown <= 0.0f && dist_to_player > 18.0f &&
-          !s.is_in_light) {
+      if (m_global_screech_cooldown <= 0.0f && !result.any_screech &&
+          s.screech_timer <= 0.0f && dist_to_player > 20.0f && !s.is_in_light) {
         s.just_screeched = true;
         result.any_screech = true;
+        s.screech_timer = 50.0f;
         m_global_screech_cooldown =
-            35.0f + static_cast<float>((s.id * 37) % 25);
+            60.0f + static_cast<float>((s.id * 37) % 35);
+        m_alert_screech_cooldown = std::max(m_alert_screech_cooldown, 12.0f);
         VF_LOG_INFO("VoidStalker",
                     "Stalker " << s.id
                                << " emitted distant cavern echo screech (dist="
@@ -613,28 +704,56 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     s.has_player_los = los;
 
     // Visual detection range (shadow vs light vs stealth crouch)
-    float visual_range = 12.0f;
+    float visual_range = 10.0f; // Baseline dark shadow vision
     if (s.is_pursuing_attacker) {
-      visual_range =
-          s.pursuit_break_dist; // High alert predator pursuit tracking
+      visual_range = s.pursuit_break_dist; // High alert predator pursuit tracking
     } else if (s.is_in_light) {
       visual_range = 22.0f; // Directly lit up by flashlight beam
     } else if (player_is_crouching) {
-      visual_range =
-          5.2f; // Delver crouching in dark shadows has high visual concealment
-    } else if (noise_level_pct > 25.0f || player_is_drilling ||
-               s.state == StalkerState::Investigating ||
-               s.state == StalkerState::Stalking ||
+      visual_range = 4.5f; // Delver crouching in dark shadows has high visual concealment
+    } else if (s.state == StalkerState::Stalking ||
                s.state == StalkerState::Circling ||
                s.state == StalkerState::Lunging) {
-      visual_range = 20.0f; // Agitated alertness / active combat engagement
+      visual_range = 16.0f; // Active combat engagement
+    } else if (s.state == StalkerState::Investigating) {
+      visual_range = 12.0f; // Investigating sound
+    } else if (noise_level_pct > 25.0f || player_is_drilling) {
+      visual_range = 14.0f; // High environmental noise
     }
 
-    // Tactile proximity trigger: physically colliding within 2.2m senses
-    // warmth/contact
-    bool tactile_proximity = (dist_to_player < 2.2f);
-    bool can_see_player = (los && dist_to_player <= visual_range) ||
-                          (los && s.is_in_light) || tactile_proximity;
+    // Tactile proximity trigger: physically colliding within 2.2m senses warmth/contact.
+    // When crouching in stealth, delver can sneak right behind enemy (within 1-2m); only actual physical contact (< 0.85m) triggers tactile alert.
+    bool tactile_proximity = player_is_crouching ? (dist_to_player < 0.85f) : (dist_to_player < 2.2f);
+
+    // Vision cone check: Creature only visually sees targets within its forward field of view (120 deg cone).
+    bool in_fov = AberrantAI::is_in_vision_cone(s.position, s.forward(), player_pos, glm::radians(60.0f));
+
+    bool can_see_player = false;
+    if (s.state == StalkerState::Roosting) {
+      if (player_is_crouching) {
+        // When delver is sneaking in stealth, roosting enemies (closed eyes) cannot visually detect them
+        // unless directly illuminated by headlamp flashlight beam or physical collision.
+        can_see_player = (s.is_in_light && los) || tactile_proximity;
+      } else {
+        // Standing / walking delver is directly spotted if within visual range and line-of-sight
+        can_see_player = (los && dist_to_player <= visual_range) || (s.is_in_light && los) || tactile_proximity;
+      }
+    } else if (s.is_engaged_state()) {
+      // Active combat engagement: stalker is tracking the delver
+      can_see_player = (los && dist_to_player <= visual_range) || tactile_proximity;
+    } else {
+      // Unalerted / Idling / Investigating / Emerging:
+      if (player_is_crouching) {
+        // Sneaking delver: must be within visual range, line-of-sight, AND within the creature's forward vision cone!
+        bool visually_spotted = los && (dist_to_player <= visual_range) && in_fov;
+        can_see_player = visually_spotted || tactile_proximity;
+      } else {
+        // Standing / walking delver or elevated noise:
+        bool in_vision = in_fov || (noise_level_pct > 25.0f || dist_to_player < 2.2f);
+        can_see_player = (los && dist_to_player <= visual_range && in_vision) || tactile_proximity;
+      }
+    }
+
 
     if (can_see_player) {
       s.last_seen_player_pos = player_pos;
@@ -643,36 +762,75 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       s.lost_los_timer += dt;
     }
 
-    // Retaliation pursuit tracking:
-    // If enemy was attacked by player, it pursues the player. It only loses
-    // interest if the player has fled far away (> pursuit_break_dist or
-    // prolonged broken LOS at distance) for a long time.
+    // Retaliation pursuit tracking de-escalation:
+    // If enemy was attacked by player, it pursues the player. It cleanly loses
+    // interest and drops pursuit alert if line-of-sight is broken and player remains hidden.
     if (s.is_pursuing_attacker) {
-      if (dist_to_player > s.pursuit_break_dist ||
-          (!can_see_player && dist_to_player > 18.0f)) {
-        s.pursuit_lost_timer += dt;
+      if (dist_to_player > s.pursuit_break_dist || (player_is_crouching && !can_see_player)) {
+        float flee_rate = player_is_crouching ? 2.5f : 1.0f;
+        s.pursuit_lost_timer += dt * flee_rate;
         if (s.pursuit_lost_timer >= s.pursuit_break_time) {
           s.is_pursuing_attacker = false;
           s.pursuit_lost_timer = 0.0f;
           s.state = StalkerState::Idle;
           s.state_timer = 0.0f;
-          s.patrol_anchor = s.position;
-          s.patrol_waypoint = s.position;
+          s.velocity = glm::vec3(0.0f);
           VF_LOG_INFO("VoidStalker",
                       "Stalker " << s.id
-                                 << " lost interest after prolonged pursuit "
-                                    "(player escaped for "
-                                 << s.pursuit_break_time
-                                 << "s, dist=" << dist_to_player << "m)");
+                                 << " lost track of hidden attacker -> pursuit subsided (dist="
+                                 << dist_to_player << "m)");
         }
       } else {
-        // Maintained proximity or visual contact: reset flee timeout
+        // Maintained visual contact: reset flee timeout
         s.pursuit_lost_timer = 0.0f;
       }
     }
 
     // === FSM State Transitions & Behavior ===
     switch (s.state) {
+
+    case StalkerState::Emerging: {
+      s.velocity = glm::vec3(0.0f); // Anchored to borehole during emergence animation
+
+      // Periodic digging / rock chipping sound cue & particle trigger
+      s.drill_timer -= dt;
+      if (s.drill_timer <= 0.0f) {
+        s.drill_timer = 0.28f + static_cast<float>((s.id * 7) % 10) * 0.02f;
+        s.just_dug = true;
+        result.any_digging = true;
+      }
+
+      // Agitated chattering clicks during emergence
+      s.chitter_timer -= dt;
+      if (s.chitter_timer <= 0.0f) {
+        s.chitter_timer = 0.35f;
+        s.just_chittered = true;
+        result.any_chitter = true;
+      }
+
+      // Check if emergence duration has completed
+      if (s.state_timer >= s.burrow_duration) {
+        s.just_emerged = true;
+        // Transition into combat state depending on Line of Sight & role
+        if (can_see_player) {
+          s.state = StalkerState::Stalking;
+          s.just_spotted_player = true;
+          result.any_spotted = true;
+        } else if (s.has_sound_target) {
+          s.state = StalkerState::Investigating;
+          s.investigation_timer = 4.0f;
+        } else {
+          s.state = StalkerState::Idle;
+        }
+        s.state_timer = 0.0f;
+        s.drill_timer = 0.0f;
+        VF_LOG_INFO("VoidStalker",
+                    "Stalker " << s.id << " (Role="
+                               << (s.is_goliath() ? "Goliath" : (s.is_shooter() ? "Shooter" : "Melee"))
+                               << ") COMPLETED emergence into cavern!");
+      }
+      break;
+    }
 
     case StalkerState::Roosting: {
       // Roosting enemies remain stationary clamped to surfaces until disturbed
@@ -720,10 +878,19 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         sound_db = std::max(sound_db, rx);
       }
 
+      // Spawn grace period safeguard: Roosting enemies ignore distant visual sightlines
+      // and quiet ambient footsteps during entry grace unless player physically collides or shines light
+      bool sight_awakens = can_see_player && (s.spawn_grace_timer <= 0.0f || !player_is_crouching || s.is_in_light || dist_to_player < 0.85f);
+
       // Rule 4: If player is spotted directly OR noise exceeds 70 dB ->
-      // AIState::PURSUIT with screech and swarm alert
-      if (can_see_player || sound_db > AberrantAI::THRESHOLD_PURSUIT_DB) {
-        s.state = StalkerState::Stalking; // AIState::PURSUIT
+      // Pursuit engagement subject to concurrent chaser limits
+      if (sight_awakens || sound_db > AberrantAI::THRESHOLD_PURSUIT_DB) {
+        if (can_engage_new_chaser()) {
+          s.state = StalkerState::Stalking; // AIState::PURSUIT
+        } else {
+          s.state = StalkerState::Investigating;
+          s.investigation_timer = 4.0f;
+        }
         s.state_timer = 0.0f;
         s.lost_los_timer = 0.0f;
         s.target_pos =
@@ -732,22 +899,43 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 : (best_acoustic_evt
                        ? best_acoustic_evt->position
                        : (best_sound ? best_sound->position : player_pos));
-        s.just_spotted_player = true;
+        if (m_global_hiss_cooldown <= 0.0f) {
+          s.just_spotted_player = true;
+          m_global_hiss_cooldown = 3.0f;
+        }
         result.any_spotted = true;
-        s.just_screeched = true;
-        result.any_screech = true;
-        SwarmManager::instance().AddAgitation(0.35f);
-        // Swarm alert: wake and alert nearby packmates into pursuit
-        for (auto &other : m_stalkers) {
-          if (&other != &s && other.state != StalkerState::Dead &&
-              other.state != StalkerState::Dying) {
-            if (glm::distance(other.position, s.position) <= 20.0f) {
-              other.state = StalkerState::Stalking;
-              other.target_pos = s.target_pos;
-              other.surface_state = StalkerSurfaceState::FLOOR;
-              other.target_surface_state = StalkerSurfaceState::FLOOR;
-              other.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
-              other.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+        if (!result.any_screech && (s.screech_timer <= 0.0f || can_see_player)) {
+          s.just_screeched = true;
+          result.any_screech = true;
+          s.screech_timer = 25.0f;
+          m_alert_screech_cooldown = 2.0f;
+          m_global_screech_cooldown = std::max(m_global_screech_cooldown, 14.0f);
+        }
+        SwarmManager::instance().AddAgitation(0.20f);
+        // Swarm alert: wake and alert at most 1 nearby packmate into pursuit if direct visual contact confirmed
+        if (s.has_player_los) {
+          int alerted_pack = 0;
+          for (auto &other : m_stalkers) {
+            if (&other != &s && other.state != StalkerState::Dead &&
+                other.state != StalkerState::Dying) {
+              if (glm::distance(other.position, s.position) <= 10.0f &&
+                  has_line_of_sight(s.position, other.position, world)) {
+                if (alerted_pack < 1) {
+                  alerted_pack++;
+                  other.target_pos = s.target_pos;
+                  other.surface_state = StalkerSurfaceState::FLOOR;
+                  other.target_surface_state = StalkerSurfaceState::FLOOR;
+                  other.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                  other.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                  other.screech_timer = std::max(other.screech_timer, 15.0f);
+                  if (can_engage_new_chaser()) {
+                    other.state = StalkerState::Stalking;
+                  } else {
+                    other.state = StalkerState::Investigating;
+                    other.investigation_timer = 3.5f;
+                  }
+                }
+              }
             }
           }
         }
@@ -758,7 +946,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         VF_LOG_INFO("VoidStalker",
                     "Roosting Stalker "
                         << s.id
-                        << " enters PURSUIT with screech & swarm alert (noise="
+                        << " awakens into combat/investigation (noise="
                         << sound_db << " dB)");
         break;
       }
@@ -815,29 +1003,53 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       // swarm alert
       if (can_see_player || idle_sound_db > AberrantAI::THRESHOLD_PURSUIT_DB) {
         if (can_see_player && dist_to_player < 4.2f &&
+            (std::abs(player_pos.y - s.position.y) <= 1.8f || s.surface_state == StalkerSurfaceState::WALL_CLIMBING) &&
             s.role == StalkerRole::Melee) {
           s.state = StalkerState::Lunging;
           s.state_timer = 0.0f;
           s.lost_los_timer = 0.0f;
           s.just_lunged = true;
           result.any_lunge = true;
+          result.any_spotted = true;
+          if (m_global_hiss_cooldown <= 0.0f) {
+            s.just_spotted_player = true;
+            m_global_hiss_cooldown = 3.0f;
+          }
           VF_LOG_INFO("VoidStalker",
                       "Melee Stalker "
                           << s.id << " AMBUSH LUNGES at close player (dist="
                           << dist_to_player << "m)!");
         } else {
-          s.state = StalkerState::Stalking;
+          if (can_engage_new_chaser()) {
+            s.state = StalkerState::Stalking;
+          } else {
+            s.state = StalkerState::Investigating;
+            s.investigation_timer = 4.0f;
+          }
           s.state_timer = 0.0f;
           s.lost_los_timer = 0.0f;
           s.target_pos = can_see_player ? player_pos : s.investigation_target;
-          s.just_spotted_player = true;
+          if (m_global_hiss_cooldown <= 0.0f) {
+            s.just_spotted_player = true;
+            m_global_hiss_cooldown = 3.0f;
+          }
           result.any_spotted = true;
-          s.just_screeched = true;
-          result.any_screech = true;
-          SwarmManager::instance().AddAgitation(0.25f);
+          if (!result.any_screech && s.screech_timer <= 0.0f &&
+              m_alert_screech_cooldown <= 0.0f) {
+            s.just_screeched = true;
+            result.any_screech = true;
+            s.screech_timer = 25.0f;
+            m_alert_screech_cooldown = 14.0f;
+            m_global_screech_cooldown = std::max(m_global_screech_cooldown, 14.0f);
+          }
+          SwarmManager::instance().AddAgitation(0.15f);
           glm::vec3 to_pl = s.target_pos - s.position;
           if (glm::length(glm::vec2(to_pl.x, to_pl.z)) > 0.1f) {
-            s.yaw = std::atan2(to_pl.x, to_pl.z);
+            float target_yaw = std::atan2(to_pl.x, to_pl.z);
+            float diff = target_yaw - s.yaw;
+            while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+            while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+            s.yaw += std::clamp(diff, -10.0f * dt, 10.0f * dt);
           }
           VF_LOG_INFO("VoidStalker",
                       "Stalker "
@@ -858,7 +1070,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.target_pos = s.investigation_target;
         glm::vec3 to_snd = s.investigation_target - s.position;
         if (glm::length(glm::vec2(to_snd.x, to_snd.z)) > 0.1f) {
-          s.yaw = std::atan2(to_snd.x, to_snd.z);
+          float target_yaw = std::atan2(to_snd.x, to_snd.z);
+          float diff = target_yaw - s.yaw;
+          while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+          while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+          s.yaw += std::clamp(diff, -10.0f * dt, 10.0f * dt);
         }
         VF_LOG_INFO("VoidStalker",
                     "Stalker " << s.id << " HEARD sound disturbance ("
@@ -910,9 +1126,13 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         if (glm::length(prowl_dir) > 0.01f) {
           s.velocity = prowl_dir * s.prowl_speed * prowl_burst;
           s.position += s.velocity * dt;
-          if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING ||
+          if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING &&
               glm::length(glm::vec2(s.velocity.x, s.velocity.z)) > 0.1f) {
-            s.yaw = std::atan2(s.velocity.x, s.velocity.z);
+            float target_yaw = std::atan2(s.velocity.x, s.velocity.z);
+            float diff = target_yaw - s.yaw;
+            while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+            while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+            s.yaw += std::clamp(diff, -10.0f * dt, 10.0f * dt);
           }
         }
       } else {
@@ -924,8 +1144,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       s.chitter_timer -= dt;
       if (s.chitter_timer <= 0.0f) {
         s.chitter_timer = 4.0f + static_cast<float>((s.id * 23) % 25) * 0.1f;
-        s.just_chittered = true;
-        result.any_chitter = true;
+        if (m_global_chitter_cooldown <= 0.0f) {
+          s.just_chittered = true;
+          result.any_chitter = true;
+          m_global_chitter_cooldown = 2.2f;
+        }
       }
       break;
     }
@@ -954,19 +1177,33 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           (inv_sound_db > AberrantAI::THRESHOLD_PURSUIT_DB) ||
           (best_sound && best_sound->intensity > 70.0f);
       // If direct line-of-sight to player is established (or sound > 70 dB),
-      // screech and enter PURSUIT
+      // screech and enter PURSUIT subject to chaser limits
       if (can_see_player || sound_spike_70db) {
-        s.just_screeched = true;
-        result.any_screech = true;
-        SwarmManager::instance().AddAgitation(0.35f);
-        s.state = StalkerState::Stalking; // AIState::PURSUIT
-        s.state_timer = 0.0f;
-        s.lost_los_timer = 0.0f;
-        s.target_pos = player_pos;
-        s.just_spotted_player = true;
-        result.any_spotted = true;
-        VF_LOG_INFO("VoidStalker",
-                    "Stalker " << s.id << " SCREECHES and enters PURSUIT!");
+        if (can_engage_new_chaser()) {
+          if (m_global_hiss_cooldown <= 0.0f) {
+            s.just_spotted_player = true;
+            m_global_hiss_cooldown = 3.0f;
+          }
+          result.any_spotted = true;
+          if (!result.any_screech && s.screech_timer <= 0.0f &&
+              m_alert_screech_cooldown <= 0.0f) {
+            s.just_screeched = true;
+            result.any_screech = true;
+            s.screech_timer = 25.0f;
+            m_alert_screech_cooldown = 14.0f;
+            m_global_screech_cooldown = std::max(m_global_screech_cooldown, 14.0f);
+          }
+          SwarmManager::instance().AddAgitation(0.15f);
+          s.state = StalkerState::Stalking; // AIState::PURSUIT
+          s.state_timer = 0.0f;
+          s.lost_los_timer = 0.0f;
+          s.target_pos = player_pos;
+          VF_LOG_INFO("VoidStalker",
+                      "Stalker " << s.id << " SCREECHES and enters PURSUIT!");
+        } else {
+          s.target_pos = player_pos;
+          s.investigation_timer = 4.0f;
+        }
         break;
       }
 
@@ -982,17 +1219,23 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                       "Melee Stalker "
                           << s.id
                           << " SPOTTED player while investigating and LUNGED!");
-        } else {
+        } else if (can_engage_new_chaser()) {
           s.state = StalkerState::Stalking;
           s.state_timer = 0.0f;
           s.lost_los_timer = 0.0f;
           s.target_pos = player_pos;
-          s.just_spotted_player = true;
+          if (m_global_hiss_cooldown <= 0.0f) {
+            s.just_spotted_player = true;
+            m_global_hiss_cooldown = 3.0f;
+          }
           result.any_spotted = true;
           VF_LOG_INFO("VoidStalker",
                       "Stalker "
                           << s.id
                           << " SPOTTED player during sound investigation!");
+        } else {
+          s.target_pos = player_pos;
+          s.investigation_timer = 4.0f;
         }
         break;
       }
@@ -1003,7 +1246,11 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.target_pos = s.investigation_target;
         glm::vec3 to_snd_dir = s.investigation_target - s.position;
         if (glm::length(glm::vec2(to_snd_dir.x, to_snd_dir.z)) > 0.1f) {
-          s.yaw = std::atan2(to_snd_dir.x, to_snd_dir.z);
+          float target_yaw = std::atan2(to_snd_dir.x, to_snd_dir.z);
+          float diff = target_yaw - s.yaw;
+          while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+          while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+          s.yaw += std::clamp(diff, -10.0f * dt, 10.0f * dt);
         }
       }
 
@@ -1048,9 +1295,16 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           move_dir = AberrantAI::calculate_wall_traversal_direction(
               s.position, s.investigation_target, s.contact_normal);
         } else {
+          float snd_vert_diff = s.investigation_target.y - s.position.y;
           glm::vec3 to_snd_xz(to_snd.x, 0.0f, to_snd.z);
-          if (glm::length(to_snd_xz) > 0.1f) {
+          float horiz_to_snd = glm::length(to_snd_xz);
+          if (snd_vert_diff > 1.5f && (horiz_to_snd < 5.0f || !has_line_of_sight(s.position, s.investigation_target, world))) {
+            move_dir = AberrantAI::find_ascending_wall_direction(
+                s.position, s.investigation_target, world);
+          } else if (horiz_to_snd > 0.1f) {
             move_dir = glm::normalize(to_snd_xz);
+          }
+          if (glm::length(move_dir) > 0.01f) {
             move_dir = AberrantAI::steer_around_obstacles(
                 s.position, move_dir, s.contact_normal, world);
           }
@@ -1059,9 +1313,13 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         if (glm::length(move_dir) > 0.01f) {
           s.velocity = move_dir * effective_move_speed * 1.15f * burst;
           s.position += s.velocity * dt;
-          if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING ||
+          if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING &&
               glm::length(glm::vec2(s.velocity.x, s.velocity.z)) > 0.1f) {
-            s.yaw = std::atan2(s.velocity.x, s.velocity.z);
+            float target_yaw = std::atan2(s.velocity.x, s.velocity.z);
+            float diff = target_yaw - s.yaw;
+            while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+            while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+            s.yaw += std::clamp(diff, -10.0f * dt, 10.0f * dt);
           }
         }
       } else {
@@ -1072,35 +1330,27 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.chitter_timer -= dt;
         if (s.chitter_timer <= 0.0f) {
           s.chitter_timer = 2.5f + static_cast<float>((s.id * 19) % 20) * 0.1f;
-          s.just_chittered = true;
-          result.any_chitter = true;
+          if (m_global_chitter_cooldown <= 0.0f) {
+            s.just_chittered = true;
+            result.any_chitter = true;
+            m_global_chitter_cooldown = 2.2f;
+          }
         }
       }
 
       // Nothing found and silence resumed / suspicion dissipated
       if (s.investigation_timer <= 0.0f) {
-        if (s.is_pursuing_attacker) {
-          // Persistently hunting attacker: resume stalking towards player's
-          // last direction
-          s.state = StalkerState::Stalking;
-          s.state_timer = 0.0f;
-          s.target_pos = can_see_player ? player_pos : s.last_seen_player_pos;
-          VF_LOG_INFO("VoidStalker",
-                      "Stalker "
-                          << s.id
-                          << " continuing relentless pursuit of attacker!");
-        } else {
-          s.patrol_anchor = s.position;
-          s.patrol_waypoint = s.position;
-          s.state = StalkerState::Idle;
-          s.state_timer = 0.0f;
-          s.has_sound_target = false;
-          s.velocity = glm::vec3(0.0f);
-          VF_LOG_INFO("VoidStalker",
-                      "Stalker " << s.id
-                                 << " suspicion subsided due to delver stealth "
-                                    "stance -> returned to Idle");
-        }
+        s.patrol_anchor = s.position;
+        s.patrol_waypoint = s.position;
+        s.state = StalkerState::Idle;
+        s.state_timer = 0.0f;
+        s.has_sound_target = false;
+        s.is_pursuing_attacker = false;
+        s.velocity = glm::vec3(0.0f);
+        VF_LOG_INFO("VoidStalker",
+                    "Stalker " << s.id
+                               << " suspicion subsided -> returned to Idle");
+        break;
       }
       break;
     }
@@ -1175,8 +1425,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         }
       }
 
-      // Close range (< 6.8m) combat reactions:
-      if (dist_to_player < 6.8f && can_see_player) {
+      // Close range (< 6.8m) combat reactions (only if within vertical melee reach or on climbing wall):
+      if (dist_to_player < 6.8f && can_see_player &&
+          (std::abs(player_pos.y - s.position.y) <= 1.8f || s.surface_state == StalkerSurfaceState::WALL_CLIMBING)) {
         if (s.role == StalkerRole::Melee) {
           s.state = StalkerState::Lunging;
           s.state_timer = 0.0f;
@@ -1240,8 +1491,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             player_pos + player_vel * (flight_time * 0.75f);
         glm::vec3 aim_dir = glm::normalize(
             predicted_pos + glm::vec3(0.0f, 0.5f, 0.0f) - spawn_pt);
+        // Projectile ballistics inherit shooter velocity so circling/leaping does not distort spine trajectory
         m_projectiles.push_back({m_next_proj_id++, spawn_pt + aim_dir * 0.4f,
-                                 aim_dir * 15.0f, 2.5f, 10.0f, true});
+                                 aim_dir * 15.0f + s.velocity * 0.4f, 2.5f, 10.0f, true});
         s.projectile_cooldown = 2.4f;
         s.just_fired_spine = true;
         result.any_projectile_fired = true;
@@ -1290,17 +1542,22 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           move_dir = AberrantAI::calculate_wall_traversal_direction(
               s.position, s.target_pos, s.contact_normal);
         } else {
+          float vert_diff = s.target_pos.y - s.position.y;
           glm::vec3 to_tgt_xz(s.target_pos.x - s.position.x, 0.0f,
                               s.target_pos.z - s.position.z);
           float horiz_to_tgt = glm::length(to_tgt_xz);
-          if (horiz_to_tgt > 0.1f) {
+          if (vert_diff > 1.5f && (horiz_to_tgt < 5.0f || !has_line_of_sight(s.position, s.target_pos, world))) {
+            // Player is elevated / directly above: seek adjacent wall to climb up to them!
+            move_dir = AberrantAI::find_ascending_wall_direction(
+                s.position, s.target_pos, world);
+          } else if (horiz_to_tgt > 0.1f) {
             glm::vec3 dir_xz = to_tgt_xz / horiz_to_tgt;
             glm::vec3 perp(-dir_xz.z, 0.0f, dir_xz.x);
             move_dir = glm::normalize(dir_xz + perp * weave);
-            if (dist_to_player <= 35.0f) {
-              move_dir = AberrantAI::steer_around_obstacles(
-                  s.position, move_dir, s.contact_normal, world);
-            }
+          }
+          if (glm::length(move_dir) > 0.01f && dist_to_player <= 35.0f) {
+            move_dir = AberrantAI::steer_around_obstacles(
+                s.position, move_dir, s.contact_normal, world);
           }
         }
 
@@ -1330,21 +1587,26 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
         s.position += s.velocity * dt;
         if (s.surface_state != StalkerSurfaceState::WALL_CLIMBING ||
             glm::length(glm::vec2(s.velocity.x, s.velocity.z)) > 0.1f) {
-          s.yaw = std::atan2(s.velocity.x, s.velocity.z);
+          float target_yaw = std::atan2(s.velocity.x, s.velocity.z);
+          float diff = target_yaw - s.yaw;
+          while (diff > glm::pi<float>()) diff -= 2.0f * glm::pi<float>();
+          while (diff < -glm::pi<float>()) diff += 2.0f * glm::pi<float>();
+          s.yaw += std::clamp(diff, -12.0f * dt, 12.0f * dt);
         }
       }
 
       // Transition to circling at mid-range (6.8m to 12.0m) if in open sight
-      // (only when on floor)
+      // (only when on floor and player is not elevated above)
       if (s.surface_state == StalkerSurfaceState::FLOOR && can_see_player &&
-          dist_to_player <= 12.0f && dist_to_player >= 6.8f) {
+          dist_to_player <= 12.0f && dist_to_player >= 6.8f && (player_pos.y - s.position.y <= 1.5f)) {
         s.state = StalkerState::Circling;
         s.state_timer = 0.0f;
       }
 
-      // Immediate lunge if within lunge range (Melee ONLY!)
+      // Immediate lunge if within lunge range (Melee ONLY, and within vertical melee reach!)
       if (can_see_player && s.role == StalkerRole::Melee &&
-          dist_to_player <= s.lunge_range) {
+          dist_to_player <= s.lunge_range &&
+          (std::abs(player_pos.y - s.position.y) <= 1.8f || s.surface_state == StalkerSurfaceState::WALL_CLIMBING)) {
         s.state = StalkerState::Lunging;
         s.state_timer = 0.0f;
         s.just_lunged = true;
@@ -1356,8 +1618,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     }
 
     case StalkerState::Circling: {
-      // If player approaches within 5.8m:
-      if (dist_to_player < 5.8f && can_see_player) {
+      // If player approaches within 5.8m (and within vertical melee reach):
+      if (dist_to_player < 5.8f && can_see_player &&
+          (std::abs(player_pos.y - s.position.y) <= 1.8f || s.surface_state == StalkerSurfaceState::WALL_CLIMBING)) {
         if (s.role == StalkerRole::Melee) {
           s.state = StalkerState::Lunging;
           s.state_timer = 0.0f;
@@ -1424,8 +1687,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
             player_pos + player_vel * (flight_time * 0.75f);
         glm::vec3 aim_dir = glm::normalize(
             predicted_pos + glm::vec3(0.0f, 0.5f, 0.0f) - spawn_pt);
+        // Projectile ballistics inherit shooter velocity so circling/flanking does not distort spine trajectory
         m_projectiles.push_back({m_next_proj_id++, spawn_pt + aim_dir * 0.4f,
-                                 aim_dir * 15.0f, 2.5f, 10.0f, true});
+                                 aim_dir * 15.0f + s.velocity * 0.4f, 2.5f, 10.0f, true});
         s.projectile_cooldown = 2.2f;
         s.just_fired_spine = true;
         result.any_projectile_fired = true;
@@ -1456,14 +1720,22 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           circle_dir = AberrantAI::find_descending_wall_direction(
               s.position, player_pos, world);
         } else {
-          // Eerie variable-radius orbit with height undulation (floor pattern)
-          float orbit_radius = 5.0f + std::sin(s.glow_phase * 0.65f) * 1.8f;
-          float orbit_angle = s.glow_phase * 0.85f;
-          glm::vec3 orbit_offset(std::cos(orbit_angle) * orbit_radius,
-                                 std::sin(s.glow_phase * 1.1f) * 0.75f,
-                                 std::sin(orbit_angle) * orbit_radius);
-          glm::vec3 target = player_pos + orbit_offset;
-          circle_dir = glm::normalize(target - s.position);
+          float vert_diff = player_pos.y - s.position.y;
+          float horiz_to_player = glm::distance(glm::vec2(s.position.x, s.position.z),
+                                                glm::vec2(player_pos.x, player_pos.z));
+          if (vert_diff > 1.8f && horiz_to_player < 5.0f) {
+            circle_dir = AberrantAI::find_ascending_wall_direction(
+                s.position, player_pos, world);
+          } else {
+            // Eerie variable-radius orbit with height undulation (floor pattern)
+            float orbit_radius = 5.0f + std::sin(s.glow_phase * 0.65f) * 1.8f;
+            float orbit_angle = s.glow_phase * 0.85f;
+            glm::vec3 orbit_offset(std::cos(orbit_angle) * orbit_radius,
+                                   std::sin(s.glow_phase * 1.1f) * 0.75f,
+                                   std::sin(orbit_angle) * orbit_radius);
+            glm::vec3 target = player_pos + orbit_offset;
+            circle_dir = glm::normalize(target - s.position);
+          }
         }
         glm::vec3 f_sep(0.0f);
         if (dist_to_player <= 35.0f) {
@@ -1747,23 +2019,27 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     // ─── Kinematic Voxel Navigation, Step-Clambering & Wall Sliding ───
     if (s.state != StalkerState::Burrowing && s.state != StalkerState::Dead &&
         s.state != StalkerState::Dying) {
-      // Track movement progress to detect obstructions (3D distance)
-      float progress = glm::distance(s.position, s.last_progress_pos);
-      s.last_progress_pos = s.position;
-      float move_speed = glm::length(s.velocity);
+      // Net displacement tracking across time intervals (eliminates high-frequency collision ping-pong)
+      s.stuck_checkpoint_timer += dt;
+      if (s.stuck_checkpoint_timer >= 0.35f) {
+        float net_disp = glm::distance(s.position, s.stuck_checkpoint_pos);
+        float move_speed = glm::length(s.velocity);
+        float desired_speed = glm::length(s.m_targetVelocity);
 
-      if (move_speed > 0.6f && progress < 0.15f * dt) {
-        s.stuck_timer += dt;
-      } else {
-        s.stuck_timer = std::max(0.0f, s.stuck_timer - dt * 2.0f);
+        // If entity has active movement intent, but net displacement over 0.35s is under 0.18m
+        if ((move_speed > 0.4f || desired_speed > 0.4f) && net_disp < 0.18f) {
+          s.stuck_timer += s.stuck_checkpoint_timer;
+        } else {
+          s.stuck_timer = std::max(0.0f, s.stuck_timer - s.stuck_checkpoint_timer * 1.5f);
+        }
+        s.stuck_checkpoint_pos = s.position;
+        s.stuck_checkpoint_timer = 0.0f;
       }
 
       // Anti-stuck resolution:
-      // If obstructed against cavern geometry for > 0.30s while pursuing/moving:
-      if (s.stuck_timer > 0.30f) {
+      if (s.stuck_timer > 0.45f) {
         if (s.state == StalkerState::Fleeing || s.hp <= s.flee_hp_threshold) {
-          // Cornered against wall/rock -> immediately burrow into the rock to
-          // escape!
+          // Cornered against wall/rock -> immediately burrow into the rock to escape!
           s.state = StalkerState::Burrowing;
           s.state_timer = 0.0f;
           s.burrow_duration = 2.0f;
@@ -1779,25 +2055,61 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                       "Stalker " << s.id
                                  << " cornered against rock face -> DECISIVELY "
                                     "BURROWS into rock to escape!");
+        } else if (s.stuck_timer > 1.2f && !s.is_pursuing_attacker && (s.state == StalkerState::Investigating || s.state == StalkerState::Circling)) {
+          // If stuck while investigating sound or circling (not hunting attacker), de-escalate back to Idle!
+          s.state = StalkerState::Idle;
+          s.state_timer = 0.0f;
+          s.has_sound_target = false;
+          s.stuck_timer = 0.0f;
+          s.velocity = glm::vec3(0.0f);
+          s.m_targetVelocity = glm::vec3(0.0f);
+          VF_LOG_INFO("VoidStalker",
+                      "Stalker " << s.id << " trapped while investigating -> DE-ESCALATING to Idle");
+        } else if (s.stuck_timer > 1.6f && s.state == StalkerState::Stalking) {
+          // Obstacle diversion: deflect laterally around obstacles (only step up if headroom is clear)
+          glm::vec2 fwd_v(std::sin(s.yaw), std::cos(s.yaw));
+          glm::vec2 perp(-fwd_v.y, fwd_v.x);
+          float sign = ((s.id % 2) == 0) ? 1.0f : -1.0f;
+          glm::vec3 deflect(perp.x * sign, 0.0f, perp.y * sign);
+          s.velocity += deflect * 4.0f;
+          s.m_targetVelocity += deflect * 4.0f;
+          float col_h = (s.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f;
+          int px = static_cast<int>(std::floor(s.position.x));
+          int py_head = static_cast<int>(std::floor(s.position.y + col_h + 0.35f));
+          int pz = static_cast<int>(std::floor(s.position.z));
+          if (py_head < 32 && !world.is_solid(glm::ivec3(px, py_head, pz))) {
+            s.position.y += 0.30f;
+          }
+          s.stuck_timer = 0.0f;
+          VF_LOG_INFO("VoidStalker",
+                      "Stalker " << s.id << " obstructed by rock -> DEFLECTS laterally around obstacle");
         } else if (s.state == StalkerState::Stalking ||
                    s.state == StalkerState::Investigating ||
                    s.state == StalkerState::Circling) {
+          // Smooth steering deflection (modify velocity steering instead of teleporting position)
           if (s.surface_state == StalkerSurfaceState::CEILING_CRAWLING) {
             glm::vec3 wall_dir = AberrantAI::find_descending_wall_direction(
                 s.position, s.target_pos, world);
-            s.position += wall_dir * 3.5f * dt;
+            s.m_targetVelocity += wall_dir * 2.5f;
           } else if (s.surface_state == StalkerSurfaceState::WALL_CLIMBING) {
             glm::vec3 wall_lateral = glm::cross(s.contact_normal, glm::vec3(0.0f, 1.0f, 0.0f));
             if (glm::length(wall_lateral) > 0.01f) wall_lateral = glm::normalize(wall_lateral);
             float sign = ((s.id % 2) == 0) ? 1.0f : -1.0f;
-            s.position += (wall_lateral * sign - glm::vec3(0.0f, 1.0f, 0.0f)) * 2.5f * dt;
+            s.m_targetVelocity += (wall_lateral * sign - glm::vec3(0.0f, 1.0f, 0.0f)) * 2.0f;
           } else {
-            // Deflect laterally around obstacle to slide around corners
-            glm::vec2 fwd_v(std::sin(s.yaw), std::cos(s.yaw));
-            glm::vec2 perp(-fwd_v.y, fwd_v.x);
-            float sign = ((s.id % 2) == 0) ? 1.0f : -1.0f;
-            glm::vec3 deflect(perp.x * sign, 0.0f, perp.y * sign);
-            s.position += deflect * 2.5f * dt;
+            // On floor: if player is elevated (e.g. directly above), steer towards an ascending wall
+            if (s.target_pos.y > s.position.y + 1.5f) {
+              glm::vec3 wall_dir = AberrantAI::find_ascending_wall_direction(
+                  s.position, s.target_pos, world);
+              s.m_targetVelocity += wall_dir * 2.5f;
+            } else {
+              // Deflect laterally around obstacle to slide around corners
+              glm::vec2 fwd_v(std::sin(s.yaw), std::cos(s.yaw));
+              glm::vec2 perp(-fwd_v.y, fwd_v.x);
+              float sign = ((s.id % 2) == 0) ? 1.0f : -1.0f;
+              glm::vec3 deflect(perp.x * sign, 0.0f, perp.y * sign);
+              s.m_targetVelocity += deflect * 2.5f;
+            }
           }
         }
       }
@@ -1807,12 +2119,13 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       // wall/ceiling hold.
       if (s.surface_state == StalkerSurfaceState::FLOOR &&
           s.state != StalkerState::Burrowing) {
-        int sx = static_cast<int>(std::floor(s.position.x));
-        int sy = static_cast<int>(std::floor(s.position.y - 0.1f));
-        int sz = static_cast<int>(std::floor(s.position.z));
-        Voxel below = world.get_voxel(sx, sy, sz);
-        if (below.material_id == MAT_AIR) {
-          s.position.y -= 4.0f * dt; // Cavern gravity
+        float ground_y = 0.0f;
+        if (AberrantAI::find_ground_surface(world, s.position, 1.35f, 4.0f, &ground_y)) {
+          if (s.position.y > ground_y + 0.05f) {
+            s.position.y = std::max(ground_y, s.position.y - 9.8f * dt);
+          }
+        } else {
+          s.position.y -= 9.8f * dt; // Cavern gravity over cliffs / drops
         }
       }
 
@@ -2128,34 +2441,45 @@ bool VoidStalkerManager::damage_nearest(const glm::vec3 &origin, float radius,
                 << " REPOSITIONS after damage to return fire and pursue!");
       }
 
-      // Pack Alert: Alert nearby packmates within close tactical range (<= 10m)
-      // of the wounded stalker
+      // Pack Alert: Alert at most 1 nearby packmate (2 in Sector 3+) within <= 8.0m with clear LOS
+      int alerted_count = 0;
+      int max_pack_alerts = (m_sector_level >= 3) ? 2 : 1;
       for (auto &other : m_stalkers) {
         if (&other != nearest && other.state != StalkerState::Dead &&
             other.state != StalkerState::Dying &&
             other.state != StalkerState::Fleeing) {
           float pack_dist = glm::distance(other.position, nearest->position);
-          if (pack_dist <= 10.0f && (other.state == StalkerState::Roosting ||
+          if (pack_dist <= 8.0f && (other.state == StalkerState::Roosting ||
                                      other.state == StalkerState::Idle)) {
-            other.state = StalkerState::Stalking;
-            other.target_pos = actual_attacker_pos;
-            other.last_seen_player_pos = actual_attacker_pos;
-            other.lost_los_timer = 0.0f;
-            other.is_pursuing_attacker = true;
-            other.pursuit_lost_timer = 0.0f;
-            other.surface_state = StalkerSurfaceState::FLOOR;
-            other.target_surface_state = StalkerSurfaceState::FLOOR;
-            other.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
-            other.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
-            glm::vec3 to_att = actual_attacker_pos - other.position;
-            if (glm::length(glm::vec2(to_att.x, to_att.z)) > 0.1f) {
-              other.yaw = std::atan2(to_att.x, to_att.z);
+            if (alerted_count < max_pack_alerts) {
+              alerted_count++;
+              other.surface_state = StalkerSurfaceState::FLOOR;
+              other.target_surface_state = StalkerSurfaceState::FLOOR;
+              other.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+              other.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+              other.target_pos = actual_attacker_pos;
+              other.last_seen_player_pos = actual_attacker_pos;
+              other.lost_los_timer = 0.0f;
+              if (can_engage_new_chaser()) {
+                other.state = StalkerState::Stalking;
+                other.is_pursuing_attacker = true;
+                other.pursuit_lost_timer = 0.0f;
+              } else {
+                other.state = StalkerState::Investigating;
+                other.investigation_timer = 3.5f;
+                other.investigation_target = actual_attacker_pos;
+                other.has_sound_target = true;
+              }
+              glm::vec3 to_att = actual_attacker_pos - other.position;
+              if (glm::length(glm::vec2(to_att.x, to_att.z)) > 0.1f) {
+                other.yaw = std::atan2(to_att.x, to_att.z);
+              }
+              VF_LOG_INFO("VoidStalker",
+                          "Pack Stalker "
+                              << other.id
+                              << " ALERTED by distress of wounded Stalker "
+                              << nearest->id << "!");
             }
-            VF_LOG_INFO("VoidStalker",
-                        "Pack Stalker "
-                            << other.id
-                            << " ALERTED by distress of wounded Stalker "
-                            << nearest->id << "!");
           }
         }
       }
@@ -2182,12 +2506,45 @@ void VoidStalkerManager::remove_dead() {
                    m_stalkers.end());
 }
 
+void VoidStalkerManager::set_sector_level(int level) {
+  m_sector_level = level;
+  m_max_concurrent_chasers = (level <= 1) ? 2 : ((level == 2) ? 3 : 4);
+}
+
+int VoidStalkerManager::concurrent_chasers_count() const {
+  int count = 0;
+  for (const auto &s : m_stalkers) {
+    if (s.state == StalkerState::Dead || s.state == StalkerState::Dying ||
+        s.state == StalkerState::Fleeing)
+      continue;
+    if (s.state == StalkerState::Stalking || s.state == StalkerState::Lunging ||
+        s.state == StalkerState::Circling || s.is_pursuing_attacker) {
+      count++;
+    }
+  }
+  return count;
+}
+
+bool VoidStalkerManager::can_engage_new_chaser() const {
+  if (m_combat_recovery_timer > 0.0f) {
+    return false;
+  }
+  return concurrent_chasers_count() < m_max_concurrent_chasers;
+}
+
+void VoidStalkerManager::trigger_combat_recovery(float duration) {
+  m_combat_recovery_timer = std::max(m_combat_recovery_timer, duration);
+}
+
 void VoidStalkerManager::reset() {
   m_stalkers.clear();
   m_projectiles.clear();
   m_spatial_hash.clear();
   m_next_id = 1;
   m_next_proj_id = 1;
+  m_combat_recovery_timer = 0.0f;
+  m_sector_level = 1;
+  m_max_concurrent_chasers = 2;
 }
 
 } // namespace Voidfall

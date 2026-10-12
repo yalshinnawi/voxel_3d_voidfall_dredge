@@ -135,12 +135,12 @@ TEST(FluidMesher, SharedEdgeHasIdenticalElevation) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 2. SkirtEmittedOnElevationDelta
-// Verify a vertical boundary skirt quad is emitted between differing levels
-// so no hollow void is exposed.
+// 2. InternalBoundaryBetweenContiguousFluidsIsCulled
+// Verify that contiguous liquid blocks do not emit an internal
+// vertical "wall" or pane between different height levels.
 // ─────────────────────────────────────────────────────────────
-TEST(FluidMesher, SkirtEmittedOnElevationDelta) {
-    std::cout << "[Test 2] SkirtEmittedOnElevationDelta..." << std::endl;
+TEST(FluidMesher, InternalBoundaryBetweenContiguousFluidsIsCulled) {
+    std::cout << "[Test 2] InternalBoundaryBetweenContiguousFluidsIsCulled..." << std::endl;
 
     Chunk chunk(ChunkPos{0, 0, 0});
     chunk.set_voxel(0, 0, 0, Voxel{MAT_WATER, 5});
@@ -149,32 +149,22 @@ TEST(FluidMesher, SkirtEmittedOnElevationDelta) {
     auto mesh = GreedyMesher::generate_mesh(chunk, nullptr);
     ASSERT_FALSE(mesh.empty());
 
-    bool found_skirt = false;
-    float skirt_top_y = -1.0f;
-    float skirt_bot_y = -1.0f;
-
+    bool found_internal_pane = false;
     for (const auto& v : mesh) {
         uint32_t layer = (v.data0 >> 23u) & 0xFFu;
         uint32_t norm = (v.data0 >> 18u) & 0x7u;
-        // Check for vertical step skirt (+X face between (0,0,0) and (1,0,0))
-        if (layer == MAT_WATER && norm == 0 && v.is_vertical_flow()) {
+        // Verify NO vertical separation pane is emitted at the shared boundary X = 1.0
+        if (layer == MAT_WATER && (norm == 0 || norm == 1)) {
             glm::vec3 pos = v.position();
             if (std::abs(pos.x - 1.0f) < 0.001f) {
-                found_skirt = true;
-                if (skirt_top_y < 0.0f || pos.y > skirt_top_y) skirt_top_y = pos.y;
-                if (skirt_bot_y < 0.0f || pos.y < skirt_bot_y) skirt_bot_y = pos.y;
+                found_internal_pane = true;
+                break;
             }
         }
     }
 
-    ASSERT_TRUE(found_skirt);
-    // Skirt connects top level 5 (0.88m) down to level 4 (0.704m)
-    ASSERT_NEAR(skirt_top_y, 0.88f, 0.02f);
-    ASSERT_NEAR(skirt_bot_y, 0.704f, 0.02f);
-    ASSERT_TRUE(skirt_top_y > skirt_bot_y);
-
-    std::cout << "  -> PASSED: Skirt emitted from Y=" << skirt_top_y
-              << " down to Y=" << skirt_bot_y << " bridging elevation delta." << std::endl;
+    ASSERT_FALSE(found_internal_pane);
+    std::cout << "  -> PASSED: Internal boundary face is fully culled; no partition pane emitted." << std::endl;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -194,13 +184,13 @@ TEST(FluidMeshTest, LiquidMeshBufferNotEmpty) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 4. SteppedDropsEmitBoundarySkirts
+// 4. ContiguousFluidCellsDoNotEmitInternalSeparationPanes
 // Place Level 5 water at (0, 0, 0) and Level 4 water at (1, 0, 0).
-// Assert that a vertical skirt quad is emitted between X = 1.0,
-// spanning the delta between the two levels.
+// Assert that chunk mesh contains only top & outer bounding faces,
+// with no internal vertical separator walls between differing levels.
 // ─────────────────────────────────────────────────────────────
-TEST(FluidMeshTest, SteppedDropsEmitBoundarySkirts) {
-    std::cout << "[Test 4] SteppedDropsEmitBoundarySkirts..." << std::endl;
+TEST(FluidMeshTest, ContiguousFluidCellsDoNotEmitInternalSeparationPanes) {
+    std::cout << "[Test 4] ContiguousFluidCellsDoNotEmitInternalSeparationPanes..." << std::endl;
 
     auto chunk = std::make_unique<Chunk>(ChunkPos{0, 0, 0});
     chunk->set_voxel(0, 0, 0, Voxel{MAT_WATER, 5});
@@ -210,30 +200,93 @@ TEST(FluidMeshTest, SteppedDropsEmitBoundarySkirts) {
     ASSERT_TRUE(chunk->GetLiquidVertexCount() > 0);
 
     auto mesh = GreedyMesher::generate_mesh(*chunk, nullptr);
-    bool found_skirt = false;
-    float skirt_top_y = -1.0f;
-    float skirt_bot_y = -1.0f;
+    bool found_internal_pane = false;
 
     for (const auto& v : mesh) {
         uint32_t layer = (v.data0 >> 23u) & 0xFFu;
         uint32_t norm = (v.data0 >> 18u) & 0x7u;
-        if (layer == MAT_WATER && norm == 0 && v.is_vertical_flow()) {
+        if (layer == MAT_WATER && (norm == 0 || norm == 1)) {
             glm::vec3 pos = v.position();
             if (std::abs(pos.x - 1.0f) < 0.001f) {
-                found_skirt = true;
-                if (skirt_top_y < 0.0f || pos.y > skirt_top_y) skirt_top_y = pos.y;
-                if (skirt_bot_y < 0.0f || pos.y < skirt_bot_y) skirt_bot_y = pos.y;
+                found_internal_pane = true;
+                break;
             }
         }
     }
 
-    ASSERT_TRUE(found_skirt);
-    ASSERT_NEAR(skirt_top_y, 0.88f, 0.02f);
-    ASSERT_NEAR(skirt_bot_y, 0.704f, 0.02f);
-    ASSERT_TRUE(skirt_top_y > skirt_bot_y);
+    ASSERT_FALSE(found_internal_pane);
+    std::cout << "  -> PASSED: Contiguous liquid volume has seamless top without internal walls." << std::endl;
+}
 
-    std::cout << "  -> PASSED: Vertical skirt quad at X=1.0 spanning Y="
-              << skirt_top_y << " to Y=" << skirt_bot_y << std::endl;
+// ─────────────────────────────────────────────────────────────
+// 5. StepDownSlopesLedgeLipTowardsLowerLevel
+// Place Level 5 liquid at (0, 1, 0) and Level 5 liquid at (1, 0, 0)
+// with air at (1, 1, 0) (a 1-block step down).
+// Verify that inter-level averaging smoothly dips the surface
+// at the ledge lip (X = 1) towards the lower liquid.
+// ─────────────────────────────────────────────────────────────
+TEST(FluidMesher, StepDownSlopesLedgeLipTowardsLowerLevel) {
+    std::cout << "[Test 5] StepDownSlopesLedgeLipTowardsLowerLevel..." << std::endl;
+
+    Chunk chunk(ChunkPos{0, 0, 0});
+    chunk.set_voxel(0, 1, 0, Voxel{MAT_WATER, 5});
+    chunk.set_voxel(1, 0, 0, Voxel{MAT_WATER, 5});
+    chunk.set_voxel(1, 1, 0, Voxel{MAT_AIR, 0});
+
+    struct MockWorld {
+        const Chunk& m_chunk;
+        uint8_t GetBlockMaterial(const glm::ivec3& pos) const {
+            if (Chunk::in_bounds(pos.x, pos.y, pos.z)) {
+                return m_chunk.get_voxel(pos.x, pos.y, pos.z).material_id;
+            }
+            return MAT_AIR;
+        }
+        uint8_t GetBlockFlags(const glm::ivec3& pos) const {
+            if (Chunk::in_bounds(pos.x, pos.y, pos.z)) {
+                return m_chunk.get_voxel(pos.x, pos.y, pos.z).flags_and_damage;
+            }
+            return 0;
+        }
+    };
+    MockWorld world{chunk};
+
+    float C_back = CalculateCornerHeight(world, 0, 1, 0);
+    float C_lip  = CalculateCornerHeight(world, 1, 1, 0);
+
+    ASSERT_NEAR(C_back, 0.88f, 0.02f);
+    // Lip corner should be smoothed downward into the step drop: C_lip < C_back
+    ASSERT_TRUE(C_lip < C_back - 0.15f);
+    ASSERT_TRUE(C_lip >= 0.40f);
+
+    auto mesh = GreedyMesher::generate_mesh(chunk, nullptr);
+    ASSERT_FALSE(mesh.empty());
+
+    float y_back = -1.0f;
+    float y_lip  = -1.0f;
+    for (const auto& v : mesh) {
+        uint32_t layer = (v.data0 >> 23u) & 0xFFu;
+        uint32_t norm = (v.data0 >> 18u) & 0x7u;
+        uint32_t fluid_lvl = (v.data1 >> 28u) & 0x7u;
+        if (layer == MAT_WATER && norm == 2 && fluid_lvl == 6) {
+            glm::vec3 pos = v.position();
+            // Check top vertices for block (0, 1, 0)
+            if (pos.y >= 1.0f && pos.y <= 2.0f && pos.z <= 1.0f) {
+                if (std::abs(pos.x - 0.0f) < 0.01f) {
+                    y_back = pos.y;
+                } else if (std::abs(pos.x - 1.0f) < 0.01f) {
+                    y_lip = pos.y;
+                }
+            }
+        }
+    }
+
+    ASSERT_TRUE(y_back > 0.0f);
+    ASSERT_TRUE(y_lip > 0.0f);
+    // Smooth transition: top surface slopes downhill towards step down
+    ASSERT_TRUE(y_lip < y_back - 0.15f);
+
+    std::cout << "  -> PASSED: Top surface slopes from Y=" << y_back
+              << " down to Y=" << y_lip << " at step lip." << std::endl;
 }
 
 int main() {
@@ -242,9 +295,10 @@ int main() {
     std::cout << "==========================================================" << std::endl;
 
     FluidMesher_SharedEdgeHasIdenticalElevation();
-    FluidMesher_SkirtEmittedOnElevationDelta();
+    FluidMesher_InternalBoundaryBetweenContiguousFluidsIsCulled();
     FluidMeshTest_LiquidMeshBufferNotEmpty();
-    FluidMeshTest_SteppedDropsEmitBoundarySkirts();
+    FluidMeshTest_ContiguousFluidCellsDoNotEmitInternalSeparationPanes();
+    FluidMesher_StepDownSlopesLedgeLipTowardsLowerLevel();
 
     std::cout << "=== All Fluid Rendering Tests PASSED successfully ===" << std::endl;
     return 0;

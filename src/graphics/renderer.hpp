@@ -4,6 +4,7 @@
 #include "clustered_lighting.hpp"
 #include "surface_clutter.hpp"
 #include "../voxel/chunk.hpp"
+#include "../voxel/block_break_fx.hpp"
 #include "../skills/surveying.hpp"
 #include "../player/character_class.hpp"
 #include "../player/loadout.hpp"
@@ -17,6 +18,7 @@
 namespace Voidfall {
 
 class DynamicDebris;
+enum class StalkerRole : uint8_t;
 struct VoidStalker;
 struct SeismicBurrower;
 struct EnemyCarcass;
@@ -27,8 +29,9 @@ struct Headlamp {
     glm::vec3 direction{0.0f, 0.0f, -1.0f};
     glm::vec3 color{0.95f, 0.98f, 1.0f}; // Crisp high-intensity halogen LED
     float inner_cutoff{glm::cos(glm::radians(18.0f))};
-    float outer_cutoff{glm::cos(glm::radians(32.0f))};
+    float outer_cutoff{glm::cos(glm::radians(28.0f))}; // Tightened beam: 18 deg inner / 28 deg outer
     float intensity{4.5f};
+    float max_range{22.0f}; // Clamped range to 22m with quadratic falloff
     bool enabled{true};
 };
 
@@ -97,19 +100,29 @@ public:
     void render_burrowers(const std::vector<SeismicBurrower>& burrowers);
     void render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts);
     void render_delver(const glm::vec3& pos, float yaw, CharacterClass cls, float anim_time = 0.0f);
-    void end_frame(float delta_time, float radiation_level = 0.0f, float shield_timer = 0.0f);
+    void end_frame(float delta_time, float radiation_level = 0.0f, float shield_timer = 0.0f,
+                   const glm::vec3& hazard_haze_color = glm::vec3(0.0f), float hazard_haze_factor = -1.0f);
 
     void trigger_sonar_pulse(const glm::vec3& origin);
+    void render_sonar_clusters(const std::vector<SurveyedCluster>& clusters, float alpha);
+    void render_sonar_monsters(const std::vector<SurveyedMonster>& monsters, float alpha);
+    void render_sonar_wireframes(const std::vector<SurveyedCluster>& clusters, float alpha) {
+        render_sonar_clusters(clusters, alpha);
+    }
     void render_sonar_wireframes(const std::vector<SurveyedVoxel>& voxels, float alpha);
     void render_grapple_cable(const glm::vec3& start, const glm::vec3& end);
     void render_extraction_beacon(const glm::vec3& beacon_pos, float siren_pulse, float time, bool is_pod_landed);
     void render_extraction_pod(const glm::vec3& beacon_pos, float drill_progress, float ramp_extension, float time, bool is_anchored);
+    void render_precursor_relic(const glm::vec3& base_pos, float time);
     void trigger_dust_kickup(float duration = 3.0f);
     void spawn_dust_cloud(const glm::vec3& pos, int count = 24);
 
-    void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id);
-    void spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id);
+    void spawn_break_particles(const glm::vec3& block_pos, const glm::ivec3& normal, uint8_t mat_id, VoxelShape shape = SHAPE_CUBE);
+    void spawn_clutter_break_particles(const glm::vec3& clutter_pos, ClutterType type, const glm::vec4& tint = glm::vec4(1.0f));
+    void spawn_crack_debris(const glm::vec3& block_pos, const glm::ivec3& normal, float intensity, uint8_t mat_id, VoxelShape shape = SHAPE_CUBE);
     void spawn_burrow_particles(const glm::vec3& burrow_pos, const glm::vec3& burrow_dir, uint8_t mat_id = 1, int count = 8);
+    void spawn_monster_emergence_particles(const glm::vec3& pos, const glm::vec3& normal, StalkerRole role, float progress = 0.5f, int count = 6);
+    void spawn_burrower_emergence_particles(const glm::vec3& pos, const glm::vec3& forward_dir, float progress = 0.5f, int count = 10);
     void spawn_toxic_gas_cloud(const glm::vec3& block_pos, int count = 3);
     void spawn_radiation_glimmer(const glm::vec3& block_pos, int count = 2);
     void spawn_lava_embers(const glm::vec3& block_pos, int count = 2);
@@ -118,7 +131,22 @@ public:
     size_t active_particle_count() const { return m_particles.size(); }
     const std::vector<BreakParticle>& particles() const { return m_particles; }
 
-    void render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id = 1);
+    static glm::vec4 get_material_crack_color(uint8_t mat_id, int stage) {
+        return BlockBreakFX::get_material_crack_color(mat_id, stage);
+    }
+    static void generate_block_crack_geometry(
+        const glm::ivec3& voxel_pos,
+        float progress,
+        const glm::ivec3& face_norm,
+        uint8_t mat_id,
+        VoxelShape shape,
+        std::vector<float>& out_lines,
+        glm::vec4& out_color
+    ) {
+        BlockBreakFX::generate_block_crack_geometry(voxel_pos, progress, face_norm, mat_id, shape, out_lines, out_color);
+    }
+
+    void render_block_cracks(const glm::ivec3& voxel_pos, float progress, const glm::ivec3& face_norm, uint8_t mat_id = 1, VoxelShape shape = SHAPE_CUBE);
     void render_placed_charge(const glm::ivec3& block_pos, const glm::ivec3& normal, float time);
     void render_flares(const std::vector<struct ChemicalFlare>& flares, float time);
     void render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float time);
@@ -159,6 +187,7 @@ private:
     void cleanup_framebuffers();
     void render_quad();
     void init_wireframe_cube();
+    void init_sonar_buffers();
     void init_cable_buffer();
     void init_particle_buffers();
     void init_stalker_buffers();
@@ -215,6 +244,10 @@ private:
     // Wireframe unit cube for sonar X-ray
     unsigned int m_wireframe_vao{0};
     unsigned int m_wireframe_vbo{0};
+
+    // Smooth sonar hull & outline dynamic buffer
+    unsigned int m_sonar_vao{0};
+    unsigned int m_sonar_vbo{0};
 
     // Grapple cable line
     unsigned int m_cable_vao{0};

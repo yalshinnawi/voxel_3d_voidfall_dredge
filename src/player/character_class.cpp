@@ -16,6 +16,7 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.baseMineSpeed = 1.40f;
             attr.moveSpeed = 1.00f;
             attr.suitIntegrity = 100.0f;
+            attr.baseShield = 50.0f;
             attr.grapplePullSpeed = 1.00f;
             attr.sonarRadius = 14.0f;
             attr.sonarCooldown = 10.0f;
@@ -36,6 +37,7 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.baseMineSpeed = 1.00f;
             attr.moveSpeed = 0.88f;
             attr.suitIntegrity = 135.0f;
+            attr.baseShield = 75.0f;
             attr.grapplePullSpeed = 1.00f;
             attr.sonarRadius = 14.0f;
             attr.sonarCooldown = 10.0f;
@@ -56,6 +58,7 @@ CharacterAttributes get_character_attributes(CharacterClass cls) {
             attr.baseMineSpeed = 1.00f;
             attr.moveSpeed = 1.20f;
             attr.suitIntegrity = 80.0f;
+            attr.baseShield = 40.0f;
             attr.grapplePullSpeed = 1.50f;
             attr.sonarRadius = 22.0f;
             attr.sonarCooldown = 8.0f;

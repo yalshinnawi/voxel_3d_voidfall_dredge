@@ -37,23 +37,33 @@ $$\text{Effective Rank} = \max(\text{upgrades.sonarFrequencyTier}, \text{skills.
 ## 3. Acoustic Spectroscopy & HUD Material Labels (Rank 2+)
 When the delver achieves **Rank 2 or higher** in Surveying, the suit's acoustic receiver performs harmonic Fourier analysis on reflected sound waves to identify exact rock and mineral compositions.
 
-### Cluster Extraction & Label Projections
-To prevent visual clutter when scanning dense ore veins (which contain dozens of adjacent voxels), [`SurveyingSystem`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/skills/surveying.hpp) groups neighboring voxels of the same material ($\text{distance} \le 3.2\,\text{m}$) into a single [`SurveyedCluster`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/skills/surveying.hpp).
+### 3.1 Objective & Hostile Target Filtering
+To eliminate visual clutter and ensure maximal tactical focus, [`SurveyingSystem`](file:///d:/Projects/voxel_3d_voidfall_dredge/src/skills/surveying.hpp) exclusively highlights **monsters** and **mission objectives**—nothing else:
+1. **Target Filtering**:
+   - **Primary Mission Objectives**: Voidite crystals (`MAT_VOIDITE_CRYSTAL`, `MAT_VOIDITE`) required to fulfill the sector quota.
+   - **Secondary Anomaly Objectives**: Ancient Precursor Vault bulkhead doors (`MAT_REINFORCED_VAULT_DOOR`, `MAT_VAULT_DOOR`).
+   - **Hostile Entities**: Void Stalkers and Seismic Burrowers within the acoustic pulse wave radius.
+   - **Strict Exclusion**: All other materials (granite, basalt, titanium/bulkheads, radioactive ores, astral minerals, prismatic crystals, liquids) are completely ignored by Sonar.
+2. **Flood-Fill Objective Clustering**: Touching adjacent voxels of objective targets are clustered into a unified vein deposit with smooth Laplacian-smoothed glowing hulls and outlines.
+3. **Monster Holographic Echoes**:
+   - Detected monsters are rendered with luminous acoustic wireframe cages and soft volumetric hulls visible through solid rock walls (`glDisable(GL_DEPTH_TEST)`).
+   - Void Stalkers: Hostile Crimson glow (`#FF3326`) with acoustic waist ring.
+   - Seismic Burrowers: Fiery Warning Amber glow (`#FF731A`).
 
-The HUD projects a high-contrast tactical pill marker and distance readout directly at each cluster's 3D world centroid:
+### 3.2 Tactical HUD & Compass Objective/Monster Markers
+The HUD projects high-contrast tactical pill markers and distance readouts directly at each detected objective centroid and monster location:
 
-- **Voidite Crystals (`MAT_VOIDITE_CRYSTAL`)**:
-  - Marker: `[VOIDITE: <dist>m]`
-  - Emissive Color: Neon Cyan (`#00F0FF`, `rgb(0, 240, 255)`)
-- **Titanium / Bulkheads (`MAT_INDUSTRIAL_BULKHEAD`)**:
-  - Marker: `[TITANIUM: <dist>m]`
-  - Emissive Color: Industrial Gold / Amber (`#FFB300`, `rgb(255, 179, 0)`)
+- **Voidite Extraction Quota (`MAT_VOIDITE_CRYSTAL`)**:
+  - Marker: `[OBJ VOIDITE: <dist>m]`
+  - Emissive Color: Neon Cyan / Void Violet (`#E04DFF`, `rgb(224, 77, 255)`)
 - **Ancient Vault Doors (`MAT_REINFORCED_VAULT_DOOR`)**:
-  - Marker: `[VAULT DOOR: <dist>m]`
+  - Marker: `[OBJ VAULT DOOR: <dist>m]`
   - Emissive Color: Deep Magenta (`#FF00D4`, `rgb(255, 0, 212)`)
-- **Radioactive Ores (`MAT_RADIOACTIVE_ORE`)**:
-  - Marker: `[RADIOACTIVE: <dist>m]`
-  - Emissive Color: Toxic Lime (`#00FF66`, `rgb(0, 255, 102)`)
+- **Hostile Monsters**:
+  - Marker: `[HOSTILE STALKER: <dist>m]` / `[HOSTILE BURROWER: <dist>m]`
+  - Emissive Color: Crimson Red / Fiery Amber
+- **Top Compass Ribbon**:
+  - Displays real-time blips for detected objectives (purple/magenta) and monsters (red/amber) across the horizontal orienteering ribbon.
 
 Labels smoothly fade out synchronously with the acoustic decay curve:
 $$\alpha(t) = \text{clamp}\left(\frac{t_{\text{remaining}}}{t_{\text{duration}}}, 0.0, 1.0\right)$$

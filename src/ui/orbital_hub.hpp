@@ -10,6 +10,7 @@
 #include "../core/save_system.hpp"
 
 #include "main_menu.hpp"
+#include "font_atlas.hpp"
 
 namespace Voidfall {
 
@@ -54,21 +55,34 @@ public:
 
     void resize(int width, int height);
 
-    MainMenuAction render_main_menu(int& selected_level, UserProfile& profile, bool has_save, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
-    bool render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
-    bool render_main_menu(int& selected_level, UserProfile& profile, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
+    MainMenuAction render_main_menu(int& selected_level, UserProfile& profile, bool has_save, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false, bool mouse_down = false, float scroll_delta = 0.0f);
+    bool render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false, bool mouse_down = false, float scroll_delta = 0.0f);
+    bool render_main_menu(int& selected_level, UserProfile& profile, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false, bool mouse_down = false, float scroll_delta = 0.0f);
 
-    bool render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
-    bool render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, UserProfile& profile, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
+    bool render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false, bool mouse_down = false, float scroll_delta = 0.0f);
+    bool render_orbital_hub(int selected_level, const SkillMatrix& skills, const PlayerInventory& inventory, UserProfile& profile, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false, bool mouse_down = false, float scroll_delta = 0.0f);
 
     DebriefAction render_debrief(bool success, int level, PlayerInventory& inventory, const SkillMatrix& skills, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
     DebriefAction render_debrief(bool success, int level, PlayerInventory& inventory, const SkillMatrix& skills, UserProfile& profile, float mouse_x = -1.0f, float mouse_y = -1.0f, bool mouse_clicked = false);
 
     MenuSubView subview() const { return m_subview; }
-    void set_subview(MenuSubView sv) { m_subview = sv; }
+    void set_subview(MenuSubView sv) {
+        if (m_subview != sv && sv == MenuSubView::SectorSelect) {
+            m_carousel_needs_focus = true;
+        }
+        m_subview = sv;
+    }
 
     HubTab active_tab() const { return m_active_tab; }
-    void set_active_tab(HubTab tab) { m_active_tab = tab; }
+    void set_active_tab(HubTab tab) {
+        if (m_active_tab != tab && tab == HubTab::SectorSelect) {
+            m_carousel_needs_focus = true;
+        }
+        m_active_tab = tab;
+    }
+
+    void focus_sector(int sector, bool instant = true);
+    void focus_upgrade_node(int type_idx);
 
     bool has_profile_changed() const { return m_profile_dirty; }
     void clear_profile_changed() { m_profile_dirty = false; }
@@ -85,19 +99,25 @@ public:
     bool is_test_mode() const { return m_test_mode; }
     void set_test_mode(bool tm) { m_test_mode = tm; }
 
+    void trigger_save_cleared_feedback() {
+        m_save_cleared_toast_timer = 3.5f;
+        m_confirming_clear_save = false;
+        m_confirm_clear_timer = 0.0f;
+    }
+
 private:
     void init_gl();
     void init_font_atlas();
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
-    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color);
-    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
-    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color);
-    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f);
+    void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
+    void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font = FontType::Body);
+    void draw_text_centered_fitted(const std::string& text, float box_x, float box_y, float box_w, float box_h, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
     void draw_panel_with_border(float x, float y, float w, float h, const glm::vec4& bg_col, const glm::vec4& border_col, float border_width = 1.0f);
 
-    void render_sector_select_carousel(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, MainMenuAction& action);
+    void render_sector_select_carousel(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, bool mouse_down, float scroll_delta, MainMenuAction& action);
     void render_delver_roster(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
-    void render_upgrade_terminal(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
+    void render_upgrade_terminal(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, bool mouse_down = false, float scroll_delta = 0.0f);
     void render_audio_settings(UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked);
 
     int m_width{1600};
@@ -110,10 +130,33 @@ private:
     bool m_return_to_title{false};
     bool m_test_sound_requested{false};
     float m_purchase_pulse_timer{0.0f};
-    int   m_carousel_page{0};   // which page of 3 sector cards is shown (0-indexed)
+
+    // Draggable carousel state
+    float m_carousel_scroll_x{0.0f};
+    float m_carousel_target_x{0.0f};
+    float m_carousel_velocity_x{0.0f};
+    bool  m_is_dragging_carousel{false};
+    float m_drag_start_mouse_x{0.0f};
+    float m_drag_total_dist{0.0f};
+    float m_last_mouse_x{0.0f};
+    bool  m_carousel_needs_focus{true};
+    int   m_focused_sector{1};
+
+    // Draggable upgrade tree state
+    float m_upgrades_scroll_x{0.0f};
+    float m_upgrades_target_x{0.0f};
+    float m_upgrades_velocity_x{0.0f};
+    bool  m_is_dragging_upgrades{false};
+    float m_drag_start_upgrades_x{0.0f};
+    float m_drag_total_dist_upgrades{0.0f};
+    float m_last_upgrades_mouse_x{0.0f};
+
     std::string m_terminal_msg;
     glm::vec4 m_terminal_msg_col{0.2f, 0.95f, 0.4f, 1.0f};
     int m_selected_upgrade_idx{0};
+    bool m_confirming_clear_save{false};
+    float m_confirm_clear_timer{0.0f};
+    float m_save_cleared_toast_timer{0.0f};
 
     Shader m_ui_shader;
     Shader m_text_shader;

@@ -2,6 +2,275 @@
 
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
+## 2026-10-12
+- **Crouch Stealth Overhaul, Forward Vision Cone Gating & Sneak Attack Criticals (`src/ai/`, `src/entities/enemies/`, `tests/`, `wiki/`)**:
+  - **Unalerted Enemy Proximity Gating (Sneaking via Crouch)**:
+    - Crouching delvers generate $0\,\text{dB}$ movement noise.
+    - Proximity detection when crouching is reduced from omnidirectional $2.2\,\text{m}$ down to actual physical body collision ($< 0.85\,\text{m}$ for Void Stalkers, $< 0.90\,\text{m}$ for Seismic Burrowers).
+    - Unalerted enemies in `Idle` or `Dormant` states will no longer detect or aggro on players creeping up behind them or nearby in shadows.
+  - **Forward Vision Cone Gating (`AberrantAI::is_in_vision_cone`)**:
+    - Implemented 3D surface-tangent forward vector calculation `VoidStalker::forward()` based on current surface normal and orientation yaw.
+    - Implemented `AberrantAI::is_in_vision_cone()` enforcing a strict $120^\circ$ field-of-view cone ($\pm 60^\circ$ from facing direction).
+    - When crouching, unalerted enemies can only visually spot the player if the player is within line-of-sight, within visual range, **AND** within the creature's forward vision cone. Delvers approaching from behind or the flanks remain completely undetectable.
+  - **Roosting Creature Dormancy & Headlamp Awakening**:
+    - Roosting stalkers (stationary fauna clinging with closed eyes) do not awaken in the dark when crouch-approached.
+    - Roosting creatures strictly awaken upon:
+      1. Direct illumination by the delver's headlamp flashlight beam (`s.is_in_light && los`),
+      2. Direct physical collision ($< 0.85\,\text{m}$),
+      3. Loud acoustic disturbances ($> 70\,\text{dB}$), or
+      4. Weapon damage.
+  - **Seismic Burrower Subterranean Stealth & Dormancy**:
+    - Unalerted subterranean burrowers do not track or lock onto crouching delvers at $18\,\text{m}$ through solid rock.
+    - Cavern breaches strictly require line-of-sight within a forward cone or direct physical collision ($< 0.90\,\text{m}$).
+    - Dormant burrowers do not awaken when approached at close range ($2.0\,\text{m}$) by a crouching delver.
+  - **Sneak Attack Critical Hit System**:
+    - Approaching unalerted enemies allows players to execute stealth melee or ranged attacks, triggering guaranteed `SNEAK ATTACK CRITICAL HIT` with a $2.5\times$ damage multiplier (`StealthSystem::SNEAK_ATTACK_CRIT_MULTIPLIER`).
+  - **Regression & Unit Test Suite Coverage**:
+    - Added Module 32 in `tests/test_enemy_stalker.cpp` validating behind-the-back sneak approach, unalerted sneak crits, forward vision cone detection, and headlamp awakening.
+    - Added Test 16 in `tests/test_enemy_burrower.cpp` validating crouched sneak approach to dormant burrowers and sneak attack critical hits.
+    - All 22 test suites verified passing via `python scripts/tdd.py`.
+
+## 2026-10-11
+- **Precursor Relic 3D Model & Multi-Axis Gyroscopic Spinning Overhaul (`src/voxel/`, `src/graphics/`, `src/core/`, `tests/`, `wiki/`)**:
+  - **Decoupled Relic Voxel from Static Greedy Chunk Meshing**:
+    - Defined `VOXEL_FLAG_CUSTOM_MODEL` (`0x01`) in [src/voxel/voxel_types.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/voxel_types.hpp).
+    - Updated `Voxel::is_renderable()` in [src/voxel/packed_vertex.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/packed_vertex.hpp) to suppress static greedy meshing when `is_custom_model()` is true, while keeping `is_solid() == true`.
+    - Preserves exact raycast hit testing (`look_hit.block_pos == mission.vault().relic_pos`), collision, and room samplers while delegating rendering to dynamic PBR passes.
+  - **3D Procedural PBR Geometry & Gyroscopic Levitation Animation (`src/graphics/renderer.cpp`)**:
+    - **Octagonal Dais & Focusing Prongs**: Rendered stepped dais socket with recessed glowing cyan runic conduits and 4 gilded precursor focusing prongs tipped with luminous cyan emitter crystals.
+    - **Dual Counter-Rotating Gimbal Rings**: Outer golden celestial astrolabe ring tilted $+24^\circ$ spinning at $+1.1\,\text{rad/s}$ with 4 quadrature runes; inner obsidian-titanium ring tilted $-32^\circ$ spinning at $-1.6\,\text{rad/s}$ with 4 glowing violet flux nodes.
+    - **Floating Faceted Octahedron Hyper-Core**: Smooth vertical hovering ($y_{\text{base}} + 0.54\,\text{m} + 0.065\,\text{m} \times \sin(2.2\,t)$), continuous axial spinning ($\omega = 2.0\,\text{rad/s}$), and white-gold singularity kernel.
+    - **Orbiting Satellite Shards & Energy Containment**: 4 satellite crystal spindles revolving at $r=0.44\,\text{m}$ with axial wobble, dual ascending laser containment beams, and expanding drifting energy rings.
+  - **Lifecycle Integration & Test Validation**:
+    - Hooked `Renderer::render_precursor_relic()` into `Application::render()` whenever the relic is not yet retrieved.
+    - Added `--test-relic` CLI test flag to `main.cpp` and `Application` for instant headless showcase capture.
+    - Added comprehensive unit test `test_precursor_relic_model_and_geometry()` in `tests/test_level_structural.cpp` validating voxel flags, meshing exclusion, solid raycasting, and retrieval lifecycle.
+    - All 22 test suites passing 100% in parallel (~3s) via `python scripts/tdd.py`.
+
+- **Industrial Bulkhead Visual Overhaul & Non-Plastic PBR Shading (`src/graphics/`, `assets/shaders/`, `wiki/`)**:
+  - **Eliminated Plastic Sheen & Uncontrolled Specular Glare**:
+    - Re-calibrated PBR roughness for `MAT_INDUSTRIAL_BULKHEAD` / `MAT_BULKHEAD`: clamped minimum roughness to $0.68$ (previously $0.45$), yielding a realistic matte cold-rolled alloy finish that scatters point light specular lobes naturally without glassy plastic glare.
+    - Reduced headlamp specular factor (`headlampSpecFactor`) from $0.10$ down to $0.05$ on bulkheads, preventing blinding specular washouts under player headlamp spotlight beams.
+    - Updated fallback PBR albedo to dark charcoal gunmetal `vec3(0.26, 0.28, 0.32)` and rough/metal parameters to `vec2(0.70, 0.82)`.
+  - **Cold-Rolled Alloy Texture Array Generation (`src/graphics/texture_array.cpp`)**:
+    - Replaced the tiny 16-rep/voxel unidirectional grate with alternating heavy industrial non-slip diamond tread bars (period 6, perfectly seamless across adjacent voxels).
+    - Added true bidirectional bevel normal mapping to tread bar ridges (`d_dist_dx, d_dist_dy`), catching light dynamically on facing edges while shading opposing slopes.
+    - Added periodic flush structural anchor bolts with dark oxidized washer counterbore rings (4 per voxel, period 2).
+    - Integrated organic cold-rolled microscopic surface normal relief (`steel_micro_x, steel_micro_y`) and brushed steel grain on base plates, eliminating the flat mirror normal vector `(0, 0, 1)` that caused molded-plastic reflections.
+  - **Visual Catalog & Telemetry Validation**:
+    - Regenerated all 16 level shape catalog captures via `python scripts/capture_level_shapes.py`. Verified in `16_corridor_bulkhead_vault.png` and `05_industrial_vault_bunker.png` that bulkheads exhibit authentic heavy ballistic steel texture with zero plastic artifacts.
+    - Verified all 19 test suites pass 100% in ~5s via `python scripts/tdd.py`.
+
+- **Dedicated Precursor Vault Rooms, Level-Scaled Obstacles & Boss Guardians (`src/voxel/`, `tests/`, `wiki/`)**:
+  - **3 Dedicated Precursor Vault Chamber Archetypes**:
+    - `PrecursorSanctumVault` (Sector 1+): Runic dais, vaulted basalt ceiling arches, glowing titanium portal columns, sealed bulkhead doorway.
+    - `SubterraneanVaultBastion` (Sector 2+): Heavily fortified military garrison with perimeter catwalk mezzanine ($y=room.floor\_y+4$), industrial ladder shafts, titanium blast gate, and reinforced bulkhead pylons.
+    - `AbyssalVaultChasm` (Sector 3 Exclusive): Colossal 10m drop chasm to bedrock ($y=4$), molten thermite slag & obsidian punji pits, radioactive cliff seams, floating monolithic stepping islands ($y=14$), and isolated boss dais.
+  - **Level-Scaled Approach Obstacles**:
+    - Sector 1: `AquiferSteppingStones` — Crystal flora moat with a 4-way cross of precursor stepping stones.
+    - Sector 2: `HazardTrenchSlag` — Perimeter defense trench filled with razor obsidian spikes and molten slag flumes, crossed via a narrow titanium balance walkway.
+    - Sector 3: `ChasmAbyssRadiation` — Floating precursor monolithic stepping islands across a lethal void/radiation chasm.
+  - **Level-Scaled Boss Monsters & Guardians**:
+    - Sector 1: Stalker Melee Guardian lurking in the sanctum shadows.
+    - Sector 2: Stalker Shooter Guardian sniping from the bastion mezzanine catwalks.
+    - Sector 3: Chitin Goliath Boss Guardian — 3-meter armored apex terror with high health pool, heavy ground slams causing localized ceiling collapses, and impenetrable chitin plating.
+  - **Clean Room Integration & Seamless Navigation**:
+    - Fixed corridor-vault doorway collisions: `configure_vault_placement` verifies `has_unconnected_clear_wall` before picking host rooms. If all 4 cardinal walls have active corridors, the vault portal shifts off-center by $+4$ voxels along X so doorways never collide with central corridors.
+    - Added elevation diversity check in `LevelGenerator::generate_layout` ensuring at least one connected room pair has differing floor elevations ($y=4$ vs $y=14$), guaranteeing sloping stepped ramps across all seeds.
+    - Excluded dedicated vault chambers and vault host rooms from secondary random fluid contamination (`has_random_fluid`), maintaining dry, walkable breach zones.
+    - Resolved unanchored floating block bugs in structural check by ensuring downward support pillars convert foundation slabs to full cubes and adding a post-pillar load-bearing sweep in `ensure_world_connectivity`.
+  - **Validation & Test Coverage**:
+    - Added Module 17 to `tests/test_level_collision.cpp` validating dedicated vault room archetypes, obstacle scaling, and boss guardian roles across multiple procedural seeds.
+    - All 19 parallel test suites passing 100% in ~5s via `python scripts/tdd.py`.
+
+- **Subterranean Cave Wall Texturing, Geological Strata Bands & Multi-Tier Clutter (`src/voxel/`, `src/graphics/`, `wiki/`)**:
+  - **Organic Harmonic Wall Geometry**:
+    - Upgraded `LevelGenerator::compute_room_wall_radius` to incorporate 3D asymmetric harmonic lobes (frequencies 3 and 5), vertical swell / strata ripples ($\sin(0.42y)$), and micro-cragginess, eliminating sterile planar boxiness across all chambers.
+    - Updated corridor carving along X, Z, and diagonal axes with 3D noise modulation ($\pm 0.42\,\text{m}$), ensuring organic variation along tunnels while maintaining $\ge 1.8\,\text{m}$ collision clearance.
+  - **Sedimentary & Igneous Strata Bands**:
+    - Layered subterranean cavern walls in `check_doorway_or_solid` into wavy geological strata bands: dark volcanic basalt (`MAT_VOLCANIC_BASALT`), fractured granite (`MAT_FRACTURED_GRANITE`), and ancient bedrock (`MAT_DREDGE_BEDROCK`).
+    - Added high-frequency spatial hashing for crumbly vs tough rock inclusions and wall-base moisture lichen/moss (`MAT_BIOLUMINESCENT_FLORA`).
+  - **Multi-Tier Surface & Wall-Mounted Clutter**:
+    - Added multi-tier scale variation for floor scree/rubble ($0.32\times$, $0.62\times$, $1.15\times$) and ceiling stalactites ($0.35\times$, $0.60\times$, $1.05\times$).
+    - Implemented vertical **Wall-Mounted Clutter Pass** scanning exposed perimeter faces ($+X, -X, +Z, -Z$), anchoring protruding rock spurs, downward wall stalactite dripstones, and tinted mineral crystals aligned with wall normals.
+
+## 2026-10-10
+- **On-Screen Text Notices & Crisis Banner Removal — Full Audiovisual Immersion Transition (`src/ui/`, `src/core/`, `wiki/`)**:
+  - **Eliminated On-Screen Tactical Notification & Warning Stack**:
+    - Removed Section 9 (`ON-SCREEN TACTICAL NOTIFICATIONS STACK`) card rendering in `HUD::render()` (`src/ui/hud.cpp`). The persistent text popup cards at the top of the screen that previously displayed game notices are eliminated, keeping the field of view clean, atmospheric, and immersive.
+    - Removed Section 7a (`PRIMARY ENVIRONMENTAL CRISIS BANNER`) in `HUD::render()` (`! ACTIVE SEISMIC TREMOR IN PROGRESS !`), removing disruptive arcade-style full-screen warning banners during tremors.
+  - **Purged Gameplay Text Warning Callbacks**:
+    - Disconnected `m_player->set_on_warning` and `m_mission.set_on_notification` callbacks in `Application::init()` (`src/core/application.cpp`).
+    - Removed spammy text warning triggers across all delver gameplay events:
+      - Flare deployment, seismic tremors, ceiling spall, burrower sub-terrain detection.
+      - Proximity pre-damage notifications for ionizing radiation, toxic bio-gas vents, obsidian spikes, and molten magma.
+      - Low thruster power alerts, toxic gas inhalation notices, room biome entry advisories, and combat kill confirmations.
+      - Extraction holdout wave notices (`! HOSTILE SCOUT INBOUND !`, `!! APEX WAVE !!`, `!!! EVAC POD INBOUND !!!`) and beacon locked notifications.
+  - **Sensory Grounding via Audio, Visuals & Environmental Events**:
+    - **Audio Feedback**: The game now exclusively relies on its rich 3D spatial soundscape (`AudioSystem` / `SoundCue`):
+      - Proximity hazards telegraphed via Geiger counter clicking (`update_hazard_proximity_audio`), boiling lava murmurs, hissing gas pockets, and sub-frequency hums.
+      - Low health & combat tension communicated through dynamic cardiac biometric heartbeats (`update_biometrics`), delver vocalization/asphyxiation groans, and beast growls.
+      - Extraction holdouts telegraphed by roaring thruster descent acoustics, mechanical beacon deployment audio, and tremor rumbling.
+    - **Visual & Physical Cues**:
+      - Environmental crises telegraphed by volumetric fog density shifts, particle embers, screen trauma/camera shudder (`add_trauma`), falling ceiling spall debris, and subtle chromatic damage flashes.
+      - Vital suit status and weapon state remain readable at a glance via the sleek, compact corner HUD gauges (Vitals, Dosimeter, Radar, Noise Meter, Inventory Quota).
+  - **Validation & Test Compatibility**:
+    - Preserved underlying data structures (`m_notifications`, `compute_top_stack_layout`) so headless layout unit tests continue to validate layout math without regression.
+    - All 18 test suites passed in parallel with zero regressions.
+
+- **Room Adjacency Constraints, Thematic Continuity & Contextual Selection Rules (`src/voxel/`, `tests/`, `wiki/`)**:
+  - **Zero Adjacent Same-Type Hard Guarantee**:
+    - Enforced strict 100% hard constraint in `LevelGenerator::generate_layout()` preventing two orthogonally adjacent rooms from ever sharing the same `RoomShapeType`.
+    - Added heavy penalty for diagonal same-type rooms, eliminating repetitive room clusters across the subterranean grid.
+  - **Thematic Categorization (`RoomCategory`) & Contextual Affinity Scoring**:
+    - Classified all 27 room archetypes into 7 distinct thematic categories (`SafeTerminal`, `NaturalCrystalline`, `BioOrganic`, `PrecursorIndustrial`, `VolcanicThermal`, `TectonicChasm`, `CosmicVoidAbyss`).
+    - Implemented `get_room_adjacency_affinity(typeA, typeB)` evaluating geological and atmospheric transitions between neighboring rooms (e.g., thermal to coolant/water affinity $+16.0$, volcanic to basalt tectonic $+10.0$, bio-organic to crystal grotto $+14.0$).
+  - **Placement Limits & Safety Boundaries**:
+    - *Spawn Safety*: Extreme hazard rooms (`MagmaCalderaLake`, `MoltenMagmaFoundry`, `VoidSingularityRift`, `SpikeTrenchArena`, `RadioactiveCoreSanctuary`) are strictly prevented from spawning adjacent to spawn cavern $(0, 0)$.
+    - *Harsh Hazard Anti-Clustering*: Harsh hazard rooms can be adjacent to at most 1 other harsh hazard room.
+    - *Category Diversity*: Limits adjacent rooms of the same category to $\le 2$.
+    - *Global Archetype Caps*: Standard rooms capped at $\le 2$ instances per level; colossal/massive landmarks capped at $\le 1$ instance per level.
+  - **Wavefront Constraint Satisfaction Solver**:
+    - Replaced unconstrained random archetype rolls with Manhattan-distance wavefront traversal outward from spawn $(0,0)$.
+    - Evaluates candidates against hard limits and scores them via combined heuristic weights (`base_affinity * 1.5 + seed_variation - repetition_penalties`), with progressive fallback relaxation.
+  - **Test Suite & Validation**:
+    - Added Module 14 to `tests/test_level_collision.cpp` validating 90 generated level layouts across Sectors 1-3 with 0 adjacent same-type violations and 100% compliance with adjacency rules.
+    - All 18 parallel test suites passing cleanly via `python scripts/tdd.py`.
+
+- **Wall-Embedded Objective Deposit Architecture & Surface Discovery Guarantee (`src/voxel/`, `tests/`, `wiki/`)**:
+  - **Eliminated Free-Floating Objective Crystals**:
+    - Previously, candidate spawn offsets placed objective voxels inside rooms before room shape carving, occasionally leaving purple Voidite blocks floating in open air or obstructing floor walkways.
+    - Updated `LevelGenerator::add_objective_voxel()` to strictly reject any position that is `MAT_AIR`, fluid, or bedrock, enforcing that objective crystals can only replace solid mineable base wall or structural voxels (`is_mineable_solid()`).
+  - **Surface Exposure & Inward Vein Growth (`find_wall_surface_voxel()`)**:
+    - Implemented `LevelGenerator::find_wall_surface_voxel()` to anchor every deposit directly onto the solid rock face of perimeter walls, columns, quarry benches, or ledges bordering room `MAT_AIR`.
+    - **Surface Visibility Guarantee**: At least one piece of each vein is positioned flush on the wall surface with an exposed face adjacent to room air, ensuring delvers can visually spot the emissive purple crystal outcrop when exploring the chamber.
+    - **Natural Inward Vein Growth**: Multi-block deposits ($N > 1$) extend inward into the solid rock matrix along the wall's inward normal and lateral tangents behind the surface block, creating realistic, authentic ore veins embedded in the cavern walls that delvers excavate by drilling into the rock face.
+  - **Base Geometry Decoupling (`sample_base_voxel`)**:
+    - Introduced `LevelGenerator::sample_base_voxel()` to query true room and terrain geometry prior to objective injection, allowing robust wall finding and boundary validation.
+    - Updated `get_room_at_position()` with a secondary 2-voxel wall buffer so perimeter wall deposits are seamlessly attributed to their respective parent rooms.
+  - **Comprehensive Test Suite Validation**:
+    - Added Module 12.9.5 in `tests/test_level_collision.cpp` asserting that zero objective voxels spawn in `MAT_AIR` and every room containing objective resources possesses an exposed vein surface piece facing room air across all sectors and seeds.
+    - All 18 parallel test suites passing cleanly via `python scripts/tdd.py`.
+
+- **Scalable Material Scarcity System, Late-Level Astral Ore & Pure Single-Ore Veins (`src/voxel/`, `src/player/`, `src/core/`, `src/ui/`, `tests/`, `wiki/`)**:
+  - **New Late-Level Material: Astral Ore (`MAT_ASTRAL_ORE = 17`)**:
+    - Introduced mythic Grade 5 material `MAT_ASTRAL_ORE` (alias `MAT_ASTRAL`, `MAT_ASTRAL_LUMEN`) unlocked in Sector 3+.
+    - Added procedural PBR 2D texture generation in layer 17 of `texture_array.cpp` with golden starlight streaks (`#FFE066`), diamond specular flecks, and warm emissive glow (`er=255, eg=220, eb=120`).
+    - Integrated with block break FX particles, emissive meshing, spectrometer HUD target prompt (`"[EXOTIC ASTRAL ORE]"`), and surveying sonar detection.
+    - Added `astral_ore` inventory tracking, sector expedition quotas (`target_astral_ore`), evacuation lock checks, score multiplier (+250 XP, +100 gold bonus per core), and persistent profile save/load in `save_system.cpp`.
+  - **Scalable Material Scarcity Architecture (`MaterialScarcitySystem`)**:
+    - Created extensible registry mapping each material to its `MaterialGrade` (Common through Mythic), `unlock_sector`, `base_scarcity`, `scarcity_decay_per_sector`, and `min_scarcity`.
+    - **Progression Dynamics**: In earlier sectors, high-grade materials are 100% locked ($S = 1.0$). As delvers reach deeper sectors, the scarcity rate of previously unlocked ores smoothly decays, rendering early materials (Titanium, Voidite) more common and accessible, while higher-grade materials (Radioactive, Prismatic, and Astral Ore) maintain high scarcity rates ($S > 0.75$).
+    - Abundance spawn weights ($W = \max(0, 1 - S)$) cleanly drive procedural ore vein selection.
+  - **Pure Single-Ore Vein Invariant**:
+    - Procedural host rock veins cluster into coherent 3D cells `(x/3, y/2, z/3)`.
+    - Vein ore type is sampled strictly once per cluster (`hash_coord(cell_x, cell_y, cell_z, 4513)`), guaranteeing 100% ore purity within any vein (no mixed-ore clusters).
+    - Added `sample_voxel(x, y, z, &is_vein)` and `is_vein_voxel(x, y, z)` to `LevelGenerator` for exact, zero-overhead vein identification without desync.
+  - **Comprehensive TDD Validation**:
+    - Validated in `tests/test_level_collision.cpp` Module 13 and `tests/test_unit_all.cpp` Module 18; all 18 test suites passing in parallel.
+
+- **Visual Decoupling: Room Decorations & Surface Clutter vs Objective Minerals (`src/voxel/`, `src/graphics/`, `src/ui/`, `tests/`)**:
+  - **Natural & Architectural Material Realism in Room Shapes**:
+    - Replaced pseudo-crystal blocks across natural and architectural room features with appropriate structural materials (`MAT_VOLCANIC_BASALT`, `MAT_FRACTURED_GRANITE`, `MAT_TITANIUM`, `MAT_BIOLUMINESCENT_FLORA`):
+      - Quarry excavation floors (`sample_terraced_quarry`) now use basalt.
+      - Support column bands and bridge keystone (`sample_pillar_hall`) now use structural titanium alloy.
+      - Caldera volcanic chimney (`sample_magma_caldera`) now uses solid volcanic basalt.
+      - Moisture stalactites and oasis banks (`sample_aquifer_oasis`) now use basalt and bioluminescent moss flora.
+      - Crevasse grapple stalactite (`sample_fault_crevasse`) now uses anchored basalt.
+      - Wall ore veins in host rock matrix (`sample_point`) now generate titanium, radioactive ore, or flora, eliminating false crystal signals in transit tunnels.
+  - **Decorative Crystal Visual Distinction (`MAT_PRISMATIC_CRYSTAL`)**:
+    - Overhauled texture generation in `texture_array.cpp` to an icy radiant diamond cyan / aquamarine palette (`#4DEEEA`) with sharp white specular refraction ridges and cyan luminescence (`er=25, eg=205, eb=245`).
+    - Updated PBR fallback albedo in `voxel_pbr.frag` to radiant cyan `vec3(0.25, 0.92, 0.96)`, completely removing all purple/violet undertones so players never confuse decorative crystals with objective Voidite (`MAT_VOIDITE_CRYSTAL`, `vec3(0.48, 0.12, 0.72)`).
+  - **Dedicated Clutter System Archetypes (`ClutterType::PrismaticCrystal`)**:
+    - Added `ClutterType::PrismaticCrystal` for decorative diamond crystals, featuring multi-faceted icy cyan diamond spires with sparkling white apex crests (`glm::vec4(0.25f, 0.92f, 0.98f, 1.0f)`).
+    - `ClutterType::VoiditeCrystal` is strictly reserved for objective Voidite blocks, preserving its signature purple amethyst spires.
+    - Clutter break particles emit cyan diamond shards for decorative crystals and purple shards for objective Voidite.
+  - **HUD & Scanner Differentiation**:
+    - Target hover prompt clearly distinguishes `[LMB] DRILL VOIDITE (OBJECTIVE)` in violet (`COLOR_PURPLE`) from `[LMB] SALVAGE PRISMATIC (DECORATIVE)` in cyan (`COLOR_CYAN`).
+    - Scanner clusters and compass ribbon label `[OBJ VOIDITE: Xm]` in magenta vs `[DECORATIVE PRISMATIC: Xm]` in cyan.
+
+- **Procedural Level Generation: Objective Material Budgeting, Room Shape Decoupling & Scarcity Validation (`src/voxel/`, `src/core/`, `tests/test_level_collision.cpp`, `wiki/`)**:
+  - **Decoupling Objective Materials from Fixed Room Shapes**:
+    - Removed hardcoded objective material (`MAT_VOIDITE_CRYSTAL`) generation across all 27 room shape samplers (geodes, pillar halls, cathedrals, firmament abyss, training niche, and corridors), replacing them with decorative crystals (`MAT_PRISMATIC_CRYSTAL`, `MAT_TITANIUM`, `MAT_BIOLUMINESCENT_FLORA`).
+    - Decoupled `MAT_PRISMATIC_CRYSTAL` mining rewards in `application.cpp` to grant rare salvage (+10 Salvage, +50 pts) instead of Voidite, ensuring only genuine `MAT_VOIDITE_CRYSTAL` deposits advance the level objective quota.
+    - Prevents single room types from acting as "jackpot" resource caches that immediately fulfilled quotas without requiring cave exploration.
+  - **Budgeted, Scarce Objective Resource Placement (`place_objective_resources`)**:
+    - Quota-Aware Generation: The level quota target is passed directly to `LevelGenerator(sector, seed, vertical_chunks, target_objective)`.
+    - Tight Budget Cap: Total spawned objective voxels across the entire cave system are capped strictly to $\text{target} + 2$ (at most $\text{target} + 3$), eliminating over-abundance while ensuring guaranteed completability if a block is lost to hazards.
+    - Zero Near-Spawn & Zero-Extraction Gating: Distance 0 (Spawn Cavern), Distance 1 (Adjacent Rooms), and the Extraction Landing Bay have 0 candidate spawn offsets and strictly 0 spawned crystals.
+    - Empty Rooms Invariant ($40\%\dots 52\%$ of All Rooms): Rather than scattering crystals uniformly into every room, distant rooms receive deposits up to per-room capacity ($2\dots 4$ voxels, up to 5 in Sector 1) until the quota budget is satisfied. Subsequent distant chambers receive 0 objective materials (`rooms_with_zero_objective_count()`), forcing players to explore the cavern system.
+    - Pre-Determined Candidate Spawn Nodes across All 27 Archetypes: Placed in tailored natural wall crevices, high ledges, pillar flanks, and corner alcoves via `get_room_candidate_spawn_offsets()`.
+    - Small Vein Granularity: Objective deposits spawn in tight veins of 2 to 3 voxels, distributing resources across distant rooms ($D \ge 2$) with no room exceeding 4-5 voxels. Players are forced to venture into multiple distant rooms to complete the level.
+  - **Room-Level & Level-Wide Validation Checks (`validate_room_resources`, `validate_level_resources`)**:
+    - `validate_room_resources(room)` returns a `RoomValidationReport` auditing each room for zero near-spawn/extraction resources and maximum allowed capacity.
+    - `validate_level_resources()` enforces total quota completability ($S \ge T$), strict scarcity ceiling ($S \le T + 3$), presence of multiple zero-resource rooms, and multi-room spread.
+    - Guaranteed non-hanging safety fallback and scarcity ceiling trimmer.
+  - **High-Performance Bitset Indexing**:
+    - $O(1)$ branchless bitset spatial lookup (`m_objective_bitset`) for instant sampling in `sample_voxel()`.
+  - **Ultra-Fast Parallel TDD Runner (`scripts/tdd.py`)**:
+    - Enabled `--parallel` (multi-core `/m` MSBuild) in CMake build command, slashing build time from ~40s to ~2.7s.
+    - All 18 test suites execute in parallel in ~3.1s.
+
+- **Removal of Carry Weight & Overburden Encumbrance Mechanics (`src/player/loadout.hpp`, `src/ui/hud.cpp`, `src/ui/pause_menu.cpp`, `tests/test_unit_all.cpp`)**:
+  - **Unrestricted Inventory Capacity**:
+    - Removed carry weight calculation and encumbrance penalties from `PlayerInventory`. `carry_weight()` is locked to $0.0\,\text{kg}$, `is_overburdened()` always returns `false`, and `overburden_penalty()` returns an unencumbered $1.0\times$ speed multiplier across all contractor archetypes.
+    - Delvers maintain $100\%$ base movement velocity and standard jetpack fuel consumption regardless of mined mineral volume or relic recovery.
+  - **HUD & UI Refinement**:
+    - **In-Game HUD (`src/ui/hud.cpp`)**: Replaced the cargo `LOAD: X/Y KG` gauge in the secondary mineral row with a direct `SALVAGE: X` count, keeping resource telemetry focused on actionable crafting materials.
+    - **Pause Menu Cargo Rig (`src/ui/pause_menu.cpp`)**: Removed weight progress bars, overburden warning alerts, and per-item kilogram annotations. Replaced with clean unit tallies (`X UNITS`) and an "Unrestricted Capacity" mobility status indicator.
+  - **Unit Test Matrix (`tests/test_unit_all.cpp`)**:
+    - Updated Module 11 unit tests to validate unrestricted inventory hauls and verify that no class experiences overburden penalties upon mineral or relic acquisition.
+
+- **Realistic Projectile Ballistics, Orthonormal 3D Meshes & Shooter Velocity Inheritance (`src/player/`, `src/entities/`, `src/graphics/`, `src/core/`)**:
+  - **Shooter Platform Velocity Inheritance (Galilean Invariance)**:
+    - Updated `PlayerController::try_fire_weapon()` to add player platform velocity (`m_velocity`) to projectile velocity (`bolt.velocity = fire_dir * speed + m_velocity`).
+    - Eliminates lateral reticle drift when strafing sideways: from the player's moving frame of reference, bullets travel straight along the forward sightline rather than dragging horizontally across the screen as an artificial sideways bar.
+    - Updated `VoidStalker` spine launches to inherit stalker movement velocity (`s.velocity * 0.4f`), providing realistic ballistic lead and trajectory fidelity during leaping/circling attacks.
+  - **Orthonormal Projectile Orientation Matrix (`src/graphics/renderer.cpp`)**:
+    - Replaced flawed Euler yaw/pitch rotation (which suffered from inverted pitch signs, gimbal lock, and mirroring across XZ planes) with `make_projectile_matrix()`.
+    - Constructs an exact orthonormal coordinate basis $([\text{right}, \text{up}, \text{forward}, \text{pos}])$ aligning local $+Z$ directly along the velocity vector, guaranteeing mathematically perfect orientation along true 3D trajectories at all pitch and yaw angles.
+  - **Faceted Aerodynamic 3D Projectile Meshes & Volumetric Trails**:
+    - **Delver Plasma Bolts (`add_plasma_bolt_mesh`)**: Replaced blocky Minecraft-style cuboids with a 6-sided faceted nose cone, cylindrical PBR energy sheath, boat-tail exhaust nozzle, 4 stabilizing aerodynamic ion vanes, white-hot emissive core spindle ($Z = 8.5\text{f}$ bloom), and a 3D volumetric cross-quad energy wake ribbon trailing behind.
+    - **Void Stalker Spines (`add_void_spike_mesh`)**: Replaced generic cuboid with a virulent bio-crystalline quill featuring a hexagonal diamond apex needle, backward-swept recurved chitin barbs, radiant toxic emerald core spindle, and 3D volumetric toxic vapor wake ribbon.
+  - **Dynamic Cavern Illumination (Real-Time Point Lights)**:
+    - Added dynamic point light illumination for active plasma bolts (electric cyan/orange, radius $6.0\text{m}$, intensity $2.8\text{f}$) and void spine projectiles (toxic emerald, radius $5.0\text{m}$, intensity $2.5\text{f}$) in `Application::render_world()`, casting real-time light onto dark subterranean cave walls and tunnels.
+  - **Regression Test Suite (`tests/test_gameplay_mechanics.cpp`)**:
+    - Added `ProjectileBallisticsAndShooterVelocityInheritanceTest` validating stationary muzzle speed, lateral strafing momentum preservation with zero relative drift across reticle, and vertical jump inheritance.
+
+- **Procedural Fluid Structures, Wall Cascades, Hazard Trenches & Drop Sumps (`src/voxel/level_shapes.hpp`, `src/voxel/level_shapes.cpp`, `tests/test_fluid_geometry.cpp`)**:
+  - **Dynamic Fluid Structure Archetypes**:
+    - Replaced uniform static fluid pools with six distinct procedural fluid structure types (`FluidStructureType`): `ContainedPool`, `SteppingStonePool`, `WallCascade`, `CascadingTwinPools`, `HazardTrench`, and `DropChasmSump`.
+    - **`WallCascade`**: Generates vertical stone flume buttresses rising up the wall to an emissive crystal or bulkhead discharge spout, pouring down into an enclosed plunge basin with localized acoustic spray.
+    - **`CascadingTwinPools`**: Generates dual interconnected basins in an hourglass/dumbbell configuration separated by a solid stone weir ridge and traversal bridge.
+    - **`HazardTrench`**: Generates elongated security/cooling trenches (coolant, molten slag, or acid) cutting across rooms with midpoint crossing stepping stones to serve as tactical environmental obstacles.
+    - **`SteppingStonePool`**: Generates hazardous pools with elevated prize/mineral plinths and stepping stone paths.
+    - **`DropChasmSump`**: Generates vast sump reservoirs at the base of deep abyssal chasms, colossal drop pits, and tectonic sinkholes with central extraction/refinery platforms.
+  - **Watertight Invariant & Sleep on Spawn**:
+    - Formulated mathematical containment ensuring every liquid voxel has solid/non-air support beneath, complete cardinal lateral containment on all four horizontal sides, and raised solid retaining rims exceeding liquid surface height.
+    - Guaranteed room centers and cardinal doorway corridors remain dry and unobstructed for navigation.
+    - Maintained 0 ms idle CPU cost on spawn across all 50 seeds in `test_fluid_geometry.cpp`.
+
+## 2026-10-09
+- **Two-Tier Delver Defense: Recharging Kinetic Shield Layer & Non-Regenerating Hitpoints (`src/player/`, `src/ui/`, `wiki/`)**:
+  - **Kinetic Shield Layer Architecture (`src/player/controller.hpp`, `src/player/controller.cpp`, `src/player/character_class.hpp`)**:
+    - Added `baseShield` attribute to `CharacterAttributes` and initialized per archetype: Demolitionist ($50\,\text{SP}$), Vanguard ($75\,\text{SP}$), and Scout ($40\,\text{SP}$).
+    - Integrated `m_shield` and `m_max_shield` into `PlayerController` and `ExoStatus.shield`.
+    - In `PlayerController::take_damage()`, all incoming damage sources (kinetic attacks, enemy melee, falling debris, spikes, and environmental hazards) are absorbed by the shield layer first.
+    - If damage exceeds the current shield capacity, the shield breaks/depletes to $0\,\text{SP}$, and the remaining overflow punctures into suit integrity hitpoints.
+    - Automated out-of-combat shield recharge: after $4.0\,\text{s}$ without taking damage (`m_shield_recharge_delay`), the shield automatically recharges at $+15.0\,\text{SP/s}$ (`m_shield_recharge_rate`) until reaching maximum capacity. Taking damage resets the timer immediately to $0\,\text{s}$ to interrupt recharge.
+  - **Permanent Hitpoints (Zero Health Regeneration)**:
+    - Completely deprecated and removed the legacy out-of-combat nanite triage health recuperation. Once hitpoints take damage, they cannot be regenerated automatically.
+    - Fatal damage ($0\,\text{HP}$) prevents dead delvers from recharging shields.
+  - **Vitals HUD Gauge Modernization (`src/ui/hud.cpp`)**:
+    - Expanded bottom-left Vitals HUD panel to a 3-tier stacked layout displaying:
+      1. `KINETIC SHIELD`: Electric-cyan bar with percentage and pulsing `[REGEN]` tag when recharging out of combat.
+      2. `SUIT INTEGRITY`: High-visibility green/crimson bar reflecting unregenerated core hitpoints.
+      3. `THRUST POWER`: Cyan bar showing thruster energy.
+    - Color-coded left status indicator accent strip dynamically reflecting shield active (cyan), unshielded caution (amber), and critical health (crimson).
+  - **Regression & Unit Testing (`tests/test_gameplay_mechanics.cpp`, `tests/test_progression.cpp`, `tests/test_e2e_expeditions.cpp`, `tests/test_level_collision.cpp`)**:
+    - Added dedicated test `PlayerShieldLayerRechargeAndNonRegeneratingHealthTest` verifying shield absorption, overflow damage, continuous damage recharge suppression, 4.0s out-of-combat recharge curve, permanent health damage over 60s idle time, and fatality suppression.
+    - Updated regression suites to validate shield layer mechanics and unshielded direct health damage.
+
 ## 2026-10-08
 - **Optimized Event-Driven Liquid Physics, Sub-Block Waterlogging & Slope Conformance (`src/voxel/`, `src/graphics/`, `src/player/`)**:
   - **Liquid Metadata & Waterlogging Allocation (`src/voxel/chunk.hpp`, `src/voxel/voxel_types.hpp`, `src/voxel/packed_vertex.hpp`)**:
@@ -586,4 +855,23 @@ Chronological ledger of balance iterations, mechanics additions, and architectur
   - Composites 4x4 master contact sheet montage (`docs/level_design/level_shapes_showcase.jpg` and `.png`) with telemetry headers and footers.
   - Generated comprehensive developer visual catalog in `docs/level_design/README.md`.
 - **Validation**: All 16 slots verified at 100.0% non-black ratio and healthy luminance; all 7 test suites pass in $< 1.1\,\text{s}$ via `python scripts/tdd.py`.
+
+### 2026-10-10: Shape-Conforming & Material-Consistent Block Breaking Animation Architecture
+- **Shape-Conforming Crack Decal Geometry**:
+  - Replaced legacy axis-aligned 1x1 flat plane crack overlay with 3D shape-conforming geometry calculation (`BlockBreakFX::generate_block_crack_geometry` in `src/voxel/block_break_fx.cpp`).
+  - **Ramps (`SHAPE_RAMP_EAST`, `WEST`, `SOUTH`, `NORTH`)**: Sloped hypotenuse face crack lines adhere precisely to 45° slope equations ($y=x$, $y=1-x$, $y=z$, $y=1-z$) with tangent vectors along and across the slope. Flank hits conform to vertical triangular side walls.
+  - **3D Silhouette Stress Fractures**: When breaking progress reaches $\ge 33\%$ (stage 2+) and $\ge 50\%$ (stage 3+), multi-axis structural silhouette stress fractures wrap around the wedge's diagonal ridges, crest, toe, and heel lines while remaining strictly inside the solid prism volume.
+  - **Slabs (`SHAPE_SLAB_BOTTOM`, `TOP`)**: Crack overlays align with half-height boundaries ($Y = 0.5\text{m}$) with side wall extents clamped to half height.
+- **Material Texture Fracture Patterns & Color Consistency**:
+  - Implemented `BlockBreakFX::get_material_crack_color` with distinctive mineral and alloy palettes:
+    - *Voidite & Prismatic Crystals*: 60°/120° cleavage facet stars with amethyst-to-lilac and iridescent cyan discharge.
+    - *Industrial Bulkheads & Vault Doors*: 45° cold-rolled shear stress bands, perimeter bolt strain rings, and incandescent orange-amber sparks.
+    - *Granite & Basalt*: Quartz-tan fissures and incandescent volcanic magma cooling joints.
+    - *Radioactive Ore*: Ionizing phosphorescent toxic emerald to neon nuclear green discharge.
+- **Shape-Aware Particle Ejection & Center-of-Mass**:
+  - `spawn_crack_debris` and `spawn_break_particles` compute true center-of-mass ($Y = 0.333\text{m}$ for ramps, $Y = 0.25\text{m}$ or $0.75\text{m}$ for slabs) and eject particles along the slope normal with material-matching color palettes.
+- **Verification & Testing**:
+  - Added unit test cases `BlockBreaking.MaterialTextureCrackColorConsistency` and `BlockBreaking.ShapeConformingRampAndSlabCrackAnimation` in `tests/test_voxel_geometry.cpp`.
+  - Executed full 18-suite test suite via `python scripts/tdd.py` (all 18 suites passing in $< 3.5\,\text{s}$).
+
 

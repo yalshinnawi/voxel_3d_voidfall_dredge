@@ -145,18 +145,37 @@ struct DelverUpgrades {
 struct SectorRecord {
     int highest_completion_rate{0};
     std::string best_badge{"UNEXPLORED"};
+    uint32_t saved_seed{0};
+    bool completed{false};
+
+    SectorRecord() = default;
+    SectorRecord(int rate, const std::string& badge, uint32_t seed = 0, bool comp = false)
+        : highest_completion_rate(rate), best_badge(badge), saved_seed(seed), completed(comp) {
+        if (!completed && (rate >= 50 && badge != "M.I.A. (SUIT FAILURE)" && badge != "ABANDONED (<50%)" && badge != "UNEXPLORED")) {
+            completed = true;
+        }
+    }
+
+    bool is_completed() const {
+        return completed || (highest_completion_rate >= 50 &&
+                             best_badge != "M.I.A. (SUIT FAILURE)" &&
+                             best_badge != "ABANDONED (<50%)" &&
+                             best_badge != "UNEXPLORED");
+    }
 };
 
 struct PlayerInventory {
     int voidite{0};
     int titanium{0};
     int salvage_parts{0};
+    int astral_ore{0};
     int demolition_charges{3};
     int bulkheads{15};
     int max_bulkheads{20};
     int scrap_metal{0};
     int granite_mined_count{0};
     int total_run_score{0};
+    uint32_t active_seed{0};
 
     // Upgrades persist across expedition runs
     DelverUpgrades upgrades;
@@ -165,6 +184,7 @@ struct PlayerInventory {
     bool vault_breached{false};
     bool relic_extracted{false};
     int target_voidite{25};
+    int target_astral_ore{0};
     int alphas_eliminated{0};
     int target_alphas{0}; // >0 in endless sectors requiring an alpha kill
     std::string custom_objective_text{""};
@@ -185,35 +205,21 @@ struct PlayerInventory {
         return max_bulkheads + upgrades.max_bulkheads_level * 5;
     }
 
+    // Carry weight removed: inventory has unrestricted capacity and zero movement penalty
     float carry_weight() const {
-        return static_cast<float>(voidite) * 1.0f +
-               static_cast<float>(titanium) * 2.5f +
-               static_cast<float>(salvage_parts) * 0.4f +
-               static_cast<float>(bulkheads) * 2.0f +
-               static_cast<float>(demolition_charges) * 1.5f +
-               (relic_extracted ? 10.0f : 0.0f);
+        return 0.0f;
     }
 
-    float max_carry_weight(int class_id) const {
-        // 0: Demolitionist, 1: Vanguard, 2: Scout
-        switch (class_id) {
-            case 1: return 85.0f; // Vanguard heavy frame
-            case 0: return 60.0f; // Demolitionist balanced
-            case 2: return 42.0f; // Scout agile frame
-            default: return 60.0f;
-        }
+    float max_carry_weight(int /*class_id*/) const {
+        return 0.0f;
     }
 
-    bool is_overburdened(int class_id) const {
-        return carry_weight() > max_carry_weight(class_id);
+    bool is_overburdened(int /*class_id*/) const {
+        return false;
     }
 
-    float overburden_penalty(int class_id) const {
-        float cw = carry_weight();
-        float mw = max_carry_weight(class_id);
-        if (cw <= mw) return 1.0f;
-        float excess = (cw - mw) / mw;
-        return std::max(0.55f, 1.0f - excess * 0.45f);
+    float overburden_penalty(int /*class_id*/) const {
+        return 1.0f;
     }
 
     void add_voidite(int amount) {
@@ -229,6 +235,11 @@ struct PlayerInventory {
     void add_salvage(int amount) {
         salvage_parts += amount;
         total_run_score += amount * 2;
+    }
+
+    void add_astral_ore(int amount) {
+        astral_ore += amount;
+        total_run_score += amount * 10;
     }
 
     void add_relic() {
@@ -312,10 +323,15 @@ struct PlayerInventory {
         return false;
     }
 
-    // Formula: Rate = (Voidite Mined / Target Voidite * 50%) + (Vault Breached * 25%) + (Safe Evac * 25%)
+    // Formula: Rate = (Resource Mined / Target Resource * 50%) + (Vault Breached * 25%) + (Safe Evac * 25%)
     int calculate_completion_rate(bool safe_evac) const {
         float voidite_ratio = (target_voidite > 0) ? std::min(1.0f, static_cast<float>(voidite) / static_cast<float>(target_voidite)) : 1.0f;
-        float rate = (voidite_ratio * 50.0f) + (vault_breached ? 25.0f : 0.0f) + (safe_evac ? 25.0f : 0.0f);
+        float resource_ratio = voidite_ratio;
+        if (target_astral_ore > 0) {
+            float astral_ratio = std::min(1.0f, static_cast<float>(astral_ore) / static_cast<float>(target_astral_ore));
+            resource_ratio = (voidite_ratio + astral_ratio) * 0.5f;
+        }
+        float rate = (resource_ratio * 50.0f) + (vault_breached ? 25.0f : 0.0f) + (safe_evac ? 25.0f : 0.0f);
         int final_rate = static_cast<int>(std::round(rate));
         return (final_rate < 0) ? 0 : (final_rate > 100) ? 100 : final_rate;
     }
@@ -336,7 +352,7 @@ struct PlayerInventory {
         // Hybrid coin earning: base extraction stipend + completion rate bonus + harvested minerals + relic
         int base_payout = safe_evac ? 60 : 20;
         int completion_bonus = run_completion_rate; // 0 to 100 coins
-        int mineral_coins = voidite * 2 + titanium * 3 + salvage_parts * 1;
+        int mineral_coins = voidite * 2 + titanium * 3 + salvage_parts * 1 + astral_ore * 5;
         int relic_bonus = relic_extracted ? 100 : 0;
         run_coins_earned = base_payout + completion_bonus + mineral_coins + relic_bonus;
         if (is_abandoned) {
@@ -354,6 +370,12 @@ struct PlayerInventory {
             } else if (sector_records[sector].best_badge == "UNEXPLORED") {
                 sector_records[sector].best_badge = run_outcome_badge;
             }
+            if (safe_evac && !is_abandoned && !suit_failed) {
+                sector_records[sector].completed = true;
+                if (sector_records[sector].saved_seed == 0 && active_seed != 0) {
+                    sector_records[sector].saved_seed = active_seed;
+                }
+            }
         }
     }
 
@@ -363,13 +385,15 @@ struct PlayerInventory {
         titanium = std::max(0, titanium / 2);
         salvage_parts = std::max(0, salvage_parts / 2);
         scrap_metal = std::max(0, scrap_metal / 2);
+        astral_ore = std::max(0, astral_ore / 2);
         run_coins_earned = std::max(0, run_coins_earned / 2);
     }
 
-    void reset(int voidite_goal = 25) {
+    void reset(int voidite_goal = 25, int astral_goal = 0) {
         voidite = 0;
         titanium = 0;
         salvage_parts = 0;
+        astral_ore = 0;
         demolition_charges = 3;
         bulkheads = 15;
         scrap_metal = 0;
@@ -384,6 +408,7 @@ struct PlayerInventory {
         run_outcome_badge = "UNEXPLORED";
         run_completion_rate = 0;
         target_voidite = voidite_goal;
+        target_astral_ore = astral_goal;
     }
 };
 

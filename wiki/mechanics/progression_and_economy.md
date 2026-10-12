@@ -55,23 +55,42 @@ Where:
 
 ---
 
-## 4. Upgrade Tree Costs & Level Gating
+---
 
-Each skill branch (Mining, Movement, Survival, Sonar) contains 5 sequential tiers. Purchasing a node requires meeting both the **Player Level Requirement** and paying the **Coin / Mineral Cost**.
+## 4. Progressive Skill Tree Matrix (6 Disciplines, 18 Specializations)
 
-| Tier | Required Player Level | Coin Cost | Voidite Cost | Titanium Cost |
-|:---:|:---:|:---:|:---:|:---:|
-| **Tier 1** | Level 1 | 100 | 0 | 0 |
-| **Tier 2** | Level 2 | 160 | 5 | 0 |
-| **Tier 3** | Level 3 | 256 | 10 | 3 |
-| **Tier 4** | Level 4 | 410 | 15 | 6 |
-| **Tier 5** | Level 5 | 656 | 20 | 10 |
+The skill system features a 6-discipline web structure radiating from the central core matrix, mirroring orbital engineering proficiencies. The tree contains **18 specialized nodes** organized into 6 disciplines with a total of **60 points** across the full matrix ($6 \times [5 + 3 + 2] = 60$).
 
-### Exponential Scaling Formula
+### 4.1 Disciplines & Node Hierarchy
+
+Each discipline follows a progressive prerequisite structure: **Foundation (Max 5)** $\rightarrow$ **Specialization (Max 3)** $\rightarrow$ **Capstone (Max 2)**. Specializations require at least Tier 1 in the Foundation node, and Capstones require at least Tier 1 in the Specialization node.
+
+| Discipline | Foundation (Max 5) | Specialization (Max 3) | Capstone (Max 2) |
+|---|---|---|---|
+| **Excavation** | `Drill Speed` (+12%/tier mining speed) | `Drill Durability` (-15% heat, +20% cooling) | `Micro-Charges` (+20%/tier high-grade mineral yield) |
+| **Traversal** | `Thruster Tank` (+20%/tier fuel capacity) | `Kinetic Dynamo` (+15%/tier sprint/fall recharge) | `Sonar Frequency` (+2m radius, -1s CD, T2 HUD labels) |
+| **Defense** | `Reinforced Plating` (+15 HP, -10% debris damage) | `Kinetic Shielding` (+12 Shield, -0.5s recharge delay) | `Defibrillator` (Second Wind survive lethal trauma) |
+| **Stealth** | `Acoustic Dampening` (-20%/tier noise radius) | `Shadow Veil` (-15%/tier optical sightline range) | `Ambush Protocol` (+35%/tier unalerted strike damage) |
+| **Melee** | `Pneumatic Impact` (+30%/tier shove damage & stagger)| `Cleave Shockwave` (90° cleave arc & shock stun) | `Berserker Overdrive` (+12 Shield siphon & speed burst) |
+| **Gun Damage** | `Hyper-Velocity Slugs` (+12%/tier weapon projectile dmg)| `Rapid Cycling` (+8% fire rate, +10% reload speed) | `Critical Weakpoint` (+35%/tier weakpoint headshot dmg) |
+
+### 4.2 Campaign Point Cap vs. Post-Game Grandmaster Matrix
+
+To preserve tactical tension, build diversity, and specialization:
+- **Campaign Point Cap (24 Points Max)**: Prior to completing the entire game (clearing Sector 3: The Void Cradle), players can allocate a maximum of **24 points** (out of 60). Even if a player accumulates surplus EXP, additional nodes are locked with `CampaignCapReached` (`NodeWebState::CampaignCapped`).
+- **Respec Necessity**: Because the campaign cap is 24 points, players cannot acquire all skills simultaneously during the main game. To experience different paths (e.g., switching from a Gun Damage / Melee combat build to a pure Stealth / Defense infiltrator), players must **respec**.
+- **100% Full EXP Refund**: Respec at the Upgrade Terminal refunds **100% of all spent EXP**, instantly returning the full EXP pool to the player and resetting assigned points to 0 so they can immediately redistribute into alternative disciplines.
+- **Post-Game Grandmaster Matrix (60 Points)**: Upon clearing Sector 3 (completing the main story expedition), the point limit expands to **60 points**, allowing dedicated delvers to achieve 100% mastery across all 6 disciplines.
+
+### 4.3 Exponential EXP Cost Scaling Formula
 $$\text{Cost}(\text{tier}) = \left\lfloor 100 \times 1.6^{\text{tier}-1} \right\rfloor$$
+- **Tier 1**: 100 EXP
+- **Tier 2**: 160 EXP
+- **Tier 3**: 256 EXP
+- **Tier 4**: 410 EXP
+- **Tier 5**: 656 EXP
 
-### Respec Economics
-Players can reset all skill trees at the Orbital Hub Terminal at any time. Respec yields an **85% Coin refund** of all spent credits. The 15% delta represents the contractor re-calibration fee. The player's **EXP and Delver Rank are never reduced or reset during respec**.
+Upgrades strictly consume Delver EXP. Mining minerals (Voidite & Titanium) and Credits remain untouched.
 
 ---
 

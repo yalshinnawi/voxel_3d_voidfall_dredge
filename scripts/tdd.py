@@ -38,7 +38,17 @@ TESTS = {
     "collision": {
         "target": "test_level_collision",
         "exe": f"test_level_collision{EXE_EXT}",
-        "name": "Level Design, Base Shapes, Sightlines & Mesh Integrity (9 modules)"
+        "name": "Wall/Ceiling Anti-Clipping, Corner Slide & Hazards (8 modules)"
+    },
+    "generation": {
+        "target": "test_level_generation",
+        "exe": f"test_level_generation{EXE_EXT}",
+        "name": "Procedural Layout, Scarcity & Room Shapes (5 modules)"
+    },
+    "structural": {
+        "target": "test_level_structural",
+        "exe": f"test_level_structural{EXE_EXT}",
+        "name": "Structural Grounding, Adjacency Matrix & Vaults (4 modules)"
     },
     "enemy": {
         "target": "test_enemy_stalker",
@@ -98,7 +108,12 @@ TESTS = {
     "fluid_geometry": {
         "target": "test_fluid_geometry",
         "exe": f"test_fluid_geometry{EXE_EXT}",
-        "name": "Generalized Sub-Block Fluid Filling & Watertight Inter-Level Flow (4 modules)"
+        "name": "Generalized Sub-Block Fluid Filling & Stepped Meshing (13 modules)"
+    },
+    "fluid_containment": {
+        "target": "test_fluid_containment",
+        "exe": f"test_fluid_containment{EXE_EXT}",
+        "name": "Multi-Level Watertight Containment & Sleep-on-Spawn (2 modules)"
     },
     "minecraft_fluid": {
         "target": "test_minecraft_fluid",
@@ -109,6 +124,11 @@ TESTS = {
         "target": "test_fluid_rendering",
         "exe": f"test_fluid_rendering{EXE_EXT}",
         "name": "Fluid Rendering, Shared Edge Elevation & Step Skirt Meshing (2 modules)"
+    },
+    "typography": {
+        "target": "test_ui_typography",
+        "exe": f"test_ui_typography{EXE_EXT}",
+        "name": "Typography, Font Metrics & Text Clutter Prevention (8 modules)"
     }
 }
 
@@ -118,7 +138,7 @@ def run_cmd(cmd, cwd=None):
 
 def build_targets(target=None):
     t0 = time.time()
-    cmd = ["cmake", "--build", BUILD_DIR, "--config", CONFIG]
+    cmd = ["cmake", "--build", BUILD_DIR, "--config", CONFIG, "--parallel"]
     if target:
         cmd.extend(["--target", target])
     

@@ -10,21 +10,21 @@ HazardClock::HazardClock() {
 
 void HazardClock::set_sector_parameters(int sector) {
     if (sector == 1) {
-        m_tremor_interval = 135.0f; // Calmer early cavern: tremors do not happen too soon
-        m_radiation_rate = 0.20f;
-        m_geological_creep = 0.08f;
-        m_stress_decay_rate = 2.4f;
+        m_tremor_interval = 240.0f; // Calmer early cavern: tremors do not happen too soon
+        m_radiation_rate = 0.05f;
+        m_geological_creep = 0.05f;
+        m_stress_decay_rate = 2.6f;
     } else if (sector == 3) {
-        m_tremor_interval = 55.0f;
-        m_radiation_rate = 0.60f;
-        m_geological_creep = 0.35f;
-        m_stress_decay_rate = 1.4f;
+        m_tremor_interval = 120.0f;
+        m_radiation_rate = 0.16f;
+        m_geological_creep = 0.20f;
+        m_stress_decay_rate = 1.6f;
     } else {
         // Sector 2 (Volatile Fault): Moderate escalation
-        m_tremor_interval = 105.0f;
-        m_radiation_rate = 0.25f;
-        m_geological_creep = 0.12f;
-        m_stress_decay_rate = 2.1f;
+        m_tremor_interval = 180.0f;
+        m_radiation_rate = 0.09f;
+        m_geological_creep = 0.08f;
+        m_stress_decay_rate = 2.2f;
     }
     m_tremor_timer = m_tremor_interval;
 }
@@ -218,9 +218,9 @@ void HazardClock::on_rock_mined(const glm::vec3& pos, uint8_t material_id) {
     m_rocks_mined++;
 
     if (!m_warning_phase && !m_is_tremoring && m_tremor_cooldown_timer <= 0.0f) {
-        if (zone.stress >= 65.0f) {
+        if (zone.stress >= 85.0f) {
             float roll = static_cast<float>(rand() % 1000) / 10.0f; // 0..100%
-            float trigger_chance = (zone.stress - 65.0f) * 0.40f;
+            float trigger_chance = (zone.stress - 85.0f) * 0.25f;
             if (roll < trigger_chance || zone.stress >= 100.0f) {
                 trigger_tremor_sequence_at(zone.epicenter);
             }
@@ -245,9 +245,9 @@ void HazardClock::on_weapon_impact(const glm::vec3& pos, float stress_amount) {
     m_bullet_hits++;
 
     if (!m_warning_phase && !m_is_tremoring && m_tremor_cooldown_timer <= 0.0f) {
-        if (zone.stress >= 50.0f) {
+        if (zone.stress >= 85.0f) {
             float roll = static_cast<float>(rand() % 1000) / 10.0f;
-            float trigger_chance = (zone.stress - 50.0f) * 0.55f;
+            float trigger_chance = (zone.stress - 85.0f) * 0.25f;
             if (roll < trigger_chance || zone.stress >= 100.0f) {
                 trigger_tremor_sequence_at(zone.epicenter);
             }
@@ -270,9 +270,9 @@ void HazardClock::on_explosive_detonation(const glm::vec3& pos, float stress_amo
     zone.stress = std::clamp(zone.stress + stress_amount, 0.0f, 100.0f);
 
     if (!m_warning_phase && !m_is_tremoring && m_tremor_cooldown_timer <= 0.0f) {
-        if (zone.stress >= 50.0f) {
+        if (zone.stress >= 80.0f) {
             float roll = static_cast<float>(rand() % 1000) / 10.0f;
-            float trigger_chance = (zone.stress - 45.0f) * 0.65f;
+            float trigger_chance = (zone.stress - 80.0f) * 0.35f;
             if (roll < trigger_chance || zone.stress >= 100.0f) {
                 trigger_tremor_sequence_at(zone.epicenter);
             }
@@ -290,7 +290,7 @@ void HazardClock::finish_tremor() {
     m_tremor_intensity = 0.0f;
     m_rocks_mined = 0;
     m_bullet_hits = 0;
-    m_tremor_cooldown_timer = 40.0f; // 40-second refractory window to prevent repetitive tremors
+    m_tremor_cooldown_timer = 75.0f; // 75-second refractory window to prevent repetitive tremors
 
     // Relieve tectonic strain in epicenter zone and damp neighboring boundary zones
     int cx = static_cast<int>(std::floor(m_active_epicenter.x / ZONE_SIZE));

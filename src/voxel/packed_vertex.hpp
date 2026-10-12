@@ -8,7 +8,7 @@ namespace Voidfall {
 
 
 // Voxel bit flags
-constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x10;
+constexpr uint8_t VOXEL_FLAG_ANCHORED      = 0x78; // Bits 3..6 all 1 (distinguished from 15 custom shapes [0x00..0x70])
 constexpr uint8_t VOXEL_FLAG_EMISSIVE      = 0x20;
 constexpr uint8_t VOXEL_FLAG_SURVEYED      = 0x40;
 
@@ -17,9 +17,10 @@ constexpr uint8_t VOXEL_FLAG_SURVEYED      = 0x40;
 struct Voxel {
     uint8_t material_id{MAT_AIR};
     // Flags:
+    // bit 0:   VOXEL_FLAG_CUSTOM_MODEL (0x01) for dynamic entities (e.g. Precursor Relic)
     // bit 0-2: Damage tier (0..7) or fluid level (1..5)
     // bit 2:   Waterlogged flag (0x04) when occupied by liquid on slab/ramp
-    // bit 4:   Anchored / structural node (0x10)
+    // bit 3-6: Custom geometry shape (0x00..0x70) or VOXEL_FLAG_ANCHORED (0x78)
     // bit 5:   Active emissive (0x20)
     // bit 6:   Surveyed / pinged highlight (0x40)
     // bit 7:   Player-placed block metadata (0x80)
@@ -41,13 +42,20 @@ struct Voxel {
     inline bool is_solid() const {
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE && !is_liquid();
     }
+    inline bool is_custom_model() const {
+        return (material_id == MAT_PRISMATIC_CRYSTAL) && ((flags_and_damage & VOXEL_FLAG_CUSTOM_MODEL) != 0);
+    }
     inline bool is_renderable() const {
+        if (is_custom_model()) return false;
         return material_id != MAT_AIR && material_id != MAT_GAS && material_id != MAT_VOLATILE_SMOKE;
     }
-    inline bool is_anchored() const { return (!is_ramp() && (flags_and_damage & VOXEL_FLAG_ANCHORED) != 0) || material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR; }
+    inline bool is_anchored() const {
+        if (material_id == MAT_DREDGE_BEDROCK || material_id == MAT_REINFORCED_VAULT_DOOR) return true;
+        return (flags_and_damage & VOXEL_SHAPE_MASK) == VOXEL_FLAG_ANCHORED;
+    }
     inline uint8_t damage() const { return flags_and_damage & VOXEL_DAMAGE_MASK; }
     inline void set_damage(uint8_t d) { flags_and_damage = (flags_and_damage & ~VOXEL_DAMAGE_MASK) | (d & VOXEL_DAMAGE_MASK); }
-    inline bool is_highlighted() const { return !is_ramp() && (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
+    inline bool is_highlighted() const { return shape() == SHAPE_CUBE && (flags_and_damage & VOXEL_FLAG_SURVEYED) != 0; }
     inline void set_highlighted(bool h) {
         if (h) flags_and_damage |= VOXEL_FLAG_SURVEYED;
         else   flags_and_damage &= ~VOXEL_FLAG_SURVEYED;
@@ -59,8 +67,12 @@ struct Voxel {
     }
 
     inline VoxelShape shape() const {
+        if ((flags_and_damage & VOXEL_SHAPE_MASK) == VOXEL_FLAG_ANCHORED) {
+            return SHAPE_CUBE;
+        }
         if (material_id == MAT_DREDGE_BEDROCK ||
             material_id == MAT_REINFORCED_VAULT_DOOR ||
+            material_id == MAT_INDUSTRIAL_BULKHEAD ||
             material_id == MAT_AIR ||
             material_id == MAT_GAS ||
             material_id == MAT_VOLATILE_SMOKE ||
@@ -70,7 +82,10 @@ struct Voxel {
             material_id == MAT_RADIOACTIVE_ORE ||
             material_id == MAT_PRISMATIC_CRYSTAL ||
             material_id == MAT_BIOLUMINESCENT_FLORA ||
-            material_id == MAT_OBSIDIAN_SPIKES) {
+            material_id == MAT_OBSIDIAN_SPIKES ||
+            material_id == MAT_ACID ||
+            material_id == MAT_COOLANT ||
+            material_id == MAT_ASTRAL_ORE) {
             return SHAPE_CUBE;
         }
         return static_cast<VoxelShape>(flags_and_damage & VOXEL_SHAPE_MASK);
@@ -159,13 +174,15 @@ struct PackedVoxelVertex {
         float corner_height,
         const glm::vec2& flow_dir,
         uint32_t mat_id = MAT_WATER,
-        uint32_t corner_idx = 0
+        uint32_t corner_idx = 0,
+        uint32_t norm_idx = 2,
+        uint32_t is_vertical_flow = 0
     ) {
         PackedVoxelVertex v;
         v.data0 = (x & 0x3Fu) |
                   ((y & 0x3Fu) << 6) |
                   ((z & 0x3Fu) << 12) |
-                  ((2u & 0x7u) << 18) | // normal_idx = 2 (+Y)
+                  ((norm_idx & 0x7u) << 18) |
                   (0u << 21) |          // ao = 0
                   ((mat_id & 0xFFu) << 23);
 
@@ -183,7 +200,8 @@ struct PackedVoxelVertex {
                   ((height_fixed & 0x7Fu) << 14) | // 7-bit corner height (bits 14..20)
                   ((flow_packed & 0x1Fu) << 21) |  // 5-bit flow dir (bits 21..25)
                   // bits 26 (sub_y_half), 27 (water_offset) are strictly 0
-                  (6u << 28);                   // fluid_lvl = 6 (bits 28..30)
+                  (6u << 28) |                  // fluid_lvl = 6 (bits 28..30)
+                  ((is_vertical_flow & 0x1u) << 31);
         return v;
     }
 

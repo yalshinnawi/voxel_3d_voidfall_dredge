@@ -25,10 +25,15 @@ enum MaterialID : uint8_t {
     MAT_BIOLUMINESCENT_FLORA = 12, // Subterranean glowing moss, fungi, and oasis flora
     MAT_PRISMATIC_CRYSTAL = 13,    // Translucent radiant prismatic crystal spires
     MAT_OBSIDIAN_SPIKES = 14,      // Lethal needle-sharp obsidian punji spikes
-    MAT_COUNT = 15
+    MAT_ACID = 15,                 // Corrosive bubbling neon green acid
+    MAT_COOLANT = 16,              // Sub-zero cryogenic coolant
+    MAT_ASTRAL_ORE = 17,           // Exotic cosmic stellar mineral for deep sectors
+    MAT_COUNT = 18
 };
 
 // Aliases for gameplay and surveying systems
+constexpr uint8_t MAT_ASTRAL = MAT_ASTRAL_ORE;
+constexpr uint8_t MAT_ASTRAL_LUMEN = MAT_ASTRAL_ORE;
 constexpr uint8_t MAT_VOIDITE = MAT_VOIDITE_CRYSTAL;
 constexpr uint8_t MAT_TITANIUM = MAT_INDUSTRIAL_BULKHEAD;
 constexpr uint8_t MAT_BULKHEAD = MAT_INDUSTRIAL_BULKHEAD;
@@ -39,8 +44,6 @@ constexpr uint8_t MAT_GRANITE = MAT_FRACTURED_GRANITE;
 constexpr uint8_t MAT_BASALT = MAT_VOLCANIC_BASALT;
 constexpr uint8_t MAT_WATER = MAT_CRYSTAL_AQUIFER;
 constexpr uint8_t MAT_AQUIFER = MAT_CRYSTAL_AQUIFER;
-constexpr uint8_t MAT_COOLANT = MAT_CRYSTAL_AQUIFER;
-constexpr uint8_t MAT_ACID = MAT_THERMITE_SLAG;
 constexpr uint8_t MAT_FLORA = MAT_BIOLUMINESCENT_FLORA;
 constexpr uint8_t MAT_MOSS = MAT_BIOLUMINESCENT_FLORA;
 constexpr uint8_t MAT_CRYSTAL = MAT_PRISMATIC_CRYSTAL;
@@ -55,13 +58,13 @@ inline bool IsLiquid(uint8_t mat) {
            mat == MAT_ACID || 
            mat == MAT_COOLANT || 
            mat == MAT_THERMITE_SLAG || 
-           mat == MAT_LAVA || 
-           mat == MAT_RADIOACTIVE_SLUDGE;
+           mat == MAT_LAVA;
 }
 
 constexpr uint8_t VOXEL_FLAG_PLAYER_PLACED = 0x80;
 constexpr uint8_t VOXEL_SHAPE_MASK         = 0x78; // Bits 3, 4, 5, 6
 constexpr uint8_t VOXEL_FLAG_WATERLOGGED   = 0x04; // Set when liquid occupies a slab or ramp
+constexpr uint8_t VOXEL_FLAG_CUSTOM_MODEL  = 0x01; // Block rendered via dynamic 3D entity geometry rather than static chunk mesh
 constexpr uint8_t VOXEL_DAMAGE_MASK        = 0x07; // Bits 0, 1, 2
 constexpr uint8_t VOXEL_FLUID_LEVEL_MASK   = 0x07; // Bits 0, 1, 2: fluid level [1..5]
 constexpr uint8_t VOXEL_FLUID_LEVEL_SOURCE = 5;
@@ -82,6 +85,12 @@ inline float GetLiquidColumnHeight(const WorldLike& world, const glm::ivec3& pos
     uint8_t mat = world.GetBlockMaterial(pos);
     uint8_t flags = world.GetBlockFlags(pos);
 
+    bool is_liq = IsLiquid(mat);
+    bool is_wl = (flags & VOXEL_FLAG_WATERLOGGED) != 0;
+    if (!is_liq && !is_wl) {
+        return -1.0f; // Not liquid
+    }
+
     // If block directly above is fluid, this column is fully submerged
     glm::ivec3 above = pos + glm::ivec3(0, 1, 0);
     uint8_t aboveMat = world.GetBlockMaterial(above);
@@ -89,16 +98,34 @@ inline float GetLiquidColumnHeight(const WorldLike& world, const glm::ivec3& pos
         return 1.0f;
     }
 
-    if (IsLiquid(mat)) {
+    if (is_liq) {
         int lvl = flags & 0x07;
         lvl = (lvl == 0) ? 5 : lvl; // Default source block to 5
         if (lvl >= 5) return 0.88f;
         return 0.16f + (lvl / 5.0f) * 0.68f;
     }
 
-    if (flags & VOXEL_FLAG_WATERLOGGED) {
-        int lvl = flags & 0x07;
+    if (is_wl) {
+        const glm::ivec3 searchDirs[6] = {{0, 1, 0}, {0, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}};
+        int neighborLvl = 0;
+        bool foundLiquid = false;
+        for (const auto& d : searchDirs) {
+            glm::ivec3 nbPos = pos + d;
+            uint8_t nbMat = world.GetBlockMaterial(nbPos);
+            uint8_t nbFlags = world.GetBlockFlags(nbPos);
+            bool nb_is_liq = IsLiquid(nbMat);
+            bool nb_is_wl = (nbFlags & VOXEL_FLAG_WATERLOGGED) != 0;
+            if (nb_is_liq || nb_is_wl) {
+                int nbLvl = GetFluidLevel(nbFlags);
+                if (!foundLiquid || nbLvl > neighborLvl) {
+                    neighborLvl = nbLvl;
+                    foundLiquid = true;
+                }
+            }
+        }
+        int lvl = foundLiquid ? neighborLvl : (flags & 0x07);
         lvl = (lvl == 0) ? 5 : lvl;
+        if (lvl >= 5) return 0.88f;
         return 0.16f + (lvl / 5.0f) * 0.68f;
     }
 
@@ -118,6 +145,24 @@ inline float CalculateCornerHeight(const WorldLike& world, int cx, int y, int cz
                 if (h >= 1.0f) return 1.0f; // Submerged corner clamped to 1.0m
                 sum += h;
                 count++;
+            } else {
+                // Check if upper column (y + 1) has liquid on a solid ledge (e.g. upper ledge feeding ramp)
+                if (world.GetBlockMaterial(colPos) != MAT_AIR) {
+                    glm::ivec3 colAbove = colPos + glm::ivec3(0, 1, 0);
+                    float hAbove = GetLiquidColumnHeight(world, colAbove);
+                    if (hAbove >= 0.0f) {
+                        return 1.0f; // Liquid at y+1 directly meets top of block y at 1.0m
+                    }
+                } else if (y > 0) {
+                    // Inter-level step down smoothing: factor in lower liquid column (y - 1)
+                    glm::ivec3 colBelow = colPos - glm::ivec3(0, 1, 0);
+                    float hBelow = GetLiquidColumnHeight(world, colBelow);
+                    if (hBelow >= 0.0f) {
+                        float dropH = std::clamp(hBelow * 0.45f, 0.20f, 0.50f);
+                        sum += dropH;
+                        count++;
+                    }
+                }
             }
         }
     }

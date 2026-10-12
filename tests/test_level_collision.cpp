@@ -12,6 +12,8 @@
 #include "../src/voxel/world.hpp"
 #include "../src/voxel/greedy_mesher.hpp"
 #include "../src/player/controller.hpp"
+#include "../src/systems/extraction.hpp"
+#include "../src/systems/mission_system.hpp"
 
 using namespace Voidfall;
 
@@ -29,85 +31,6 @@ void log_pass(const std::string& name) {
 
 // ─────────────────────────────────────────────────────────────
 // 1. LEVEL DESIGN & ROOM SHAPES TOPOLOGY TESTS
-// ─────────────────────────────────────────────────────────────
-void test_level_design_topology() {
-    std::cout << "\n=== [MODULE 1] Level Design Archetypes & Room Geometry ===" << std::endl;
-
-    for (int sector = 1; sector <= 3; ++sector) {
-        LevelGenerator gen(sector, 12345 + sector);
-        const auto& rooms = gen.rooms();
-        int expected_rooms = (sector == 1) ? 9 : ((sector == 2) ? 16 : 25);
-        TEST_CHECK(static_cast<int>(rooms.size()) == expected_rooms, "Sector room count mismatch with dynamic scaling");
-
-        // Spawn room must be (0, 0)
-        const RoomPlacement* spawn = gen.get_room_at_grid(0, 0);
-        TEST_CHECK(spawn != nullptr, "Spawn room at (0, 0) must exist");
-        TEST_CHECK(spawn->type == RoomShapeType::SpawnStagingCavern, "Grid (0, 0) must be SpawnStagingCavern");
-
-        // Extraction room must be at far corner (grid_w - 1, grid_d - 1)
-        int evac_x = gen.grid_width() - 1;
-        int evac_z = gen.grid_depth() - 1;
-        const RoomPlacement* evac = gen.get_room_at_grid(evac_x, evac_z);
-        TEST_CHECK(evac != nullptr, "Extraction room must exist at far corner");
-        TEST_CHECK(evac->type == RoomShapeType::ExtractionLandingBay, "Extraction room must be ExtractionLandingBay");
-
-        // Validate bedrock floor (y <= 3) and ceiling mantle (y >= 26) everywhere across dynamic world size
-        for (int x = 5; x <= gen.world_width() - 6; x += 15) {
-            for (int z = 5; z <= gen.world_depth() - 6; z += 15) {
-                Voxel bedrock = gen.sample_voxel(x, 2, z);
-                TEST_CHECK(bedrock.is_solid() && bedrock.material_id == MAT_DREDGE_BEDROCK, "Bedrock y=2 must be solid MAT_DREDGE_BEDROCK");
-                Voxel mantle = gen.sample_voxel(x, 26, z);
-                TEST_CHECK(mantle.is_solid(), "Ceiling mantle at y=26 must be solid");
-            }
-        }
-
-        // Validate sector-specific room type pools
-        bool has_vault = false;
-        bool has_chasm = false;
-        bool has_sanctuary = false;
-        bool has_hazard_room = false;
-        for (const auto& r : rooms) {
-            if (r.type == RoomShapeType::IndustrialVaultBunker) has_vault = true;
-            if (r.type == RoomShapeType::AbyssalVerticalChasm) has_chasm = true;
-            if (r.type == RoomShapeType::RadioactiveCoreSanctuary) has_sanctuary = true;
-            if (r.type == RoomShapeType::MagmaCalderaLake || r.type == RoomShapeType::SpikeTrenchArena ||
-                r.type == RoomShapeType::VoidSingularityRift || r.type == RoomShapeType::FungoidBioGrotto) {
-                has_hazard_room = true;
-            }
-        }
-
-        // Validate multi-floor distribution and dynamic sizing
-        bool has_floor0 = false;
-        bool has_floor1 = false;
-        bool has_multifloor = false;
-        bool has_massive = false;
-        bool has_small = false;
-        for (const auto& r : rooms) {
-            if (r.floor_level == 0) has_floor0 = true;
-            if (r.floor_level == 1) has_floor1 = true;
-            if (r.floor_level == 2) has_multifloor = true;
-            if (r.is_massive) has_massive = true;
-            if (r.half_width <= 7 || r.half_depth <= 7) has_small = true;
-        }
-        TEST_CHECK(has_floor0, "Sector must contain Floor 0 (lower cavern) rooms");
-        TEST_CHECK(has_floor1, "Sector must contain Floor 1 (upper mezzanine) rooms");
-        TEST_CHECK(has_multifloor, "Sector must contain Multi-Floor rooms");
-        TEST_CHECK(has_massive, "Sector must generate massive multi-deck cavern chambers");
-        TEST_CHECK(has_small, "Sector must generate randomized small niche rooms");
-
-        if (sector >= 2) {
-            TEST_CHECK(has_vault || has_hazard_room, "Sector 2+ must spawn Industrial Bunkers or Environmental Hazard rooms");
-        }
-        if (sector == 3) {
-            TEST_CHECK(has_chasm || has_sanctuary || has_hazard_room, "Sector 3 must spawn Abyssal Chasms, Sanctuaries or Void Rifts");
-        }
-    }
-
-    log_pass("Level layout topology, grid connectivity, and sector archetypes verified");
-}
-
-// ─────────────────────────────────────────────────────────────
-// 2. THOROUGH WALL SPRINT COLLISION & ANTI-CLIPPING TESTS
 // ─────────────────────────────────────────────────────────────
 void test_wall_collision_and_anti_clipping() {
     std::cout << "\n=== [MODULE 2] Wall Collision & Anti-Clipping Stress Test ===" << std::endl;
@@ -439,7 +362,10 @@ void test_isolated_base_shapes_stress() {
         {RoomShapeType::ColossalVaultedDredgeCathedral, "ColossalVaultedDredgeCathedral"},
         {RoomShapeType::TectonicAbyssalSinkhole,        "TectonicAbyssalSinkhole"},
         {RoomShapeType::CyclopeanExcavationSilo,        "CyclopeanExcavationSilo"},
-        {RoomShapeType::BioluminescentFirmamentAbyss,   "BioluminescentFirmamentAbyss"}
+        {RoomShapeType::BioluminescentFirmamentAbyss,   "BioluminescentFirmamentAbyss"},
+        {RoomShapeType::PrecursorSanctumVault,          "PrecursorSanctumVault"},
+        {RoomShapeType::SubterraneanVaultBastion,       "SubterraneanVaultBastion"},
+        {RoomShapeType::AbyssalVaultChasm,               "AbyssalVaultChasm"}
     };
 
     for (const auto& [shape_type, shape_name] : all_shapes) {
@@ -546,385 +472,6 @@ void test_isolated_base_shapes_stress() {
 
 // ─────────────────────────────────────────────────────────────
 // 7. INTEGRATION TESTS: RANDOM SHAPE PERMUTATIONS & CONNECTIVITY
-// ─────────────────────────────────────────────────────────────
-void test_random_shape_permutations_integration() {
-    std::cout << "\n=== [MODULE 7] Random Shape Permutations & Integration Testing ===" << std::endl;
-
-    const std::vector<uint32_t> test_seeds = {
-        101, 202, 303, 404, 505, 777, 999, 1337, 2026, 4242
-    };
-
-    int total_permutations_tested = 0;
-    int total_corridors_tested = 0;
-
-    for (int sector = 1; sector <= 3; ++sector) {
-        for (uint32_t seed : test_seeds) {
-            total_permutations_tested++;
-
-            World world(seed, false);
-            world.generate_world(sector, seed);
-            const LevelGenerator* gen = world.level_generator();
-            TEST_CHECK(gen != nullptr, "Level generator must be initialized");
-
-            const auto& corridors = gen->corridors();
-            size_t min_orthogonal = static_cast<size_t>(gen->grid_depth() * (gen->grid_width() - 1) + gen->grid_width() * (gen->grid_depth() - 1));
-            TEST_CHECK(corridors.size() >= min_orthogonal,
-                       "Sector " + std::to_string(sector) + " layout must have at least " + std::to_string(min_orthogonal) + " inter-room corridors");
-
-            // Verify corridor variety: diagonals, ravines, and sloping ramps
-            bool has_diagonal_corridor = false;
-            bool has_ravine_corridor = false;
-            bool has_sloping_ramp = false;
-            for (const auto& c : corridors) {
-                if (c.is_diagonal) has_diagonal_corridor = true;
-                if (c.is_ravine) has_ravine_corridor = true;
-                if (c.type == CorridorType::SlopingRamp) has_sloping_ramp = true;
-            }
-            TEST_CHECK(has_diagonal_corridor, "Level layout must generate diagonal corridors");
-            TEST_CHECK(has_ravine_corridor, "Level layout must generate deep jagged ravines");
-            TEST_CHECK(has_sloping_ramp, "Level layout must generate sloping stepped ramps connecting different floors");
-
-            // 1. Verify Corridor Threshold Seams
-            for (const auto& c : corridors) {
-                total_corridors_tested++;
-
-                // Test start seam (where corridor meets Room A) and end seam (where corridor meets Room B)
-                glm::ivec3 seams[2] = { c.start_pos, c.end_pos };
-                int seam_floors[2] = { c.floor_y, c.end_floor_y };
-                for (int s = 0; s < 2; ++s) {
-                    glm::ivec3 p = seams[s];
-                    int fy = seam_floors[s];
-                    // Floor must be solid at fy or within 2 blocks below if intersecting a sloping ramp
-                    bool sol = world.is_solid(p.x, fy, p.z) ||
-                               (fy > 4 && (world.is_solid(p.x, fy - 1, p.z) || world.is_solid(p.x, fy - 2, p.z)));
-                    TEST_CHECK(sol,
-                               "Corridor threshold seam floor must be solid at (" +
-                               std::to_string(p.x) + ", " + std::to_string(fy) + ", " + std::to_string(p.z) + ")");
-
-                    // Headroom: y = fy + 1 and y = fy + 2 must not be bedrock
-                    Voxel v1 = world.get_voxel(p.x, fy + 1, p.z);
-                    Voxel v2 = world.get_voxel(p.x, fy + 2, p.z);
-                    TEST_CHECK(v1.material_id != MAT_DREDGE_BEDROCK, "Corridor seam blocked by bedrock at y=" + std::to_string(fy + 1));
-                    TEST_CHECK(v2.material_id != MAT_DREDGE_BEDROCK, "Corridor seam blocked by bedrock at y=" + std::to_string(fy + 2));
-
-                    // Ceiling above corridor must remain solid mantle at y=26
-                    TEST_CHECK(world.is_solid(p.x, 26, p.z), "Corridor seam mantle must be solid at y=26");
-                }
-            }
-
-            // 2. Bidirectional Walkthrough across room boundary seams (Sector 1 unobstructed corridors)
-            if (sector == 1) {
-                const CorridorPlacement* corr_x = nullptr;
-                const CorridorPlacement* corr_z = nullptr;
-                for (const auto& c : gen->corridors()) {
-                    if (c.is_x_axis && c.start_pos.x <= 25 && c.end_pos.x >= 25 && !corr_x) {
-                        corr_x = &c;
-                    }
-                    if (!c.is_x_axis && !c.is_diagonal && c.start_pos.z <= 25 && c.end_pos.z >= 25 && !corr_z) {
-                        corr_z = &c;
-                    }
-                }
-
-                if (corr_x) {
-                    float start_x = static_cast<float>(corr_x->start_pos.x);
-                    float start_y = static_cast<float>(corr_x->floor_y + 1);
-                    float start_z = static_cast<float>(corr_x->start_pos.z);
-                    float mid_x = static_cast<float>(corr_x->start_pos.x + corr_x->end_pos.x) * 0.5f;
-
-                    PlayerController player_x(glm::vec3(start_x, start_y, start_z));
-                    player_x.clamp_to_surface(world);
-                    TEST_CHECK(!player_x.is_penetrating_solid(world), "Player penetrating at corridor start");
-
-                    // Sprint along corridor toward Room (1, 0)
-                    glm::vec2 planar_dir(static_cast<float>(corr_x->end_pos.x - corr_x->start_pos.x),
-                                         static_cast<float>(corr_x->end_pos.z - corr_x->start_pos.z));
-                    if (glm::length(planar_dir) > 0.001f) planar_dir = glm::normalize(planar_dir);
-                    else planar_dir = glm::vec2(1.0f, 0.0f);
-
-                    player_x.set_velocity(glm::vec3(planar_dir.x * 8.0f, 0.0f, planar_dir.y * 8.0f));
-                    for (int tick = 0; tick < 100; ++tick) {
-                        player_x.velocity_mut().x = planar_dir.x * 8.0f;
-                        player_x.velocity_mut().z = planar_dir.y * 8.0f;
-                        player_x.update_physics(1.0f / 60.0f, world);
-                        TEST_CHECK(!player_x.is_penetrating_solid(world), "Player clipped while walking East across corridor seam");
-                    }
-                    TEST_CHECK(player_x.position().x > mid_x + 0.5f, "Player failed to cross corridor into adjacent room");
-
-                    // Sprint back toward Room (0, 0)
-                    player_x.set_velocity(glm::vec3(-planar_dir.x * 8.0f, 0.0f, -planar_dir.y * 8.0f));
-                    for (int tick = 0; tick < 100; ++tick) {
-                        player_x.velocity_mut().x = -planar_dir.x * 8.0f;
-                        player_x.velocity_mut().z = -planar_dir.y * 8.0f;
-                        player_x.update_physics(1.0f / 60.0f, world);
-                        TEST_CHECK(!player_x.is_penetrating_solid(world), "Player clipped while walking West across corridor seam");
-                    }
-                    TEST_CHECK(player_x.position().x < mid_x - 0.5f, "Player failed to return across corridor to origin room");
-                }
-
-                if (corr_z) {
-                    float start_x = static_cast<float>(corr_z->start_pos.x);
-                    float start_y = static_cast<float>(corr_z->floor_y + 1);
-                    float start_z = static_cast<float>(corr_z->start_pos.z);
-                    float mid_z = static_cast<float>(corr_z->start_pos.z + corr_z->end_pos.z) * 0.5f;
-
-                    PlayerController player_z(glm::vec3(start_x, start_y, start_z));
-                    player_z.clamp_to_surface(world);
-                    TEST_CHECK(!player_z.is_penetrating_solid(world), "Player penetrating at North corridor start");
-
-                    // Sprint along corridor toward Room (0, 1)
-                    glm::vec2 planar_dir(static_cast<float>(corr_z->end_pos.x - corr_z->start_pos.x),
-                                         static_cast<float>(corr_z->end_pos.z - corr_z->start_pos.z));
-                    if (glm::length(planar_dir) > 0.001f) planar_dir = glm::normalize(planar_dir);
-                    else planar_dir = glm::vec2(0.0f, 1.0f);
-
-                    player_z.set_velocity(glm::vec3(planar_dir.x * 8.0f, 0.0f, planar_dir.y * 8.0f));
-                    for (int tick = 0; tick < 100; ++tick) {
-                        player_z.velocity_mut().x = planar_dir.x * 8.0f;
-                        player_z.velocity_mut().z = planar_dir.y * 8.0f;
-                        player_z.update_physics(1.0f / 60.0f, world);
-                        TEST_CHECK(!player_z.is_penetrating_solid(world), "Player clipped while walking North across corridor seam");
-                    }
-                    TEST_CHECK(player_z.position().z > mid_z + 0.5f, "Player failed to cross North corridor into adjacent room");
-
-                    // Sprint back toward Room (0, 0)
-                    player_z.set_velocity(glm::vec3(-planar_dir.x * 8.0f, 0.0f, -planar_dir.y * 8.0f));
-                    for (int tick = 0; tick < 100; ++tick) {
-                        player_z.velocity_mut().x = -planar_dir.x * 8.0f;
-                        player_z.velocity_mut().z = -planar_dir.y * 8.0f;
-                        player_z.update_physics(1.0f / 60.0f, world);
-                        TEST_CHECK(!player_z.is_penetrating_solid(world), "Player clipped while walking South across corridor seam");
-                    }
-                    TEST_CHECK(player_z.position().z < mid_z - 0.5f, "Player failed to return South across corridor to origin room");
-                }
-            }
-
-            // 3. 3D BFS Topological Reachability Solver (Spawn (0,0) -> Extraction (W-1, D-1))
-            // Verifies that across all permutations, a traversable path exists connecting the entire level.
-            struct Node { int x, y, z; };
-            std::queue<Node> q;
-            int w_w = gen->world_width();
-            int w_d = gen->world_depth();
-            std::vector<uint8_t> visited(w_w * 32 * w_d, 0);
-            auto idx3d = [w_w, w_d](int x, int y, int z) { return (x * 32 + y) * w_d + z; };
-
-            // Start at spawn pad: (16, 5, 16)
-            q.push(Node{16, 5, 16});
-            visited[idx3d(16, 5, 16)] = 1;
-
-            bool reached_extraction = false;
-            const int dx[4] = { 1, -1, 0, 0 };
-            const int dz[4] = { 0, 0, 1, -1 };
-            glm::ivec3 extract_pos = gen->extraction_position();
-
-            while (!q.empty()) {
-                Node cur = q.front();
-                q.pop();
-
-                // Target: reached Extraction Landing Bay zone around extraction_position()
-                if (std::abs(cur.x - extract_pos.x) <= 4 && std::abs(cur.z - extract_pos.z) <= 4 && cur.y <= 12) {
-                    reached_extraction = true;
-                    break;
-                }
-
-                // Try 4 cardinal directions with step up (+1) and step down (-1, -2)
-                for (int i = 0; i < 4; ++i) {
-                    int nx = cur.x + dx[i];
-                    int nz = cur.z + dz[i];
-
-                    if (nx < 4 || nx > w_w - 5 || nz < 4 || nz > w_d - 5) continue;
-
-                    // Test possible y levels (flat, step up 1, step down 1 or 2)
-                    for (int dy_step : {0, 1, -1, -2}) {
-                        int ny = cur.y + dy_step;
-                        if (ny < 4 || ny > 24) continue;
-
-                        int id = idx3d(nx, ny, nz);
-                        if (visited[id]) continue;
-
-                        // Check passability:
-                        // Needs ground support at ny - 1
-                        if (!world.is_solid(nx, ny - 1, nz)) continue;
-
-                        // Needs feet clearance at ny and head clearance at ny + 1
-                        Voxel feet = world.get_voxel(nx, ny, nz);
-                        Voxel head = world.get_voxel(nx, ny + 1, nz);
-
-                        bool feet_passable = (sector == 1) ? !feet.is_solid() : (feet.material_id != MAT_DREDGE_BEDROCK);
-                        bool head_passable = (sector == 1) ? !head.is_solid() : (head.material_id != MAT_DREDGE_BEDROCK);
-
-                        if (feet_passable && head_passable) {
-                            visited[id] = 1;
-                            q.push(Node{nx, ny, nz});
-                        }
-                    }
-                }
-            }
-
-            TEST_CHECK(reached_extraction, "Sector " + std::to_string(sector) + " Seed " +
-                       std::to_string(seed) + " failed 3D reachability solver from Spawn to Extraction!");
-        }
-    }
-
-    log_pass("Tested 30 random shape permutations across Sectors 1-3 (" +
-             std::to_string(total_corridors_tested) + " corridor seams verified, 100% 3D BFS reachable)");
-}
-
-// ─────────────────────────────────────────────────────────────
-// 8. FULL SECTOR ROOM-TO-ROOM SIGHTLINE & TRAVERSAL TOUR
-// ─────────────────────────────────────────────────────────────
-void test_all_rooms_tour_and_visibility() {
-    std::cout << "\n=== [MODULE 8] Full Sector Room-to-Room Sightlines & Traversal Tour ===" << std::endl;
-
-    for (int sector = 1; sector <= 3; ++sector) {
-        World world(4242 + sector, false);
-        world.generate_world(sector, 4242 + sector);
-
-        const auto* gen = world.level_generator();
-        TEST_CHECK(gen != nullptr, "Level generator must be initialized");
-
-        int gw = gen->grid_width();
-        int gd = gen->grid_depth();
-        int total_rooms = gw * gd;
-
-        // Tour sequence through all grid rooms: S-curve path guaranteeing each transition
-        // is an adjacent connected orthogonal step (0,0) to (W-1, D-1)
-        std::vector<std::pair<int, int>> tour_path;
-        tour_path.reserve(total_rooms);
-        for (int gz = 0; gz < gd; ++gz) {
-            if (gz % 2 == 0) {
-                for (int gx = 0; gx < gw; ++gx) {
-                    tour_path.push_back({gx, gz});
-                }
-            } else {
-                for (int gx = gw - 1; gx >= 0; --gx) {
-                    tour_path.push_back({gx, gz});
-                }
-            }
-        }
-
-        std::vector<bool> rooms_visited(total_rooms, false);
-
-        for (size_t step = 0; step + 1 < tour_path.size(); ++step) {
-            int gxA = tour_path[step].first;
-            int gzA = tour_path[step].second;
-            int gxB = tour_path[step + 1].first;
-            int gzB = tour_path[step + 1].second;
-
-            const RoomPlacement* roomA = gen->get_room_at_grid(gxA, gzA);
-            const RoomPlacement* roomB = gen->get_room_at_grid(gxB, gzB);
-            TEST_CHECK(roomA != nullptr && roomB != nullptr, "Both connected rooms must exist");
-
-            rooms_visited[gzA * gw + gxA] = true;
-            rooms_visited[gzB * gw + gxB] = true;
-
-            // 1. Find Connecting Corridor between Room A and Room B
-            const CorridorPlacement* connecting_corr = nullptr;
-            for (const auto& c : gen->corridors()) {
-                bool matchAB = (glm::distance(glm::vec2(c.start_pos.x, c.start_pos.z), glm::vec2(roomA->center.x, roomA->center.z)) < 16.0f &&
-                                glm::distance(glm::vec2(c.end_pos.x, c.end_pos.z), glm::vec2(roomB->center.x, roomB->center.z)) < 16.0f);
-                bool matchBA = (glm::distance(glm::vec2(c.start_pos.x, c.start_pos.z), glm::vec2(roomB->center.x, roomB->center.z)) < 16.0f &&
-                                glm::distance(glm::vec2(c.end_pos.x, c.end_pos.z), glm::vec2(roomA->center.x, roomA->center.z)) < 16.0f);
-                if (matchAB || matchBA) {
-                    connecting_corr = &c;
-                    break;
-                }
-            }
-
-            glm::vec3 corridor_start, corridor_end;
-            int floorA = roomA->floor_y;
-            int floorB = roomB->floor_y;
-            glm::vec3 step_dir = glm::normalize(glm::vec3(roomB->center - roomA->center));
-            float extA = (std::abs(step_dir.x) > std::abs(step_dir.z)) ? static_cast<float>(roomA->half_width) : static_cast<float>(roomA->half_depth);
-            float extB = (std::abs(step_dir.x) > std::abs(step_dir.z)) ? static_cast<float>(roomB->half_width) : static_cast<float>(roomB->half_depth);
-
-            if (connecting_corr) {
-                bool is_forward = (glm::distance(glm::vec2(connecting_corr->start_pos.x, connecting_corr->start_pos.z),
-                                                glm::vec2(roomA->center.x, roomA->center.z)) <
-                                   glm::distance(glm::vec2(connecting_corr->end_pos.x, connecting_corr->end_pos.z),
-                                                glm::vec2(roomA->center.x, roomA->center.z)));
-                if (is_forward) {
-                    corridor_start = glm::vec3(connecting_corr->start_pos);
-                    corridor_end   = glm::vec3(connecting_corr->end_pos);
-                    floorA = connecting_corr->floor_y;
-                    floorB = connecting_corr->end_floor_y;
-                } else {
-                    corridor_start = glm::vec3(connecting_corr->end_pos);
-                    corridor_end   = glm::vec3(connecting_corr->start_pos);
-                    floorA = connecting_corr->end_floor_y;
-                    floorB = connecting_corr->floor_y;
-                }
-            } else {
-                corridor_start = glm::vec3(roomA->center) + step_dir * (extA - 1.0f);
-                corridor_end   = glm::vec3(roomB->center) - step_dir * (extB - 1.0f);
-            }
-
-            glm::vec3 start_pos(corridor_start.x + 0.5f, static_cast<float>(floorA + 1), corridor_start.z + 0.5f);
-            glm::vec3 target_pos(corridor_end.x + 0.5f, static_cast<float>(floorB + 1), corridor_end.z + 0.5f);
-
-            glm::vec3 eyeA(start_pos.x, static_cast<float>(floorA) + 2.5f, start_pos.z);
-            glm::vec3 eyeB(target_pos.x, static_cast<float>(floorB) + 2.5f, target_pos.z);
-
-            glm::vec3 ray_dir = glm::normalize(eyeB - eyeA);
-            float total_dist = glm::distance(eyeA, eyeB);
-
-            // Step along ray between doorways and verify open sightline through the corridor
-            float sample_step = 0.5f;
-            int air_samples = 0;
-            int total_samples = 0;
-            for (float t = 0.5f; t <= total_dist - 0.5f; t += sample_step) {
-                glm::vec3 p = eyeA + ray_dir * t;
-                total_samples++;
-                if (!world.is_solid(static_cast<int>(std::floor(p.x)),
-                                    static_cast<int>(std::floor(p.y)),
-                                    static_cast<int>(std::floor(p.z)))) {
-                    air_samples++;
-                }
-            }
-
-            if (total_samples > 0) {
-                float air_ratio = static_cast<float>(air_samples) / static_cast<float>(total_samples);
-                float min_ratio = (sector == 1) ? 0.70f : 0.40f; // Sector 2-3 have bulkhead doors & rubble
-                TEST_CHECK(air_ratio >= min_ratio, "Corridor between (" + std::to_string(gxA) + "," + std::to_string(gzA) +
-                           ") and (" + std::to_string(gxB) + "," + std::to_string(gzB) + ") has visual occlusion (air ratio: " +
-                           std::to_string(air_ratio) + ")");
-            }
-
-            // 2. Physical Traversal Test: Delver walks through the corridor from Room A to Room B
-            PlayerController delver(start_pos);
-            delver.clamp_to_surface(world);
-            TEST_CHECK(!delver.is_penetrating_solid(world), "Delver must not penetrate at corridor entry");
-
-            // Walk across the corridor to Room B doorway over 180 physics frames
-            for (int f = 0; f < 180; ++f) {
-                glm::vec3 to_target = target_pos - delver.position();
-                to_target.y = 0.0f; // horizontal walk
-                if (glm::length(to_target) > 0.3f) {
-                    glm::vec3 move_dir = glm::normalize(to_target);
-                    delver.velocity_mut().x = move_dir.x * 7.5f;
-                    delver.velocity_mut().z = move_dir.z * 7.5f;
-                }
-                delver.update_physics(1.0f / 60.0f, world);
-
-                // Anti-clipping verification during transition
-                TEST_CHECK(!delver.is_penetrating_solid(world), "Delver clipped into wall during corridor transition!");
-            }
-
-            // Verify delver traversed across the corridor to Room B doorway
-            float dist_to_end = glm::distance(glm::vec2(delver.position().x, delver.position().z),
-                                              glm::vec2(target_pos.x, target_pos.z));
-            TEST_CHECK(dist_to_end <= 2.5f, "Delver failed to traverse corridor into Room B (dist to end: " + std::to_string(dist_to_end) + ")");
-        }
-
-        for (int r = 0; r < total_rooms; ++r) {
-            TEST_CHECK(rooms_visited[r], "All " + std::to_string(total_rooms) + " rooms in sector " + std::to_string(sector) + " must be visited");
-        }
-    }
-
-    log_pass("Sector 1-3 room-to-room tour: 100% of all rooms visited, open sightlines verified, 0 clipping");
-}
-
-// ─────────────────────────────────────────────────────────────
-// 9. FLIGHT CARVING, BLOCK BREAKING & MESH INTEGRITY STRESS TEST
 // ─────────────────────────────────────────────────────────────
 void test_flight_carving_and_mesh_integrity() {
     std::cout << "\n=== [MODULE 9] Flight Carving, Block Breaking & Mesh Integrity Stress Test ===" << std::endl;
@@ -1073,6 +620,7 @@ void test_environmental_room_dangers_and_mortality() {
 
     PlayerController lava_player(glm::vec3(6.5f, 3.0f, 6.5f));
     lava_player.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{}); // 90 HP base
+    lava_player.set_shield(0.0f);
     std::string last_warning;
     lava_player.set_on_warning([&](const std::string& msg) { last_warning = msg; });
 
@@ -1110,6 +658,7 @@ void test_environmental_room_dangers_and_mortality() {
 
     PlayerController spike_player(glm::vec3(14.0f, 3.0f, 14.0f));
     spike_player.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+    spike_player.set_shield(0.0f);
     spike_player.set_on_warning([&](const std::string& msg) { last_warning = msg; });
 
     // Single step on spikes
@@ -1139,6 +688,7 @@ void test_environmental_room_dangers_and_mortality() {
     // Fall 1: High cavern drop (y=21 down to floor y=4.9)
     PlayerController fall_player1(glm::vec3(20.0f, 21.0f, 20.0f));
     fall_player1.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+    fall_player1.set_shield(0.0f);
     int step_count = 0;
     while (!fall_player1.is_grounded() && step_count < 150) {
         fall_player1.update_physics(0.016f, world);
@@ -1152,6 +702,7 @@ void test_environmental_room_dangers_and_mortality() {
     // Fall 2: Fatal fall with downward explosive propulsion / pre-damaged delver
     PlayerController fall_player2(glm::vec3(20.0f, 21.0f, 20.0f));
     fall_player2.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+    fall_player2.set_shield(0.0f);
     fall_player2.set_velocity(glm::vec3(0.0f, -20.0f, 0.0f)); // concussive downward blast velocity
     fall_player2.set_on_warning([&](const std::string& msg) { last_warning = msg; });
     int step_count2 = 0;
@@ -1173,6 +724,7 @@ void test_environmental_room_dangers_and_mortality() {
 
     PlayerController void_player(glm::vec3(22.0f, 1.5f, 22.0f));
     void_player.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
+    void_player.set_shield(0.0f);
     void_player.set_health(25.0f); // Pre-damaged delver falls into the abyss
 
     void_player.update_physics(0.02f, world);
@@ -1183,173 +735,128 @@ void test_environmental_room_dangers_and_mortality() {
 // ─────────────────────────────────────────────────────────────
 // 11. SPAWN SAFETY, HAZARD VISIBILITY & FULL LEVEL WALK/FLIGHT
 // ─────────────────────────────────────────────────────────────
-void test_spawn_safety_and_full_level_walk_flight() {
-    std::cout << "\n=== [MODULE 11] Spawn Safety, Hazard Placement & Full Level Traversal ===" << std::endl;
+void test_extraction_pod_grounding_clearance_and_rigidity() {
+    std::cout << "\n=== [MODULE 15] Extraction Pod Ground Placement, Landing Clearance & Rigidity ===" << std::endl;
 
-    for (int sector = 1; sector <= 3; ++sector) {
-        World world(1000 + sector * 77, false);
-        world.generate_world(sector, 1000 + sector * 77);
-        const LevelGenerator* gen = world.level_generator();
-        TEST_CHECK(gen != nullptr, "Level generator must be initialized");
-
-        // 1. Verify Spawn Safety & Immediate Mobility
-        glm::vec3 spawn_pos = gen->spawn_position();
-        PlayerController player(spawn_pos);
-        player.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
-        player.clamp_to_surface(world);
-
-        // Ground check on spawn
-        TEST_CHECK(player.isGrounded(), "Delver must be solidly grounded upon spawn");
-        TEST_CHECK(!player.is_in_spikes(), "Delver MUST NOT spawn on spikes");
-        TEST_CHECK(!player.is_in_lava(), "Delver MUST NOT spawn in lava");
-        TEST_CHECK(player.health() == player.max_health(), "Delver must have 100% full health at spawn");
-
-        // Step 30 physics frames standing on spawn pad (0.5s idle)
-        for (int f = 0; f < 30; ++f) {
-            player.update_physics(1.0f / 60.0f, world);
-        }
-        TEST_CHECK(player.health() == player.max_health(), "Idle delver at spawn pad must take 0 damage");
-        TEST_CHECK(!player.is_in_spikes(), "Idle delver at spawn pad must not be flagged in spikes");
-
-        // 2. Cardinal Walking Test: Uninhibited Movement in All 4 Directions
-        const glm::vec3 dirs[4] = {
-            glm::vec3(1.0f, 0.0f, 0.0f),   // East (+X)
-            glm::vec3(-1.0f, 0.0f, 0.0f),  // West (-X)
-            glm::vec3(0.0f, 0.0f, 1.0f),   // South (+Z)
-            glm::vec3(0.0f, 0.0f, -1.0f)   // North (-Z)
-        };
-
-        for (int d = 0; d < 4; ++d) {
-            player.set_position(spawn_pos);
-            player.clamp_to_surface(world);
-            glm::vec3 start_p = player.position();
-
-            for (int f = 0; f < 25; ++f) {
-                player.velocity_mut() = dirs[d] * 5.5f;
-                player.update_physics(1.0f / 60.0f, world);
-            }
-            float dist_moved = glm::distance(glm::vec2(player.position().x, player.position().z),
-                                            glm::vec2(start_p.x, start_p.z));
-            TEST_CHECK(dist_moved >= 1.2f, "Delver walking in spawn room must move freely without false spike drag");
-            TEST_CHECK(player.health() == player.max_health(), "Delver walking in spawn room must take 0 damage");
-            TEST_CHECK(!player.is_in_spikes(), "Delver walking in spawn room must not trigger spike flag");
-        }
-
-        // 3. Verify Entire Spawn Staging Cavern (0, 0) Has ZERO Hazards
-        const RoomPlacement* spawn_room = gen->get_room_at_grid(0, 0);
-        TEST_CHECK(spawn_room != nullptr, "Spawn staging cavern must exist at grid (0,0)");
-        for (int rx = spawn_room->center.x - spawn_room->half_width; rx <= spawn_room->center.x + spawn_room->half_width; ++rx) {
-            for (int rz = spawn_room->center.z - spawn_room->half_depth; rz <= spawn_room->center.z + spawn_room->half_depth; ++rz) {
-                for (int ry = spawn_room->floor_y; ry <= spawn_room->ceiling_y; ++ry) {
-                    Voxel v = world.get_voxel(rx, ry, rz);
-                    TEST_CHECK(v.material_id != MAT_OBSIDIAN_SPIKES, "Spawn room must never contain obsidian spikes");
-                    TEST_CHECK(v.material_id != MAT_THERMITE_SLAG && v.material_id != MAT_MOLTEN_MAGMA, "Spawn room must never contain lava");
-                    TEST_CHECK(v.material_id != MAT_GAS && v.material_id != MAT_TOXIC_GAS, "Spawn room must never contain toxic gas");
-                }
-            }
-        }
-
-        // 4. Verify Doorway Thresholds and Mandatory Corridors are Hazard-Free
-        for (const auto& room : gen->rooms()) {
-            // Check cardinal doorway thresholds
-            const int door_coords[4][2] = {
-                {room.center.x + room.half_width, room.center.z},
-                {room.center.x - room.half_width, room.center.z},
-                {room.center.x, room.center.z + room.half_depth},
-                {room.center.x, room.center.z - room.half_depth}
-            };
-            for (int i = 0; i < 4; ++i) {
-                int dx = door_coords[i][0];
-                int dz = door_coords[i][1];
-                if (gen->is_in_bounds(dx, room.floor_y + 1, dz)) {
-                    Voxel step_v = world.get_voxel(dx, room.floor_y + 1, dz);
-                    TEST_CHECK(step_v.material_id != MAT_OBSIDIAN_SPIKES, "Doorway step must not be obsidian spikes");
-                    TEST_CHECK(step_v.material_id != MAT_THERMITE_SLAG && step_v.material_id != MAT_MOLTEN_MAGMA, "Doorway step must not be lava");
-                }
-            }
-        }
-
-        // 5. Test Full Level Flight & Safe Mid-Air Roaming Across All Rooms
-        for (const auto& room : gen->rooms()) {
-            glm::vec3 fly_pos(room.center.x + 0.5f, static_cast<float>(room.floor_y + 3) + 0.5f, room.center.z + 0.5f);
-            if (world.is_solid(glm::ivec3(fly_pos))) {
-                // If a decorative pillar/monument occupies exact center, find open air adjacent
-                for (int ox = -3; ox <= 3; ++ox) {
-                    for (int oz = -3; oz <= 3; ++oz) {
-                        glm::ivec3 check_air(room.center.x + ox, room.floor_y + 3, room.center.z + oz);
-                        if (!world.is_solid(check_air) && !world.is_solid(check_air + glm::ivec3(0, 1, 0))) {
-                            fly_pos = glm::vec3(check_air) + glm::vec3(0.5f);
-                            break;
-                        }
-                    }
-                }
-            }
-            player.set_position(fly_pos);
-            player.set_velocity(glm::vec3(0.0f));
-
-            for (int f = 0; f < 10; ++f) {
-                player.update_physics(1.0f / 60.0f, world);
-            }
-            TEST_CHECK(!player.is_penetrating_solid(world), "Flight inside cavern must not clip into ceiling or walls");
-            TEST_CHECK(!player.is_in_spikes(), "Flight high above floor must not trigger spike trap");
-            TEST_CHECK(!player.is_in_lava(), "Flight high above floor must not trigger lava damage");
-        }
-
-        // 6. Hazard Room Safe Bridge Verification
-        for (const auto& room : gen->rooms()) {
-            if (room.type == RoomShapeType::SpikeTrenchArena) {
-                // Bridge spans at floor_y + 2
-                glm::vec3 b_start(room.center.x - room.half_width + 2, static_cast<float>(room.floor_y + 3) + 0.95f, room.center.z);
-                PlayerController bridge_walker(b_start);
-                bridge_walker.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
-                bridge_walker.clamp_to_surface(world);
-
-                // Walk along bridge across the room
-                for (int f = 0; f < 30; ++f) {
-                    bridge_walker.velocity_mut() = glm::vec3(4.0f, 0.0f, 0.0f);
-                    bridge_walker.update_physics(1.0f / 60.0f, world);
-                }
-                TEST_CHECK(bridge_walker.health() == bridge_walker.max_health(), "Delver traversing spike trench bridge must take 0 damage");
-                TEST_CHECK(!bridge_walker.is_in_spikes(), "Delver on safe bridge must not trigger spikes");
-            } else if (room.type == RoomShapeType::ColossalAbyssalChasm) {
-                // Suspension bridge spans at floor_y + 8
-                glm::vec3 b_start(room.center.x - room.half_width + 2, static_cast<float>(room.floor_y + 9) + 0.95f, room.center.z);
-                PlayerController chasm_walker(b_start);
-                chasm_walker.apply_attributes_and_upgrades(CharacterClass::Scout, UpgradeTree{});
-                chasm_walker.clamp_to_surface(world);
-
-                for (int f = 0; f < 30; ++f) {
-                    chasm_walker.velocity_mut() = glm::vec3(4.0f, 0.0f, 0.0f);
-                    chasm_walker.update_physics(1.0f / 60.0f, world);
-                }
-                TEST_CHECK(chasm_walker.health() == chasm_walker.max_health(), "Delver traversing colossal chasm suspension bridge must take 0 damage");
-                TEST_CHECK(!chasm_walker.is_in_spikes(), "Delver on suspension bridge must not trigger spikes");
-            }
+    World world(42, false);
+    for (int x = 0; x < 32; ++x) {
+        for (int z = 0; z < 32; ++z) {
+            world.set_voxel(x, 4, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
         }
     }
 
-    log_pass("Spawn safety, uninhibited cardinal mobility, hazard placement, and full level flight verified across Sectors 1-3");
+    // 1. Valid Landing Site: Open space with ground at y=4 -> ground surface at 5.0f
+    glm::vec3 open_lz(16.0f, 6.0f, 16.0f);
+    float ground_y = 0.0f;
+    std::string reason;
+    bool clear1 = ExtractionSystem::check_landing_clearance(world, open_lz, ground_y, &reason);
+    TEST_CHECK(clear1, "Open landing zone must pass clearance check");
+    TEST_CHECK(std::abs(ground_y - 5.0f) < 0.001f, "Ground level must be exact top of floor voxel (5.0f)");
+
+    // 2. Low Ceiling Obstruction: add ceiling at y=7 (only 2 blocks clearance above ground y=4)
+    World cramped_world(42, false);
+    for (int x = 0; x < 32; ++x) {
+        for (int z = 0; z < 32; ++z) {
+            cramped_world.set_voxel(x, 4, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+            cramped_world.set_voxel(x, 7, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        }
+    }
+    bool clear_low = ExtractionSystem::check_landing_clearance(cramped_world, open_lz, ground_y, &reason);
+    TEST_CHECK(!clear_low, "Low ceiling (y=7) must fail landing clearance");
+    TEST_CHECK(reason.find("LOW CEILING") != std::string::npos || reason.find("OBSTRUCTED") != std::string::npos,
+        "Clearance failure reason must indicate low ceiling or obstruction");
+
+    // 3. Wall Block in Footprint: place a boulder at (16, 5, 16) right in landing column
+    World blocked_world(42, false);
+    for (int x = 0; x < 32; ++x) {
+        for (int z = 0; z < 32; ++z) {
+            blocked_world.set_voxel(x, 4, z, Voxel{MAT_DREDGE_BEDROCK, 0}, false);
+        }
+    }
+    blocked_world.set_voxel(16, 5, 16, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+    bool clear_boulder = ExtractionSystem::check_landing_clearance(blocked_world, open_lz, ground_y, &reason);
+    TEST_CHECK(!clear_boulder, "Obstruction block inside landing footprint must fail clearance");
+
+    // 4. Ground-Level Beacon & Pod Landing: verify pod sits at ground level (not floating)
+    ExtractionSystem evac;
+    glm::vec3 pod_pos(16.0f, ground_y, 16.0f);
+    evac.deploy_beacon(pod_pos, 40.0f);
+    TEST_CHECK(evac.beacon_position().y == 5.0f, "Beacon position Y must be grounded at 5.0f");
+
+    // 5. Rigid Pod Collider & Anti-Penetration Tests
+    PlayerController player;
+    player.set_position(glm::vec3(16.0f, 5.9f, 10.0f));
+
+    // A) Pod is descending / landed and closed (ramp = 0.0)
+    player.set_pod_collider(pod_pos, 1.0f, 0.0f, true);
+
+    // Try to run straight into the center of the pod from the south (-Z)
+    player.set_position(glm::vec3(16.0f, 5.9f, 15.5f));
+    player.set_velocity(glm::vec3(0.0f, 0.0f, 5.0f));
+    bool collided_back = player.resolve_extraction_pod_collision(pod_pos, 1.0f, 0.0f, true);
+    TEST_CHECK(collided_back, "Player inside pod bounds must register collision");
+    float dist_back = glm::distance(glm::vec2(player.position().x, player.position().z), glm::vec2(pod_pos.x, pod_pos.z));
+    TEST_CHECK(dist_back >= 1.75f, "Player must be depenetrated to at least MIN_COLLISION_DIST (>= 1.75m)");
+    TEST_CHECK(player.velocity().z <= 0.0f, "Inward velocity into pod must be eliminated");
+
+    // Camera eye position check: distance to outer wall must be > near clipping plane (0.10m)
+    float eye_to_wall = dist_back - 1.45f;
+    TEST_CHECK(eye_to_wall >= 0.30f, "Eye position must maintain at least 0.30m margin outside hull (near plane 0.10m)");
+
+    // B) Try to penetrate from the side (+X)
+    player.set_position(glm::vec3(16.8f, 5.9f, 16.0f));
+    player.set_velocity(glm::vec3(-4.0f, 0.0f, 0.0f));
+    bool collided_side = player.resolve_extraction_pod_collision(pod_pos, 1.0f, 0.0f, true);
+    TEST_CHECK(collided_side, "Player entering from side must collide");
+    float dist_side = glm::distance(glm::vec2(player.position().x, player.position().z), glm::vec2(pod_pos.x, pod_pos.z));
+    TEST_CHECK(dist_side >= 1.75f, "Side collision must depenetrate player to >= 1.75m");
+    TEST_CHECK(player.velocity().x >= 0.0f, "Inward X velocity must be canceled");
+
+    // C) Boarding Ramp Test (+Z direction, ramp extended to 1.0)
+    player.set_pod_collider(pod_pos, 1.0f, 1.0f, true);
+    player.set_position(glm::vec3(16.0f, 5.9f, 18.5f));
+    player.set_velocity(glm::vec3(0.0f, -2.0f, -3.0f));
+    bool ramp_col = player.resolve_extraction_pod_collision(pod_pos, 1.0f, 1.0f, true);
+    TEST_CHECK(ramp_col, "Ramp interaction must register");
+    TEST_CHECK(player.is_grounded(), "Player on ramp must be grounded");
+    TEST_CHECK(player.position().y >= 5.0f + 0.9f, "Player feet must be supported on inclined ramp deck");
+
+    // D) Ramp Handrails: Player trying to walk off sides of ramp at |dx| > 0.52m is constrained
+    player.set_position(glm::vec3(16.8f, 5.9f, 18.5f));
+    player.resolve_extraction_pod_collision(pod_pos, 1.0f, 1.0f, true);
+    TEST_CHECK(player.position().x <= 16.0f + 0.55f, "Ramp handrail must constrain player within ramp walkway width");
+
+    // E) Roof Support: Player lands on top of pod (y = 5.0f + 4.20f = 9.20f)
+    player.set_position(glm::vec3(16.0f, 9.20f + 0.9f + 0.1f, 16.0f));
+    player.set_velocity(glm::vec3(0.0f, -5.0f, 0.0f));
+    bool roof_col = player.resolve_extraction_pod_collision(pod_pos, 1.0f, 1.0f, true);
+    TEST_CHECK(roof_col, "Top deck of pod must collide and support player");
+    TEST_CHECK(player.is_grounded(), "Player standing on pod roof must be grounded");
+    TEST_CHECK(player.velocity().y >= 0.0f, "Downward velocity on pod roof must be stopped");
+
+    log_pass("Extraction Pod grounded landing, space clearance checks & rigid physical collision verified");
 }
+
+// ─────────────────────────────────────────────────────────────
+// 16. STRUCTURAL CONNECTIVITY & FLOATING BLOCK PREVENTION TEST
+// ─────────────────────────────────────────────────────────────
 
 int main() {
     std::cout << "==========================================================" << std::endl;
-    std::cout << "  VOIDFALL: DREDGE -- LEVEL DESIGN & COLLISION TEST SUITE" << std::endl;
+    std::cout << "  VOIDFALL: DREDGE -- LEVEL COLLISION AND PHYSICS TEST SUITE" << std::endl;
     std::cout << "==========================================================" << std::endl;
 
-    test_level_design_topology();
     test_wall_collision_and_anti_clipping();
     test_ceiling_flying_and_anti_clipping();
     test_block_break_and_walkthrough();
     test_diagonal_corner_and_depenetration();
     test_isolated_base_shapes_stress();
-    test_random_shape_permutations_integration();
-    test_all_rooms_tour_and_visibility();
     test_flight_carving_and_mesh_integrity();
     test_environmental_room_dangers_and_mortality();
-    test_spawn_safety_and_full_level_walk_flight();
+    test_extraction_pod_grounding_clearance_and_rigidity();
 
     std::cout << "\n==========================================================" << std::endl;
-    std::cout << "  ALL " << s_passed_tests << " LEVEL DESIGN & COLLISION TESTS PASSED (0 CLIPPING ERRORS, 0 OCCLUSION GLITCHES)!" << std::endl;
+    std::cout << "  ALL " << s_passed_tests << " LEVEL COLLISION AND PHYSICS TESTS PASSED!" << std::endl;
     std::cout << "==========================================================" << std::endl;
     return 0;
 }

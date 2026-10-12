@@ -18,11 +18,17 @@ void DebriefMenu::SetReturnToHubHandler(ReturnToHubCallback cb) {
 }
 
 DebriefAction DebriefMenu::ProcessClick(const std::string& button_label) {
-    if (button_label.find("RE-DEPLOY") != std::string::npos || button_label.find("LAUNCH") != std::string::npos) {
+    if (button_label.find("RE-DEPLOY") != std::string::npos) {
         if (s_redeploy_handler) {
             s_redeploy_handler(m_currentSectorIndex);
         }
         return DebriefAction::RedeployExpedition;
+    }
+    if (button_label.find("CONTINUE") != std::string::npos || button_label.find("LAUNCH") != std::string::npos) {
+        if (s_redeploy_handler) {
+            s_redeploy_handler(m_currentSectorIndex);
+        }
+        return DebriefAction::LaunchNextSector;
     }
     if (button_label.find("RETURN") != std::string::npos || button_label.find("HUB") != std::string::npos) {
         if (s_hub_handler) {

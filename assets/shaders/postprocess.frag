@@ -138,7 +138,7 @@ void main() {
             depthHazeColor = vec3(0.025, 0.07, 0.04); // Sector 3: Toxic emerald
         }
         if (uRadiationGlitch > 0.0) {
-            depthHazeColor = mix(depthHazeColor, vec3(0.06, 0.18, 0.08), uRadiationGlitch * 0.7);
+            depthHazeColor = mix(depthHazeColor, vec3(0.05, 0.28, 0.10), uRadiationGlitch * 0.85);
         }
         float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
         scene = mix(scene, depthHazeColor, depthHazeFactor);

@@ -29,6 +29,7 @@ struct ExoStatus {
     float max_heat{100.0f};
     bool overheated{false};
     float integrity{100.0f};  // 0..100%
+    float shield{100.0f};     // 0..100% (Kinetic barrier layer)
     float radiation{0.0f};    // 0..100%
 };
 
@@ -87,6 +88,21 @@ public:
     void set_velocity(const glm::vec3& vel) { m_velocity = vel; }
     glm::vec3& velocity_mut() { return m_velocity; }
     bool is_penetrating_solid(const World& world) const;
+
+    // Physical Extraction Pod Collider (Rigid Dropship Collision & Walkable Ramp)
+    struct ExtractionPodCollider {
+        bool active{false};
+        glm::vec3 position{0.0f};
+        float drill_progress{1.0f};
+        float ramp_extension{0.0f};
+        bool is_anchored{false};
+    };
+
+    void set_pod_collider(const glm::vec3& pod_pos, float drill_progress, float ramp_extension, bool is_anchored);
+    void clear_pod_collider();
+    bool has_pod_collider() const { return m_pod_collider.active; }
+    const ExtractionPodCollider& pod_collider() const { return m_pod_collider; }
+    bool resolve_extraction_pod_collision(const glm::vec3& pod_pos, float drill_progress, float ramp_extension, bool is_anchored);
 
     struct CameraView {
         glm::vec3 Front;
@@ -221,6 +237,25 @@ public:
     float debris_damage_reduction() const {
         return std::clamp(m_char_attr.fallingDamageReduction + (m_upgrades.reinforcedPlatingTier * 0.10f), 0.0f, 0.85f);
     }
+    float stealth_noise_multiplier() const {
+        return std::max(0.20f, 1.0f - m_upgrades.acousticDampeningTier * 0.20f);
+    }
+    float optical_detection_multiplier() const {
+        return std::max(0.35f, 1.0f - m_upgrades.shadowVeilTier * 0.15f);
+    }
+    float ambush_damage_multiplier() const {
+        return 1.0f + m_upgrades.ambushProtocolTier * 0.35f;
+    }
+    float melee_damage_multiplier() const {
+        return 1.0f + m_upgrades.pneumaticImpactTier * 0.30f;
+    }
+    float mineral_yield_multiplier() const {
+        return 1.0f + m_upgrades.microChargesTier * 0.20f;
+    }
+    float weakpoint_critical_multiplier() const {
+        return 1.0f + m_upgrades.criticalWeakpointTier * 0.35f;
+    }
+    float defibrillator_timer() const { return m_defibrillator_timer; }
 
     enum class DamageSource {
         Kinetic,         // Standard kinetic attack (screen shake trauma, red flash)
@@ -236,7 +271,23 @@ public:
 
     float health() const { return m_health; }
     float max_health() const { return m_max_health; }
-    void set_health(float h) { m_health = glm::clamp(h, 0.0f, m_max_health); }
+    void set_health(float h);
+
+    float shield() const { return m_shield; }
+    float max_shield() const { return m_max_shield; }
+    void set_shield(float s);
+    void set_max_shield(float ms);
+    void reset_shield();
+    bool is_shield_depleted() const { return m_shield <= 0.0f; }
+    bool is_shield_recharging() const {
+        return m_time_since_damage >= m_shield_recharge_delay && m_shield < m_max_shield && m_health > 0.0f;
+    }
+    float shield_recharge_delay() const { return m_shield_recharge_delay; }
+    void set_shield_recharge_delay(float delay) { m_shield_recharge_delay = delay; }
+    float shield_recharge_rate() const { return m_shield_recharge_rate; }
+    void set_shield_recharge_rate(float rate) { m_shield_recharge_rate = rate; }
+    void update_shield_recharge(float dt);
+
     float take_damage(float dmg, DamageSource source);
     float take_damage(float dmg, bool is_falling_debris = false);
     DamageSource last_damage_source() const { return m_last_damage_source; }
@@ -395,12 +446,17 @@ private:
     float m_eyeHeight{1.65f};
     World* m_current_world{nullptr};
     uint16_t m_current_buttons{0};
+    ExtractionPodCollider m_pod_collider;
 
     // Character Archetype & Meta-Upgrades
     CharacterAttributes m_char_attr{get_character_attributes(CharacterClass::Demolitionist)};
     UpgradeTree m_upgrades;
     float m_health{100.0f};
     float m_max_health{100.0f};
+    float m_shield{50.0f};
+    float m_max_shield{50.0f};
+    float m_shield_recharge_delay{4.0f};
+    float m_shield_recharge_rate{15.0f};
     float m_time_since_damage{15.0f};
 
     // Suit status & equipment
@@ -504,6 +560,7 @@ private:
 
     // Insertion Pod Breach Shielding & Combat Pause
     float m_insertionShieldTimer{0.0f};
+    float m_defibrillator_timer{0.0f};
     bool m_combat_inputs_paused{false};
     float m_spawn_shoot_pause_timer{0.0f};
     bool m_require_lmb_release{false};

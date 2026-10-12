@@ -38,12 +38,14 @@ void main() {
 
         float theta = dot(L, normalize(-uHeadlampDir));
         float innerCutoff = 0.951; // cos(18 deg)
-        float outerCutoff = 0.848; // cos(32 deg)
+        float outerCutoff = 0.883; // cos(28 deg)
         float epsilon = innerCutoff - outerCutoff;
         float spotIntensity = clamp((theta - outerCutoff) / epsilon, 0.0, 1.0);
 
-        if (spotIntensity > 0.0) {
-            float attenuation = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
+        const float MAX_HEADLAMP_RANGE = 22.0;
+        if (spotIntensity > 0.0 && dist < MAX_HEADLAMP_RANGE) {
+            float rangeFactor = clamp(1.0 - (dist / MAX_HEADLAMP_RANGE), 0.0, 1.0);
+            float attenuation = (rangeFactor * rangeFactor) / (1.0 + 0.09 * dist + 0.032 * dist * dist);
             vec3 radiance = uHeadlampColor * 4.5 * attenuation * spotIntensity;
 
             // Cook-Torrance Specular + Lambertian Diffuse
@@ -68,6 +70,13 @@ void main() {
             vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
             vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
             vec3 diffuse = kD * albedo / 3.14159265;
+
+            // Subtle Detritus Specular Clamp:
+            // For non-interactive detritus (emissive <= 0.05), strictly clamp specular shine
+            // so dull rock stalactites/stalagmites do not catch distracting specular glints under the headlamp
+            if (emissive <= 0.05) {
+                specular = clamp(specular, vec3(0.0), vec3(0.04));
+            }
 
             Lo += (diffuse + specular) * radiance * NdotL * ao;
         }

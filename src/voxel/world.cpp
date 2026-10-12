@@ -2,6 +2,9 @@
 #include "structural_check.hpp"
 #include "fluid_sim.hpp"
 #include "../graphics/surface_clutter.hpp"
+#include "../graphics/particle_system.hpp"
+#include "../core/save_system.hpp"
+#include "../core/logger.hpp"
 #include <glm/gtc/matrix_access.hpp>
 #include <cmath>
 #include <iostream>
@@ -67,11 +70,20 @@ void World::set_seed(uint32_t seed) {
     generate_world(m_sector_index, seed);
 }
 
-void World::generate_world(int sector_index, uint32_t seed) {
+void World::generate_world(int sector_index, uint32_t seed, int target_objective) {
     m_sector_index = sector_index;
-    uint32_t effective_seed = (seed != 0) ? seed : (static_cast<uint32_t>(sector_index) * 2654435761u + static_cast<uint32_t>(time(nullptr)));
+    uint32_t effective_seed = (seed != 0) ? seed : SaveSystem::generate_random_seed(sector_index);
     m_seed = effective_seed;
-    m_level_gen = std::make_unique<LevelGenerator>(sector_index, effective_seed);
+    m_level_gen = std::make_unique<LevelGenerator>(sector_index, effective_seed, 1, target_objective);
+
+    if (m_level_gen) {
+        VF_LOG_INFO("World", "Generated sector " << sector_index << " (seed " << effective_seed << "): "
+                    << "Objective Target=" << m_level_gen->target_objective_amount()
+                    << ", Spawned=" << m_level_gen->total_objective_material_count()
+                    << ", Room Spread=" << m_level_gen->objective_room_spread_count()
+                    << ", Zero-Resource Rooms=" << m_level_gen->rooms_with_zero_objective_count()
+                    << ", Completable=" << (m_level_gen->validate_resource_compleatability() ? "YES" : "NO"));
+    }
 
     // Flush stale mesh queue requests
     {
@@ -116,6 +128,11 @@ void World::generate_world(int sector_index, uint32_t seed) {
     for (auto& [cpos, chunk] : m_chunks) {
         if (chunk) {
             ApplyTopologicalShapes(*chunk);
+        }
+    }
+    ensure_structural_connectivity();
+    for (auto& [cpos, chunk] : m_chunks) {
+        if (chunk) {
             GenerateChunkClutter(*chunk);
         }
     }
@@ -124,6 +141,7 @@ void World::generate_world(int sector_index, uint32_t seed) {
             OnChunkGenerated(chunk.get());
         }
     }
+    settle_fluids_offline();
     PopulateFauna();
     m_playerSpawnYaw = calculate_spawn_yaw(m_playerSpawnPos);
 
@@ -188,6 +206,8 @@ void World::PopulateFauna() {
         return std::nullopt;
     };
 
+    constexpr float MIN_FAUNA_SPAWN_SEPARATION = 8.0f;
+
     for (size_t i = 1; i < rooms.size(); ++i) { // Room 0 is player insertion arrival bay
         glm::vec3 room_center(
             static_cast<float>(rooms[i].center.x),
@@ -197,6 +217,18 @@ void World::PopulateFauna() {
 
         auto safe_pos = find_valid_room_spawn(room_center);
         if (!safe_pos) {
+            continue;
+        }
+
+        // Enforce minimum spatial separation from all already-placed fauna entities
+        bool too_close = false;
+        for (const auto& existing : m_active_entities) {
+            if (glm::distance(existing.pos, *safe_pos) < MIN_FAUNA_SPAWN_SEPARATION) {
+                too_close = true;
+                break;
+            }
+        }
+        if (too_close) {
             continue;
         }
 
@@ -210,22 +242,56 @@ void World::PopulateFauna() {
         m_active_entities.push_back(e);
 
         if (m_sector_index >= 2 && (i % 2 == 0)) {
-            glm::vec3 sec_candidate = *safe_pos + glm::vec3(3.5f, 0.0f, -3.5f);
+            glm::vec3 sec_candidate = *safe_pos + glm::vec3(8.5f, 0.0f, -8.5f);
             auto sec_safe = find_valid_room_spawn(sec_candidate);
-            if (sec_safe && glm::distance(*sec_safe, *safe_pos) >= 2.0f) {
-                FaunaEntity e2;
-                e2.id = next_id++;
-                e2.pos = *sec_safe;
-                e2.position = *sec_safe;
-                e2.state = AIState::ROOSTING;
-                e2.role = StalkerRole::Melee;
-                m_active_entities.push_back(e2);
+            if (sec_safe) {
+                bool sec_too_close = false;
+                for (const auto& existing : m_active_entities) {
+                    if (glm::distance(existing.pos, *sec_safe) < MIN_FAUNA_SPAWN_SEPARATION) {
+                        sec_too_close = true;
+                        break;
+                    }
+                }
+                if (!sec_too_close) {
+                    FaunaEntity e2;
+                    e2.id = next_id++;
+                    e2.pos = *sec_safe;
+                    e2.position = *sec_safe;
+                    e2.state = AIState::ROOSTING;
+                    e2.role = StalkerRole::Melee;
+                    m_active_entities.push_back(e2);
+                }
             }
         }
+    }
+
+    // Procedural Precursor Vault Guardian / Boss Monster Spawn
+    if (m_level_gen && m_level_gen->has_vault() && m_level_gen->vault_placement().has_guardian) {
+        const auto& vp = m_level_gen->vault_placement();
+        FaunaEntity guardian;
+        guardian.id = next_id++;
+        guardian.pos = vp.guardian_spawn_pos;
+        guardian.position = vp.guardian_spawn_pos;
+        guardian.state = AIState::ROOSTING;
+        if (vp.guardian_role == VaultGuardianRole::ChitinGoliath) {
+            guardian.role = StalkerRole::ChitinGoliath;
+        } else if (vp.guardian_role == VaultGuardianRole::StalkerShooter) {
+            guardian.role = StalkerRole::Shooter;
+        } else {
+            guardian.role = StalkerRole::Melee;
+        }
+        m_active_entities.push_back(guardian);
     }
 }
 
 void World::GenerateSectorStructures(int sector_index) {
+    if (m_level_gen && m_level_gen->has_vault()) {
+        const auto& vp = m_level_gen->vault_placement();
+        m_vault_door = VaultDoor(vp.door_pos, vp.door_height);
+        m_vault_door.set_relic_position(vp.relic_pos);
+        return;
+    }
+
     bool should_generate = (sector_index >= 2) || ((m_seed % 100) < 30);
     if (!should_generate) {
         m_vault_door = VaultDoor{};
@@ -244,6 +310,15 @@ void World::GenerateSectorStructures(int sector_index) {
     for (int x = vx - 3; x <= vx + 3; ++x) {
         for (int y = vy; y <= vy + 4; ++y) {
             for (int z = vz - 3; z <= vz + 3; ++z) {
+                // Do not seal or obstruct existing open corridors, doorways, or room walkways
+                Voxel existing = get_voxel(x, y, z);
+                if (existing.material_id == MAT_AIR ||
+                    existing.material_id == MAT_VOLCANIC_BASALT ||
+                    existing.material_id == MAT_INDUSTRIAL_BULKHEAD ||
+                    existing.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                    continue;
+                }
+
                 bool is_boundary = (x == vx - 3 || x == vx + 3 ||
                                     y == vy || y == vy + 4 ||
                                     z == vz - 3 || z == vz + 3);
@@ -264,9 +339,9 @@ void World::GenerateSectorStructures(int sector_index) {
     m_vault_door = VaultDoor(door_pos, 3);
     m_vault_door.set_relic_position(glm::ivec3(vx, vy + 1, vz));
 
-    // Floating Relic Hyper-Core Pedestal in vault center
+    // Floating Relic Hyper-Core Pedestal in vault center (dynamic animated 3D model)
     set_voxel(vx, vy, vz, Voxel{MAT_PRECURSOR_STONE, VOXEL_FLAG_ANCHORED}, false);
-    set_voxel(vx, vy + 1, vz, Voxel{MAT_PRISMATIC_CRYSTAL, VOXEL_FLAG_EMISSIVE}, false);
+    set_voxel(vx, vy + 1, vz, Voxel{MAT_PRISMATIC_CRYSTAL, static_cast<uint8_t>(VOXEL_FLAG_EMISSIVE | VOXEL_FLAG_CUSTOM_MODEL)}, false);
 }
 
 void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
@@ -320,6 +395,13 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
             ApplyTopologicalShapes(*chunk);
         }
     }
+    ensure_structural_connectivity();
+    for (auto& [cpos, chunk] : m_chunks) {
+        if (chunk) {
+            OnChunkGenerated(chunk.get());
+        }
+    }
+    settle_fluids_offline();
     PopulateFauna();
     m_playerSpawnYaw = calculate_spawn_yaw(m_playerSpawnPos);
 
@@ -368,9 +450,9 @@ void World::OnChunkGenerated(Chunk* chunk) {
     int by = cpos.y * CHUNK_SIZE;
     int bz = cpos.z * CHUNK_SIZE;
 
-    const glm::ivec3 orthogonalDirs[6] = {
+    const glm::ivec3 flowDirs[5] = {
+        { 0,-1, 0},
         { 1, 0, 0}, {-1, 0, 0},
-        { 0, 1, 0}, { 0,-1, 0},
         { 0, 0, 1}, { 0, 0,-1}
     };
 
@@ -384,7 +466,7 @@ void World::OnChunkGenerated(Chunk* chunk) {
 
                 glm::ivec3 worldPos(bx + x, by + y, bz + z);
                 bool hasAirNeighbor = false;
-                for (const auto& dir : orthogonalDirs) {
+                for (const auto& dir : flowDirs) {
                     int nx = x + dir.x;
                     int ny = y + dir.y;
                     int nz = z + dir.z;
@@ -430,6 +512,7 @@ Chunk* World::get_or_create_chunk(const ChunkPos& pos) {
     }
 
     if (created && raw) {
+        ApplyTopologicalShapes(*raw);
         queue_chunk_for_meshing(pos);
         OnChunkGenerated(raw);
     }
@@ -486,6 +569,42 @@ bool World::set_voxel(int world_x, int world_y, int world_z, Voxel v, bool mark_
             }
         } else if (!old_is_rad && new_is_rad) {
             m_radioactive_sources.push_back(glm::ivec3(world_x, world_y, world_z));
+        }
+    }
+
+    // Anchor Dependency & Auto-Despawn:
+    // When a solid voxel breaks or is cleared to air/liquid, clear all decorative clutter anchored to its faces
+    if (old_vox.is_solid() && (!v.is_solid() || v.material_id == MAT_AIR)) {
+        clear_disconnected_clutter(glm::ivec3(world_x, world_y, world_z));
+
+        // Dynamic Organic Crystal Spawning:
+        // When a solid block breaks, any adjacent crystal deposit has its newly exposed surface sprout a 3D faceted cluster!
+        const glm::ivec3 adj_dirs[6] = {
+            { 1, 0, 0}, {-1, 0, 0},
+            { 0, 1, 0}, { 0,-1, 0},
+            { 0, 0, 1}, { 0, 0,-1}
+        };
+        for (int d = 0; d < 6; ++d) {
+            glm::ivec3 n_pos = glm::ivec3(world_x, world_y, world_z) + adj_dirs[d];
+            Voxel n_vox = get_voxel(n_pos.x, n_pos.y, n_pos.z);
+            if (n_vox.material_id == MAT_VOIDITE_CRYSTAL || n_vox.material_id == MAT_PRISMATIC_CRYSTAL) {
+                glm::ivec3 attach_norm = -adj_dirs[d];
+                ChunkPos n_cpos{floor_div(n_pos.x, CHUNK_SIZE), floor_div(n_pos.y, CHUNK_SIZE), floor_div(n_pos.z, CHUNK_SIZE)};
+                Chunk* n_chunk = get_chunk(n_cpos);
+                if (n_chunk) {
+                    bool already_has = false;
+                    for (const auto& cl : n_chunk->clutter_instances()) {
+                        if (cl.host_voxel == n_pos && cl.attach_normal == attach_norm) {
+                            already_has = true;
+                            break;
+                        }
+                    }
+                    if (!already_has) {
+                        ClutterInstance new_cl = SurfaceClutterSystem::create_crystal_instance(n_pos, attach_norm, n_vox.material_id, m_seed);
+                        n_chunk->clutter_instances_mut().push_back(new_cl);
+                    }
+                }
+            }
         }
     }
 
@@ -602,6 +721,32 @@ bool World::set_block_flags(const glm::ivec3& pos, uint8_t flags) {
     int ly = floor_mod(pos.y, CHUNK_SIZE);
     int lz = floor_mod(pos.z, CHUNK_SIZE);
     chunk->SetFlags(lx, ly, lz, flags);
+    chunk->MarkDirty();
+    queue_chunk_for_meshing(cpos);
+
+    // Cross-chunk mesh dirtying on boundaries
+    if (lx == 0) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x - 1, cpos.y, cpos.z});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (lx == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x + 1, cpos.y, cpos.z});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+    if (ly == 0) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x, cpos.y - 1, cpos.z});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (ly == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x, cpos.y + 1, cpos.z});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+    if (lz == 0) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x, cpos.y, cpos.z - 1});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    } else if (lz == CHUNK_SIZE - 1) {
+        Chunk* c = get_chunk(ChunkPos{cpos.x, cpos.y, cpos.z + 1});
+        if (c) { c->MarkDirty(); queue_chunk_for_meshing(c->get_pos()); }
+    }
+
     return true;
 }
 
@@ -695,7 +840,7 @@ void World::generate_chunk_terrain(Chunk& chunk) {
                     m_toxic_gas_sources.push_back(glm::ivec3(wx, wy, wz));
                 } else if (v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_LAVA) {
                     m_lava_sources.push_back(glm::ivec3(wx, wy, wz));
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT || v.material_id == MAT_ACID) {
                     m_aquifer_sources.push_back(glm::ivec3(wx, wy, wz));
                 }
             }
@@ -725,7 +870,102 @@ Voxel World::get_voxel_unlocked(int world_x, int world_y, int world_z) const {
 }
 
 void World::GenerateChunkClutter(Chunk& chunk) {
-    chunk.set_clutter_instances(SurfaceClutterSystem::generate_chunk_clutter(chunk, m_seed));
+    chunk.set_clutter_instances(SurfaceClutterSystem::generate_chunk_clutter(
+        chunk, m_seed, [this](int wx, int wy, int wz) { return get_voxel(wx, wy, wz); }
+    ));
+}
+
+int World::clear_disconnected_clutter(const glm::ivec3& host_block) {
+    int total_removed = 0;
+    std::vector<ClutterInstance> removed_props;
+
+    int cx = floor_div(host_block.x, CHUNK_SIZE);
+    int cy = floor_div(host_block.y, CHUNK_SIZE);
+    int cz = floor_div(host_block.z, CHUNK_SIZE);
+
+    ChunkPos cpos{cx, cy, cz};
+    Chunk* chunk = get_chunk(cpos);
+    if (chunk) {
+        total_removed += chunk->remove_clutter_hosted_at(host_block, &removed_props);
+    }
+
+    // Check adjacent neighbor chunks if the host block is at a chunk boundary
+    int lx = floor_mod(host_block.x, CHUNK_SIZE);
+    int ly = floor_mod(host_block.y, CHUNK_SIZE);
+    int lz = floor_mod(host_block.z, CHUNK_SIZE);
+
+    const glm::ivec3 neighbor_dirs[6] = {
+        {-1, 0, 0}, { 1, 0, 0},
+        { 0,-1, 0}, { 0, 1, 0},
+        { 0, 0,-1}, { 0, 0, 1}
+    };
+    bool is_border[6] = {
+        lx == 0,
+        lx == CHUNK_SIZE - 1,
+        ly == 0,
+        ly == CHUNK_SIZE - 1,
+        lz == 0,
+        lz == CHUNK_SIZE - 1
+    };
+
+    for (int d = 0; d < 6; ++d) {
+        if (is_border[d]) {
+            Chunk* n_chunk = get_chunk(ChunkPos{cx + neighbor_dirs[d].x, cy + neighbor_dirs[d].y, cz + neighbor_dirs[d].z});
+            if (n_chunk) {
+                total_removed += n_chunk->remove_clutter_hosted_at(host_block, &removed_props);
+            }
+        }
+    }
+
+    // Auto-Despawn: Instantly clear disconnected surface props with a small break-particle burst
+    for (const auto& prop : removed_props) {
+        ParticleSystem::SpawnClutterBreakDebris(prop.position, prop.type, prop.color_tint);
+    }
+
+    return total_removed;
+}
+
+int World::cleanup_all_disconnected_clutter(Chunk& chunk) {
+    auto& instances = chunk.clutter_instances_mut();
+    if (instances.empty()) return 0;
+    int removed_count = 0;
+    std::vector<ClutterInstance> removed;
+    auto it = std::remove_if(instances.begin(), instances.end(), [&](const ClutterInstance& inst) {
+        Voxel v = get_voxel(inst.host_voxel.x, inst.host_voxel.y, inst.host_voxel.z);
+        if (!v.is_solid() || v.material_id == MAT_AIR) {
+            removed.push_back(inst);
+            removed_count++;
+            return true;
+        }
+        return false;
+    });
+    instances.erase(it, instances.end());
+    for (const auto& prop : removed) {
+        ParticleSystem::SpawnClutterBreakDebris(prop.position, prop.type, prop.color_tint);
+    }
+    return removed_count;
+}
+
+int World::ensure_structural_connectivity() {
+    return StructuralCheck::ensure_world_connectivity(*this);
+}
+
+int World::count_unanchored_blocks() const {
+    return StructuralCheck::count_unanchored_blocks(*this);
+}
+
+int World::count_disconnected_clutter() const {
+    int count = 0;
+    for (const auto& [cpos, chunk] : m_chunks) {
+        if (!chunk) continue;
+        for (const auto& inst : chunk->clutter_instances()) {
+            Voxel v = get_voxel(inst.host_voxel.x, inst.host_voxel.y, inst.host_voxel.z);
+            if (!v.is_solid() || v.material_id == MAT_AIR) {
+                count++;
+            }
+        }
+    }
+    return count;
 }
 
 void World::ApplyTopologicalShapes(Chunk& chunk) {
@@ -836,7 +1076,8 @@ void World::ApplyTopologicalShapes(Chunk& chunk) {
                 }
 
                 // 2. Headroom Check:
-                if (cur.is_ramp()) {
+                // Ramps and slabs cannot exist if there is a solid block directly above them
+                if (cur.is_ramp() || cur.is_slab()) {
                     Voxel above = get_vox(lx, ly + 1, lz);
                     if (above.is_solid()) {
                         cur.set_shape(SHAPE_CUBE);
@@ -885,6 +1126,68 @@ void World::ApplyTopologicalShapes(Chunk& chunk) {
                         if (lz - 1 >= 0) {
                             north_n.set_shape(SHAPE_SLAB_BOTTOM);
                             chunk.set_voxel(lx, ly, lz - 1, north_n);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 3: Liquid-Contact Sub-Block Waterlogging Pass
+    // Ensure any natural ramps or slabs in contact with initially placed world liquids
+    // are correctly marked waterlogged so fluids seamlessly flow and contour over them.
+    bool changed = true;
+    for (int iter = 0; iter < 4 && changed; ++iter) {
+        changed = false;
+        for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+            for (int ly = 0; ly < CHUNK_SIZE; ++ly) {
+                for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                    Voxel cur = chunk.get_voxel(lx, ly, lz);
+                    if (!cur.is_ramp() && !cur.is_slab()) continue;
+
+                    // Check if directly beneath fluid
+                    Voxel above = get_vox(lx, ly + 1, lz);
+                    bool submerged = above.is_liquid() || above.is_waterlogged();
+
+                    // Check lateral liquid contact
+                    bool lateral_liquid = false;
+                    int max_liquid_lvl = 0;
+                    const glm::ivec3 dirs[4] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+                    for (const auto& d : dirs) {
+                        Voxel nb = get_vox(lx + d.x, ly, lz + d.z);
+                        if (nb.is_liquid() || nb.is_waterlogged()) {
+                            lateral_liquid = true;
+                            int lvl = GetFluidLevel(nb.flags_and_damage);
+                            max_liquid_lvl = std::max(max_liquid_lvl, lvl);
+                        }
+                    }
+
+                    // Check upper step contact (liquid on elevated ledge feeding down onto ramp)
+                    bool upper_liquid = false;
+                    glm::ivec3 high_dir(0);
+                    if (cur.shape() == SHAPE_RAMP_EAST)  high_dir = glm::ivec3( 1, 0, 0);
+                    if (cur.shape() == SHAPE_RAMP_WEST)  high_dir = glm::ivec3(-1, 0, 0);
+                    if (cur.shape() == SHAPE_RAMP_SOUTH) high_dir = glm::ivec3( 0, 0, 1);
+                    if (cur.shape() == SHAPE_RAMP_NORTH) high_dir = glm::ivec3( 0, 0,-1);
+                    if (high_dir != glm::ivec3(0)) {
+                        Voxel nb_high = get_vox(lx + high_dir.x, ly + 1, lz + high_dir.z);
+                        if (nb_high.is_liquid() || nb_high.is_waterlogged()) {
+                            upper_liquid = true;
+                            int lvl = GetFluidLevel(nb_high.flags_and_damage);
+                            max_liquid_lvl = std::max(max_liquid_lvl, lvl);
+                        }
+                    }
+
+                    if (submerged || lateral_liquid || upper_liquid) {
+                        uint8_t old_flags = cur.flags_and_damage;
+                        cur.flags_and_damage |= VOXEL_FLAG_WATERLOGGED;
+                        int final_lvl = submerged ? 5 : max_liquid_lvl;
+                        if (final_lvl < 1) final_lvl = 1;
+                        if (final_lvl > 5) final_lvl = 5;
+                        cur.flags_and_damage = (cur.flags_and_damage & ~VOXEL_DAMAGE_MASK) | (final_lvl & VOXEL_DAMAGE_MASK);
+                        if (cur.flags_and_damage != old_flags) {
+                            chunk.set_voxel(lx, ly, lz, cur);
+                            changed = true;
                         }
                     }
                 }
@@ -1722,6 +2025,30 @@ void World::flush_fluid_dirty_chunks() {
             queue_chunk_for_meshing(c->get_pos());
         }
     }
+    m_fluidDirtyChunks.clear();
+}
+
+void World::settle_fluids_offline(int max_ticks) {
+    constexpr float TICK_INTERVAL = 0.0833f;
+    int ticks = 0;
+    while ((!m_fluidSim.m_activeFluids.empty() || !m_fluidSim.m_scheduledSpreads.empty()) && ticks < max_ticks) {
+        m_fluidSim.Update(TICK_INTERVAL, *this);
+        ticks++;
+    }
+
+    // Flush any pending scheduled spreads into world blocks immediately
+    while (!m_fluidSim.m_scheduledSpreads.empty()) {
+        auto upd = m_fluidSim.m_scheduledSpreads.front();
+        m_fluidSim.m_scheduledSpreads.pop_front();
+        std::unordered_set<Chunk*> dirtyChunks;
+        m_fluidSim.TrySpreadToNeighbor(*this, upd.pos, upd.material, upd.level, dirtyChunks, true);
+    }
+
+    // Sleep on Spawn: Ensure spawn queues are completely empty so liquids cost 0 ms CPU until disturbed
+    m_fluidSim.m_activeFluids.clear();
+    m_fluidSim.m_activeFluidSet.clear();
+    m_fluidSim.m_scheduledSpreads.clear();
+    m_fluidSim.m_accumulator = 0.0f;
     m_fluidDirtyChunks.clear();
 }
 

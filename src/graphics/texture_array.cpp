@@ -15,10 +15,19 @@ namespace Voidfall {
 
 namespace {
 
+constexpr float TWO_PI = 6.283185307179586f;
+
 inline float fractf(float x) { return x - std::floor(x); }
 
 inline float hash2d(float x, float y) {
     float n = std::sin(x * 127.1f + y * 311.7f) * 43758.5453123f;
+    return fractf(n);
+}
+
+inline float periodic_hash2d(int ix, int iy, int px, int py) {
+    int wx = (ix % px + px) % px;
+    int wy = (iy % py + py) % py;
+    float n = std::sin(static_cast<float>(wx) * 127.1f + static_cast<float>(wy) * 311.7f) * 43758.5453123f;
     return fractf(n);
 }
 
@@ -42,6 +51,28 @@ inline float noise2d(float x, float y) {
            d * ux * uy;
 }
 
+inline float periodic_noise2d(float fx, float fy, int period) {
+    float x = fx * static_cast<float>(period);
+    float y = fy * static_cast<float>(period);
+    int ix = static_cast<int>(std::floor(x));
+    int iy = static_cast<int>(std::floor(y));
+    float lx = fractf(x);
+    float ly = fractf(y);
+
+    float ux = lx * lx * (3.0f - 2.0f * lx);
+    float uy = ly * ly * (3.0f - 2.0f * ly);
+
+    float a = periodic_hash2d(ix, iy, period, period);
+    float b = periodic_hash2d(ix + 1, iy, period, period);
+    float c = periodic_hash2d(ix, iy + 1, period, period);
+    float d = periodic_hash2d(ix + 1, iy + 1, period, period);
+
+    return a * (1.0f - ux) * (1.0f - uy) +
+           b * ux * (1.0f - uy) +
+           c * (1.0f - ux) * uy +
+           d * ux * uy;
+}
+
 inline float fbm2d(float x, float y, int octaves = 4) {
     float val = 0.0f;
     float amp = 0.5f;
@@ -49,6 +80,18 @@ inline float fbm2d(float x, float y, int octaves = 4) {
     for (int i = 0; i < octaves; ++i) {
         val += amp * noise2d(x * freq, y * freq);
         freq *= 2.02f;
+        amp *= 0.5f;
+    }
+    return val;
+}
+
+inline float periodic_fbm2d(float fx, float fy, int base_freq, int octaves = 4) {
+    float val = 0.0f;
+    float amp = 0.5f;
+    int freq = base_freq;
+    for (int i = 0; i < octaves; ++i) {
+        val += amp * periodic_noise2d(fx, fy, freq);
+        freq *= 2;
         amp *= 0.5f;
     }
     return val;
@@ -94,6 +137,45 @@ inline VoronoiResult voronoi2d(float x, float y) {
     return {f1, f2, sx, sy, cid};
 }
 
+inline VoronoiResult periodic_voronoi2d(float fx, float fy, int num_cells) {
+    float x = fx * static_cast<float>(num_cells);
+    float y = fy * static_cast<float>(num_cells);
+    int ix = static_cast<int>(std::floor(x));
+    int iy = static_cast<int>(std::floor(y));
+    float lx = fractf(x);
+    float ly = fractf(y);
+
+    float f1 = 8.0f;
+    float f2 = 8.0f;
+    float sx = 0.0f, sy = 0.0f;
+    int cid = 0;
+
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            int cell_x = (ix + i) % num_cells;
+            if (cell_x < 0) cell_x += num_cells;
+            int cell_y = (iy + j) % num_cells;
+            if (cell_y < 0) cell_y += num_cells;
+
+            float rx = hash2d(static_cast<float>(cell_x) * 13.1f, static_cast<float>(cell_y) * 17.7f);
+            float ry = hash2d(static_cast<float>(cell_x) * 31.4f + 5.1f, static_cast<float>(cell_y) * 23.9f + 9.3f);
+            float px = static_cast<float>(i) + rx;
+            float py = static_cast<float>(j) + ry;
+            float d = std::sqrt((px - lx) * (px - lx) + (py - ly) * (py - ly));
+            if (d < f1) {
+                f2 = f1;
+                f1 = d;
+                sx = static_cast<float>(cell_x) + rx;
+                sy = static_cast<float>(cell_y) + ry;
+                cid = static_cast<int>(rx * 1000.0f) ^ (static_cast<int>(ry * 1000.0f) << 4);
+            } else if (d < f2) {
+                f2 = d;
+            }
+        }
+    }
+    return {f1, f2, sx, sy, cid};
+}
+
 // Clamp to uint8 helper
 inline uint8_t u8clamp(float v) {
     return static_cast<uint8_t>(std::clamp(v, 0.0f, 255.0f));
@@ -115,6 +197,7 @@ inline void pack_normal(float nx, float ny, float nz, uint8_t& out_r, uint8_t& o
 }
 
 } // namespace
+
 
 TextureArray::TextureArray(int width, int height, int layers, bool pixel_art)
     : m_width(width)
@@ -158,14 +241,14 @@ void TextureArray::initialize_procedural_materials() {
 
                 switch (l) {
                     case 1: { // ── MAT_FRACTURED_GRANITE (Realistic igneous rock with mineral grains and fissures) ──
-                        float stone_fbm = fbm2d(fx * 12.0f, fy * 12.0f, 4);
-                        VoronoiResult vor = voronoi2d(fx * 14.0f, fy * 14.0f);
+                        float stone_fbm = periodic_fbm2d(fx, fy, 12, 4);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 14);
                         float crack_dist = vor.f2 - vor.f1;
                         float is_crack = (crack_dist < 0.12f) ? std::pow(1.0f - (crack_dist / 0.12f), 2.0f) : 0.0f;
 
                         // Quartz (light gray), Feldspar (warm tan/salmon), Biotite (dark specks)
-                        float mineral_grain = noise2d(fx * 45.0f, fy * 45.0f);
-                        float feldspar_tint = noise2d(fx * 6.0f + 2.0f, fy * 6.0f + 7.0f);
+                        float mineral_grain = periodic_noise2d(fx, fy, 48);
+                        float feldspar_tint = periodic_noise2d(fx, fy, 6);
 
                         // Base stone color
                         r = 95.0f + 55.0f * stone_fbm + 25.0f * feldspar_tint;
@@ -181,8 +264,8 @@ void TextureArray::initialize_procedural_materials() {
                         b = b * (1.0f - 0.75f * is_crack);
 
                         // Normal map from stone relief & cracks
-                        float d_fbm_x = fbm2d((fx + 0.01f) * 12.0f, fy * 12.0f) - fbm2d((fx - 0.01f) * 12.0f, fy * 12.0f);
-                        float d_fbm_y = fbm2d(fx * 12.0f, (fy + 0.01f) * 12.0f) - fbm2d(fx * 12.0f, (fy - 0.01f) * 12.0f);
+                        float d_fbm_x = periodic_fbm2d(fx + 0.01f, fy, 12, 4) - periodic_fbm2d(fx - 0.01f, fy, 12, 4);
+                        float d_fbm_y = periodic_fbm2d(fx, fy + 0.01f, 12, 4) - periodic_fbm2d(fx, fy - 0.01f, 12, 4);
                         nx = -d_fbm_x * 2.5f;
                         ny = -d_fbm_y * 2.5f;
                         if (is_crack > 0.1f) {
@@ -197,8 +280,8 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 2: { // ── MAT_VOLCANIC_BASALT (Porous vesicular lava rock with cooling joints) ──
-                        float basalt_fbm = fbm2d(fx * 10.0f, fy * 10.0f, 4);
-                        VoronoiResult vor = voronoi2d(fx * 16.0f, fy * 16.0f);
+                        float basalt_fbm = periodic_fbm2d(fx, fy, 10, 4);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 16);
                         // Gas vesicles (porous bubbles frozen in lava)
                         float vesicle = (vor.f1 < 0.28f) ? std::pow(1.0f - (vor.f1 / 0.28f), 2.5f) : 0.0f;
 
@@ -208,153 +291,140 @@ void TextureArray::initialize_procedural_materials() {
                         b = 36.0f + 20.0f * basalt_fbm - 15.0f * vesicle;
 
                         // Pitted vesicular crater normal map
-                        nx = (fx - vor.seed_x / 16.0f) * vesicle * 8.0f;
-                        ny = (fy - vor.seed_y / 16.0f) * vesicle * 8.0f;
+                        float v_local_x = fractf(fx * 16.0f);
+                        float v_local_y = fractf(fy * 16.0f);
+                        nx = (v_local_x - 0.5f) * vesicle * 8.0f;
+                        ny = (v_local_y - 0.5f) * vesicle * 8.0f;
                         nz = 1.0f - vesicle * 0.7f;
 
                         // Glassy obsidian cleavage flecks
-                        float obsidian_fleck = noise2d(fx * 55.0f, fy * 55.0f);
+                        float obsidian_fleck = periodic_noise2d(fx, fy, 56);
                         rough = (obsidian_fleck > 0.82f) ? 35.0f : 235.0f;
                         metal = (obsidian_fleck > 0.82f) ? 45.0f : 20.0f;
                         height_disp = std::clamp(0.6f + basalt_fbm * 0.3f - vesicle * 0.6f, 0.0f, 1.0f);
                         break;
                     }
 
-                    case 3: { // ── MAT_VOIDITE_CRYSTAL (Authentic Seamless Faceted Gemstone Cluster) ──
-                        // Seamless toroidal crystal facets across the entire block (no artificial square borders)
-                        struct GemSeed {
-                            float x, y, nx, ny, height, shade;
-                        };
-                        const GemSeed gem_seeds[8] = {
-                            {0.18f, 0.22f,  0.60f,  0.35f, 0.95f, 1.05f},
-                            {0.68f, 0.16f, -0.55f,  0.45f, 0.88f, 0.92f},
-                            {0.38f, 0.52f,  0.30f, -0.65f, 1.00f, 1.15f},
-                            {0.84f, 0.48f, -0.65f, -0.30f, 0.92f, 0.98f},
-                            {0.14f, 0.78f,  0.45f, -0.50f, 0.85f, 0.88f},
-                            {0.58f, 0.82f, -0.35f,  0.60f, 0.96f, 1.08f},
-                            {0.88f, 0.88f,  0.50f,  0.50f, 0.80f, 0.85f},
-                            {0.48f, 0.18f, -0.20f, -0.70f, 0.90f, 1.02f}
-                        };
+                    case 3: { // ── MAT_VOIDITE_CRYSTAL (Authentic Geode Bedrock Host Matrix with Crystalline Roots) ──
+                        float rock_fbm = periodic_fbm2d(fx, fy, 10, 4);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 14);
+                        float fissure = (vor.f2 - vor.f1 < 0.10f) ? std::pow(1.0f - ((vor.f2 - vor.f1) / 0.10f), 2.0f) : 0.0f;
 
-                        float best_d1 = 10.0f;
-                        float best_d2 = 10.0f;
-                        int best_seed = 0;
-                        float best_dx = 0.0f, best_dy = 0.0f;
+                        // Deep dark void-basalt / obsidian matrix with subtle violet undertones
+                        r = 24.0f + 14.0f * rock_fbm + 18.0f * fissure;
+                        g = 20.0f + 10.0f * rock_fbm + 4.0f * fissure;
+                        b = 34.0f + 18.0f * rock_fbm + 35.0f * fissure;
 
-                        for (int si = 0; si < 8; ++si) {
-                            // Test all 9 toroidal neighbor shifts for perfect seamless wrapping
-                            for (int oj = -1; oj <= 1; ++oj) {
-                                for (int oi = -1; oi <= 1; ++oi) {
-                                    float sx = gem_seeds[si].x + static_cast<float>(oi);
-                                    float sy = gem_seeds[si].y + static_cast<float>(oj);
-                                    float dx = fx - sx;
-                                    float dy = fy - sy;
-                                    float d = std::sqrt(dx * dx + dy * dy);
-                                    if (d < best_d1) {
-                                        best_d2 = best_d1;
-                                        best_d1 = d;
-                                        best_seed = si;
-                                        best_dx = dx;
-                                        best_dy = dy;
-                                    } else if (d < best_d2) {
-                                        best_d2 = d;
-                                    }
-                                }
-                            }
+                        // Rugged geode crust normal map
+                        float d_fbm_x = periodic_fbm2d(fx + 0.01f, fy, 10, 4) - periodic_fbm2d(fx - 0.01f, fy, 10, 4);
+                        float d_fbm_y = periodic_fbm2d(fx, fy + 0.01f, 10, 4) - periodic_fbm2d(fx, fy - 0.01f, 10, 4);
+                        nx = -d_fbm_x * 2.2f;
+                        ny = -d_fbm_y * 2.2f;
+                        if (fissure > 0.05f) {
+                            nx += (hash2d(vor.seed_x, vor.seed_y) - 0.5f) * fissure * 2.0f;
+                            ny += (hash2d(vor.seed_y, vor.seed_x) - 0.5f) * fissure * 2.0f;
+                            nz = 0.6f;
                         }
 
-                        const GemSeed& seed = gem_seeds[best_seed];
-                        float facet_ridge = best_d2 - best_d1;
-                        float is_ridge = (facet_ridge < 0.055f) ? std::pow(1.0f - (facet_ridge / 0.055f), 2.0f) : 0.0f;
-                        float center_glow = std::pow(std::max(0.0f, 1.0f - best_d1 * 2.5f), 2.2f);
+                        // Rough mineral host matrix rock with fine sparkling crystalline flecks
+                        float crystal_fleck = periodic_noise2d(fx, fy, 48);
+                        rough = (crystal_fleck > 0.85f) ? 55.0f : 210.0f;
+                        metal = (crystal_fleck > 0.85f) ? 35.0f : 12.0f;
 
-                        // Subtle internal crystal growth striations / cleavage planes
-                        float striation = std::sin((best_dx * seed.nx + best_dy * seed.ny) * 65.0f) * 0.06f;
-
-                        // Rich gemstone color palette: Deep royal amethyst, vibrant electric purple, electric magenta facet ridges
-                        float shade = seed.shade * (1.0f + striation);
-                        r = (100.0f + 40.0f * center_glow + 95.0f * is_ridge) * shade;
-                        g = (20.0f  + 25.0f * center_glow + 75.0f * is_ridge) * shade;
-                        b = (180.0f + 35.0f * center_glow + 55.0f * is_ridge) * shade;
-
-                        // Facet surface normal tilted at prismatic cleavage angles
-                        float slope = 0.65f; // ~37 degree facet tilt
-                        nx = seed.nx * slope;
-                        ny = seed.ny * slope;
-                        nz = std::sqrt(std::max(0.1f, 1.0f - nx * nx - ny * ny));
-
-                        // Ridge bevel catches light from perpendicular directions
-                        if (is_ridge > 0.1f) {
-                            float r_ang = std::atan2(best_dy, best_dx);
-                            nx = nx * (1.0f - is_ridge) + std::cos(r_ang) * 0.6f * is_ridge;
-                            ny = ny * (1.0f - is_ridge) + std::sin(r_ang) * 0.6f * is_ridge;
-                            nz = nz * (1.0f - is_ridge) + 0.8f * is_ridge;
-                        }
-
-                        // Ultra-smooth polished gemstone surface
-                        rough = 18.0f + 14.0f * (1.0f - is_ridge);
-                        metal = 52.0f; // High refractive gemstone brilliance
-
-                        // Controlled luminous emission that glows vibrantly without washing out into flat white
-                        er = u8clamp(75.0f + 55.0f * center_glow + 105.0f * is_ridge);
-                        eg = u8clamp(15.0f + 20.0f * center_glow + 45.0f  * is_ridge);
-                        eb = u8clamp(155.0f + 45.0f * center_glow + 85.0f * is_ridge);
-                        height_disp = std::clamp(seed.height * 0.75f + is_ridge * 0.25f, 0.0f, 1.0f);
+                        // Subtle deep geode root luminescence in deep fissures (er, eg, eb)
+                        er = u8clamp(18.0f + 45.0f * fissure);
+                        eg = u8clamp(4.0f  + 12.0f * fissure);
+                        eb = u8clamp(32.0f + 65.0f * fissure);
+                        height_disp = std::clamp(0.55f + rock_fbm * 0.3f - fissure * 0.4f, 0.0f, 1.0f);
                         break;
                     }
 
-                    case 4: { // ── MAT_INDUSTRIAL_BULKHEAD (Ballistic Cold-Rolled Alloy Plate with Tread Grips & Hex Bolts) ──
-                        // Perimeter border frame (10% border inset)
-                        float border_w = 0.08f;
-                        bool is_border = (fx < border_w || fx > (1.0f - border_w) || fy < border_w || fy > (1.0f - border_w));
+                    case 4: { // ── MAT_INDUSTRIAL_BULKHEAD (Ballistic Cold-Rolled Alloy Plate with Tread Grips & Flush Rivets) ──
+                        // 1. Alternating heavy industrial non-slip diamond tread bars (period 6 = seamless across blocks)
+                        float gx = fx * 6.0f;
+                        float gy = fy * 6.0f;
+                        int cell_ix = static_cast<int>(std::floor(gx));
+                        int cell_iy = static_cast<int>(std::floor(gy));
+                        float lx = fractf(gx) - 0.5f;
+                        float ly = fractf(gy) - 0.5f;
+                        bool alt = ((cell_ix + cell_iy) % 2) != 0;
 
-                        // Diamond-plate / raised tread pattern in center
-                        float tread_x = std::fmod(fx * 16.0f, 1.0f);
-                        float tread_y = std::fmod(fy * 16.0f, 1.0f);
-                        float tread_diag = std::abs((tread_x - 0.5f) + (tread_y - 0.5f));
-                        bool is_tread_rib = (!is_border && tread_diag < 0.22f && (tread_x > 0.15f && tread_x < 0.85f));
-
-                        // 4 Corner Hex Bolts (at 12% in from corners)
-                        float bolt_dist = 10.0f;
-                        float bolt_centers[4][2] = {{0.12f, 0.12f}, {0.88f, 0.12f}, {0.12f, 0.88f}, {0.88f, 0.88f}};
-                        bool is_bolt = false;
-                        for (int bi = 0; bi < 4; ++bi) {
-                            float bdx = fx - bolt_centers[bi][0];
-                            float bdy = fy - bolt_centers[bi][1];
-                            float bd = std::sqrt(bdx * bdx + bdy * bdy);
-                            if (bd < 0.045f) {
-                                is_bolt = true;
-                                bolt_dist = bd;
-                                nx = bdx / 0.045f;
-                                ny = bdy / 0.045f;
-                                nz = std::sqrt(std::max(0.0f, 1.0f - nx * nx - ny * ny));
-                                break;
-                            }
-                        }
-
-                        // Brushed steel micro-scratch noise
-                        float brushed = noise2d(fx * 90.0f, fy * 8.0f) * 15.0f;
-
-                        if (is_bolt) {
-                            r = 145.0f + brushed; g = 150.0f + brushed; b = 160.0f + brushed;
-                            rough = 55.0f; metal = 245.0f;
-                        } else if (is_border) {
-                            // Chamfered frame normal
-                            r = 110.0f + brushed; g = 115.0f + brushed; b = 125.0f + brushed;
-                            if (fx < border_w) nx = -0.7f;
-                            else if (fx > (1.0f - border_w)) nx = 0.7f;
-                            if (fy < border_w) ny = -0.7f;
-                            else if (fy > (1.0f - border_w)) ny = 0.7f;
-                            rough = 75.0f; metal = 225.0f;
-                        } else if (is_tread_rib) {
-                            r = 105.0f + brushed; g = 110.0f + brushed; b = 120.0f + brushed;
-                            nx = 0.5f; ny = 0.5f; nz = 0.7f;
-                            rough = 70.0f; metal = 230.0f;
+                        float u, v;
+                        if (alt) {
+                            u = (lx + ly) * 0.70710678f;
+                            v = (ly - lx) * 0.70710678f;
                         } else {
-                            r = 75.0f + brushed; g = 80.0f + brushed; b = 88.0f + brushed;
-                            rough = 85.0f; metal = 235.0f;
+                            u = (lx - ly) * 0.70710678f;
+                            v = (lx + ly) * 0.70710678f;
                         }
-                        height_disp = is_bolt ? 1.0f : (is_tread_rib ? 0.75f : (is_border ? 0.6f : 0.35f));
+
+                        float bar_half_len = 0.22f;
+                        float bar_half_w = 0.08f;
+                        float clamped_u = std::clamp(u, -bar_half_len, bar_half_len);
+                        float du = u - clamped_u;
+                        float dv = v;
+                        float bar_dist = std::sqrt(du * du + dv * dv);
+                        bool is_tread_rib = (bar_dist < bar_half_w);
+                        float bar_profile = is_tread_rib ? std::cos((bar_dist / bar_half_w) * 1.5707963f) : 0.0f;
+
+                        // Bidirectional rounded bevel normals on tread rib (eliminates flat plastic reflection)
+                        float d_dist_dx = (alt ? (du * 0.70710678f - dv * 0.70710678f) : (du * 0.70710678f + dv * 0.70710678f)) / std::max(bar_dist, 0.0001f);
+                        float d_dist_dy = (alt ? (du * 0.70710678f + dv * 0.70710678f) : (-du * 0.70710678f + dv * 0.70710678f)) / std::max(bar_dist, 0.0001f);
+                        float rib_nx = d_dist_dx * 0.55f * (1.0f - bar_profile * 0.35f);
+                        float rib_ny = d_dist_dy * 0.55f * (1.0f - bar_profile * 0.35f);
+
+                        // 2. Periodic flush structural anchor bolts with counterbore washer rings (4 per block, period 2)
+                        float fsub_x = std::fmod(fx * 2.0f, 1.0f) - 0.5f;
+                        float fsub_y = std::fmod(fy * 2.0f, 1.0f) - 0.5f;
+                        float bolt_dist = std::sqrt(fsub_x * fsub_x + fsub_y * fsub_y);
+                        bool is_bolt_head = (bolt_dist < 0.065f);
+                        bool is_washer_groove = (bolt_dist >= 0.065f && bolt_dist < 0.088f);
+
+                        // 3. Brushed steel and cold-rolled micro-relief noise (organic light scattering, prevents plastic mirror glare)
+                        float brushed = (periodic_noise2d(fx, fy, 32) - 0.5f) * 12.0f;
+                        float steel_micro_x = (periodic_noise2d(fx + 0.12f, fy + 0.12f, 48) - 0.5f) * 0.20f;
+                        float steel_micro_y = (periodic_noise2d(fx + 0.28f, fy + 0.28f, 48) - 0.5f) * 0.20f;
+
+                        if (is_bolt_head) {
+                            r = 108.0f + brushed * 0.5f;
+                            g = 114.0f + brushed * 0.5f;
+                            b = 126.0f + brushed * 0.5f;
+                            rough = 145.0f; // PBR ~0.57 (hardened bolt steel)
+                            metal = 238.0f; // PBR ~0.93 (high metallic)
+                            nx = (fsub_x / 0.065f) * 0.40f;
+                            ny = (fsub_y / 0.065f) * 0.40f;
+                            nz = std::sqrt(std::max(0.1f, 1.0f - nx * nx - ny * ny));
+                            height_disp = 0.82f;
+                        } else if (is_washer_groove) {
+                            r = 44.0f; g = 46.0f; b = 52.0f; // Dark recessed oxidized washer counterbore
+                            rough = 215.0f; // PBR ~0.84 (matte oxide)
+                            metal = 160.0f; // PBR ~0.63
+                            nx = steel_micro_x * 0.5f;
+                            ny = steel_micro_y * 0.5f;
+                            nz = 0.98f;
+                            height_disp = 0.34f;
+                        } else if (is_tread_rib) {
+                            r = 82.0f + 16.0f * bar_profile + brushed;
+                            g = 88.0f + 18.0f * bar_profile + brushed;
+                            b = 100.0f + 20.0f * bar_profile + brushed;
+                            rough = 155.0f + 25.0f * (1.0f - bar_profile); // PBR ~0.61 - 0.70
+                            metal = 225.0f; // PBR ~0.88
+                            nx = rib_nx;
+                            ny = rib_ny;
+                            nz = std::sqrt(std::max(0.15f, 1.0f - nx * nx - ny * ny));
+                            height_disp = 0.58f + 0.26f * bar_profile;
+                        } else {
+                            // Authentic heavy cold-rolled gunmetal titanium plate (matte industrial finish)
+                            r = 62.0f + brushed;
+                            g = 66.0f + brushed;
+                            b = 76.0f + brushed;
+                            rough = 185.0f; // PBR ~0.725 (matte industrial cold-rolled steel finish, stops plastic glare)
+                            metal = 205.0f; // PBR ~0.804 (heavy structural alloy)
+                            nx = steel_micro_x;
+                            ny = steel_micro_y;
+                            nz = std::sqrt(std::max(0.2f, 1.0f - nx * nx - ny * ny));
+                            height_disp = 0.48f;
+                        }
                         break;
                     }
 
@@ -364,7 +434,7 @@ void TextureArray::initialize_procedural_materials() {
                         bool is_ridge = (chev < 0.16f);
 
                         // Scratched wear revealing dark steel under golden brass
-                        float scratch = noise2d(fx * 75.0f, fy * 65.0f);
+                        float scratch = periodic_noise2d(fx, fy, 64);
                         bool is_worn = (scratch > 0.78f);
 
                         if (is_worn) {
@@ -383,7 +453,7 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 6: { // ── MAT_THERMITE_SLAG (Volcanic Magma & Incandescent Slag Fissures) ──
-                        VoronoiResult vor = voronoi2d(fx * 8.0f, fy * 8.0f);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 8);
                         float fissure_dist = vor.f2 - vor.f1;
                         float is_fissure = (fissure_dist < 0.18f) ? std::pow(1.0f - (fissure_dist / 0.18f), 1.8f) : 0.0f;
 
@@ -402,13 +472,13 @@ void TextureArray::initialize_procedural_materials() {
                             height_disp = 0.2f - is_fissure * 0.2f;
                         } else {
                             // Black cooling volcanic crust islands
-                            float crust_noise = fbm2d(fx * 14.0f, fy * 14.0f, 3);
+                            float crust_noise = periodic_fbm2d(fx, fy, 14, 3);
                             r = 22.0f + 15.0f * crust_noise;
                             g = 20.0f + 12.0f * crust_noise;
                             b = 22.0f + 14.0f * crust_noise;
 
-                            nx = (noise2d(fx * 20.0f, fy * 20.0f) - 0.5f) * 1.5f;
-                            ny = (noise2d(fx * 20.0f + 2.0f, fy * 20.0f + 2.0f) - 0.5f) * 1.5f;
+                            nx = (periodic_noise2d(fx, fy, 20) - 0.5f) * 1.5f;
+                            ny = (periodic_noise2d(fx + 0.1f, fy + 0.1f, 20) - 0.5f) * 1.5f;
                             nz = 0.9f;
 
                             rough = 240.0f; metal = 20.0f;
@@ -418,7 +488,7 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 7: { // ── MAT_RADIOACTIVE_ORE (Pitchblende Host Rock with Glowing Emerald Uraninite Needles) ──
-                        VoronoiResult vor = voronoi2d(fx * 12.0f, fy * 12.0f);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 12);
                         bool is_crystal_needle = (vor.f1 < 0.22f);
 
                         if (is_crystal_needle) {
@@ -428,8 +498,10 @@ void TextureArray::initialize_procedural_materials() {
                             g = 220.0f + 35.0f * needle_sharp;
                             b = 75.0f + 50.0f * needle_sharp;
 
-                            nx = (fx - vor.seed_x / 12.0f) * 5.0f;
-                            ny = (fy - vor.seed_y / 12.0f) * 5.0f;
+                            float v_local_x = fractf(fx * 12.0f);
+                            float v_local_y = fractf(fy * 12.0f);
+                            nx = (v_local_x - 0.5f) * 5.0f;
+                            ny = (v_local_y - 0.5f) * 5.0f;
                             nz = 0.8f;
 
                             rough = 32.0f; metal = 50.0f;
@@ -441,7 +513,7 @@ void TextureArray::initialize_procedural_materials() {
                             height_disp = 0.8f + needle_sharp * 0.2f;
                         } else {
                             // Dark rugged pitchblende matrix
-                            float rock_noise = fbm2d(fx * 15.0f, fy * 15.0f, 4);
+                            float rock_noise = periodic_fbm2d(fx, fy, 16, 4);
                             r = 30.0f + 20.0f * rock_noise;
                             g = 35.0f + 22.0f * rock_noise;
                             b = 32.0f + 20.0f * rock_noise;
@@ -453,15 +525,15 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 8: { // ── MAT_DREDGE_BEDROCK (Ultra-Dense Planetary Crust with Compressed Strata) ──
-                        float strata = std::sin(fy * 32.0f + fbm2d(fx * 6.0f, fy * 2.0f, 3) * 6.0f);
-                        float iron_fleck = noise2d(fx * 60.0f, fy * 60.0f);
+                        float strata = std::sin(fy * TWO_PI * 5.0f + periodic_fbm2d(fx, fy, 6, 3) * 6.0f);
+                        float iron_fleck = periodic_noise2d(fx, fy, 60);
 
                         r = 18.0f + 10.0f * strata + (iron_fleck > 0.85f ? 45.0f : 0.0f);
                         g = 18.0f + 10.0f * strata + (iron_fleck > 0.85f ? 40.0f : 0.0f);
                         b = 24.0f + 12.0f * strata + (iron_fleck > 0.85f ? 35.0f : 0.0f);
 
-                        nx = (strata) * 0.4f;
-                        ny = (noise2d(fx * 25.0f, fy * 25.0f) - 0.5f) * 0.8f;
+                        nx = strata * 0.4f;
+                        ny = (periodic_noise2d(fx, fy, 24) - 0.5f) * 0.8f;
                         nz = 0.95f;
 
                         rough = (iron_fleck > 0.85f) ? 60.0f : 245.0f;
@@ -471,7 +543,7 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 9: { // MAT_GAS
-                        float gas_n = fbm2d(fx * 8.0f, fy * 8.0f, 3);
+                        float gas_n = periodic_fbm2d(fx, fy, 8, 3);
                         r = 60.0f + 40.0f * gas_n;
                         g = 170.0f + 50.0f * gas_n;
                         b = 40.0f + 30.0f * gas_n;
@@ -481,7 +553,7 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 10: { // MAT_VOLATILE_SMOKE
-                        float smoke_n = fbm2d(fx * 7.0f, fy * 7.0f, 3);
+                        float smoke_n = periodic_fbm2d(fx, fy, 8, 3);
                         r = 45.0f + 30.0f * smoke_n;
                         g = 42.0f + 25.0f * smoke_n;
                         b = 55.0f + 35.0f * smoke_n;
@@ -490,8 +562,8 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 11: { // ── MAT_CRYSTAL_AQUIFER (Shimmering Subterranean Water with Caustic Cells) ──
-                        float wave1 = std::sin(fx * 30.0f + fy * 20.0f);
-                        float wave2 = std::cos(fx * 22.0f - fy * 32.0f);
+                        float wave1 = std::sin(fx * TWO_PI * 5.0f + fy * TWO_PI * 3.0f);
+                        float wave2 = std::cos(fx * TWO_PI * 3.0f - fy * TWO_PI * 5.0f);
                         float caustic = std::pow((wave1 * wave2) * 0.5f + 0.5f, 1.5f);
 
                         r = 20.0f + 35.0f * caustic;
@@ -511,10 +583,10 @@ void TextureArray::initialize_procedural_materials() {
                     }
 
                     case 12: { // ── MAT_BIOLUMINESCENT_FLORA (Velvety Moss with Glowing Hyphae & Spore Pods) ──
-                        float moss_fbm = fbm2d(fx * 18.0f, fy * 18.0f, 4);
-                        VoronoiResult vor = voronoi2d(fx * 10.0f, fy * 10.0f);
+                        float moss_fbm = periodic_fbm2d(fx, fy, 18, 4);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 10);
                         bool is_spore_node = (vor.f1 < 0.20f);
-                        float hyphae_vein = std::pow(fbm2d(fx * 25.0f, fy * 25.0f, 3), 2.2f);
+                        float hyphae_vein = std::pow(periodic_fbm2d(fx, fy, 24, 3), 2.2f);
 
                         r = 22.0f + 30.0f * moss_fbm;
                         g = 85.0f + 95.0f * moss_fbm;
@@ -583,38 +655,40 @@ void TextureArray::initialize_procedural_materials() {
                         float is_ridge = (facet_ridge < 0.055f) ? std::pow(1.0f - (facet_ridge / 0.055f), 2.0f) : 0.0f;
                         float center_glow = std::pow(std::max(0.0f, 1.0f - best_d1 * 2.5f), 2.2f);
 
-                        // Prismatic radiant colors (iridescent violet, radiant diamond cyan, white highlights)
+                        // Decorative mineral colors: Soft natural celestine / aquamarine with subtle crystalline depth
+                        // Subdued, naturally integrated gemstone palette that avoids overpowering the player's view
                         float shade = seed.shade;
-                        r = (140.0f + 50.0f * center_glow + 65.0f * is_ridge) * shade;
-                        g = (185.0f + 40.0f * center_glow + 55.0f * is_ridge) * shade;
-                        b = (245.0f + 10.0f * center_glow) * shade;
+                        r = (38.0f + 22.0f * center_glow + 55.0f * is_ridge) * shade;
+                        g = (142.0f + 25.0f * center_glow + 30.0f * is_ridge) * shade;
+                        b = (182.0f + 20.0f * center_glow + 20.0f * is_ridge) * shade;
 
-                        float slope = 0.65f;
+                        float slope = 0.55f;
                         nx = seed.nx * slope;
                         ny = seed.ny * slope;
                         nz = std::sqrt(std::max(0.1f, 1.0f - nx * nx - ny * ny));
 
                         if (is_ridge > 0.1f) {
                             float r_ang = std::atan2(best_dy, best_dx);
-                            nx = nx * (1.0f - is_ridge) + std::cos(r_ang) * 0.6f * is_ridge;
-                            ny = ny * (1.0f - is_ridge) + std::sin(r_ang) * 0.6f * is_ridge;
-                            nz = nz * (1.0f - is_ridge) + 0.8f * is_ridge;
+                            nx = nx * (1.0f - is_ridge) + std::cos(r_ang) * 0.45f * is_ridge;
+                            ny = ny * (1.0f - is_ridge) + std::sin(r_ang) * 0.45f * is_ridge;
+                            nz = nz * (1.0f - is_ridge) + 0.85f * is_ridge;
                         }
 
-                        rough = 14.0f + 12.0f * (1.0f - is_ridge);
-                        metal = 75.0f; // Flawless gemstone polish & high refraction
+                        // Organic mineral roughness (prevents harsh specular glare under headlamp)
+                        rough = 55.0f + 25.0f * (1.0f - is_ridge);
+                        metal = 28.0f; // Subtle natural crystalline sheen
 
-                        // Radiant diamond luminescence
-                        er = u8clamp(90.0f + 55.0f * center_glow + 95.0f * is_ridge);
-                        eg = u8clamp(145.0f + 50.0f * center_glow + 60.0f * is_ridge);
-                        eb = u8clamp(215.0f + 40.0f * center_glow);
+                        // Gentle ambient mineral luminescence (soft calcite/quartz glow, not an aggressive spotlight)
+                        er = u8clamp(10.0f + 14.0f * center_glow + 28.0f * is_ridge);
+                        eg = u8clamp(48.0f + 28.0f * center_glow + 24.0f * is_ridge);
+                        eb = u8clamp(68.0f + 32.0f * center_glow + 18.0f * is_ridge);
                         height_disp = std::clamp(seed.height * 0.75f + is_ridge * 0.25f, 0.0f, 1.0f);
                         break;
                     }
 
                     case 14: { // ── MAT_OBSIDIAN_SPIKES (Razor-Sharp Conchoidal Glass with Crimson Hazard Veins) ──
-                        float conchoid = std::sin(fx * 24.0f + std::cos(fy * 24.0f) * 3.0f);
-                        VoronoiResult vor = voronoi2d(fx * 10.0f, fy * 10.0f);
+                        float conchoid = std::sin(fx * TWO_PI * 4.0f + std::cos(fy * TWO_PI * 4.0f) * 3.0f);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 10);
                         bool is_warning_vein = (vor.f1 < 0.16f);
 
                         // Jet-black mirror glass
@@ -623,7 +697,7 @@ void TextureArray::initialize_procedural_materials() {
                         b = 22.0f + 8.0f * conchoid;
 
                         nx = conchoid * 0.6f;
-                        ny = (noise2d(fx * 30.0f, fy * 30.0f) - 0.5f) * 0.8f;
+                        ny = (periodic_noise2d(fx, fy, 28) - 0.5f) * 0.8f;
                         nz = 0.85f;
 
                         rough = 22.0f; metal = 65.0f;
@@ -640,6 +714,102 @@ void TextureArray::initialize_procedural_materials() {
                         height_disp = std::clamp(0.5f + conchoid * 0.3f + (is_warning_vein ? 0.2f : 0.0f), 0.0f, 1.0f);
                         break;
                     }
+
+                    case 15: { // ── MAT_ACID (Bubbling Corrosive Neon Green Acid) ──
+                        float wave1 = std::sin(fx * TWO_PI * 4.0f + fy * TWO_PI * 4.0f);
+                        float wave2 = std::cos(fx * TWO_PI * 3.0f - fy * TWO_PI * 4.0f);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 14);
+                        bool is_bubble = (vor.f1 < 0.22f);
+                        float bubble_rim = (vor.f1 >= 0.16f && vor.f1 < 0.22f) ? 1.0f : 0.0f;
+
+                        r = 45.0f + 15.0f * wave1;
+                        g = 190.0f + 35.0f * wave2;
+                        b = 25.0f + 10.0f * wave1;
+
+                        nx = wave1 * 0.4f;
+                        ny = wave2 * 0.4f;
+                        nz = 0.9f;
+
+                        rough = 12.0f; metal = 30.0f;
+                        if (is_bubble) {
+                            float b_glow = std::pow(1.0f - (vor.f1 / 0.22f), 1.8f);
+                            r = u8clamp(70.0f + 30.0f * b_glow);
+                            g = u8clamp(220.0f + 35.0f * b_glow);
+                            b = 40.0f;
+                            er = 15.0f + 40.0f * b_glow;
+                            eg = 180.0f + 75.0f * b_glow;
+                            eb = 20.0f;
+                            rough = 8.0f;
+                            height_disp = 0.7f + b_glow * 0.3f;
+                        } else {
+                            er = 12.0f;
+                            eg = 65.0f;
+                            eb = 5.0f;
+                            height_disp = 0.5f + bubble_rim * 0.2f;
+                        }
+                        break;
+                    }
+
+                    case 16: { // ── MAT_COOLANT (Frosted Cryogenic Sub-Zero Fluid) ──
+                        float frost_fbm = periodic_fbm2d(fx, fy, 16, 3);
+                        float wave = std::sin(fx * TWO_PI * 3.0f + fy * TWO_PI * 2.0f) * 0.5f + 0.5f;
+
+                        r = 175.0f + 25.0f * wave + 15.0f * frost_fbm;
+                        g = 215.0f + 20.0f * wave + 15.0f * frost_fbm;
+                        b = 245.0f + 10.0f * wave;
+
+                        nx = std::sin(fx * TWO_PI * 4.0f) * 0.3f;
+                        ny = std::cos(fy * TWO_PI * 4.0f) * 0.3f;
+                        nz = 0.95f;
+
+                        rough = 8.0f; metal = 50.0f;
+                        er = 30.0f + 20.0f * frost_fbm;
+                        eg = 60.0f + 30.0f * frost_fbm;
+                        eb = 110.0f + 40.0f * frost_fbm;
+                        height_disp = 0.5f + frost_fbm * 0.2f;
+                        break;
+                    }
+
+                    case 17: { // ── MAT_ASTRAL_ORE (Exotic Stellar Cosmic Gold Ore with Luminescent Filaments) ──
+                        float wave1 = std::sin(fx * TWO_PI * 4.0f + fy * TWO_PI * 2.0f);
+                        float wave2 = std::cos(fx * TWO_PI * 2.0f - fy * TWO_PI * 5.0f);
+                        float astral_fbm = periodic_fbm2d(fx, fy, 18, 4);
+                        VoronoiResult vor = periodic_voronoi2d(fx, fy, 12);
+                        bool is_crystal_vein = (vor.f1 < 0.18f);
+
+                        // Base metallic rich astral gold with deep celestial bronze undertones
+                        r = 210.0f + 35.0f * wave1 + 10.0f * astral_fbm;
+                        g = 165.0f + 25.0f * wave2 + 10.0f * astral_fbm;
+                        b = 45.0f + 20.0f * wave1;
+
+                        nx = wave1 * 0.45f;
+                        ny = wave2 * 0.45f;
+                        nz = 0.85f;
+
+                        rough = 15.0f;
+                        metal = 85.0f; // High metallic sheen
+
+                        if (is_crystal_vein) {
+                            float vein_glow = std::pow(1.0f - (vor.f1 / 0.18f), 2.0f);
+                            // Radiant stellar white-gold crest
+                            r = u8clamp(245.0f + 10.0f * vein_glow);
+                            g = u8clamp(215.0f + 40.0f * vein_glow);
+                            b = u8clamp(90.0f + 165.0f * vein_glow);
+                            er = u8clamp(240.0f + 15.0f * vein_glow);
+                            eg = u8clamp(200.0f + 55.0f * vein_glow);
+                            eb = u8clamp(70.0f + 185.0f * vein_glow);
+                            rough = 6.0f;
+                            metal = 95.0f;
+                            height_disp = 0.65f + vein_glow * 0.35f;
+                        } else {
+                            er = 45.0f + 25.0f * astral_fbm;
+                            eg = 35.0f + 20.0f * astral_fbm;
+                            eb = 10.0f;
+                            height_disp = 0.45f + astral_fbm * 0.25f;
+                        }
+                        break;
+                    }
+
 
                     default:
                         r = 70.0f; g = 70.0f; b = 70.0f;

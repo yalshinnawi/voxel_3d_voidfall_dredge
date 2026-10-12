@@ -38,15 +38,20 @@ public:
                glm::distance(player_pos, m_beacon_pos) <= defense_radius();
     }
 
+    // Forward declaration of World for clearance queries
+    static bool check_landing_clearance(const class World& world, const glm::vec3& target_pos, float& out_ground_y, std::string* out_reason = nullptr);
+
     using ExtractionCompleteCallback = std::function<void()>;
     using CeilingWarningCallback = std::function<void(const glm::vec3& beacon_pos)>;
     using PodArrivalCallback = std::function<void(const glm::vec3& beacon_pos)>;
     using SteamVentCallback = std::function<void(const glm::vec3& beacon_pos)>;
+    using ClearanceVerifyCallback = std::function<bool(const glm::vec3& beacon_pos, std::string* reason)>;
 
     void set_on_complete(ExtractionCompleteCallback cb) { m_on_complete = std::move(cb); }
     void set_on_ceiling_warning(CeilingWarningCallback cb) { m_on_ceiling_warning = std::move(cb); }
     void set_on_pod_arrival(PodArrivalCallback cb) { m_on_pod_arrival = std::move(cb); }
     void set_on_steam_vent(SteamVentCallback cb) { m_on_steam_vent = std::move(cb); }
+    void set_on_clearance_verify(ClearanceVerifyCallback cb) { m_on_clearance_verify = std::move(cb); }
 
 private:
     ExtractionPhase m_phase{ExtractionPhase::Dormant};
@@ -67,6 +72,7 @@ private:
     CeilingWarningCallback m_on_ceiling_warning;
     PodArrivalCallback m_on_pod_arrival;
     SteamVentCallback m_on_steam_vent;
+    ClearanceVerifyCallback m_on_clearance_verify;
 };
 
 } // namespace Voidfall

@@ -76,9 +76,12 @@ public:
 
     uint32_t seed() const { return m_seed; }
     void set_seed(uint32_t seed);
-    void generate_world(int sector_index, uint32_t seed = 0);
+    void generate_world(int sector_index, uint32_t seed = 0, int target_objective = -1);
     void set_level_generator(std::unique_ptr<LevelGenerator> gen);
     int sector_index() const { return m_sector_index; }
+    int world_height() const { return m_level_gen ? m_level_gen->world_height() : LevelGenerator::WORLD_HEIGHT; }
+    int world_width() const { return m_level_gen ? m_level_gen->world_width() : LevelGenerator::WORLD_WIDTH; }
+    int world_depth() const { return m_level_gen ? m_level_gen->world_depth() : LevelGenerator::WORLD_DEPTH; }
 
     void PopulateFauna();
     void GenerateSectorStructures(int sector_index);
@@ -87,6 +90,12 @@ public:
     void apply_topological_shapes(Chunk& chunk) { ApplyTopologicalShapes(chunk); }
     void GenerateChunkClutter(Chunk& chunk);
     void generate_chunk_clutter(Chunk& chunk) { GenerateChunkClutter(chunk); }
+    int clear_disconnected_clutter(const glm::ivec3& host_block);
+    int ClearDisconnectedClutter(const glm::ivec3& host_block) { return clear_disconnected_clutter(host_block); }
+    int cleanup_all_disconnected_clutter(Chunk& chunk);
+    int ensure_structural_connectivity();
+    int count_unanchored_blocks() const;
+    int count_disconnected_clutter() const;
 
     const std::vector<FaunaEntity>& GetActiveEntities() const { return m_active_entities; }
     std::vector<FaunaEntity>& GetActiveEntities() { return m_active_entities; }
@@ -237,6 +246,9 @@ public:
     const std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash>& chunks() const {
         return m_chunks;
     }
+    std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash>& chunks_mut() {
+        return m_chunks;
+    }
 
     const LevelGenerator* level_generator() const { return m_level_gen.get(); }
 
@@ -290,6 +302,7 @@ public:
     void flush_fluid_dirty_chunks();
     void update_fluids(float dt) { m_fluidSim.Update(dt, *this); }
     void UpdateFluids(float dt) { update_fluids(dt); }
+    void settle_fluids_offline(int max_ticks = 16);
 
     size_t active_fluid_count() const { return m_fluidSim.m_activeFluids.size(); }
     size_t ActiveFluidCount() const { return active_fluid_count(); }

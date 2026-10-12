@@ -46,9 +46,10 @@ void SurfaceClutterSystem::init_gpu() {
     build_stalactite_mesh(m_prototypes[static_cast<size_t>(ClutterType::CeilingStalactite)]);
     build_stalagmite_mesh(m_prototypes[static_cast<size_t>(ClutterType::FloorStalagmiteRubble)]);
     build_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::VoiditeCrystal)]);
+    build_prismatic_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::PrismaticCrystal)]);
 
     m_gpu_initialized = true;
-    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals)");
+    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals, prismatic diamonds)");
 }
 
 static void setup_proto_attributes(ClutterMeshPrototype& proto, const std::vector<ClutterVertex>& vertices, const std::vector<unsigned int>& indices) {
@@ -113,7 +114,8 @@ void SurfaceClutterSystem::build_stalactite_mesh(ClutterMeshPrototype& proto) {
 
     glm::vec3 tip(0.0f, -length, 0.0f);
     glm::vec4 rock_col(0.24f, 0.23f, 0.22f, 1.0f);
-    glm::vec4 rock_mat(0.0f, 0.88f, 0.0f, 0.85f); // non-metallic, rough rock, zero emissive, 0.85 ao
+    // Non-interactive detritus: zero metallic, ultra-matte high roughness (0.96) to prevent specular distractions
+    glm::vec4 rock_mat(0.0f, 0.96f, 0.0f, 0.85f);
 
     // Base ring vertices (y = 0.0)
     std::vector<glm::vec3> base_ring;
@@ -152,7 +154,8 @@ void SurfaceClutterSystem::build_stalagmite_mesh(ClutterMeshPrototype& proto) {
 
     glm::vec3 apex(0.04f, height, -0.05f); // Naturally tilted apex
     glm::vec4 rock_col(0.21f, 0.20f, 0.19f, 1.0f);
-    glm::vec4 rock_mat(0.04f, 0.84f, 0.0f, 0.90f);
+    // Non-interactive detritus: zero metallic, high roughness (0.95), zero emissive to prevent glare
+    glm::vec4 rock_mat(0.0f, 0.95f, 0.0f, 0.90f);
 
     std::vector<glm::vec3> base_ring;
     for (int i = 0; i < SIDES; ++i) {
@@ -211,7 +214,7 @@ void SurfaceClutterSystem::build_crystal_mesh(ClutterMeshPrototype& proto) {
     glm::vec4 crystal_mat(0.22f, 0.12f, 3.8f, 1.0f);  // low roughness, high gloss, 3.8x emissive radiance
 
     // Helper to add a 6-sided faceted crystal spire with shaft and pointed cap
-    auto add_spire = [&](glm::vec3 base_pos, glm::vec3 dir, float length, float radius, float tilt_rad) {
+    auto add_spire = [&](glm::vec3 base_pos, glm::vec3 dir, float length, float radius, float tilt_rad, glm::vec4 col) {
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
         if (std::abs(glm::dot(dir, up)) > 0.95f) up = glm::vec3(1.0f, 0.0f, 0.0f);
         glm::vec3 side = glm::normalize(glm::cross(dir, up));
@@ -244,10 +247,10 @@ void SurfaceClutterSystem::build_crystal_mesh(ClutterMeshPrototype& proto) {
             glm::vec3 norm = glm::normalize(glm::cross(b1 - b0, w0 - b0));
 
             unsigned int idx = static_cast<unsigned int>(vertices.size());
-            vertices.push_back({b0, norm, crystal_col, crystal_mat});
-            vertices.push_back({b1, norm, crystal_col, crystal_mat});
-            vertices.push_back({w1, norm, crystal_col, crystal_mat});
-            vertices.push_back({w0, norm, crystal_col, crystal_mat});
+            vertices.push_back({b0, norm, col, crystal_mat});
+            vertices.push_back({b1, norm, col, crystal_mat});
+            vertices.push_back({w1, norm, col, crystal_mat});
+            vertices.push_back({w0, norm, col, crystal_mat});
 
             indices.push_back(idx);
             indices.push_back(idx + 1);
@@ -265,9 +268,9 @@ void SurfaceClutterSystem::build_crystal_mesh(ClutterMeshPrototype& proto) {
             glm::vec3 norm = glm::normalize(glm::cross(w1 - w0, tip - w0));
 
             unsigned int idx = static_cast<unsigned int>(vertices.size());
-            vertices.push_back({w0, norm, crystal_col, crystal_mat});
-            vertices.push_back({w1, norm, crystal_col, crystal_mat});
-            vertices.push_back({tip, norm, crystal_col, crystal_mat});
+            vertices.push_back({w0, norm, col, crystal_mat});
+            vertices.push_back({w1, norm, col, crystal_mat});
+            vertices.push_back({tip, norm, col, crystal_mat});
 
             indices.push_back(idx);
             indices.push_back(idx + 1);
@@ -275,12 +278,97 @@ void SurfaceClutterSystem::build_crystal_mesh(ClutterMeshPrototype& proto) {
         }
     };
 
-    // Central primary crystal spire jutting outward at 45°
-    add_spire(glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0.72f, 0.09f, 0.785f /* 45° */);
-    // Flanking crystal spire tilted at 35°
-    add_spire(glm::vec3(-0.06f, 0.0f, 0.04f), glm::vec3(0.0f, 1.0f, 0.0f), 0.48f, 0.065f, -0.61f /* -35° */);
-    // Flanking crystal spire tilted at 55°
-    add_spire(glm::vec3(0.07f, 0.0f, -0.05f), glm::vec3(0.0f, 1.0f, 0.0f), 0.52f, 0.07f, 0.96f /* 55° */);
+    // Central primary crystal spire jutting outward at 42°
+    add_spire(glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0.74f, 0.095f, 0.73f /* 42° */, glm::vec4(0.62f, 0.18f, 0.92f, 1.0f));
+    // Flanking tall crystal spire tilted at -36°
+    add_spire(glm::vec3(-0.08f, 0.0f, 0.05f), glm::vec3(0.0f, 1.0f, 0.0f), 0.58f, 0.075f, -0.63f /* -36° */, glm::vec4(0.55f, 0.12f, 0.85f, 1.0f));
+    // Flanking crystal spire tilted at 56°
+    add_spire(glm::vec3(0.09f, 0.0f, -0.06f), glm::vec3(0.0f, 1.0f, 0.0f), 0.54f, 0.070f, 0.98f /* 56° */, glm::vec4(0.65f, 0.22f, 0.95f, 1.0f));
+    // Low forward cluster spire tilted at 22°
+    add_spire(glm::vec3(0.04f, 0.0f, 0.09f), glm::vec3(0.0f, 1.0f, 0.0f), 0.44f, 0.062f, 0.38f /* 22° */, glm::vec4(0.52f, 0.14f, 0.82f, 1.0f));
+    // Sharp needle spire tilted at -52°
+    add_spire(glm::vec3(-0.06f, 0.0f, -0.07f), glm::vec3(0.0f, 1.0f, 0.0f), 0.36f, 0.048f, -0.91f /* -52° */, glm::vec4(0.70f, 0.25f, 0.98f, 1.0f));
+
+    setup_proto_attributes(proto, vertices, indices);
+}
+
+// 4. Faceted Prismatic Diamond Clusters: Soft celestine/aquamarine crystal clusters and delicate mineral needles
+void SurfaceClutterSystem::build_prismatic_crystal_mesh(ClutterMeshPrototype& proto) {
+    std::vector<ClutterVertex> vertices;
+    std::vector<unsigned int> indices;
+
+    // Natural mineral gemstone: subtle 0.35x ambient luminescence, balanced matte roughness to avoid glare
+    glm::vec4 diamond_mat(0.18f, 0.42f, 0.35f, 0.90f);
+
+    auto add_spire = [&](glm::vec3 base_pos, glm::vec3 dir, float length, float radius, float tilt_rad, glm::vec4 col) {
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        if (std::abs(glm::dot(dir, up)) > 0.95f) up = glm::vec3(1.0f, 0.0f, 0.0f);
+        glm::vec3 side = glm::normalize(glm::cross(dir, up));
+        up = glm::normalize(glm::cross(side, dir));
+
+        dir = glm::normalize(dir + side * std::sin(tilt_rad));
+
+        const int SIDES = 6;
+        std::vector<glm::vec3> ring_base;
+        std::vector<glm::vec3> ring_waist;
+
+        float shaft_len = length * 0.70f;
+        glm::vec3 tip = base_pos + dir * length;
+
+        for (int i = 0; i < SIDES; ++i) {
+            float angle = i * glm::two_pi<float>() / SIDES;
+            glm::vec3 offset = (side * std::cos(angle) + up * std::sin(angle)) * radius;
+            ring_base.push_back(base_pos + offset);
+            ring_waist.push_back(base_pos + dir * shaft_len + offset * 0.90f);
+        }
+
+        for (int i = 0; i < SIDES; ++i) {
+            glm::vec3 b0 = ring_base[i];
+            glm::vec3 b1 = ring_base[(i + 1) % SIDES];
+            glm::vec3 w0 = ring_waist[i];
+            glm::vec3 w1 = ring_waist[(i + 1) % SIDES];
+
+            glm::vec3 norm = glm::normalize(glm::cross(b1 - b0, w0 - b0));
+
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            vertices.push_back({b0, norm, col, diamond_mat});
+            vertices.push_back({b1, norm, col, diamond_mat});
+            vertices.push_back({w1, norm, col, diamond_mat});
+            vertices.push_back({w0, norm, col, diamond_mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+
+            indices.push_back(idx);
+            indices.push_back(idx + 2);
+            indices.push_back(idx + 3);
+        }
+
+        // Apex cap with subtle translucent quartz crest
+        glm::vec4 tip_col = glm::mix(col, glm::vec4(0.70f, 0.88f, 0.94f, 1.0f), 0.35f);
+        for (int i = 0; i < SIDES; ++i) {
+            glm::vec3 w0 = ring_waist[i];
+            glm::vec3 w1 = ring_waist[(i + 1) % SIDES];
+            glm::vec3 norm = glm::normalize(glm::cross(w1 - w0, tip - w0));
+
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            vertices.push_back({w0, norm, col, diamond_mat});
+            vertices.push_back({w1, norm, col, diamond_mat});
+            vertices.push_back({tip, norm, tip_col, diamond_mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+        }
+    };
+
+    // Delicate natural mineral cluster: nestled spires with gentle celestine tones that blend seamlessly into cavern rock
+    add_spire(glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0.46f, 0.068f, 0.60f, glm::vec4(0.32f, 0.82f, 0.90f, 1.0f));
+    add_spire(glm::vec3(-0.05f, 0.0f, 0.04f), glm::vec3(0.0f, 1.0f, 0.0f), 0.36f, 0.055f, -0.50f, glm::vec4(0.28f, 0.80f, 0.88f, 1.0f));
+    add_spire(glm::vec3(0.06f, 0.0f, -0.04f), glm::vec3(0.0f, 1.0f, 0.0f), 0.34f, 0.052f, 0.78f, glm::vec4(0.35f, 0.85f, 0.92f, 1.0f));
+    add_spire(glm::vec3(0.02f, 0.0f, 0.06f), glm::vec3(0.0f, 1.0f, 0.0f), 0.28f, 0.044f, 0.28f, glm::vec4(0.26f, 0.78f, 0.86f, 1.0f));
+    add_spire(glm::vec3(-0.04f, 0.0f, -0.04f), glm::vec3(0.0f, 1.0f, 0.0f), 0.22f, 0.038f, -0.72f, glm::vec4(0.36f, 0.86f, 0.94f, 1.0f));
 
     setup_proto_attributes(proto, vertices, indices);
 }
@@ -294,7 +382,54 @@ static inline uint32_t spatial_hash(int x, int y, int z, uint32_t seed) {
     return h;
 }
 
-std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(const Chunk& chunk, uint32_t seed) {
+ClutterInstance SurfaceClutterSystem::create_crystal_instance(
+    const glm::ivec3& host_block,
+    const glm::ivec3& face_dir,
+    uint8_t mat_id,
+    uint32_t seed
+) {
+    glm::vec3 norm = glm::vec3(face_dir);
+    glm::vec3 anchor = glm::vec3(host_block) + glm::vec3(0.5f) + norm * 0.5f;
+
+    // Orient towards face normal
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 rot(1.0f);
+    if (glm::abs(glm::dot(norm, up)) < 0.99f) {
+        glm::vec3 axis = glm::normalize(glm::cross(up, norm));
+        float angle = std::acos(glm::clamp(glm::dot(up, norm), -1.0f, 1.0f));
+        rot = glm::rotate(glm::mat4(1.0f), angle, axis);
+    } else if (norm.y < 0.0f) {
+        rot = glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+    }
+
+    uint32_t h = spatial_hash(host_block.x + face_dir.x, host_block.y + face_dir.y, host_block.z + face_dir.z, seed ^ 0xC8899AAu);
+    float spin = (h % 360) * glm::pi<float>() / 180.0f;
+    // Decorative crystals are subtly scaled down to nestle naturally into room rock faces
+    float scale_var = (mat_id == MAT_PRISMATIC_CRYSTAL)
+        ? (0.68f + 0.16f * ((h >> 6) % 100) / 100.0f)
+        : (0.90f + 0.25f * ((h >> 6) % 100) / 100.0f);
+
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+    model = model * rot;
+    model = glm::rotate(model, spin, glm::vec3(0.0f, 1.0f, 0.0f));
+    model = glm::scale(model, glm::vec3(scale_var));
+
+    ClutterType ctype = (mat_id == MAT_PRISMATIC_CRYSTAL)
+        ? ClutterType::PrismaticCrystal
+        : ClutterType::VoiditeCrystal;
+
+    glm::vec4 tint = (mat_id == MAT_PRISMATIC_CRYSTAL)
+        ? glm::vec4(0.32f, 0.85f, 0.92f, 0.85f)   // Soft celestine/aquamarine mineral tone (decorative)
+        : glm::vec4(0.72f, 0.20f, 0.96f, 1.0f);  // Voidite deep amethyst (objective)
+
+    return ClutterInstance{anchor, model, ctype, tint, 1.0f, host_block, face_dir};
+}
+
+std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
+    const Chunk& chunk,
+    uint32_t seed,
+    const std::function<Voxel(int, int, int)>& get_world_voxel
+) {
     std::vector<ClutterInstance> clutter;
     if (chunk.is_empty()) return clutter;
 
@@ -303,10 +438,20 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(const 
     int world_base_y = cpos.y * CHUNK_SIZE;
     int world_base_z = cpos.z * CHUNK_SIZE;
 
-    // Scan interior slice voxels
-    for (int y = 1; y < CHUNK_SIZE - 1; ++y) {
-        for (int z = 1; z < CHUNK_SIZE - 1; ++z) {
-            for (int x = 1; x < CHUNK_SIZE - 1; ++x) {
+    auto sample_neighbor = [&](int lx, int ly, int lz, int gx, int gy, int gz) -> Voxel {
+        if (Chunk::in_bounds(lx, ly, lz)) {
+            return chunk.get_voxel(lx, ly, lz);
+        }
+        if (get_world_voxel) {
+            return get_world_voxel(gx, gy, gz);
+        }
+        return Voxel{MAT_AIR, 0};
+    };
+
+    // Scan all chunk voxels
+    for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
                 Voxel v = chunk.get_voxel(x, y, z);
                 if (!v.is_solid() || v.is_liquid() || v.shape() != SHAPE_CUBE) {
                     continue;
@@ -317,41 +462,114 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(const 
                 int wz = world_base_z + z;
 
                 // 1. Ceiling Stalactite Pass:
-                // Solid rock voxel with open cavern air directly underneath
-                if (chunk.get_voxel(x, y - 1, z).material_id == MAT_AIR) {
-                    uint32_t h = spatial_hash(wx, wy, wz, seed ^ 0xCE11100u);
-                    if ((h % 100) < 4) { // ~4% chance on exposed ceilings
-                        float yaw = (h % 360) * glm::pi<float>() / 180.0f;
-                        float scale_var = 0.85f + 0.35f * ((h >> 8) % 100) / 100.0f;
+                // Solid rock voxel with open cavern air directly underneath (non-mineral blocks)
+                if (v.material_id != MAT_VOIDITE_CRYSTAL && v.material_id != MAT_PRISMATIC_CRYSTAL) {
+                    if (wy > 1 && sample_neighbor(x, y - 1, z, wx, wy - 1, wz).material_id == MAT_AIR) {
+                        uint32_t h = spatial_hash(wx, wy, wz, seed ^ 0xCE11100u);
+                        if ((h % 100) < 5) { // ~5% chance on exposed ceilings
+                            float yaw = (h % 360) * glm::pi<float>() / 180.0f;
+                            // Multi-tier sizes: small drop (0.35x), medium spike (0.60x), colossal stalactite (1.05x)
+                            int tier = (h >> 12) % 100;
+                            float base_scale = (tier < 35) ? 0.35f : ((tier < 80) ? 0.60f : 1.05f);
+                            float scale_var = base_scale * (0.85f + 0.30f * ((h >> 8) % 100) / 100.0f);
 
-                        glm::vec3 anchor(wx + 0.5f, wy, wz + 0.5f); // Bottom face of ceiling voxel
-                        glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
-                        model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                        model = glm::scale(model, glm::vec3(scale_var));
+                            glm::vec3 anchor(wx + 0.5f, wy, wz + 0.5f); // Bottom face of ceiling voxel
+                            glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+                            model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                            model = glm::scale(model, glm::vec3(scale_var));
 
-                        clutter.push_back({anchor, model, ClutterType::CeilingStalactite, glm::vec4(1.0f), 0.0f});
+                            clutter.push_back({anchor, model, ClutterType::CeilingStalactite, glm::vec4(1.0f), 0.0f, glm::ivec3(wx, wy, wz), glm::ivec3(0, -1, 0)});
+                        }
                     }
-                }
 
-                // 2. Floor Stalagmite & Rubble Pass:
-                // Solid rock voxel with open air above
-                if (chunk.get_voxel(x, y + 1, z).material_id == MAT_AIR) {
-                    uint32_t h = spatial_hash(wx, wy, wz, seed ^ 0xF100888u);
-                    if ((h % 100) < 4) { // ~4% chance on cavern floors
-                        float yaw = (h % 360) * glm::pi<float>() / 180.0f;
-                        float scale_var = 0.80f + 0.40f * ((h >> 8) % 100) / 100.0f;
+                    // 2. Floor Stalagmite & Rubble Pass:
+                    // Solid rock voxel with open air above
+                    if (wy < 31 && sample_neighbor(x, y + 1, z, wx, wy + 1, wz).material_id == MAT_AIR) {
+                        uint32_t h = spatial_hash(wx, wy, wz, seed ^ 0xF100888u);
+                        if ((h % 100) < 5) { // ~5% chance on cavern floors
+                            float yaw = (h % 360) * glm::pi<float>() / 180.0f;
+                            // Multi-tier sizes: small scree pebble (0.32x), medium boulder (0.62x), massive rock pile (1.15x)
+                            int tier = (h >> 12) % 100;
+                            float base_scale = (tier < 40) ? 0.32f : ((tier < 82) ? 0.62f : 1.15f);
+                            float scale_var = base_scale * (0.80f + 0.35f * ((h >> 8) % 100) / 100.0f);
 
-                        glm::vec3 anchor(wx + 0.5f, wy + 1.0f, wz + 0.5f); // Top face of floor voxel
-                        glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
-                        model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                        model = glm::scale(model, glm::vec3(scale_var));
+                            glm::vec3 anchor(wx + 0.5f, wy + 1.0f, wz + 0.5f); // Top face of floor voxel
+                            glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+                            model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                            model = glm::scale(model, glm::vec3(scale_var));
 
-                        clutter.push_back({anchor, model, ClutterType::FloorStalagmiteRubble, glm::vec4(1.0f), 0.0f});
+                            clutter.push_back({anchor, model, ClutterType::FloorStalagmiteRubble, glm::vec4(1.0f), 0.0f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
+                        }
+                    }
+
+                    // 3. Exposed Wall-Face Detritus, Rock Outcrops & Crevice Crystals:
+                    // For vertical wall faces facing into open cavern air
+                    if (v.material_id != MAT_REINFORCED_VAULT_DOOR && v.material_id != MAT_DREDGE_BEDROCK) {
+                        const glm::ivec3 wall_dirs[4] = {
+                            { 1, 0, 0}, {-1, 0, 0},
+                            { 0, 0, 1}, { 0, 0,-1}
+                        };
+                        for (int d = 0; d < 4; ++d) {
+                            int nx = x + wall_dirs[d].x;
+                            int ny = y;
+                            int nz = z + wall_dirs[d].z;
+                            int gnx = wx + wall_dirs[d].x;
+                            int gny = wy;
+                            int gnz = wz + wall_dirs[d].z;
+                            Voxel n_vox = sample_neighbor(nx, ny, nz, gnx, gny, gnz);
+                            if (n_vox.material_id == MAT_AIR) {
+                                uint32_t wh = spatial_hash(gnx, gny, gnz, seed ^ (0xDA7A000u + d * 0x1337u));
+                                if ((wh % 100) < 6) { // ~6% chance on exposed wall faces
+                                    int type_roll = (wh >> 8) % 100;
+                                    ClutterType ctype = ClutterType::FloorStalagmiteRubble;
+                                    glm::vec4 tint(1.0f);
+                                    float scale = 0.50f;
+
+                                    if (type_roll < 60) {
+                                        // Rock Spur outcropping jutting horizontally from wall
+                                        ctype = ClutterType::FloorStalagmiteRubble;
+                                        int tier = (wh >> 14) % 100;
+                                        float base_s = (tier < 35) ? 0.35f : ((tier < 80) ? 0.60f : 1.05f);
+                                        scale = base_s * (0.85f + 0.30f * ((wh >> 18) % 100) / 100.0f);
+                                        tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                            ? glm::vec4(0.82f, 0.84f, 0.86f, 1.0f)
+                                            : glm::vec4(1.04f, 0.98f, 0.92f, 1.0f);
+                                    } else if (type_roll < 82) {
+                                        // Wall Stalactite projection hanging along wall
+                                        ctype = ClutterType::CeilingStalactite;
+                                        scale = (0.45f + 0.35f * ((wh >> 16) % 100) / 100.0f) * 0.70f;
+                                        tint = glm::vec4(0.95f, 0.95f, 0.95f, 1.0f);
+                                    } else {
+                                        // Small crystalline cluster in wall crevice
+                                        ctype = ClutterType::PrismaticCrystal;
+                                        scale = (0.40f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.60f;
+                                        tint = glm::vec4(0.42f, 0.88f, 0.95f, 0.85f);
+                                    }
+
+                                    glm::vec3 norm = glm::vec3(wall_dirs[d]);
+                                    glm::vec3 anchor = glm::vec3(wx, wy, wz) + glm::vec3(0.5f) + norm * 0.48f;
+                                    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+                                    glm::mat4 rot(1.0f);
+                                    if (glm::abs(glm::dot(norm, up)) < 0.99f) {
+                                        glm::vec3 axis = glm::normalize(glm::cross(up, norm));
+                                        float angle = std::acos(glm::clamp(glm::dot(up, norm), -1.0f, 1.0f));
+                                        rot = glm::rotate(glm::mat4(1.0f), angle, axis);
+                                    }
+                                    float spin = ((wh >> 6) % 360) * glm::pi<float>() / 180.0f;
+                                    glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+                                    model = model * rot;
+                                    model = glm::rotate(model, spin, glm::vec3(0.0f, 1.0f, 0.0f));
+                                    model = glm::scale(model, glm::vec3(scale));
+
+                                    clutter.push_back({anchor, model, ctype, tint, (ctype == ClutterType::PrismaticCrystal ? 1.0f : 0.0f), glm::ivec3(wx, wy, wz), wall_dirs[d]});
+                                }
+                            }
+                        }
                     }
                 }
 
                 // 3. Faceted Voidite & Prismatic Crystal Cluster Pass:
-                // Mineral veins with adjacent air faces jutting outward at 30°–60° angles
+                // Organic Crystal Voxels: Exposed surfaces spawn the 3D faceted cluster mesh by default!
                 if (v.material_id == MAT_VOIDITE_CRYSTAL || v.material_id == MAT_PRISMATIC_CRYSTAL) {
                     const glm::ivec3 dirs[6] = {
                         { 1, 0, 0}, {-1, 0, 0},
@@ -363,37 +581,16 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(const 
                         int nx = x + dirs[d].x;
                         int ny = y + dirs[d].y;
                         int nz = z + dirs[d].z;
-                        if (chunk.get_voxel(nx, ny, nz).material_id == MAT_AIR) {
-                            uint32_t h = spatial_hash(wx + dirs[d].x, wy + dirs[d].y, wz + dirs[d].z, seed ^ 0xC8899AAu);
-                            if ((h % 100) < 35) { // 35% chance on exposed crystal vein boundaries
-                                glm::vec3 norm = glm::vec3(dirs[d]);
-                                glm::vec3 anchor = glm::vec3(wx + 0.5f, wy + 0.5f, wz + 0.5f) + norm * 0.5f;
-
-                                // Orient towards face normal
-                                glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-                                glm::mat4 rot(1.0f);
-                                if (glm::abs(glm::dot(norm, up)) < 0.99f) {
-                                    glm::vec3 axis = glm::normalize(glm::cross(up, norm));
-                                    float angle = std::acos(glm::clamp(glm::dot(up, norm), -1.0f, 1.0f));
-                                    rot = glm::rotate(glm::mat4(1.0f), angle, axis);
-                                } else if (norm.y < 0.0f) {
-                                    rot = glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
-                                }
-
-                                float spin = (h % 360) * glm::pi<float>() / 180.0f;
-                                float scale_var = 0.85f + 0.35f * ((h >> 6) % 100) / 100.0f;
-
-                                glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
-                                model = model * rot;
-                                model = glm::rotate(model, spin, glm::vec3(0.0f, 1.0f, 0.0f));
-                                model = glm::scale(model, glm::vec3(scale_var));
-
-                                glm::vec4 tint = (v.material_id == MAT_PRISMATIC_CRYSTAL)
-                                    ? glm::vec4(0.85f, 0.45f, 0.98f, 1.0f)
-                                    : glm::vec4(0.58f, 0.15f, 0.88f, 1.0f);
-
-                                clutter.push_back({anchor, model, ClutterType::VoiditeCrystal, tint, 1.0f});
-                            }
+                        int gnx = wx + dirs[d].x;
+                        int gny = wy + dirs[d].y;
+                        int gnz = wz + dirs[d].z;
+                        Voxel n_vox = sample_neighbor(nx, ny, nz, gnx, gny, gnz);
+                        if (!n_vox.is_solid()) {
+                            // Guaranteed 3D faceted cluster mesh by default on all exposed faces
+                            ClutterInstance inst = create_crystal_instance(
+                                glm::ivec3(wx, wy, wz), dirs[d], v.material_id, seed
+                            );
+                            clutter.push_back(inst);
                         }
                     }
                 }

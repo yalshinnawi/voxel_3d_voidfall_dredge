@@ -20,9 +20,9 @@ As delvers delve deeper into Voidfall, sectors expand horizontally, increasing n
 
 ---
 
-## 3. Chamber Archetypes (23 Distinct Rooms)
+## 3. Chamber Archetypes (30 Distinct Rooms)
 
-Voidfall Dredge features 23 meticulously handcrafted room archetypes categorized by tactical role, verticality, environmental hazards, and parkour challenges:
+Voidfall Dredge features 30 meticulously handcrafted room archetypes categorized by tactical role, verticality, environmental hazards, and parkour challenges:
 
 | Shape Archetype | Sector Gating | Dimensions | Tactical Profile & Hazard Features | Parkour & Traversal Mechanics |
 |---|---|---|---|---|
@@ -53,6 +53,9 @@ Voidfall Dredge features 23 meticulously handcrafted room archetypes categorized
 | **Tectonic Abyssal Sinkhole** | Sector 2+ (Mega) | $26\times 22\times 26$ | Staggering multi-tiered subterranean sinkhole plunging to bedrock ($y=4$). Glowing magma fissure trough, stepped spiral terraces, central lookout monolith, and suspension cable bridge at $y=18$. | Descending spiral terraces ($y=18, 12, 8$), cable bridge crossing, and monolith parkour spire. |
 | **Cyclopean Excavation Silo** | Sector 1+ (Mega) | $26\times 22\times 26$ | Titanic circular precursor excavation shaft with heavy titanium dredging basin. Double-tiered maintenance ring catwalks ($y=12, 20$) and overhead heavy crane girder at $y=23$. | Dual perimeter ring catwalks, vertical conduit pipe climbs, and high crane hoist grapple lines. |
 | **Bioluminescent Firmament Abyss** | All Sectors (Mega) | $26\times 22\times 26$ | Vast subterranean celestial vault with an undulating floor of glowing crystal aquifer pools. Canopy at $y=23..25$ embedded with hundreds of emissive starlight crystals and high natural stone arch bridge at $y=19$. | Diagonal soaring stone arch bridge at $y=19$, crystal water cushion descents, and panoramic firmament sightlines. |
+| **Precursor Sanctum Vault** | Sector 1+ (Dedicated) | $22\times 14\times 22$ | Dedicated precursor vault chamber. Vaulted ceiling arches, runic titanium columns, crystal flora moat with stepping stones, sealed bulkhead portal. | Cross stepping stone path across moat, raised runic altar dais. |
+| **Subterranean Vault Bastion** | Sector 2+ (Dedicated) | $24\times 16\times 24$ | Heavily fortified military vault bastion. Perimeter catwalk mezzanine, central obsidian spike & defense trench, reinforced blast gate. | Mezzanine ladder climbs, catwalk sniper perches, narrow central access bridge. |
+| **Abyssal Vault Chasm** | Sector 3 Exclusive (Dedicated) | $26\times 24\times 26$ (Mega) | Deep tectonic vault chasm plunging 10m to bedrock. Lethal thermite slag & punji spike pits, irradiated cliff walls, floating monolithic stepping islands, isolated boss roost. | Floating monolith island hops ($y=14$), thruster-assisted void crossings, elevated boss arena. |
 
 ---
 
@@ -84,9 +87,68 @@ To support natural climbing of stepped ramps and terraces without requiring jump
 - If clear headroom exists above the step, the controller smoothly steps up onto the ledge.
 - Ground detection checks underfoot blocks to ensure continuous grounded state when traversing stepped ramps horizontally.
 
+### 4.5 Organic Wall Texturing, Geological Strata & Surface Clutter
+To prevent artificial planar smoothness and create authentic subterranean cave aesthetics:
+1. **Multi-Harmonic 3D Wall Carving**:
+   - `compute_room_wall_radius` modulates room contours with asymmetric harmonic lobes (frequencies 3 and 5), elevation-dependent vertical swell / strata ripples ($\sin(0.42y)$), and high-frequency cragginess.
+   - Corridors modulate width along cardinal and diagonal axes with 3D noise offsets ($\pm 0.42\,\text{m}$), ensuring no two stretches of tunnel feel identical while strictly maintaining $\ge 1.8\,\text{m}$ traversability clearance.
+2. **Sedimentary & Igneous Strata Bands**:
+   - `check_doorway_or_solid` layers subterranean rock into undulating geological bands: alternating dark volcanic basalt (`MAT_VOLCANIC_BASALT`), fractured granite (`MAT_FRACTURED_GRANITE`), and ancient dredge bedrock (`MAT_DREDGE_BEDROCK`).
+   - High-frequency spatial hashing injects mottled mineral inclusions and crumbly rock pockets.
+   - Cavern wall bases in moist grottos and aquifer biomes spawn patches of moisture lichen (`MAT_BIOLUMINESCENT_FLORA`).
+3. **Multi-Tier Surface & Wall-Mounted Clutter**:
+   - Floor rubble and scree scale dynamically across three distinct tiers: fine gravel/scree ($0.32\times$), standard boulders ($0.62\times$), and colossal rock piles ($1.15\times$).
+   - Ceiling stalactites scale between delicate drops ($0.35\times$), standard spears ($0.60\times$), and massive formations ($1.05\times$).
+   - Dedicated **Wall-Mounted Clutter Pass** scans horizontal perimeter faces ($+X, -X, +Z, -Z$), anchoring protruding rock spurs, downward wall stalactite dripstones, and glowing crevice mineral clusters oriented along surface normal directions.
+
 ---
 
-## 5. Collision & Boundary Integrity
+## 5. Dedicated Precursor Vault Chambers, Level Obstacles & Boss Guardians
+
+To elevate vault encounters from generic wall cutouts into atmospheric, high-stakes capstone challenges, the level generator incorporates dedicated Precursor Vault Chambers ([src/voxel/level_shapes.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/level_shapes.hpp), [src/voxel/level_shapes.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/level_shapes.cpp)):
+
+### 5.1 Vault Chamber Archetypes by Sector
+1. **Sector 1: Precursor Sanctum Vault (`PrecursorSanctumVault`)**:
+   - *Atmosphere*: Ancient sacred reliquary featuring soaring vaulted basalt ceiling arches, glowing titanium runic portal columns, and an elevated relic dais.
+   - *Obstacle*: `VaultObstacleType::AquiferSteppingStones` — A circular crystal flora moat (`MAT_BIOLUMINESCENT_FLORA`) spanned by a four-way cross of precursor stepping stones leading to the sealed vault portal.
+   - *Guardian*: `VaultGuardianRole::StalkerMelee` — An agitated Void Stalker lurks in the vaulted shadows, ambushing delvers approaching the breach door.
+2. **Sector 2: Subterranean Vault Bastion (`SubterraneanVaultBastion`)**:
+   - *Atmosphere*: Fortified precursor military garrison. High-elevation perimeter catwalk mezzanine ($y=room.floor\_y+4$), industrial ladders, titanium blast gate portal, and reinforced bulkhead pylons.
+   - *Obstacle*: `VaultObstacleType::HazardTrenchSlag` — A sunken perimeter defense trench filled with razor obsidian spikes (`MAT_OBSIDIAN_SPIKES`) and molten thermite slag, crossed via a narrow titanium balance walkway.
+   - *Guardian*: `VaultGuardianRole::StalkerShooter` — A specialized Void Stalker perched atop the catwalk vantage point firing long-range void projectiles.
+3. **Sector 3: Abyssal Vault Chasm (`AbyssalVaultChasm`)**:
+   - *Atmosphere*: Titanic subterranean vault fortress perched over a sheer 10-block tectonic abyss plunging to bedrock ($y=4$). Irradiated cliff walls, glowing radioactive seams, and an isolated titanium boss throne.
+   - *Obstacle*: `VaultObstacleType::ChasmAbyssRadiation` — Delvers must navigate floating precursor monolithic stepping platforms ($y=14$) across lethal slag pits and ionizing radiation beds to reach the isolated vault dais.
+   - *Boss Guardian*: `VaultGuardianRole::ChitinGoliath` — A colossal 3-meter armored apex aberrant terror guarding the ultimate vault treasure. Possesses a massive health pool, heavy ground slams causing ceiling cave-ins, and impenetrable chitin plating.
+
+### 5.2 Seamless Room Integration & Doorway Clearance Invariants
+- **Corridor Seam Collision Prevention**: `configure_vault_placement` verifies `has_unconnected_clear_wall` before picking host rooms. If all 4 cardinal walls have active corridors, the vault portal shifts off-center by $+4$ voxels along X, guaranteeing vault doors never collide with inter-chamber doorways or central traffic routes.
+- **Physical Load-Bearing Grounding**: All vault catwalks, arches, and stepping monoliths enforce 6-connected vertical face contact down to solid bedrock or ceiling anchors. Automatic post-generation solvers ensure zero unanchored blocks.
+- **Fluid & Hazard Isolation**: Dedicated vault chambers and designated vault host rooms are strictly excluded from procedural random fluid generation (`has_random_fluid`), preventing fluid puddles or slime from encroaching onto vault approaches or blocking breach explosive satchel placement.
+
+### 5.3 Precursor Relic 3D Model & Gyroscopic Levitation Animation
+Inside breached vault chambers, the Precursor Relic objective transcends static voxel cubes through dynamic PBR rendering and multi-axis gyroscopic animations ([src/graphics/renderer.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.hpp), [src/graphics/renderer.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp)):
+- **Custom Model Voxel Decoupling (`VOXEL_FLAG_CUSTOM_MODEL`)**:
+  - The relic block (`MAT_PRISMATIC_CRYSTAL`) is flagged with `VOXEL_FLAG_CUSTOM_MODEL | VOXEL_FLAG_EMISSIVE`.
+  - In [src/voxel/packed_vertex.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/packed_vertex.hpp), `Voxel::is_custom_model()` suppresses static chunk greedy meshing (`is_renderable() == false`) while retaining full spatial solidity (`is_solid() == true`).
+  - This preserves world collision and player crosshair interaction raycasts (`look_hit.block_pos == mission.vault().relic_pos`), seamlessly delegating visual presentation to the specialized PBR rendering pipeline.
+- **Relic Dais & Focusing Prongs**:
+  - An octagonal stepped dais socket anchored to the pedestal floor with recessed glowing cyan runic energy conduits.
+  - 4 gilded precursor focusing claws arching inward around the dais, tipped with luminous cyan emitter crystals that generate the levitation field.
+- **Counter-Rotating Astrolabe Gimbal Rings**:
+  - **Outer Ring**: Gilded precursor gold band tilted $24^\circ$ off-axis, revolving at $+1.1\,\text{rad/s}$ with 4 cardinal runic quadrature nodes.
+  - **Inner Ring**: Polished obsidian-titanium band tilted $-32^\circ$ in opposition, counter-revolving at $-1.6\,\text{rad/s}$ with 4 glowing violet flux nodes.
+- **Floating Octahedral Hyper-Core**:
+  - Smooth sinusoidal vertical hovering: $Y(t) = y_{\text{base}} + 0.54\,\text{m} + 0.065\,\text{m} \times \sin(2.2\,t)$.
+  - Multi-faceted celestial octahedron crystal spinning axially at $\omega = 2.0\,\text{rad/s}$, housing a high-emissive white-gold singularity core.
+  - 4 orbiting satellite crystal shards revolving at orbital radius $0.44\,\text{m}$ with synchronized axial wobble.
+- **Additive Energy Containment Field**:
+  - Dynamic laser containment vector beams anchoring each focusing claw to the hovering hyper-core.
+  - Ascending pulsing containment energy rings drifting vertically along the dais axis.
+
+---
+
+## 6. Collision & Boundary Integrity
 1. **Outer Boundary Containment**:
    - Voxel queries outside sector bounds ($x \le 3$ or $x \ge \text{width} - 4$, $z \le 3$ or $z \ge \text{depth} - 4$, $y \le 3$ or $y \ge 26$) return `true` (solid bedrock mantle) rather than `false` (air).
    - In `VoidSingularityRift`, the central void drop intentionally removes bedrock at $y \le 3$ so players plunge into the void rift hazard field.
@@ -99,7 +161,7 @@ To support natural climbing of stepped ramps and terraces without requiring jump
 
 ---
 
-## 6. GPU Greedy Meshing & Bitfield Vertex Resolution
+## 7. GPU Greedy Meshing & Bitfield Vertex Resolution
 In modern greedy chunk meshing ([src/voxel/greedy_mesher.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/greedy_mesher.cpp)), vertices on chunk boundaries lie at local coordinate 32 ($x, y, z \in [0, 32]$).
 - **6-Bit Coordinate Encoding**:
   - `PackedVoxelVertex::data0` allocates 6 bits each for `localX`, `localY`, and `localZ` (values $0..63$).
@@ -110,7 +172,7 @@ In modern greedy chunk meshing ([src/voxel/greedy_mesher.cpp](file:///d:/Project
 
 ---
 
-## 7. Automated Level Design & Collision Test Suite (`test_level_collision`)
+## 8. Automated Level Design & Collision Test Suite (`test_level_collision`)
 To ensure zero clipping and complete solidity across all 15 room shapes, corridors, and dynamic sector grids, the test suite executes in $\approx 1.2\,\text{s}$:
 
 ```bash
@@ -145,7 +207,7 @@ python scripts/tdd.py
 
 ---
 
-## 8. Visual Shape Catalog & Automated 4x4 Showcase Harness
+## 9. Visual Shape Catalog & Automated 4x4 Showcase Harness
 
 To make level iteration and visual inspection fast and accessible without requiring manual navigation across all 25 chambers:
 
@@ -165,7 +227,7 @@ python scripts/capture_level_shapes.py
 
 ---
 
-## 9. Endless Progression System
+## 10. Endless Progression System
 
 Voidfall Dredge supports up to **31 playable sectors** (indices 1–31, stored in `PlayerInventory::MAX_SECTOR_RECORDS = 32`). Sectors are generated procedurally at runtime from a compact descriptor system rather than hand-authored data.
 
@@ -218,22 +280,26 @@ The Orbital Hub's sector select screen shows **3 cards per page** with `< PREV` 
 | **Burrowers** | `max(0, 1 + (S−3)/3)` starting from Sector 3 |
 | **Audio theme** | Cycles across 3 theme banks every 3 sectors |
 
-### 9.5 Persistence
+### 9.5 Persistence & Seed Immutability
 
-`UserProfile::sector_records[N]` (N = 1..31) stores per-sector best data:
+`UserProfile::sector_records[N]` (N = 1..31) stores per-sector progress, performance records, and persistent procedural generation topology:
 
 ```cpp
 struct SectorRecord {
     int highest_completion_rate{0};  // 0-100%
     std::string best_badge{"UNEXPLORED"};
+    uint32_t saved_seed{0};          // Locked procedural seed once cleared
+    bool completed{false};           // True if sector was successfully evacuated
 };
 ```
 
-`highest_cleared_sector` is incremented by `PlayerInventory::finalize_run()` on successful extraction and serialised to `saves/save_data.json`.
+- **Random Generation on Open**: When entering an uncompleted level (`completed == false`), a fresh, non-zero entropy seed is generated on every launch via `SaveSystem::generate_random_seed(sector)`. Failed or abandoned runs do not lock the seed.
+- **Completion Lock & User Persistence**: Once a delver successfully completes an expedition (`safe_evac == true`), the level is marked completed and the seed used for that successful run is permanently locked into `saved_seed` and saved to `saves/save_data.json`.
+- **Topological Immutability**: All subsequent expeditions into a completed sector by that user load the saved seed (`m_user_profile.sector_records[N].saved_seed`), ensuring the cavern layout, mineral veins, and chamber geometry remain permanently stable for that player.
 
 ---
 
-## 10. Procedural Generation Dynamics & Layout Variation System
+## 11. Procedural Generation Dynamics & Layout Variation System
 
 To guarantee high replayability across repeat expeditions while maintaining strict 3D topological reachability and zero clipping, the generation pipeline integrates five advanced procedural systems:
 
@@ -271,5 +337,117 @@ Each room archetype evaluates a per-room coordinate seed hash `hash_coord(room.c
 - **Magma Caldera**: Alternates basalt bridge arch trajectories between NE-SW and NW-SE diagonals and phase-shifts the stepping stone grid across the lava lake.
 - **Spike Trench**: Switches balance beam bridge axes (X-only, Z-only, or full cross bridge) and alternates spike hazard grid parity.
 - **Fungoid Grotto**: Seeds mushroom stem locations across quadrants, varies cap heights ($+4$, $+7$, $+10$ above floor), and adjusts phosphorescent cap diameters without obstructing doorway paths.
+
+### 10.6 Dynamic Fluid Structures & Watertight Containment
+To eliminate repetitive static fluid pools while ensuring fluids remain strictly contained and dormant at spawn (zero leaks, zero CPU cost at rest), the level generator procedurally samples six distinct fluid structure archetypes based on room archetype and seed:
+- **`ContainedPool`**: Secluded corner basins with basalt bed ($y=floor\_y-1$), fluid surface ($y=floor\_y$), and elevated retaining rims ($y=floor\_y+1$).
+- **`SteppingStonePool`**: Hazardous chemical or thermal pools featuring a central prize/mineral plinth ($y=floor\_y+2$) and hopping stepping stones allowing agile delvers to cross safely.
+- **`WallCascade`**: Vertical wall-mounted conduits and stone flume buttresses rising up the wall to an emissive crystal/bulkhead discharge spout, splashing into an enclosed plunge basin with localized acoustic spray.
+- **`CascadingTwinPools`**: Dual interconnected basins in a dumbbell/capsule topology separated by a solid stone weir ridge and traversal bridge.
+- **`HazardTrench`**: Elongated security or drainage ditches of molten thermite slag, coolant, or caustic acid cutting across rooms with mid-point crossing stepping stones.
+- **`DropChasmSump`**: Massive reservoir pools at the bottom of deep drops (`AbyssalVerticalChasm`, `ColossalAbyssalChasm`, `TectonicAbyssalSinkhole`) featuring central extraction/refinery platforms.
+- **Watertight Invariants**: All fluid voxels are guaranteed non-air support beneath, full cardinal lateral containment on all 4 horizontal sides, and raised solid retaining rims exceeding liquid surface height. Room centers and doorway corridors remain dry and unobstructed.
+
+### 10.7 Objective Material Budgeting, Spatial Gating & Scarcity Validation
+To ensure that procedural levels demand genuine cave exploration rather than trivial goal fulfillment in starting areas:
+- **Decoupling from Room Shapes**: Hardcoded objective voxels (`MAT_VOIDITE_CRYSTAL`) are completely removed from room shape meshes (geodes, pillar halls, cathedrals, training niches, firmaments). Fixed room meshes now feature decorative crystals (`MAT_PRISMATIC_CRYSTAL`, `MAT_TITANIUM`, `MAT_BIOLUMINESCENT_FLORA`), and mining `MAT_PRISMATIC_CRYSTAL` rewards rare salvage (+10 Salvage, +50 pts) instead of Voidite, strictly preventing players from bypassing the level quota by mining decorative structures.
+- **Quota-Aware Tight Budget**: The level generator receives the mission target quota $T$. Total spawned objective material across the entire level is strictly budgeted to $T + 2$ (capped at $T + 3$), guaranteeing completability without resource abundance.
+- **Strict Exploration Gating & Extraction Immunity**: Rooms with Manhattan grid distance $D \le 1$ from spawn (the spawn staging cavern and all directly adjacent rooms) contain strictly 0 objective materials. The Extraction Landing Bay also contains strictly 0 objective materials, requiring players to search the cavern network rather than camp near extraction.
+- **Empty Rooms & Natural Scarcity**: To prevent uniform distribution where every room feels identical, objective materials are placed up to per-room capacity (2 to 4 voxels in Sectors 2+, up to 5 in Sector 1) before moving to subsequent rooms. Once the level quota goal is reached, remaining distant chambers receive 0 deposits. Across each level, $40\%\dots 52\%$ of all rooms have ZERO objective materials (`rooms_with_zero_objective_count()`), forcing delvers to traverse the cave system.
+- **Pre-Determined Candidate Spawn Offsets across All 27 Archetypes**: Deposits are placed at discrete candidate nodes along perimeter wall crevices, high ledges, pillar flanks, and corner alcoves via `get_room_candidate_spawn_offsets()`, tailored specifically for each of the 27 room archetypes.
+- **Wall-Embedded Vein Architecture & Surface Discovery Guarantee**:
+  - *Zero Floating Crystals*: Objective Voidite crystals are strictly prevented from spawning in open air or obstructing floor walkways (`add_objective_voxel` enforces `is_mineable_solid(sample_base_voxel)`).
+  - *Exposed Surface Outcrop*: `find_wall_surface_voxel()` anchors the primary piece of every deposit directly on the solid wall or structural face adjacent to room `MAT_AIR`, guaranteeing that the glowing purple crystal is visually discoverable by players exploring the room.
+  - *Inward Vein Penetration*: For deposits of size $> 1$, additional crystals penetrate deeper into the solid wall/rock matrix along inward normals and lateral tangents behind the surface block. Delvers who spot the exposed outcrop on the wall drill into the rock face to uncover and extract the entire deposit.
+- **Room-Level & Level-Wide Validation Checks**:
+  1. `validate_room_resources(room)` audits every room upon layout completion, verifying that near-spawn and extraction rooms have 0 materials, and no room exceeds the maximum capacity of 4-5 voxels.
+  2. `validate_level_resources()` audits the entire level, verifying $S \ge T$ (total spawned meets level quota), $S \le T + 3$ (strict scarcity ceiling), presence of zero-resource rooms, multi-room spread, zero floating blocks in air, and that every deposit position satisfies `sample_voxel(x, y, z) == MAT_VOIDITE_CRYSTAL`.
+  3. Deterministic termination (no infinite loops or hanging threads).
+
+### 10.8 Room Decoration & Surface Clutter Visual Decoupling
+To eliminate player confusion between objective resources and purely decorative cavern features:
+- **Architectural Material Realism**:
+  - Non-mineral room decorations (excavation floors in Terraced Quarry, support pillar collars in Mining Pillar Hall, caldera chimneys in Magma Caldera Lake, bridge arches in Crumbling Arch Canyon, moisture stalactites in Aquifer Oasis) are constructed strictly from structural/natural materials (`MAT_VOLCANIC_BASALT`, `MAT_FRACTURED_GRANITE`, `MAT_TITANIUM`, `MAT_BIOLUMINESCENT_FLORA`).
+  - Rock tunnel wall veins generated in `sample_point` host rock matrix use `MAT_TITANIUM`, `MAT_RADIOACTIVE_ORE`, or `MAT_BIOLUMINESCENT_FLORA` rather than crystal blocks, eliminating false-positive objective signals in transit corridors.
+- **Visual Decoupling & Natural Subtlety of Decorative Crystals (`MAT_PRISMATIC_CRYSTAL`)**:
+  - `MAT_PRISMATIC_CRYSTAL` is textured and shaded as soft celestine / natural aquamarine (`#268EBA`, subdued albedo `vec3(0.15, 0.56, 0.71)`, gentle ambient mineral luminescence `er=10, eg=48, eb=68`, and matte-crystalline roughness `0.45` to prevent blinding specular flash under headlamps).
+  - It contains zero violet or purple undertones, completely distinguishing it from the deep amethyst/violet voidite objective crystals (`MAT_VOIDITE_CRYSTAL`, albedo `vec3(0.48, 0.12, 0.72)`).
+  - **Natural Room Integration (Eliminating Center-of-Attention Distractions)**:
+    - Decorative crystals never form central floor platforms, giant central spires, or floating monoliths in the middle of rooms.
+    - Floors and central daises (such as the Prismatic Cathedral floor and stepped altar) are constructed from natural carved granite (`MAT_FRACTURED_GRANITE`).
+    - Decorative crystals are subtly integrated as mineral seams and natural druses nestled into upper column fluting, wall crevices, cavern arches, and the outer geode shell (`r_norm >= 0.86f`).
+- **Dedicated Clutter Archetypes (`ClutterType::PrismaticCrystal` vs `ClutterType::VoiditeCrystal`)**:
+  - `ClutterType::VoiditeCrystal` is strictly reserved for objective Voidite blocks (`MAT_VOIDITE_CRYSTAL`), rendering deep purple amethyst spires with pulsing purple emissive radiance.
+  - `ClutterType::PrismaticCrystal` renders delicate celestine/aquamarine mineral clusters with subtle ambient luminescence (`0.35x` emissive radiance, well below bloom blow-out thresholds, with compact organic scale `0.68..0.84x`).
+  - Stalactites and stalagmite rubble props (`CeilingStalactite`, `FloorStalagmiteRubble`) maintain zero emissive boost and high matte roughness (0.95), preventing specular glints that could mimic glowing minerals under the headlamp.
+- **HUD & Scanner Transparency**:
+  - Reticle look-target prompt identifies objective blocks as `[LMB] DRILL VOIDITE (OBJECTIVE)` in violet (`COLOR_PURPLE`), and decorative crystals as `[LMB] SALVAGE PRISMATIC (DECORATIVE)` in cyan (`COLOR_CYAN`).
+  - Sonar scanner and compass ribbons label anomalies as `[OBJ VOIDITE: Xm]` in magenta vs `[DECORATIVE PRISMATIC: Xm]` in cyan.
+
+### 10.9 Shape-Conforming & Material-Consistent Block Breaking Visuals
+To provide tactile, immersion-preserving feedback during mining and excavation:
+- **Voxel Shape Conformance**:
+  - Crack lines adhere strictly to the target block's physical geometry rather than a flat axis-aligned quad floating in mid-air.
+  - **Ramps (`SHAPE_RAMP_EAST/WEST/SOUTH/NORTH`)**: The sloped hypotenuse face crack plane adheres to the 45° slope equations ($y = x$, $y = 1 - x$, $y = z$, $y = 1 - z$) with local tangent vectors oriented along and across the incline. Side flanks adhere to vertical triangular wall boundaries. In advanced breaking stages (stage $\ge 2$), 3D silhouette stress fractures wrap around the wedge's diagonal ridges, crest, toe, and heel lines while remaining entirely within the solid prism volume.
+  - **Slabs (`SHAPE_SLAB_BOTTOM/TOP`)**: Crack overlays align with half-height planes ($Y = 0.5\text{m}$ for bottom slabs, $Y = 0.5\text{m}$ bottom face for top slabs), and side faces clamp to the half-height bounding box.
+- **Material Texture & Mineral Consistency**:
+  - Breaking animations and fracture patterns reflect the mineral composition:
+    - *Voidite & Prismatic Crystals*: 60°/120° cleavage facet stars with amethyst-to-lilac resonant energy discharge.
+    - *Industrial Bulkheads & Vault Doors*: 45° cold-rolled shear stress bands, perimeter bolt strain rings, and incandescent orange-amber sparks.
+    - *Granite & Basalt*: Quartz-tan fissures and incandescent volcanic magma cooling joints.
+    - *Radioactive Ore*: Ionizing phosphorescent toxic emerald to neon nuclear green discharge.
+  - Breaking debris ejections (`spawn_crack_debris`, `spawn_break_particles`) eject along the slope normal and originate from the shape's true center of mass ($Y = 0.333\text{m}$ for ramps, $Y = 0.25\text{m}$ or $0.75\text{m}$ for slabs) with material-matched colors and spark dynamics.
+
+### 10.10 Room Adjacency Constraints, Thematic Continuity & Contextual Selection Rules
+To eliminate jarring level generation artifacts (such as two identical chambers appearing side-by-side, or lethal environmental hazards placed directly at the player's spawn door), the level generator implements a **Wavefront Constraint-Satisfaction Solver** ([src/voxel/level_shapes.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/level_shapes.cpp)):
+
+1. **Zero Adjacent Same-Type Invariant (100% Hard Guarantee)**:
+   - Orthogonally adjacent rooms ($|\Delta x| + |\Delta z| = 1$) are strictly forbidden from sharing the same `RoomShapeType`.
+   - Diagonal neighbors ($|\Delta x| = 1, |\Delta z| = 1$) also penalize identical room types heavily, preventing repetitive room clusters across the subterranean grid.
+2. **Thematic Categorization (`RoomCategory`)**:
+   - Every chamber archetype is categorized into one of seven distinct geological and architectural domains:
+     - `SafeTerminal`: Spawn Cavern, Extraction Landing Bay.
+     - `NaturalCrystalline`: Crystalline Geode, Prismatic Crystal Cathedral, Bioluminescent Firmament Abyss.
+     - `BioOrganic`: Fungoid Bio-Grotto, Subterranean Aquifer Oasis, Bioluminescent Glowworm Grotto.
+     - `PrecursorIndustrial`: Mining Pillar Hall, Industrial Vault Bunker, Laser Defense Foundry, Precursor Coolant Reservoir, Cyclopean Excavation Silo.
+     - `VolcanicThermal`: Terraced Quarry, Magma Caldera Lake, Molten Magma Foundry.
+     - `TectonicChasm`: Fault-Line Crevasse, Abyssal Vertical Chasm, Spike Trench Arena, Crumbling Arch Canyon, Colossal Abyssal Chasm, Tectonic Abyssal Sinkhole.
+     - `CosmicVoidAbyss`: Radioactive Core Sanctuary, Void Singularity Rift, Ancient Titan Necropolis, Colossal Vaulted Dredge Cathedral.
+3. **Contextual Adjacency Affinity Scoring (`get_room_adjacency_affinity`)**:
+   - Evaluates smooth geological and atmospheric transitions between adjacent chambers with scores from $0.05$ (highly dissonant) to $0.95$ (optimal thematic harmony):
+     - *Harmonious pairings*: `BioOrganic` $\leftrightarrow$ `NaturalCrystalline` ($0.90$), `PrecursorIndustrial` $\leftrightarrow$ `VolcanicThermal` ($0.88$), `TectonicChasm` $\leftrightarrow$ `CosmicVoidAbyss` ($0.85$).
+     - *Dissonant pairings*: `BioOrganic` $\leftrightarrow$ `VolcanicThermal` ($0.15$), `SafeTerminal` $\leftrightarrow$ `CosmicVoidAbyss` ($0.10$).
+4. **Placement Limits & Environmental Safety Rules**:
+   - **Spawn Immunity from Extreme Hazards**: Chambers adjacent to spawn $(0, 0)$ can never be extreme hazard environments (`MagmaCalderaLake`, `MoltenMagmaFoundry`, `VoidSingularityRift`, `SpikeTrenchArena`, `RadioactiveCoreSanctuary`), guaranteeing safe initial gear preparation.
+   - **Harsh Hazard Anti-Clustering**: A harsh hazard chamber can never be adjacent to more than 1 other harsh hazard chamber, preventing overwhelming death gauntlets.
+   - **Same-Category Diversity Limit**: Chambers cannot be adjacent to more than 2 chambers of the same `RoomCategory`, forcing high aesthetic diversity along every corridor.
+   - **Global Archetype Caps**: Small and standard room types are capped at $\le 2$ instances per level, while massive and colossal landmarks are capped at $\le 1$ instance per level.
+5. **Wavefront Solver Architecture**:
+   - Generates chambers outward in order of Manhattan distance from spawn:
+     - Step 0: Anchor `SpawnCavern` at $(0, 0)$ and `ExtractionLandingBay` at $(W-1, D-1)$.
+     - Step 1..N: For each unplaced cell, filter candidates against all hard constraints, calculate combined heuristic scores (`base_affinity * 1.5 + seed_variation - repetition_penalties`), and select the top candidate.
+     - Fallback safety: If an over-constrained grid cell has no candidate passing all soft criteria, constraints relax progressively while maintaining the 100% hard prohibition on identical adjacent room types.
+
+---
+
+## 12. Structural Integrity & Floating Block Prevention
+
+To eliminate unnatural floating geometry, suspended specks, and disconnected clutter across procedurally generated subterranean levels, the engine executes automated post-generation **Structural Foundation & Connectivity Solvers** ([src/voxel/structural_check.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/structural_check.hpp), [src/voxel/structural_check.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/voxel/structural_check.cpp)):
+
+### 11.1 Structural Connectivity Invariants
+1. **Bedrock Anchor Foundations**:
+   - Blocks located at the level boundaries ($y \le 3$, $y \ge \text{chunk\_ceiling}$, $x \le 3$, $x \ge W - 4$, $z \le 3$, $z \ge D - 4$), blocks with `VOXEL_FLAG_ANCHORED`, and `MAT_DREDGE_BEDROCK` serve as immutable structural anchors.
+   - A multi-source 6-connected BFS floods from all anchor points across adjacent solid voxels. Any solid block unreached by this traversal is categorized as an unanchored floating component.
+2. **Stepped Ramp 6-Connectivity Invariant**:
+   - Diagonal stepped corridor ramps (`CorridorType::SlopingRamp`) gain elevation diagonally across $(x, y)$ or $(z, y)$. Standard single-block steps only touch corner-to-corner, failing 6-face connectivity.
+   - Corridors enforce a 2-block thick stair slab (`y == floor_y || (c.type == CorridorType::SlopingRamp && y == floor_y - 1)`). Adjacent steps share a full vertical voxel face, ensuring 100% continuous 6-connectivity from lower cavern floors to elevated upper tiers without filling deep chasms down to bedrock.
+3. **Deep Chasm Abyss Preservation (`is_in_chasm_abyss`)**:
+   - Corridors entering high-elevation chambers adjacent to deep tectonic rifts (`FaultLineCrevasse`, `CrumblingArchCanyon`, `SpikeTrenchArena`, `AbyssalVerticalChasm`, `ColossalAbyssalChasm`, `TectonicAbyssalSinkhole`) suppress corridor floor solid fills inside the chasm's interior drop below `room.floor_y`, ensuring vertical abyss plunges remain open and unobstructed while maintaining full doorway walkability.
+4. **Stray Speck & Noise Purging**:
+   - Disconnected islands with $\le 2$ blocks in open airspace are recognized as procedural noise specks and purged to `MAT_AIR`, ensuring chambers look pristine and natural. Specks within 2 voxels of the ceiling are grounded upward as hanging stalactites.
+5. **Architectural Pylon & Ledge Grounding**:
+   - Larger ungrounded architectural features (bridges, ledges, platforms) are automatically connected to the nearest solid floor below via material-matched structural columns (`MAT_INDUSTRIAL_BULKHEAD` for man-made facilities, `MAT_VOLCANIC_BASALT` or `MAT_FRACTURED_GRANITE` for natural caverns, `MAT_PRECURSOR_STONE` for ancient ruins). If suspended over a bottomless void, they are suspended from solid cavern ceilings above.
+6. **Clutter Prop Surface Pruning**:
+   - Decoration clutter meshes (`World::cleanup_all_disconnected_clutter`) verify their underlying support voxel; any prop whose host block is air or destroyed is automatically pruned.
 
 
