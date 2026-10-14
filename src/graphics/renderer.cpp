@@ -672,7 +672,9 @@ void Renderer::trigger_dust_kickup(float duration) {
 }
 
 void Renderer::spawn_dust_cloud(const glm::vec3& pos, int count) {
-    for (int i = 0; i < count; ++i) {
+    if (m_particles.size() >= MAX_PARTICLES) return;
+    int allowed = std::min(count, static_cast<int>(MAX_PARTICLES - m_particles.size()));
+    for (int i = 0; i < allowed; ++i) {
         BreakParticle p;
         float rx = static_cast<float>(rand() % 100) / 50.0f - 1.0f;
         float ry = static_cast<float>(rand() % 100) / 100.0f;
@@ -1464,7 +1466,9 @@ void Renderer::render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float ti
 }
 
 void Renderer::spawn_fireball(const glm::vec3& center, int count) {
-    for (int i = 0; i < count; ++i) {
+    if (m_particles.size() >= MAX_PARTICLES) return;
+    int allowed = std::min(count, static_cast<int>(MAX_PARTICLES - m_particles.size()));
+    for (int i = 0; i < allowed; ++i) {
         BreakParticle p;
         p.pos = center + glm::vec3(
             ((rand() % 100) / 100.0f - 0.5f) * 1.5f,
@@ -1491,19 +1495,14 @@ void Renderer::spawn_fireball(const glm::vec3& center, int count) {
 }
 
 void Renderer::update_particles(float dt) {
-    for (auto it = m_particles.begin(); it != m_particles.end();) {
-        it->pos += it->vel * dt;
-        it->vel.y -= it->gravity * dt;
-        it->vel *= std::max(0.0f, 1.0f - it->drag * dt);
-        it->size = std::max(0.01f, it->size + it->size_growth * dt);
-        it->life -= dt;
-
-        if (it->life <= 0.0f) {
-            it = m_particles.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    std::erase_if(m_particles, [dt](BreakParticle& p) {
+        p.pos += p.vel * dt;
+        p.vel.y -= p.gravity * dt;
+        p.vel *= std::max(0.0f, 1.0f - p.drag * dt);
+        p.size = std::max(0.01f, p.size + p.size_growth * dt);
+        p.life -= dt;
+        return p.life <= 0.0f;
+    });
 }
 
 void Renderer::render_particles() {
@@ -1524,10 +1523,12 @@ void Renderer::render_particles() {
     glm::vec3 cam_right = glm::vec3(m_view[0][0], m_view[1][0], m_view[2][0]);
     glm::vec3 cam_up    = glm::vec3(m_view[0][1], m_view[1][1], m_view[2][1]);
 
-    std::vector<float> vdata;
-    vdata.reserve(m_particles.size() * 54);
+    m_particle_vertex_buffer.clear();
+    size_t count = std::min(m_particles.size(), MAX_PARTICLES);
+    m_particle_vertex_buffer.reserve(count * 54);
 
-    for (const auto& p : m_particles) {
+    for (size_t i = 0; i < count; ++i) {
+        const auto& p = m_particles[i];
         float alpha = std::clamp(p.life / p.max_life, 0.0f, 1.0f);
         glm::vec4 col = p.color;
         col.a *= alpha;
@@ -1550,14 +1551,14 @@ void Renderer::render_particles() {
             p2.x, p2.y, p2.z, col.r, col.g, col.b, col.a, 1.0f, 1.0f,
             p3.x, p3.y, p3.z, col.r, col.g, col.b, col.a, 0.0f, 1.0f
         };
-        vdata.insert(vdata.end(), quad_v, quad_v + 54);
+        m_particle_vertex_buffer.insert(m_particle_vertex_buffer.end(), quad_v, quad_v + 54);
     }
 
-    if (!vdata.empty()) {
+    if (!m_particle_vertex_buffer.empty()) {
         glBindVertexArray(m_particle_vao);
         glBindBuffer(GL_ARRAY_BUFFER, m_particle_vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vdata.size() * sizeof(float)), vdata.data());
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vdata.size() / 9));
+        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(m_particle_vertex_buffer.size() * sizeof(float)), m_particle_vertex_buffer.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_particle_vertex_buffer.size() / 9));
         glBindVertexArray(0);
     }
 
@@ -3268,7 +3269,8 @@ void Renderer::render_quad() {
 }
 
 void Renderer::end_frame(float delta_time, float radiation_level, float shield_timer,
-                         const glm::vec3& hazard_haze_color, float hazard_haze_factor) {
+                         const glm::vec3& hazard_haze_color, float hazard_haze_factor,
+                         float suffocation_darkness) {
     m_total_time += delta_time;
 
     // Update sonar pulse radius
@@ -3406,6 +3408,7 @@ void Renderer::end_frame(float delta_time, float radiation_level, float shield_t
     m_postprocess_shader.set_float("uFar", 250.0f);
     m_postprocess_shader.set_int("uSector", m_sector);
     m_postprocess_shader.set_float("uDarknessFactor", m_area_darkness);
+    m_postprocess_shader.set_float("uSuffocationDarkness", suffocation_darkness);
     m_postprocess_shader.set_float("u_ShieldActive", shield_timer > 0.0f ? 1.0f : 0.0f);
     m_postprocess_shader.set_float("u_ShieldTimer", shield_timer);
 

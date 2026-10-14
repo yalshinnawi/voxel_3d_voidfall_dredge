@@ -136,6 +136,9 @@ public:
 
     ToolSlot active_tool() const { return m_active_tool; }
     void set_active_tool(ToolSlot tool) {
+        if (tool == ToolSlot::CombatWeapon) {
+            trigger_ammo_display();
+        }
         m_active_tool = tool;
         if (m_active_tool != ToolSlot::CombatWeapon) {
             m_reload_timer = 0.0f;
@@ -179,6 +182,24 @@ public:
     bool is_reloading() const { return m_reload_timer > 0.0f && m_weapon_ammo < m_weapon_stats.max_ammo && m_active_tool == ToolSlot::CombatWeapon; }
     float reload_timer() const { return std::max(0.0f, m_reload_timer); }
     float reload_progress() const { return (m_weapon_stats.reload_time > 0.0f) ? (1.0f - std::max(0.0f, m_reload_timer) / m_weapon_stats.reload_time) : 1.0f; }
+
+    // Transient ammo HUD display state (only appears on weapon switch, shooting, reload or empty)
+    static constexpr float AMMO_DISPLAY_DURATION = 3.0f;
+    static constexpr float AMMO_DISPLAY_FADE_TIME = 0.5f;
+
+    float ammo_display_timer() const { return m_ammo_display_timer; }
+    void trigger_ammo_display(float duration = AMMO_DISPLAY_DURATION) { m_ammo_display_timer = duration; }
+    bool should_show_ammo() const {
+        return is_reloading() || m_weapon_ammo == 0 || m_ammo_display_timer > 0.0f;
+    }
+    float ammo_display_alpha() const {
+        if (is_reloading() || m_weapon_ammo == 0) return 1.0f;
+        if (m_ammo_display_timer <= 0.0f) return 0.0f;
+        if (m_ammo_display_timer < AMMO_DISPLAY_FADE_TIME) {
+            return std::clamp(m_ammo_display_timer / AMMO_DISPLAY_FADE_TIME, 0.0f, 1.0f);
+        }
+        return 1.0f;
+    }
     bool is_thruster_air_braking() const { return m_thruster_air_braking; }
     bool is_vaulting() const { return m_vault_timer > 0.0f; }
     void reload_weapon();
@@ -286,8 +307,15 @@ public:
         CorrosiveAcid,   // Caustic neon acid (chemical sizzle, shield dissolution, acid vignette)
         CryogenicCoolant,// Sub-zero cryogenic coolant (servo frost, hypothermic damage, frost vignette)
         Spikes,          // Punji spike puncture (sharp crunch, recoil hop)
-        VoidSingularity  // Cosmic gravitational void (gravitational distortion)
+        VoidSingularity, // Cosmic gravitational void (gravitational distortion)
+        Suffocation      // Cave-in entombment in solid blocks (rapid damage, choking, screen darkness)
     };
+
+    bool is_suffocating() const { return m_is_suffocating; }
+    float suffocation_duration() const { return m_suffocation_duration; }
+    bool is_head_in_solid(const World& world) const;
+    using SuffocationCoughCallback = std::function<void()>;
+    void set_on_suffocation_cough(SuffocationCoughCallback cb) { m_on_suffocation_cough = std::move(cb); }
 
     float health() const { return m_health; }
     float max_health() const { return m_max_health; }
@@ -520,6 +548,7 @@ private:
     float m_fire_cooldown{0.0f};
     float m_reload_timer{0.0f};
     float m_recharge_delay{0.0f};
+    float m_ammo_display_timer{0.0f};
     bool m_thruster_air_braking{false};
     float m_vault_timer{0.0f};
     bool m_is_aiming{false};
@@ -597,6 +626,12 @@ private:
     bool m_combat_inputs_paused{false};
     float m_spawn_shoot_pause_timer{0.0f};
     bool m_require_lmb_release{false};
+
+    // Cave-in Suffocation & Burial State
+    bool m_is_suffocating{false};
+    float m_suffocation_duration{0.0f};
+    float m_suffocation_cough_timer{0.0f};
+    SuffocationCoughCallback m_on_suffocation_cough;
 
 public:
     void apply_fall_impact(float impact_speed);

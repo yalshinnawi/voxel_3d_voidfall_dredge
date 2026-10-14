@@ -2937,6 +2937,9 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
 
   // ─── Pairwise Stalker-to-Stalker Depenetration (Hard Anti-Overlap) ───
   for (int pass = 0; pass < 2; ++pass) {
+    bool any_penetration = false;
+    std::vector<uint8_t> shifted(m_stalkers.size(), 0);
+
     for (size_t i = 0; i < m_stalkers.size(); ++i) {
       auto& s1 = m_stalkers[i];
       if (s1.state == StalkerState::Dead || s1.state == StalkerState::Dying || s1.state == StalkerState::Burrowing)
@@ -2955,14 +2958,24 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
                 s1.position, s1.velocity, r1, w1,
                 s2.position, s2.velocity, r2, w2,
                 s1.id, s2.id)) {
-          // Re-clamp both against voxels so separation does not push entities inside solid blocks
-          AberrantAI::resolve_voxel_collision(s1.position, s1.velocity, r1,
-              (s1.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f,
-              s1.surface_state, s1.contact_normal, world);
-          AberrantAI::resolve_voxel_collision(s2.position, s2.velocity, r2,
-              (s2.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f,
-              s2.surface_state, s2.contact_normal, world);
+          any_penetration = true;
+          shifted[i] = 1;
+          shifted[j] = 1;
         }
+      }
+    }
+
+    if (!any_penetration) {
+      break;
+    }
+
+    for (size_t i = 0; i < m_stalkers.size(); ++i) {
+      if (shifted[i]) {
+        auto& s = m_stalkers[i];
+        float r = (s.role == StalkerRole::ChitinGoliath) ? 0.75f : 0.45f;
+        AberrantAI::resolve_voxel_collision(s.position, s.velocity, r,
+            (s.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f,
+            s.surface_state, s.contact_normal, world);
       }
     }
   }
@@ -3417,8 +3430,14 @@ void VoidStalkerManager::assign_patrol_zones_from_world(const World& world) {
 }
 
 void VoidStalkerManager::resolve_burrower_penetrations(std::vector<SeismicBurrower>& burrowers, const World& world) {
+  if (burrowers.empty() || m_stalkers.empty()) return;
+
   for (int pass = 0; pass < 2; ++pass) {
-    for (auto& s : m_stalkers) {
+    bool any_penetration = false;
+    std::vector<uint8_t> shifted(m_stalkers.size(), 0);
+
+    for (size_t i = 0; i < m_stalkers.size(); ++i) {
+      auto& s = m_stalkers[i];
       if (s.state == StalkerState::Dead || s.state == StalkerState::Dying || s.state == StalkerState::Burrowing)
         continue;
       float r_s = (s.role == StalkerRole::ChitinGoliath) ? 0.75f : 0.45f;
@@ -3434,11 +3453,23 @@ void VoidStalkerManager::resolve_burrower_penetrations(std::vector<SeismicBurrow
                 s.position, s.velocity, r_s, w_s,
                 b.position, b.velocity, r_b, w_b,
                 s.id, b.id)) {
-          // Re-clamp stalker against voxels
-          AberrantAI::resolve_voxel_collision(s.position, s.velocity, r_s,
-              (s.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f,
-              s.surface_state, s.contact_normal, world);
+          any_penetration = true;
+          shifted[i] = 1;
         }
+      }
+    }
+
+    if (!any_penetration) {
+      break;
+    }
+
+    for (size_t i = 0; i < m_stalkers.size(); ++i) {
+      if (shifted[i]) {
+        auto& s = m_stalkers[i];
+        float r_s = (s.role == StalkerRole::ChitinGoliath) ? 0.75f : 0.45f;
+        AberrantAI::resolve_voxel_collision(s.position, s.velocity, r_s,
+            (s.role == StalkerRole::ChitinGoliath) ? 1.4f : 0.85f,
+            s.surface_state, s.contact_normal, world);
       }
     }
   }

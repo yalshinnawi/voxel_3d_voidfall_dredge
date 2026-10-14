@@ -180,6 +180,12 @@ void Application::init_systems() {
         // Sensory feedback handled via audio/visuals/environment
     });
 
+    m_player->set_on_suffocation_cough([this]() {
+        if (m_audio) {
+            m_audio->trigger_player_asphyxiation(0.95f);
+        }
+    });
+
     m_player->set_on_sonar_cast([this](const glm::vec3& origin) {
         on_sonar_cast(origin);
     });
@@ -344,6 +350,10 @@ void Application::init_systems() {
             if (m_audio) {
                 m_audio->play_sound_2d(SoundCue::CavernDrip, 0.60f);
             }
+        } else if (source == PlayerController::DamageSource::Suffocation) {
+            // CAVE-IN COLLAPSE / SUFFOCATION: Subtle diaphragmatic cough shudder (0.03f)
+            float trauma_add = 0.03f;
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
         } else {
             // Kinetic / Spikes / Thermal Lava / Void Singularity
             if (m_hud) {
@@ -486,6 +496,7 @@ void Application::init_systems() {
                     << ", Titanium: " << m_user_profile.total_titanium << ")");
     } else {
         SaveSystem::load_profile(m_user_profile, m_active_save_file);
+        m_selected_level = m_user_profile.get_highest_unlocked_sector();
     }
 
     m_settings = m_user_profile.settings;
@@ -1451,10 +1462,26 @@ void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float ra
 
     if (detach_blocks.empty()) return;
 
+    std::unordered_set<ChunkPos, ChunkPosHash> affected_chunks;
     for (const auto& b : detach_blocks) {
         Voxel v = m_world->get_voxel(b.x, b.y, b.z);
-        // Remove physical block from ceiling
-        m_world->set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, true);
+        // Remove physical block from ceiling without neighbor queueing flood
+        m_world->set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, false);
+
+        int cx = (b.x >= 0) ? (b.x / CHUNK_SIZE) : ((b.x - CHUNK_SIZE + 1) / CHUNK_SIZE);
+        int cy = (b.y >= 0) ? (b.y / CHUNK_SIZE) : ((b.y - CHUNK_SIZE + 1) / CHUNK_SIZE);
+        int cz = (b.z >= 0) ? (b.z / CHUNK_SIZE) : ((b.z - CHUNK_SIZE + 1) / CHUNK_SIZE);
+        affected_chunks.insert(ChunkPos{cx, cy, cz});
+
+        int lx = (b.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+        int ly = (b.y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+        int lz = (b.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+        if (lx == 0) affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+        if (lx == CHUNK_SIZE - 1) affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+        if (ly == 0) affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+        if (ly == CHUNK_SIZE - 1) affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+        if (lz == 0) affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+        if (lz == CHUNK_SIZE - 1) affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
 
         // Spawn fracture dust/particles at ceiling detachment point in the affected zone
         if (m_renderer) {
@@ -1466,12 +1493,6 @@ void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float ra
         }
 
         if (m_host) {
-            int cx = (b.x >= 0) ? (b.x / CHUNK_SIZE) : ((b.x - CHUNK_SIZE + 1) / CHUNK_SIZE);
-            int cy = (b.y >= 0) ? (b.y / CHUNK_SIZE) : ((b.y - CHUNK_SIZE + 1) / CHUNK_SIZE);
-            int cz = (b.z >= 0) ? (b.z / CHUNK_SIZE) : ((b.z - CHUNK_SIZE + 1) / CHUNK_SIZE);
-            int lx = (b.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-            int ly = (b.y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-            int lz = (b.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
             uint16_t idx = static_cast<uint16_t>(Chunk::to_index(lx, ly, lz));
             m_host->broadcast_block_delta(cx, cy, cz, idx, MAT_AIR, 0);
         }
@@ -1496,6 +1517,11 @@ void Application::spawn_ceiling_cavein_wave(const glm::vec3& epicenter, float ra
         if (m_host) {
             m_host->broadcast_debris_spawn(did, glm::vec3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), vel, v.material_id, 1);
         }
+    }
+
+    // Queue unique affected chunks once for background remeshing
+    for (const auto& cp : affected_chunks) {
+        m_world->queue_chunk_for_meshing(cp);
     }
 }
 
@@ -2120,7 +2146,7 @@ void Application::fixed_tick(float dt) {
         glm::vec3 cam = m_player->eye_position();
         glm::vec3 diff = world_pt - cam;
         float d = glm::length(diff);
-        if (d > 35.0f) return false; // Beyond cavern acoustic/visual particle threshold
+        if (d > 20.0f) return false; // Beyond cavern acoustic/visual particle threshold
         if (d < 0.25f) return true;
         RaycastHit hit = m_world->raycast(cam, diff / d, d - 0.25f);
         return !hit.hit; // If obstructed by an intervening rock wall, it is occluded
@@ -2132,7 +2158,7 @@ void Application::fixed_tick(float dt) {
             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
         };
         int spawned_particles_count = 0;
-        constexpr int MAX_BURROW_PARTICLES_PER_FRAME = 12;
+        constexpr int MAX_BURROW_PARTICLES_PER_FRAME = 6;
         for (const auto& ev : burrower_res.excavated_voxels) {
             if (spawned_particles_count >= MAX_BURROW_PARTICLES_PER_FRAME) break;
             bool on_surface = false;
@@ -2971,6 +2997,12 @@ void Application::fixed_tick(float dt) {
                 m_hud->set_frost_exposure(frost_exp, dt);
             }
         }
+
+        if (m_player->is_suffocating()) {
+            if (m_renderer) {
+                m_renderer->set_area_darkness(1.0f);
+            }
+        }
     }
 
     // ═══ Extraction Holdout Wave Escalation ═══
@@ -3072,6 +3104,8 @@ void Application::fixed_tick(float dt) {
             death_cause = "CRUSHED // CONSUMED BY ABYSSAL VOID SINGULARITY";
         } else if (m_player->exo().radiation >= 95.0f) {
             death_cause = "LETHAL RADIATION POISONING // ACUTE IONIZATION SICKNESS";
+        } else if (m_player->is_suffocating()) {
+            death_cause = "ASPHYXIATED // BURIED ALIVE IN CAVE-IN COLLAPSE";
         }
         VF_LOG_INFO("Gameplay", "Player Delver died: " << death_cause);
     }
@@ -3724,7 +3758,9 @@ void Application::render(float dt) {
             effective_haze = lava_haze;
         }
     }
-    m_renderer->end_frame(dt, effective_rad, shield_timer, danger_haze_color, effective_haze);
+    float suffocation_darkness = (m_state == GameState::Gameplay && m_player && m_world &&
+                                 (m_player->is_suffocating() || m_player->is_head_in_solid(*m_world))) ? 1.0f : 0.0f;
+    m_renderer->end_frame(dt, effective_rad, shield_timer, danger_haze_color, effective_haze, suffocation_darkness);
 
     // Mouse coordinates and clicks for responsive menus
     glm::dvec2 cur_pos = m_window->get_cursor_pos();
@@ -3736,10 +3772,7 @@ void Application::render(float dt) {
 
     // Render State-Specific Overlay
     if (m_state == GameState::MainMenu) {
-        bool has_save = (m_user_profile.total_exp > 0 ||
-                         m_user_profile.sector_records[1].highest_completion_rate > 0 ||
-                         m_user_profile.sector_records[2].highest_completion_rate > 0 ||
-                         m_user_profile.sector_records[3].highest_completion_rate > 0);
+        bool has_save = m_user_profile.has_save_data();
         MainMenuAction action = m_hub_ui->render_main_menu(m_selected_level, m_user_profile, has_save, mouse_x, mouse_y, mouse_clicked, mouse_down, static_cast<float>(m_window->get_scroll_delta_y()));
         m_settings = m_user_profile.settings;
         sync_audio_settings();
@@ -3758,6 +3791,7 @@ void Application::render(float dt) {
         }
 
         if (action == MainMenuAction::Continue) {
+            m_selected_level = m_user_profile.get_highest_unlocked_sector();
             start_expedition(m_selected_level);
         } else if (action == MainMenuAction::NewExpedition) {
             start_expedition(m_selected_level);
@@ -3798,6 +3832,7 @@ void Application::render(float dt) {
             LaunchSector(m_selected_level);
         } else if (action == DebriefAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
+            m_selected_level = m_user_profile.get_highest_unlocked_sector();
             m_hub_ui->set_subview(MenuSubView::Main);
             TransitionState(GameState::MainMenu);
             m_window->set_cursor_locked(false);
@@ -3831,6 +3866,7 @@ void Application::render(float dt) {
             m_window->set_cursor_locked(true);
         } else if (action == PauseMenuAction::Abandon || action == PauseMenuAction::ReturnToStartup || action == PauseMenuAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
+            m_selected_level = m_user_profile.get_highest_unlocked_sector();
             // Reset mission runtime containers (clear active debris entities, reset hazard clocks, flush world delta queues)
             m_debris.clear();
             m_stalkers.reset();
@@ -4069,11 +4105,9 @@ void Application::run() {
                              m_window->is_key_down(GLFW_KEY_SPACE);
 
             if (enter_now && !enter_down_last) {
-                bool has_save = (m_user_profile.total_exp > 0 ||
-                                 m_user_profile.sector_records[1].highest_completion_rate > 0 ||
-                                 m_user_profile.sector_records[2].highest_completion_rate > 0 ||
-                                 m_user_profile.sector_records[3].highest_completion_rate > 0);
+                bool has_save = m_user_profile.has_save_data();
                 if (has_save) {
+                    m_selected_level = m_user_profile.get_highest_unlocked_sector();
                     start_expedition(m_selected_level);
                 } else {
                     m_hub_ui->set_active_tab(HubTab::SectorSelect);

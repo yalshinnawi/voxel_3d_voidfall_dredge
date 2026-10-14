@@ -102,6 +102,7 @@ struct SeismicBurrower {
     float stuck_timer{0.0f};
     float stuck_checkpoint_timer{0.0f};
     glm::vec3 stuck_checkpoint_pos{0.0f};
+    float excavation_dist_accum{1.0f}; // Accumulated displacement for rate-limited excavation
 
     // Frame events
     bool just_breached{false};

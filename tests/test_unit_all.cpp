@@ -2408,6 +2408,17 @@ void test_headlamp_briefing_melee_and_loot_systems() {
     DebriefAction act_hub = debrief.ProcessClick("[RETURN TO ORBITAL HUB]");
     TEST_CHECK(act_hub == DebriefAction::ReturnToHub, "Clicking [RETURN TO ORBITAL HUB] must return ReturnToHub action");
     log_pass("Debrief menu [RE-DEPLOY EXPEDITION] and [CONTINUE TO NEXT ROUND] sector routing");
+
+    // 8. Continue Expedition Last Unlocked Sector Routing
+    UserProfile prof_c;
+    TEST_CHECK(prof_c.get_highest_unlocked_sector() == 1, "Level 1 profile must continue from Sector 1");
+
+    // Level up to Level 4 -> Unlocks Sector 2 and Sector 3, but Sector 4 remains locked
+    prof_c.grant_exp(1350);
+    TEST_CHECK(prof_c.is_sector_unlocked(3), "Sector 3 must be unlocked at Level 4");
+    TEST_CHECK(!prof_c.is_sector_unlocked(4), "Sector 4 must remain locked before Sector 3 clear and Level 6");
+    TEST_CHECK(prof_c.get_highest_unlocked_sector() == 3, "Continue expedition must route to Sector 3 when Sector 3 unlocked but not Sector 4");
+    log_pass("Continue expedition last unlocked sector routing");
 }
 
 // ─────────────────────────────────────────────────────────────

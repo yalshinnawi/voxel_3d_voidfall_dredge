@@ -180,6 +180,24 @@ struct UserProfile {
         return is_prior_sector_cleared(sector);
     }
 
+    int get_highest_unlocked_sector() const {
+        int highest = 1;
+        for (int s = 1; s < MAX_SECTOR_RECORDS; ++s) {
+            if (is_sector_unlocked(s)) {
+                highest = s;
+            }
+        }
+        return highest;
+    }
+
+    bool has_save_data() const {
+        if (total_exp > 0 || lifetime_exp > 0 || highest_cleared_sector > 1) return true;
+        for (int s = 1; s < MAX_SECTOR_RECORDS; ++s) {
+            if (sector_records[s].highest_completion_rate > 0 || sector_records[s].completed) return true;
+        }
+        return false;
+    }
+
     bool is_sector_completed(int sector) const {
         if (sector < 1 || sector >= MAX_SECTOR_RECORDS) return false;
         return sector_records[sector].is_completed();

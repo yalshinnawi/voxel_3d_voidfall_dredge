@@ -167,29 +167,36 @@ std::vector<glm::ivec3> StructuralCheck::query_seismic_detachment_blocks(
         {0, 0, 1}, {0, 0, -1}
     };
 
-    for (int dy = min_y_offset; dy <= max_y_offset; ++dy) {
-        int vy = py + dy;
-        if (vy < 0 || vy >= 128) continue;
+    // Fast column-based surface scan: for each (dx, dz) within circle radius,
+    // scan upward from min_y_offset to max_y_offset to find the exposed ceiling boundary.
+    // The first solid block encountered above air is the ceiling surface block for this column;
+    // any blocks above it have solid rock below them and cannot detach.
+    for (int dx = -r_ceil; dx <= r_ceil; ++dx) {
+        for (int dz = -r_ceil; dz <= r_ceil; ++dz) {
+            if (dx * dx + dz * dz > radius * radius) continue;
 
-        for (int dx = -r_ceil; dx <= r_ceil; ++dx) {
-            for (int dz = -r_ceil; dz <= r_ceil; ++dz) {
-                if (dx * dx + dz * dz > radius * radius) continue;
+            int vx = px + dx;
+            int vz = pz + dz;
 
-                int vx = px + dx;
-                int vz = pz + dz;
+            for (int dy = min_y_offset; dy <= max_y_offset; ++dy) {
+                int vy = py + dy;
+                if (vy < 1 || vy >= 127) continue;
 
                 Voxel v = world.get_voxel(vx, vy, vz);
-                // Must be solid stone ceiling block (MAT_GRANITE, MAT_BASALT)
-                if (!v.is_solid()) continue;
+                if (!v.is_solid()) continue; // Still in open cavern air
+
+                // First solid block encountered in this column (ceiling face)
                 if (v.material_id == MAT_DREDGE_BEDROCK ||
                     v.material_id == MAT_INDUSTRIAL_BULKHEAD ||
                     v.material_id == MAT_REINFORCED_VAULT_DOOR) {
-                    continue;
+                    break; // Bedrock/bulkhead ceiling is indestructible, stop column
                 }
 
                 // Must have air directly below it so it can fall
                 Voxel v_below = world.get_voxel(vx, vy - 1, vz);
-                if (v_below.is_solid()) continue;
+                if (v_below.is_solid()) {
+                    break;
+                }
 
                 // Check if supported by any adjacent player-placed MAT_BULKHEAD blocks
                 bool supported_by_bulkhead = false;
@@ -204,6 +211,9 @@ std::vector<glm::ivec3> StructuralCheck::query_seismic_detachment_blocks(
                 if (!supported_by_bulkhead) {
                     candidates.push_back(glm::ivec3(vx, vy, vz));
                 }
+
+                // Ceiling block identified for this column, proceed to next column
+                break;
             }
         }
     }

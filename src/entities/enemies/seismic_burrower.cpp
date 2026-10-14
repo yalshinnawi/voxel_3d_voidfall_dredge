@@ -357,42 +357,48 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 b.velocity = facing * eff_burrow_speed;
                 b.position += b.velocity * dt;
 
-                // Swept excavation along movement path from old_pos to new position
-                std::unordered_set<ChunkPos, ChunkPosHash> burrow_affected_chunks;
-                for (float step = 0.0f; step <= move_dist + 0.8f; step += 0.8f) {
-                    glm::ivec3 center = glm::ivec3(glm::floor(old_pos + facing * (step + 1.0f)));
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        for (int dy = -1; dy <= 1; ++dy) {
-                            for (int dz = -1; dz <= 1; ++dz) {
-                                glm::ivec3 p = center + glm::ivec3(dx, dy, dz);
-                                Voxel v = world.get_voxel(p.x, p.y, p.z);
-                                if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
-                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
-                                    result.excavated_voxels.push_back({p, v.material_id});
+                // Swept excavation along movement path from old_pos to new position (distance-throttled to avoid 60fps chunk remeshing storm)
+                b.excavation_dist_accum += move_dist;
+                if (b.excavation_dist_accum >= 0.5f) {
+                    b.excavation_dist_accum = 0.0f;
+                    std::unordered_set<ChunkPos, ChunkPosHash> burrow_affected_chunks;
+                    for (float step = 0.0f; step <= move_dist + 0.8f; step += 0.8f) {
+                        glm::ivec3 center = glm::ivec3(glm::floor(old_pos + facing * (step + 1.0f)));
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            for (int dy = -1; dy <= 1; ++dy) {
+                                for (int dz = -1; dz <= 1; ++dz) {
+                                    glm::ivec3 p = center + glm::ivec3(dx, dy, dz);
+                                    Voxel v = world.get_voxel(p.x, p.y, p.z);
+                                    if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
+                                        world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
+                                        if (result.excavated_voxels.size() < 16) {
+                                            result.excavated_voxels.push_back({p, v.material_id});
+                                        }
 
-                                    int cx = p.x >> 5;
-                                    int cy = p.y >> 5;
-                                    int cz = p.z >> 5;
-                                    burrow_affected_chunks.insert(ChunkPos{cx, cy, cz});
-                                    int lx = p.x & 31;
-                                    int ly = p.y & 31;
-                                    int lz = p.z & 31;
-                                    if (lx == 0) burrow_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
-                                    if (lx == 31) burrow_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
-                                    if (ly == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
-                                    if (ly == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
-                                    if (lz == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
-                                    if (lz == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
+                                        int cx = p.x >> 5;
+                                        int cy = p.y >> 5;
+                                        int cz = p.z >> 5;
+                                        burrow_affected_chunks.insert(ChunkPos{cx, cy, cz});
+                                        int lx = p.x & 31;
+                                        int ly = p.y & 31;
+                                        int lz = p.z & 31;
+                                        if (lx == 0) burrow_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                                        if (lx == 31) burrow_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                                        if (ly == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                                        if (ly == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                                        if (lz == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                                        if (lz == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                for (const auto& cpos : burrow_affected_chunks) {
-                    Chunk* c = world.get_chunk(cpos);
-                    if (c) {
-                        c->MarkDirty();
-                        world.queue_chunk_for_meshing(cpos);
+                    for (const auto& cpos : burrow_affected_chunks) {
+                        Chunk* c = world.get_chunk(cpos);
+                        if (c) {
+                            c->MarkDirty();
+                            world.queue_chunk_for_meshing(cpos);
+                        }
                     }
                 }
 
@@ -436,6 +442,7 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 if (b.state_timer > 1.2f) {
                     b.state = BurrowerState::Charging;
                     b.state_timer = 0.0f;
+                    b.excavation_dist_accum = 1.0f; // Ready for immediate forward destruction
                     b.yaw = target_yaw;
                     b.pitch = target_pitch;
                     result.any_charge = true;
@@ -481,42 +488,48 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                     b.position = next_pos;
 
                     // DESTROY THINGS IN ITS PATH:
-                    // Obliterate any destructible voxels around the cutter head during kinetic charge!
-                    glm::ivec3 charge_center = glm::ivec3(glm::floor(next_pos + facing * 1.0f));
-                    std::unordered_set<ChunkPos, ChunkPosHash> charge_affected_chunks;
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        for (int dy = -1; dy <= 1; ++dy) {
-                            for (int dz = -1; dz <= 1; ++dz) {
-                                glm::ivec3 p = charge_center + glm::ivec3(dx, dy, dz);
-                                Voxel v = world.get_voxel(p.x, p.y, p.z);
-                                if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
-                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
-                                    result.excavated_voxels.push_back({p, v.material_id});
-                                    b.just_ground = true;
-                                    result.any_grind = true;
+                    // Obliterate any destructible voxels around the cutter head during kinetic charge (distance-throttled)!
+                    b.excavation_dist_accum += move_dist;
+                    if (b.excavation_dist_accum >= 0.5f) {
+                        b.excavation_dist_accum = 0.0f;
+                        glm::ivec3 charge_center = glm::ivec3(glm::floor(next_pos + facing * 1.0f));
+                        std::unordered_set<ChunkPos, ChunkPosHash> charge_affected_chunks;
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            for (int dy = -1; dy <= 1; ++dy) {
+                                for (int dz = -1; dz <= 1; ++dz) {
+                                    glm::ivec3 p = charge_center + glm::ivec3(dx, dy, dz);
+                                    Voxel v = world.get_voxel(p.x, p.y, p.z);
+                                    if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
+                                        world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
+                                        if (result.excavated_voxels.size() < 16) {
+                                            result.excavated_voxels.push_back({p, v.material_id});
+                                        }
+                                        b.just_ground = true;
+                                        result.any_grind = true;
 
-                                    int cx = p.x >> 5;
-                                    int cy = p.y >> 5;
-                                    int cz = p.z >> 5;
-                                    charge_affected_chunks.insert(ChunkPos{cx, cy, cz});
-                                    int lx = p.x & 31;
-                                    int ly = p.y & 31;
-                                    int lz = p.z & 31;
-                                    if (lx == 0) charge_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
-                                    if (lx == 31) charge_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
-                                    if (ly == 0) charge_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
-                                    if (ly == 31) charge_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
-                                    if (lz == 0) charge_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
-                                    if (lz == 31) charge_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
+                                        int cx = p.x >> 5;
+                                        int cy = p.y >> 5;
+                                        int cz = p.z >> 5;
+                                        charge_affected_chunks.insert(ChunkPos{cx, cy, cz});
+                                        int lx = p.x & 31;
+                                        int ly = p.y & 31;
+                                        int lz = p.z & 31;
+                                        if (lx == 0) charge_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                                        if (lx == 31) charge_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                                        if (ly == 0) charge_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                                        if (ly == 31) charge_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                                        if (lz == 0) charge_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                                        if (lz == 31) charge_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
+                                    }
                                 }
                             }
                         }
-                    }
-                    for (const auto& cpos : charge_affected_chunks) {
-                        Chunk* c = world.get_chunk(cpos);
-                        if (c) {
-                            c->MarkDirty();
-                            world.queue_chunk_for_meshing(cpos);
+                        for (const auto& cpos : charge_affected_chunks) {
+                            Chunk* c = world.get_chunk(cpos);
+                            if (c) {
+                                c->MarkDirty();
+                                world.queue_chunk_for_meshing(cpos);
+                            }
                         }
                     }
 

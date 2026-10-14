@@ -17,6 +17,7 @@ uniform float uNear;
 uniform float uFar;
 uniform int uSector;
 uniform float uDarknessFactor;
+uniform float uSuffocationDarkness;
 uniform float u_ShieldActive;
 uniform float u_ShieldTimer;
 
@@ -127,6 +128,11 @@ void main() {
 
     vec3 scene = texture(uSceneColor, uv).rgb;
     vec3 bloom = texture(uBloomColor, uv).rgb;
+
+    if (uSuffocationDarkness > 0.0) {
+        scene *= clamp(1.0 - uSuffocationDarkness, 0.0, 1.0);
+        bloom *= clamp(1.0 - uSuffocationDarkness, 0.0, 1.0);
+    }
     vec4 fog   = sample_bilateral_fog(uv); // rgb = inscatter, a = fog factor (bilateral upsampled)
 
     // Cavern expanses beyond 40.0m smoothly blend into an ambient depth haze

@@ -39,8 +39,121 @@ glm::mat4 PlayerController::get_view_matrix() const {
     return glm::lookAt(eye, eye + m_front, m_up);
 }
 
+static inline float calculate_ramp_surface_y(VoxelShape shape, int bx, int by, int bz, float px, float pz) {
+    float u = glm::clamp(px - static_cast<float>(bx), 0.0f, 1.0f);
+    float w = glm::clamp(pz - static_cast<float>(bz), 0.0f, 1.0f);
+    float local_h = 0.0f;
+    switch (shape) {
+        case SHAPE_RAMP_POS_X: local_h = u; break;          // Slope rising toward +X
+        case SHAPE_RAMP_NEG_X: local_h = 1.0f - u; break;   // Slope rising toward -X
+        case SHAPE_RAMP_POS_Z: local_h = w; break;          // Slope rising toward +Z
+        case SHAPE_RAMP_NEG_Z: local_h = 1.0f - w; break;   // Slope rising toward -Z
+        default: local_h = 1.0f; break;
+    }
+    return static_cast<float>(by) + local_h;
+}
+
+bool PlayerController::is_head_in_solid(const World& world) const {
+    glm::vec3 eye = eye_position();
+    glm::vec3 head_top = m_position + glm::vec3(0.0f, half_extents().y - 0.05f, 0.0f);
+    glm::ivec3 eb = glm::floor(eye);
+    glm::ivec3 hb = glm::floor(head_top);
+    Voxel ev = world.get_voxel(eb.x, eb.y, eb.z);
+    Voxel hv = world.get_voxel(hb.x, hb.y, hb.z);
+    return (ev.is_solid() && !ev.is_ramp()) || (hv.is_solid() && !hv.is_ramp());
+}
+
 RaycastHit PlayerController::get_look_target(const World& world, float max_dist) const {
     glm::vec3 eye = eye_position();
+    glm::ivec3 eb = glm::floor(eye);
+    Voxel ev = world.get_voxel(eb.x, eb.y, eb.z);
+    if (ev.is_solid() && !ev.is_anchored() && ev.material_id != MAT_DREDGE_BEDROCK) {
+        RaycastHit hit;
+        hit.hit = true;
+        hit.block_pos = eb;
+        hit.chunk_pos = ChunkPos{eb.x >> 5, eb.y >> 5, eb.z >> 5};
+        hit.local_x = eb.x & 31;
+        hit.local_y = eb.y & 31;
+        hit.local_z = eb.z & 31;
+        hit.normal = glm::ivec3(0, 1, 0);
+        hit.voxel = ev;
+        hit.distance = 0.0f;
+        return hit;
+    }
+
+    // Check head top, chest, and torso for penetrating solid blocks (tight space cave-ins)
+    glm::vec3 head_top = m_position + glm::vec3(0.0f, half_extents().y - 0.05f, 0.0f);
+    glm::vec3 chest = m_position + glm::vec3(0.0f, 0.20f, 0.0f);
+    glm::vec3 torso = m_position;
+
+    auto check_voxel_target = [&](const glm::vec3& pt) -> RaycastHit {
+        glm::ivec3 b = glm::floor(pt);
+        Voxel v = world.get_voxel(b.x, b.y, b.z);
+        if (v.is_solid() && !v.is_anchored() && v.material_id != MAT_DREDGE_BEDROCK) {
+            RaycastHit hit;
+            hit.hit = true;
+            hit.block_pos = b;
+            hit.chunk_pos = ChunkPos{b.x >> 5, b.y >> 5, b.z >> 5};
+            hit.local_x = b.x & 31;
+            hit.local_y = b.y & 31;
+            hit.local_z = b.z & 31;
+            hit.normal = glm::ivec3(0, 1, 0);
+            hit.voxel = v;
+            hit.distance = 0.0f;
+            return hit;
+        }
+        RaycastHit no_hit;
+        no_hit.hit = false;
+        return no_hit;
+    };
+
+    RaycastHit hit_head = check_voxel_target(head_top);
+    if (hit_head.hit) return hit_head;
+
+    RaycastHit hit_chest = check_voxel_target(chest);
+    if (hit_chest.hit) return hit_chest;
+
+    RaycastHit hit_torso = check_voxel_target(torso);
+    if (hit_torso.hit) return hit_torso;
+
+    // Check bounding box for any penetrating solid block
+    glm::vec3 box_min = m_position - half_extents();
+    glm::vec3 box_max = m_position + half_extents();
+    int min_x = static_cast<int>(std::floor(box_min.x + 0.002f));
+    int max_x = static_cast<int>(std::floor(box_max.x - 0.002f));
+    int min_y = static_cast<int>(std::floor(box_min.y + 0.15f));
+    int max_y = static_cast<int>(std::floor(box_max.y - 0.002f));
+    int min_z = static_cast<int>(std::floor(box_min.z + 0.002f));
+    int max_z = static_cast<int>(std::floor(box_max.z - 0.002f));
+
+    float best_dist = 1e9f;
+    RaycastHit best_hit;
+    best_hit.hit = false;
+    for (int y = max_y; y >= min_y; --y) {
+        for (int x = min_x; x <= max_x; ++x) {
+            for (int z = min_z; z <= max_z; ++z) {
+                glm::ivec3 bpos(x, y, z);
+                Voxel v = world.get_voxel(x, y, z);
+                if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && !v.is_anchored()) {
+                    float d = glm::distance(eye, glm::vec3(bpos) + glm::vec3(0.5f));
+                    if (d < best_dist) {
+                        best_dist = d;
+                        best_hit.hit = true;
+                        best_hit.block_pos = bpos;
+                        best_hit.chunk_pos = ChunkPos{bpos.x >> 5, bpos.y >> 5, bpos.z >> 5};
+                        best_hit.local_x = bpos.x & 31;
+                        best_hit.local_y = bpos.y & 31;
+                        best_hit.local_z = bpos.z & 31;
+                        best_hit.normal = glm::ivec3(0, 1, 0);
+                        best_hit.voxel = v;
+                        best_hit.distance = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+    if (best_hit.hit) return best_hit;
+
     return world.raycast(eye, m_front, max_dist);
 }
 
@@ -92,9 +205,9 @@ void PlayerController::handle_input(const Window& window, float dt) {
     bool x_down = window.is_key_down(GLFW_KEY_X);
     if (x_down && !x_down_last) {
         if (m_active_tool == ToolSlot::CombatWeapon) {
-            m_active_tool = ToolSlot::MiningDrill;
+            set_active_tool(ToolSlot::MiningDrill);
         } else {
-            m_active_tool = ToolSlot::CombatWeapon;
+            set_active_tool(ToolSlot::CombatWeapon);
         }
     }
     x_down_last = x_down;
@@ -283,7 +396,11 @@ void PlayerController::handle_input(const Window& window, float dt) {
     bool lmb = can_primary_action && raw_lmb;
     bool rmb = !m_combat_inputs_paused && window.is_mouse_button_down(GLFW_MOUSE_BUTTON_RIGHT);
 
-    if (m_active_tool == ToolSlot::MiningDrill) {
+    if (m_is_suffocating && raw_lmb) {
+        // Trapped inside solid rock during cave-in: pressing LMB automatically equips and operates mining drill
+        set_active_tool(ToolSlot::MiningDrill);
+        m_current_buttons |= BTN_MINE_DRILL;
+    } else if (m_active_tool == ToolSlot::MiningDrill) {
         m_is_aiming = false;
         if (lmb) m_current_buttons |= BTN_MINE_DRILL;
         if (rmb) m_current_buttons |= BTN_PLACE_BLOCK;
@@ -444,6 +561,9 @@ void PlayerController::update_physics(float dt, World& world) {
     if (m_fire_cooldown > 0.0f) {
         m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
     }
+    if (m_ammo_display_timer > 0.0f) {
+        m_ammo_display_timer = std::max(0.0f, m_ammo_display_timer - dt);
+    }
     m_melee_shove_cooldown = std::max(0.0f, m_melee_shove_cooldown - dt);
     m_melee_shove_timer = std::max(0.0f, m_melee_shove_timer - dt);
     if (m_active_tool != ToolSlot::CombatWeapon || m_weapon_ammo >= m_weapon_stats.max_ammo) {
@@ -453,6 +573,7 @@ void PlayerController::update_physics(float dt, World& world) {
         if (m_reload_timer <= 0.0f) {
             m_reload_timer = 0.0f;
             m_weapon_ammo = m_weapon_stats.max_ammo;
+            trigger_ammo_display();
         }
     }
 
@@ -797,6 +918,71 @@ void PlayerController::update_physics(float dt, World& world) {
         }
     }
 
+    // 3c. Cave-In Entombment & Suffocation in Solid Voxels (Buried alive / collapsed roof)
+    auto is_point_in_solid_voxel = [&](const glm::vec3& pt) -> bool {
+        if (pt.y < 0.0f) return false;
+        glm::ivec3 b = glm::floor(pt);
+        Voxel v = world.get_voxel(b.x, b.y, b.z);
+        if (!v.is_solid()) return false;
+        if (v.is_ramp()) {
+            float ramp_y = calculate_ramp_surface_y(v.shape(), b.x, b.y, b.z, pt.x, pt.z);
+            return pt.y < ramp_y - 0.02f;
+        }
+        if (v.shape() == SHAPE_SLAB_BOTTOM) {
+            return pt.y < static_cast<float>(b.y) + 0.48f;
+        }
+        if (v.shape() == SHAPE_SLAB_TOP) {
+            return pt.y >= static_cast<float>(b.y) + 0.50f;
+        }
+        return true;
+    };
+
+    glm::vec3 cur_eye = eye_position();
+    glm::vec3 head_pt = m_position + glm::vec3(0.0f, half_extents().y - 0.05f, 0.0f);
+    glm::vec3 chest_pt = m_position + glm::vec3(0.0f, 0.20f, 0.0f);
+    glm::vec3 torso_pt = m_position;
+    bool solid_head = is_point_in_solid_voxel(cur_eye) || is_point_in_solid_voxel(head_pt) ||
+                      is_point_in_solid_voxel(chest_pt) || is_point_in_solid_voxel(torso_pt);
+
+    if (solid_head) {
+        bool was_suffocating = m_is_suffocating;
+        m_is_suffocating = true;
+        m_suffocation_duration += dt;
+
+        // Rapid health decrease: 28 HP/s
+        float suffocation_dmg = 28.0f * dt;
+        take_damage(suffocation_dmg, DamageSource::Suffocation);
+
+        // Movement pinned while trapped in solid rock
+        m_velocity = glm::vec3(0.0f);
+
+        // Coughing spasms & choking: immediate on first frame of suffocation, then every 1.25s
+        m_suffocation_cough_timer += dt;
+        if (!was_suffocating || m_suffocation_cough_timer >= 1.25f) {
+            m_suffocation_cough_timer = 0.0f;
+            if (m_on_suffocation_cough) {
+                m_on_suffocation_cough();
+            }
+        }
+
+        static float s_suffocate_warn = 0.0f;
+        s_suffocate_warn += dt;
+        if (s_suffocate_warn >= 1.0f) {
+            s_suffocate_warn = 0.0f;
+            if (m_on_warning) {
+                if (m_health <= 0.0f) {
+                    m_on_warning("VITAL SIGNS LOST: DELVER ASPHYXIATED IN CAVE-IN COLLAPSE");
+                } else {
+                    m_on_warning("CRITICAL: BURIED ALIVE // MINE SURROUNDING ROCK (-28 HP/s)");
+                }
+            }
+        }
+    } else {
+        m_is_suffocating = false;
+        m_suffocation_duration = 0.0f;
+        m_suffocation_cough_timer = 1.0f;
+    }
+
     if (m_position.y <= 1.8f && !m_on_ground) {
         float foot_y = m_position.y - half_extents().y;
         int check_bx = static_cast<int>(std::floor(m_position.x));
@@ -962,20 +1148,6 @@ void PlayerController::PlaceBulkhead(World& world, const glm::ivec3& place_pos) 
     place_bulkhead(world, place_pos);
 }
 
-static inline float calculate_ramp_surface_y(VoxelShape shape, int bx, int by, int bz, float px, float pz) {
-    float u = glm::clamp(px - static_cast<float>(bx), 0.0f, 1.0f);
-    float w = glm::clamp(pz - static_cast<float>(bz), 0.0f, 1.0f);
-    float local_h = 0.0f;
-    switch (shape) {
-        case SHAPE_RAMP_POS_X: local_h = u; break;          // Slope rising toward +X
-        case SHAPE_RAMP_NEG_X: local_h = 1.0f - u; break;   // Slope rising toward -X
-        case SHAPE_RAMP_POS_Z: local_h = w; break;          // Slope rising toward +Z
-        case SHAPE_RAMP_NEG_Z: local_h = 1.0f - w; break;   // Slope rising toward -Z
-        default: local_h = 1.0f; break;
-    }
-    return static_cast<float>(by) + local_h;
-}
-
 static inline glm::vec3 get_ramp_normal(VoxelShape shape) {
     constexpr float INV_SQRT2 = 0.7071067811865475f;
     switch (shape) {
@@ -1067,6 +1239,9 @@ void PlayerController::UpdatePhysics(float dt) {
         if (m_fire_cooldown > 0.0f) {
             m_fire_cooldown = std::max(0.0f, m_fire_cooldown - dt);
         }
+        if (m_ammo_display_timer > 0.0f) {
+            m_ammo_display_timer = std::max(0.0f, m_ammo_display_timer - dt);
+        }
         m_melee_shove_cooldown = std::max(0.0f, m_melee_shove_cooldown - dt);
         m_melee_shove_timer = std::max(0.0f, m_melee_shove_timer - dt);
         if (m_active_tool != ToolSlot::CombatWeapon || m_weapon_ammo >= m_weapon_stats.max_ammo) {
@@ -1075,6 +1250,7 @@ void PlayerController::UpdatePhysics(float dt) {
             m_reload_timer = std::max(0.0f, m_reload_timer - dt);
             if (m_reload_timer == 0.0f) {
                 m_weapon_ammo = m_weapon_stats.max_ammo;
+                trigger_ammo_display();
             }
         }
 
@@ -1273,6 +1449,14 @@ void PlayerController::apply_fall_impact(float impact_speed) {
 }
 
 void PlayerController::depenetrate(const glm::vec3& half_extents, World& world) {
+    if (m_is_suffocating) return;
+
+    glm::ivec3 center_b = glm::floor(m_position);
+    Voxel center_v = world.get_voxel(center_b.x, center_b.y, center_b.z);
+    if (center_v.is_solid() && !center_v.is_ramp()) {
+        return; // Body entombed in fallen block
+    }
+
     glm::vec3 box_min = m_position - half_extents;
     glm::vec3 box_max = m_position + half_extents;
 
@@ -2121,11 +2305,85 @@ void PlayerController::MineBlock(float dt) {
 }
 
 void PlayerController::MineBlock(float dt, World& world) {
-    bool is_mining = (m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill);
+    bool is_mining = ((m_current_buttons & BTN_MINE_DRILL) != 0 && (m_active_tool == ToolSlot::MiningDrill)) ||
+                     (m_is_suffocating && (m_current_buttons & BTN_MINE_DRILL) != 0);
 
     if (is_mining) {
         glm::vec3 eye = eye_position();
-        RaycastHit hit = world.raycast(eye, m_front, 6.5f);
+        glm::vec3 head_top = m_position + glm::vec3(0.0f, half_extents().y - 0.05f, 0.0f);
+
+        auto is_point_in_solid_voxel = [&](const glm::vec3& pt) -> bool {
+            glm::ivec3 b = glm::floor(pt);
+            Voxel v = world.get_voxel(b.x, b.y, b.z);
+            if (!v.is_solid() || v.material_id == MAT_DREDGE_BEDROCK || v.is_anchored()) return false;
+            if (v.is_ramp()) {
+                float ramp_y = calculate_ramp_surface_y(v.shape(), b.x, b.y, b.z, pt.x, pt.z);
+                return pt.y < ramp_y - 0.02f;
+            }
+            if (v.shape() == SHAPE_SLAB_BOTTOM) {
+                return pt.y < static_cast<float>(b.y) + 0.48f;
+            }
+            if (v.shape() == SHAPE_SLAB_TOP) {
+                return pt.y >= static_cast<float>(b.y) + 0.50f;
+            }
+            return true;
+        };
+
+        // Check if any solid block is inside player (head, torso, feet)
+        glm::ivec3 inside_block(-1);
+        Voxel inside_vox;
+
+        if (is_point_in_solid_voxel(eye)) {
+            inside_block = glm::floor(eye);
+            inside_vox = world.get_voxel(inside_block.x, inside_block.y, inside_block.z);
+        } else if (is_point_in_solid_voxel(head_top)) {
+            inside_block = glm::floor(head_top);
+            inside_vox = world.get_voxel(inside_block.x, inside_block.y, inside_block.z);
+        } else {
+            // Check bounding box for any penetrating solid block (e.g. torso/legs)
+            glm::vec3 box_min = m_position - half_extents();
+            glm::vec3 box_max = m_position + half_extents();
+            int min_x = static_cast<int>(std::floor(box_min.x + 0.002f));
+            int max_x = static_cast<int>(std::floor(box_max.x - 0.002f));
+            int min_y = static_cast<int>(std::floor(box_min.y + 0.15f));
+            int max_y = static_cast<int>(std::floor(box_max.y - 0.002f));
+            int min_z = static_cast<int>(std::floor(box_min.z + 0.002f));
+            int max_z = static_cast<int>(std::floor(box_max.z - 0.002f));
+
+            float best_dist = 1e9f;
+            for (int y = max_y; y >= min_y; --y) {
+                for (int x = min_x; x <= max_x; ++x) {
+                    for (int z = min_z; z <= max_z; ++z) {
+                        glm::ivec3 bpos(x, y, z);
+                        Voxel v = world.get_voxel(x, y, z);
+                        if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && !v.is_anchored()) {
+                            float d = glm::distance(eye, glm::vec3(bpos) + glm::vec3(0.5f));
+                            if (d < best_dist) {
+                                best_dist = d;
+                                inside_block = bpos;
+                                inside_vox = v;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        RaycastHit hit;
+        if (inside_block.x != -1) {
+            // Prioritize mining out the block trapped inside of the player
+            hit.hit = true;
+            hit.block_pos = inside_block;
+            hit.voxel = inside_vox;
+            hit.distance = 0.0f;
+            hit.normal = glm::ivec3(0, 1, 0);
+        } else {
+            hit = world.raycast(eye, m_front, 6.5f);
+        }
+
+        if (hit.hit && hit.normal == glm::ivec3(0)) {
+            hit.normal = glm::ivec3(0, 1, 0);
+        }
 
         if (hit.hit && hit.voxel.material_id != MAT_DREDGE_BEDROCK &&
             hit.voxel.material_id != MAT_REINFORCED_VAULT_DOOR &&
@@ -2161,6 +2419,7 @@ void PlayerController::MineBlock(float dt, World& world) {
                 glm::ivec3 break_pos = hit.block_pos;
                 glm::ivec3 break_norm = hit.normal;
                 world.SetBlock(break_pos, MAT_AIR);
+                world.check_wake_fluid_around(break_pos);
                 if (m_on_block_break) {
                     m_on_block_break(break_pos.x, break_pos.y, break_pos.z, break_norm, old_mat, old_flags);
                 }
@@ -2307,6 +2566,8 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
         add_trauma(0.03f);
     } else if (source == DamageSource::CorrosiveAcid) {
         add_trauma(0.06f);
+    } else if (source == DamageSource::Suffocation) {
+        add_trauma(0.03f); // Subtle diaphragmatic cough shudder
     } else if (source == DamageSource::ThermalLava) {
         float trauma_to_add = std::clamp(0.10f + dmg * 0.015f, 0.10f, 0.35f);
         add_trauma(trauma_to_add);
@@ -2392,6 +2653,7 @@ void PlayerController::update_radiation(float target_exposure, float dt, bool in
 void PlayerController::reload_weapon() {
     if (m_reload_timer > 0.0f || m_weapon_ammo >= m_weapon_stats.max_ammo) return;
     m_reload_timer = m_weapon_stats.reload_time;
+    trigger_ammo_display();
     if (m_on_weapon_reload) {
         m_on_weapon_reload(m_char_attr.classType, m_weapon_stats.reload_time);
     }
@@ -2406,12 +2668,14 @@ bool PlayerController::try_fire_weapon(std::vector<PlayerPlasmaBolt>& out_bolts,
 
     if (m_weapon_ammo <= 0) {
         reload_weapon();
+        trigger_ammo_display();
         return false;
     }
 
     m_weapon_ammo--;
     m_fire_cooldown = m_weapon_stats.fire_rate;
     m_recharge_delay = 1.5f;
+    trigger_ammo_display();
 
     // Unified Camera Center Raycast & Viewmodel Convergence Matrix:
     glm::vec3 eye = eye_position();

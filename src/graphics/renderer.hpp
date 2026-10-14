@@ -105,7 +105,8 @@ public:
     size_t stalker_vbo_capacity() const { return m_stalker_vbo_capacity; }
     size_t cable_vbo_capacity() const { return m_cable_vbo_capacity; }
     void end_frame(float delta_time, float radiation_level = 0.0f, float shield_timer = 0.0f,
-                   const glm::vec3& hazard_haze_color = glm::vec3(0.0f), float hazard_haze_factor = -1.0f);
+                   const glm::vec3& hazard_haze_color = glm::vec3(0.0f), float hazard_haze_factor = -1.0f,
+                   float suffocation_darkness = 0.0f);
 
     void trigger_sonar_pulse(const glm::vec3& origin);
     void render_sonar_clusters(const std::vector<SurveyedCluster>& clusters, float alpha);
@@ -268,9 +269,11 @@ private:
     std::vector<float> m_stalker_staging_lines;
 
     // Break particles
+    static constexpr size_t MAX_PARTICLES = 1024;
     unsigned int m_particle_vao{0};
     unsigned int m_particle_vbo{0};
     std::vector<BreakParticle> m_particles;
+    std::vector<float> m_particle_vertex_buffer;
 
     float m_total_time{0.0f};
     float m_dust_timer{0.0f};

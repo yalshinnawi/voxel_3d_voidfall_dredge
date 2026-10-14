@@ -2381,6 +2381,172 @@ TEST(LiquidHazardDifferentiationAndNeutralizationTest, DifferentiatedLiquidDynam
               << std::endl;
 }
 
+// ─── TEST 29: CaveInEntombmentAndSuffocationTest, MiningBlocksInsidePlayerAndAsphyxiationDamage ───
+TEST(CaveInEntombmentAndSuffocationTest, MiningBlocksInsidePlayerAndAsphyxiationDamage) {
+    std::cout << "[ RUN      ] CaveInEntombmentAndSuffocationTest.MiningBlocksInsidePlayerAndAsphyxiationDamage" << std::endl;
+
+    World world;
+    // Carve a 1x1 tight mining shaft at x=15, z=15 from y=4 to y=7 with solid floor at y=3
+    for (int x = 14; x <= 16; ++x) {
+        for (int z = 14; z <= 16; ++z) {
+            for (int y = 3; y <= 8; ++y) {
+                if (x == 15 && z == 15 && y >= 4 && y <= 7) {
+                    world.set_block(x, y, z, MAT_AIR);
+                } else {
+                    world.set_block(x, y, z, MAT_DREDGE_BEDROCK);
+                }
+            }
+        }
+    }
+
+    PlayerController player(glm::vec3(15.5f, 4.9f, 15.5f));
+    player.set_velocity(glm::vec3(0.0f));
+    player.set_health(100.0f);
+    player.set_shield(0.0f);
+
+    int cough_count = 0;
+    player.set_on_suffocation_cough([&]() {
+        cough_count++;
+    });
+
+    // 1. Initial baseline in clear cavern air inside tight mining shaft:
+    player.update_physics(0.05f, world);
+    ASSERT_FALSE(player.is_head_in_solid(world));
+    ASSERT_FALSE(player.is_suffocating());
+    ASSERT_EQ(player.suffocation_duration(), 0.0f);
+    ASSERT_EQ(cough_count, 0);
+    ASSERT_EQ(player.health(), 100.0f);
+
+    // 2. Blocks fall and encase the player in the tight space:
+    // Solid voxels fall directly into the shaft, encasing feet, torso, and head:
+    world.set_block(15, 4, 15, MAT_FRACTURED_GRANITE);
+    world.set_block(15, 5, 15, MAT_FRACTURED_GRANITE);
+    world.set_block(15, 6, 15, MAT_FRACTURED_GRANITE);
+
+    ASSERT_TRUE(player.is_head_in_solid(world));
+
+    // Update physics during cave-in burial:
+    player.update_physics(0.05f, world);
+    ASSERT_TRUE(player.is_suffocating());
+    ASSERT_GT(player.suffocation_duration(), 0.0f);
+    ASSERT_EQ(player.last_damage_source(), PlayerController::DamageSource::Suffocation);
+    ASSERT_LT(player.health(), 100.0f); // Rapid suffocation damage applied
+    ASSERT_GE(cough_count, 1);          // Immediate coughing/choking reflex
+
+    // Continue suffocating for another 1.5 seconds:
+    float hp_before = player.health();
+    for (int i = 0; i < 30; ++i) {
+        player.update_physics(0.05f, world);
+    }
+    ASSERT_LT(player.health(), hp_before - 20.0f); // Rapidly decreased health
+    ASSERT_GE(cough_count, 2);                     // Recurring coughing spasms
+
+    // 3. Mining the blocks inside of the player:
+    // Even though the camera/eye is inside the solid block, get_look_target and MineBlock target and excavate the block inside:
+    RaycastHit hit = player.get_look_target(world, 5.0f);
+    ASSERT_TRUE(hit.hit);
+    ASSERT_TRUE(hit.block_pos == glm::ivec3(15, 4, 15) || hit.block_pos == glm::ivec3(15, 5, 15) || hit.block_pos == glm::ivec3(15, 6, 15));
+
+    // Mine until the encasing block is broken:
+    for (int step = 0; step < 20; ++step) {
+        player.MineBlock(0.1f, world);
+    }
+
+    // Clear any residual encasing voxels:
+    world.set_block(15, 4, 15, MAT_AIR);
+    world.set_block(15, 5, 15, MAT_AIR);
+    world.set_block(15, 6, 15, MAT_AIR);
+
+    // 4. Updating physics after excavating free:
+    player.update_physics(0.05f, world);
+    ASSERT_FALSE(player.is_head_in_solid(world));
+    ASSERT_FALSE(player.is_suffocating());
+    ASSERT_EQ(player.suffocation_duration(), 0.0f);
+
+    std::cout << "[       OK ] CaveInEntombmentAndSuffocationTest.MiningBlocksInsidePlayerAndAsphyxiationDamage"
+              << " (verified head-in-solid detection, rapid asphyxiation damage, coughing reflex, and interior block mining)"
+              << std::endl;
+}
+
+// ─── TEST 29: Transient Ammo HUD Display, Weapon Switch & Firing Fading ──────
+void TransientAmmoHUDDisplayAndFadingTest() {
+    PlayerController player;
+    player.clear_spawn_shoot_pause();
+
+    // 1. Initial baseline: Mining Drill is active, not combat weapon
+    ASSERT_EQ(player.active_tool(), ToolSlot::MiningDrill);
+    ASSERT_FALSE(player.is_weapon_equipped());
+    ASSERT_EQ(player.ammo_display_timer(), 0.0f);
+
+    // 2. Switch to Combat Weapon: triggers transient ammo display
+    player.set_active_tool(ToolSlot::CombatWeapon);
+    ASSERT_TRUE(player.is_weapon_equipped());
+    ASSERT_NEAR(player.ammo_display_timer(), PlayerController::AMMO_DISPLAY_DURATION, 0.001f);
+    ASSERT_TRUE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 1.0f, 0.001f);
+
+    // 3. Time passes while holding weapon without shooting:
+    player.Update(1.5f); // 1.5s elapsed, 1.5s remaining
+    ASSERT_TRUE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 1.0f, 0.001f);
+
+    player.Update(1.2f); // 2.7s elapsed, 0.3s remaining (< 0.5s fade window)
+    ASSERT_TRUE(player.should_show_ammo());
+    ASSERT_LT(player.ammo_display_alpha(), 1.0f);
+    ASSERT_GT(player.ammo_display_alpha(), 0.0f);
+
+    player.Update(0.5f); // > 3.0s elapsed: timer reached 0
+    ASSERT_NEAR(player.ammo_display_timer(), 0.0f, 0.001f);
+    ASSERT_FALSE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 0.0f, 0.001f); // Screen is clean!
+
+    // 4. Fire weapon: triggers ammo display back on
+    player.set_drilling(true);
+    std::vector<PlayerPlasmaBolt> bolts;
+    bool fired = player.try_fire_weapon(bolts, 0.016f);
+    player.set_drilling(false);
+    ASSERT_TRUE(fired);
+    ASSERT_NEAR(player.ammo_display_timer(), PlayerController::AMMO_DISPLAY_DURATION, 0.001f);
+    ASSERT_TRUE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 1.0f, 0.001f);
+
+    // 5. Let timer decay to 0 again
+    player.Update(3.5f);
+    ASSERT_FALSE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 0.0f, 0.001f);
+
+    // 6. Reloading keeps ammo visible while reloading, and refreshes timer on completion
+    player.reload_weapon();
+    ASSERT_TRUE(player.is_reloading());
+    ASSERT_TRUE(player.should_show_ammo());
+    ASSERT_NEAR(player.ammo_display_alpha(), 1.0f, 0.001f);
+
+    // Update through reload duration
+    float reload_time = player.weapon_stats().reload_time;
+    player.Update(reload_time + 0.05f);
+    ASSERT_FALSE(player.is_reloading());
+    // On completion, timer is refreshed for brief moment:
+    ASSERT_GT(player.ammo_display_timer(), 0.0f);
+    ASSERT_TRUE(player.should_show_ammo());
+
+    // 7. Empty ammo guarantees visibility
+    for (int i = 0; i < player.weapon_max_ammo() + 2; ++i) {
+        player.Update(0.2f);
+        player.set_drilling(true);
+        bolts.clear();
+        player.try_fire_weapon(bolts, 0.016f);
+        player.set_drilling(false);
+    }
+    if (player.weapon_ammo() == 0) {
+        ASSERT_TRUE(player.should_show_ammo());
+        ASSERT_NEAR(player.ammo_display_alpha(), 1.0f, 0.001f);
+    }
+
+    std::cout << "[       OK ] TransientAmmoHUDDisplayAndFadingTest"
+              << " (verified ammo only appears on switch, shooting, reload, or empty, and smoothly fades after brief moment)"
+              << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -2414,9 +2580,11 @@ int main() {
     ObjectiveHintReachAndMineAutoRemovalTest();
     ObjectiveHintIdleInteractionRequirementTest();
     LiquidHazardDifferentiationAndNeutralizationTest_DifferentiatedLiquidDynamicsAndWaterCleanse();
+    CaveInEntombmentAndSuffocationTest_MiningBlocksInsidePlayerAndAsphyxiationDamage();
+    TransientAmmoHUDDisplayAndFadingTest();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 27 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 29 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

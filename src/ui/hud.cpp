@@ -891,11 +891,15 @@ void HUD::render_optical_scope_lens(
             float rng_w = FontRenderer::get_rendered_width(rng_str, 0.72f * ui_scale);
             draw_text(rng_str, cx - rng_w * 0.5f, cy - scope_rad * 0.82f, 0.72f * ui_scale, rng_col);
 
-            // Capacitor / Rail Bolts status inside bottom of aperture
-            std::string ammo_str = "BOLTS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-            float a_w = FontRenderer::get_rendered_width(ammo_str, 0.72f * ui_scale);
-            draw_text(ammo_str, cx - a_w * 0.5f, cy + scope_rad * 0.82f, 0.72f * ui_scale,
-                      (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_GREEN));
+            // Capacitor / Rail Bolts status inside bottom of aperture (transient)
+            float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
+            if (scope_ammo_alpha > 0.005f) {
+                std::string ammo_str = "BOLTS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+                float a_w = FontRenderer::get_rendered_width(ammo_str, 0.72f * ui_scale);
+                glm::vec4 bolt_col = (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_GREEN);
+                bolt_col.a *= scope_ammo_alpha;
+                draw_text(ammo_str, cx - a_w * 0.5f, cy + scope_rad * 0.82f, 0.72f * ui_scale, bolt_col);
+            }
         }
     } else if (arch == WeaponArchetype::PlasmaCarbine) {
         // ====================================================================
@@ -944,10 +948,14 @@ void HUD::render_optical_scope_lens(
         float r_w = FontRenderer::get_rendered_width(rng_str, 0.70f * ui_scale);
         draw_text(rng_str, cx - r_w * 0.5f, cy - ring_rad - 20.0f * ui_scale, 0.70f * ui_scale, rng_col);
 
-        std::string ammo_str = "CARBINE: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-        float am_w = FontRenderer::get_rendered_width(ammo_str, 0.70f * ui_scale);
-        draw_text(ammo_str, cx - am_w * 0.5f, cy + ring_rad + 20.0f * ui_scale, 0.70f * ui_scale,
-                  (player.weapon_ammo() <= 3 ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN));
+        float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
+        if (scope_ammo_alpha > 0.005f) {
+            std::string ammo_str = "CARBINE: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+            float am_w = FontRenderer::get_rendered_width(ammo_str, 0.70f * ui_scale);
+            glm::vec4 carb_col = (player.weapon_ammo() <= 3 ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN);
+            carb_col.a *= scope_ammo_alpha;
+            draw_text(ammo_str, cx - am_w * 0.5f, cy + ring_rad + 20.0f * ui_scale, 0.70f * ui_scale, carb_col);
+        }
     } else {
         // ====================================================================
         // 3. DEMOLITIONIST: MAGMA SCATTERGUN - THERMAL BORE & PELLET DISPERSION
@@ -977,10 +985,14 @@ void HUD::render_optical_scope_lens(
         float m_w = FontRenderer::get_rendered_width(mode_str, 0.68f * ui_scale);
         draw_text(mode_str, cx - m_w * 0.5f, cy - spread_rad - 20.0f * ui_scale, 0.68f * ui_scale, Typography::COLOR_AMBER);
 
-        std::string shell_str = "SHELLS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-        float s_w = FontRenderer::get_rendered_width(shell_str, 0.70f * ui_scale);
-        draw_text(shell_str, cx - s_w * 0.5f, cy + spread_rad + 20.0f * ui_scale, 0.70f * ui_scale,
-                  (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_AMBER));
+        float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
+        if (scope_ammo_alpha > 0.005f) {
+            std::string shell_str = "SHELLS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+            float s_w = FontRenderer::get_rendered_width(shell_str, 0.70f * ui_scale);
+            glm::vec4 shell_col = (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_AMBER);
+            shell_col.a *= scope_ammo_alpha;
+            draw_text(shell_str, cx - s_w * 0.5f, cy + spread_rad + 20.0f * ui_scale, 0.70f * ui_scale, shell_col);
+        }
     }
 }
 
@@ -1043,28 +1055,33 @@ void HUD::render_crosshair(
             dot_col.a *= hip_alpha;
             draw_rect(cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, dot_col);
 
-            // Ammo counter pill below crosshair
-            std::string ammo_str;
-            glm::vec4 ammo_col = theme_col;
-            ammo_col.a *= hip_alpha;
+            // Ammo counter pill below crosshair (transient: only appears on switch, shooting, reload or empty)
             bool is_reloading = (m_show_reload || player.is_reloading()) && (player.weapon_ammo() < player.weapon_max_ammo());
-            if (is_reloading) {
-                float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
-                int sec = static_cast<int>(std::ceil(rem_time));
-                ammo_str = "RELOADING: " + std::to_string(sec) + "s";
-                ammo_col = Typography::COLOR_AMBER;
-                ammo_col.a *= hip_alpha;
-            } else {
+            if (!is_reloading && !m_show_reload) {
                 ClearReloadStatus();
-                ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-                if (player.weapon_ammo() <= 2) {
-                    ammo_col = Typography::COLOR_CRIMSON;
-                    ammo_col.a *= hip_alpha;
-                }
             }
-            float t_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
-            draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f * hip_alpha));
-            draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
+            float ammo_alpha = (is_reloading || m_show_reload || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
+            if (ammo_alpha > 0.005f) {
+                std::string ammo_str;
+                glm::vec4 ammo_col = theme_col;
+                ammo_col.a *= (hip_alpha * ammo_alpha);
+                if (is_reloading) {
+                    float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
+                    int sec = static_cast<int>(std::ceil(rem_time));
+                    ammo_str = "RELOADING: " + std::to_string(sec) + "s";
+                    ammo_col = Typography::COLOR_AMBER;
+                    ammo_col.a *= (hip_alpha * ammo_alpha);
+                } else {
+                    ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
+                    if (player.weapon_ammo() <= 2) {
+                        ammo_col = Typography::COLOR_CRIMSON;
+                        ammo_col.a *= (hip_alpha * ammo_alpha);
+                    }
+                }
+                float t_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
+                draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f * hip_alpha * ammo_alpha));
+                draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
+            }
         }
     } else {
         // Clear reload status immediately upon switching to Mining Drill (Slot 1)
@@ -2448,6 +2465,57 @@ void HUD::render(
         draw_rect(mat_box_x, mat_box_y, mat_box_w, mat_box_h, glm::vec4(0.02f, 0.08f, 0.14f, 0.85f * s_alpha));
         draw_pill(mat_box_x, mat_box_y, mat_box_w, mat_box_h, shield_cyan);
         draw_text_centered(matrix_text, mat_box_x, mat_box_y, mat_box_w, mat_box_h, mat_scale, glm::vec4(0.0f, 0.95f, 1.0f, s_alpha));
+    }
+
+    // 10h. SUFFOCATION & BURIAL IN SOLID VOXELS OVERLAY
+    if (player.is_suffocating() || player.is_head_in_solid(world)) {
+        // Complete solid pitch darkness covers the viewport to eliminate X-ray vision through clipped voxels
+        float dark_alpha = 1.0f;
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.005f, 0.003f, 0.003f, dark_alpha));
+
+        // Claustrophobic solid black perimeter borders
+        float b_thick = 52.0f * ui_scale;
+        draw_rect(0.0f, 0.0f, sw, b_thick, glm::vec4(0.002f, 0.001f, 0.001f, 1.0f));
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, glm::vec4(0.002f, 0.001f, 0.001f, 1.0f));
+        draw_rect(0.0f, 0.0f, b_thick, sh, glm::vec4(0.002f, 0.001f, 0.001f, 1.0f));
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, glm::vec4(0.002f, 0.001f, 0.001f, 1.0f));
+
+        // Urgent pulsating alert banner in the darkness
+        float pulse = 0.5f + 0.5f * std::sin(m_total_time * 8.0f);
+        glm::vec4 alert_col = glm::mix(glm::vec4(0.95f, 0.15f, 0.15f, 1.0f), glm::vec4(1.0f, 0.55f, 0.12f, 1.0f), pulse);
+
+        std::string alert_text = "! SUFFOCATING: BURIED ALIVE !";
+        std::string sub_text = "[HOLD LMB] EXCAVATE TO ESCAPE";
+
+        float a_scale = 1.30f * ui_scale;
+        float s_scale = 1.05f * ui_scale;
+        float aw = FontRenderer::get_rendered_width(alert_text, a_scale);
+        float sw_sub = FontRenderer::get_rendered_width(sub_text, s_scale);
+        float box_w = std::max(aw, sw_sub) + 48.0f * ui_scale;
+        float box_h = 58.0f * ui_scale;
+        float box_x = cx - box_w * 0.5f;
+        float box_y = cy - 70.0f * ui_scale;
+
+        draw_rect(box_x, box_y, box_w, box_h, glm::vec4(0.05f, 0.01f, 0.01f, 0.92f));
+        draw_pill(box_x, box_y, box_w, box_h, alert_col);
+        draw_text_centered(alert_text, box_x, box_y + 8.0f * ui_scale, box_w, 20.0f * ui_scale, a_scale, alert_col);
+        draw_text_centered(sub_text, box_x, box_y + 32.0f * ui_scale, box_w, 18.0f * ui_scale, s_scale, glm::vec4(1.0f, 0.85f, 0.35f, 1.0f));
+
+        // If actively drilling, show excavation progress bar
+        if (player.target_block_damage() > 0.0f) {
+            float prog = player.crack_stage();
+            float bar_w = 260.0f * ui_scale;
+            float bar_h = 16.0f * ui_scale;
+            float bar_x = cx - bar_w * 0.5f;
+            float bar_y = box_y + box_h + 16.0f * ui_scale;
+
+            draw_rect(bar_x - 2.0f, bar_y - 2.0f, bar_w + 4.0f, bar_h + 4.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.95f));
+            draw_rect(bar_x, bar_y, bar_w, bar_h, glm::vec4(0.15f, 0.15f, 0.15f, 0.85f));
+            draw_rect(bar_x, bar_y, bar_w * prog, bar_h, glm::vec4(0.95f, 0.60f, 0.15f, 1.0f));
+
+            std::string prog_text = "EXCAVATING... " + std::to_string(static_cast<int>(prog * 100.0f)) + "%";
+            draw_text_centered(prog_text, bar_x, bar_y + 1.0f * ui_scale, bar_w, bar_h, 0.85f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
     }
 
     // 11. MINIMAL CONTROLS HINT (Bottom Center, Clean & Unobtrusive - auto-fades after 6s)

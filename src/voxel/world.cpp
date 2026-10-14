@@ -1486,21 +1486,38 @@ void World::worker_thread_loop() {
         }
 
         std::shared_ptr<Chunk> chunk;
+        std::array<std::shared_ptr<Chunk>, 27> neighbor_chunks{};
         {
             std::lock_guard<std::mutex> lock(m_world_mutex);
             auto it = m_chunks.find(target_pos);
             if (it != m_chunks.end()) {
                 chunk = it->second;
             }
+            if (chunk) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            int idx = (dx + 1) + (dy + 1) * 3 + (dz + 1) * 9;
+                            ChunkPos npos{target_pos.x + dx, target_pos.y + dy, target_pos.z + dz};
+                            auto nit = m_chunks.find(npos);
+                            if (nit != m_chunks.end()) {
+                                neighbor_chunks[idx] = nit->second;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (!chunk) continue;
 
-        auto get_neighbor = [this](const ChunkPos& npos) -> const Chunk* {
-            std::lock_guard<std::mutex> lock(m_world_mutex);
-            auto it = m_chunks.find(npos);
-            if (it != m_chunks.end()) {
-                return it->second.get();
+        auto get_neighbor = [&target_pos, &neighbor_chunks](const ChunkPos& npos) -> const Chunk* {
+            int dx = npos.x - target_pos.x;
+            int dy = npos.y - target_pos.y;
+            int dz = npos.z - target_pos.z;
+            if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 && dz >= -1 && dz <= 1) {
+                int idx = (dx + 1) + (dy + 1) * 3 + (dz + 1) * 9;
+                return neighbor_chunks[idx].get();
             }
             return nullptr;
         };

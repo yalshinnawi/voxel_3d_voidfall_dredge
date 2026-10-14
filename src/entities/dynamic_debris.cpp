@@ -338,6 +338,17 @@ DynamicDebris::CollisionResult DynamicDebris::update(
         if (glm::length(m_velocity) < 0.01f) {
             m_velocity = glm::vec3(0.0f);
         }
+        // Rapid revoxelization when debris lands directly onto player or tight space
+        glm::vec3 p_diff = glm::abs(m_position - player_pos);
+        bool near_player = (p_diff.x < 1.0f && p_diff.y < 1.8f && p_diff.z < 1.0f);
+        if (near_player && glm::length(m_velocity) < 0.25f) {
+            m_low_velocity_timer += dt * 8.0f;
+            if (m_low_velocity_timer >= 0.15f) {
+                re_voxelize_blocks(world, res);
+                m_destroyed = true;
+                return res;
+            }
+        }
     }
 
     m_life_time += dt;

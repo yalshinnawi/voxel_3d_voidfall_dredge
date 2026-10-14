@@ -180,16 +180,16 @@ void OrbitalHubUI::draw_panel_with_border(float x, float y, float w, float h, co
 
 bool OrbitalHubUI::render_main_menu(int& selected_level, const PlayerInventory& inventory, float mouse_x, float mouse_y, bool mouse_clicked, bool mouse_down, float scroll_delta) {
     bool has_save = false;
-    for (int s = 1; s <= 3; ++s) {
+    for (int s = 1; s < PlayerInventory::MAX_SECTOR_RECORDS; ++s) {
         s_fallback_profile.sector_records[s] = inventory.sector_records[s];
-        if (inventory.sector_records[s].highest_completion_rate > 0) has_save = true;
+        if (inventory.sector_records[s].highest_completion_rate > 0 || inventory.sector_records[s].completed) has_save = true;
     }
     MainMenuAction action = render_main_menu(selected_level, s_fallback_profile, has_save, mouse_x, mouse_y, mouse_clicked, mouse_down, scroll_delta);
     return (action == MainMenuAction::Continue || action == MainMenuAction::NewExpedition);
 }
 
 bool OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, bool mouse_down, float scroll_delta) {
-    bool has_save = (profile.total_exp > 0 || profile.sector_records[1].highest_completion_rate > 0 || profile.sector_records[2].highest_completion_rate > 0 || profile.sector_records[3].highest_completion_rate > 0);
+    bool has_save = profile.has_save_data();
     MainMenuAction action = render_main_menu(selected_level, profile, has_save, mouse_x, mouse_y, mouse_clicked, mouse_down, scroll_delta);
     return (action == MainMenuAction::Continue || action == MainMenuAction::NewExpedition);
 }
@@ -331,8 +331,13 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
 
     bool reset_allowed = (has_save || m_test_mode || m_confirming_clear_save);
 
+    int continue_sector = profile.get_highest_unlocked_sector();
+    if (m_subview == MenuSubView::Main && has_save) {
+        selected_level = continue_sector;
+    }
+
     std::vector<MenuItem> items = {
-        { MainMenuAction::Continue,        "[ CONTINUE ]",             has_save, "Resume operations in Sector " + std::to_string(selected_level) },
+        { MainMenuAction::Continue,        "[ CONTINUE EXPEDITION ]",  has_save, "Resume operations in Sector " + std::to_string(continue_sector) },
         { MainMenuAction::NewExpedition,   "[ NEW EXPEDITION ]",        true,     "Choose sector & deploy immediately" },
         { MainMenuAction::UpgradeTerminal, "[ UPGRADES / DELVERS ]",    true,     "Delver roster & drill modifications" },
         { MainMenuAction::Settings,        "[ AUDIO & RIG SETTINGS ]",  true,     "Acoustic comfort, sound mixer & controls" },
@@ -370,6 +375,9 @@ MainMenuAction OrbitalHubUI::render_main_menu(int& selected_level, UserProfile& 
                     m_confirm_clear_timer = 0.0f;
                     action = MainMenuAction::ResetSave;
                 }
+            } else if (item.act == MainMenuAction::Continue) {
+                selected_level = continue_sector;
+                action = MainMenuAction::Continue;
             } else {
                 action = item.act;
             }

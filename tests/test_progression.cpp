@@ -367,6 +367,7 @@ int main() {
         CHECK(p.is_sector_unlocked(1), "Sector 1 must be unlocked");
         CHECK(!p.is_sector_unlocked(2), "Sector 2 must be locked at Level 1");
         CHECK(!p.is_sector_unlocked(3), "Sector 3 must be locked at Level 1");
+        CHECK(p.get_highest_unlocked_sector() == 1, "Initial highest unlocked sector must be 1");
 
         // Advance to Level 2
         int lvls = 0, bonus = 0;
@@ -374,12 +375,14 @@ int main() {
         CHECK(p.get_player_level() == 2, "Must reach Level 2");
         CHECK(p.is_sector_unlocked(2), "Sector 2 must unlock at Level 2");
         CHECK(!p.is_sector_unlocked(3), "Sector 3 must remain locked at Level 2");
+        CHECK(p.get_highest_unlocked_sector() == 2, "Highest unlocked sector must be 2 at Level 2");
 
         // Advance to Level 4 (Sector 3 requirement)
         p.add_exp(1200, lvls, bonus);
         CHECK(p.get_player_level() >= 4, "Must reach Level 4");
         CHECK(p.is_sector_unlocked(3), "Sector 3 (Uncharted Territory) must be unlocked at Level 4");
         CHECK(!p.is_sector_unlocked(4), "Sector 4 must remain locked before Sector 3 clear");
+        CHECK(p.get_highest_unlocked_sector() == 3, "Highest unlocked sector must be 3 when Sector 3 unlocked and Sector 4 locked");
 
         // Clear Sector 3 with 100% completion
         p.sector_records[3].highest_completion_rate = 100;
@@ -390,6 +393,7 @@ int main() {
         p.add_exp(2500, lvls, bonus);
         CHECK(p.get_player_level() >= 6, "Must reach Level 6");
         CHECK(p.is_sector_unlocked(4), "Sector 4 must unlock once Sector 3 is cleared and Level 6 reached");
+        CHECK(p.get_highest_unlocked_sector() == 4, "Highest unlocked sector must be 4 when Sector 4 unlocked");
 
         // Test persistence of highest_cleared_sector & sector records
         const std::string test_save_path = "saves/test_sector_save.json";
@@ -403,6 +407,7 @@ int main() {
         CHECK(loaded_p.sector_records[3].highest_completion_rate == 100, "Sector 3 record must persist 100%");
         CHECK(loaded_p.sector_records[3].best_badge == "CLEARED (100%)", "Sector 3 badge must persist");
         CHECK(loaded_p.is_sector_unlocked(4), "Sector 4 must remain unlocked in loaded profile");
+        CHECK(loaded_p.get_highest_unlocked_sector() == 4, "Loaded profile highest unlocked sector must remain 4");
 
         std::filesystem::remove(test_save_path);
         std::cout << " -> Uncharted territory unlock, level gating, clear prereqs & save persistence verified." << std::endl;
