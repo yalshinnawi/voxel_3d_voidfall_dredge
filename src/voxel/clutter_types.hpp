@@ -11,7 +11,8 @@ enum class ClutterType : uint8_t {
     VoiditeCrystal = 2,          // Objective mineral cluster (vibrant violet amethyst spires)
     PrismaticCrystal = 3,        // Decorative diamond/calcite cluster (radiant cyan ice shards)
     BioluminescentSporePod = 4,  // Subterranean bioluminescent mushroom cluster & spore nodes
-    Count = 5
+    WallIndustrialLamp = 5,      // Wall-mounted industrial bulkhead worklight / hazard lantern
+    Count = 6
 };
 
 struct ClutterInstance {

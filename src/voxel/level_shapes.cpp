@@ -1884,41 +1884,40 @@ void LevelGenerator::generate_layout() {
         int dark_roll = static_cast<int>(dark_hash % 100);
 
         if (m_sector_index <= 1) {
-          // Sector 1 (Perimeter Drift): Mostly operational lighting
-          // ~10% chance for an unpowered deep corner pocket
-          if (dark_roll < 10) {
+          // Sector 1 (Perimeter Drift): Mostly operational lighting (~14% unpowered corner pockets)
+          if (dark_roll < 14) {
             room.is_dark_zone = true;
-            room.darkness_factor = 0.65f;
+            room.darkness_factor = 0.80f;
           } else {
             room.is_dark_zone = false;
             room.darkness_factor = 0.0f;
           }
         } else if (m_sector_index == 2) {
-          // Sector 2 (Volatile Fault): Moderate infrastructure degradation (~25-38% dark zones)
+          // Sector 2 (Volatile Fault): Moderate infrastructure degradation (~30-45% dark zones)
           bool is_hazard_room = is_harsh_hazard_room(room.type) ||
                                 room.type == RoomShapeType::FaultLineCrevasse ||
                                 room.type == RoomShapeType::CrumblingArchCanyon ||
                                 room.type == RoomShapeType::SpikeTrenchArena;
-          int threshold = is_hazard_room ? 38 : 25;
+          int threshold = is_hazard_room ? 45 : 30;
           if (dark_roll < threshold) {
             room.is_dark_zone = true;
-            room.darkness_factor = 0.75f + 0.10f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+            room.darkness_factor = 0.85f + 0.10f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
           } else {
             room.is_dark_zone = false;
             room.darkness_factor = 0.0f;
           }
         } else {
-          // Sector 3+ (Void Cradle & deep late sectors): Balanced abyssal pockets (~40-55% dark zones)
+          // Sector 3+ (Void Cradle & deep late sectors): Deep abyssal blackouts (~45-65% dark zones)
           bool is_abyss_or_hazard = room.type == RoomShapeType::AbyssalVerticalChasm ||
                                     room.type == RoomShapeType::ColossalAbyssalChasm ||
                                     room.type == RoomShapeType::TectonicAbyssalSinkhole ||
                                     room.type == RoomShapeType::VoidSingularityRift ||
                                     room.type == RoomShapeType::AncientTitanNecropolis ||
                                     is_harsh_hazard_room(room.type);
-          int threshold = is_abyss_or_hazard ? 55 : 40;
+          int threshold = is_abyss_or_hazard ? 65 : 45;
           if (dark_roll < threshold) {
             room.is_dark_zone = true;
-            room.darkness_factor = 0.78f + 0.12f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+            room.darkness_factor = 0.90f + 0.08f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
           } else {
             room.is_dark_zone = false;
             room.darkness_factor = 0.0f;
@@ -2536,16 +2535,16 @@ void LevelGenerator::generate_luminaries() {
     }
 
     case RoomShapeType::MiningPillarHall: {
-      CavernLuminary seam;
-      seam.position = glm::vec3(room.center.x + 4.0f,
-                                static_cast<float>(room.floor_y + 4.0f),
-                                room.center.z + 4.0f);
-      seam.base_color = glm::vec3(0.18f, 0.82f, 0.98f);
-      seam.base_radius = 18.0f;
-      seam.base_intensity = 2.2f;
-      seam.type = LuminaryType::BioluminescentLedge;
-      seam.name = "Phosphorescent Crystal Seam";
-      m_luminaries.push_back(seam);
+      CavernLuminary worklight;
+      worklight.position = glm::vec3(room.center.x + 4.0f,
+                                     static_cast<float>(room.floor_y + 4.0f),
+                                     room.center.z + 4.0f);
+      worklight.base_color = glm::vec3(0.98f, 0.74f, 0.32f); // Industrial halogen amber
+      worklight.base_radius = 18.0f;
+      worklight.base_intensity = 2.2f;
+      worklight.type = LuminaryType::WallIndustrialSconce;
+      worklight.name = "Pillar Industrial Worklight";
+      m_luminaries.push_back(worklight);
       break;
     }
 
@@ -2554,11 +2553,11 @@ void LevelGenerator::generate_luminaries() {
       quarry.position = glm::vec3(room.center.x - 3.0f,
                                   static_cast<float>(room.floor_y + 3.0f),
                                   room.center.z + 3.0f);
-      quarry.base_color = glm::vec3(0.95f, 0.85f, 0.40f);
+      quarry.base_color = glm::vec3(0.96f, 0.78f, 0.35f); // Sodium quarry floodlight
       quarry.base_radius = 16.0f;
-      quarry.base_intensity = 1.8f;
-      quarry.type = LuminaryType::BioluminescentLedge;
-      quarry.name = "Excavation Pit Glint";
+      quarry.base_intensity = 2.0f;
+      quarry.type = LuminaryType::WallIndustrialSconce;
+      quarry.name = "Quarry Stanchion Worklight";
       m_luminaries.push_back(quarry);
       break;
     }
@@ -3160,24 +3159,52 @@ void LevelGenerator::generate_luminaries() {
       blk_light.pulse_depth = 0.18f;
       blk_light.name = "Bulkhead Clearance Light";
       m_luminaries.push_back(blk_light);
-    } else if (ci % 2 == 1) {
-      // Natural bioluminescent fungal spore cluster in connecting corridors
-      // to keep tunnels visible and readable while preserving ambient darkness
-      CavernLuminary spore_light;
-      spore_light.position =
-          glm::vec3(mid.x, static_cast<float>(c.floor_y + 1.2f), mid.z);
-      if ((ci + m_seed) % 2 == 0) {
-        spore_light.base_color = glm::vec3(0.18f, 0.85f, 0.62f); // Bioluminescent fungal teal
-      } else {
-        spore_light.base_color = glm::vec3(0.30f, 0.68f, 0.95f); // Phosphorescent spore cyan
+    } else {
+      // Connecting tunnels: Corridors are primarily dark and unlit (~75%) to maintain tension
+      // and provide natural dark zones between cavern chambers.
+      // The remaining ~25% feature diversified fixtures: wall-mounted sconces, crevice crystal glints,
+      // or rare bioluminescent spore nodes (instead of repetitive mushroom lights).
+      uint32_t corridor_hash = static_cast<uint32_t>((ci * 7919 + m_seed * 104729) ^ 0x5bd1e995);
+      uint32_t roll = corridor_hash % 100;
+      if (roll >= 75) {
+        CavernLuminary tunnel_light;
+        if (roll < 85) {
+          // Wall-mounted industrial sconce / contractor survey lamp
+          tunnel_light.position = glm::vec3(mid.x, static_cast<float>(c.floor_y + 2.2f), mid.z);
+          tunnel_light.base_color = glm::vec3(0.98f, 0.70f, 0.25f); // Warm halogen tungsten amber
+          tunnel_light.base_radius = 8.5f;
+          tunnel_light.base_intensity = 1.25f;
+          tunnel_light.type = LuminaryType::WallIndustrialSconce;
+          tunnel_light.pulse_speed = 0.5f;
+          tunnel_light.pulse_depth = 0.08f;
+          tunnel_light.name = "Corridor Wall Sconce";
+          m_luminaries.push_back(tunnel_light);
+        } else if (roll < 94) {
+          // Subterranean crystal crevice glint (amethyst/cyan mineral radiance)
+          tunnel_light.position = glm::vec3(mid.x, static_cast<float>(c.floor_y + 1.5f), mid.z);
+          tunnel_light.base_color = ((corridor_hash >> 4) % 2 == 0)
+              ? glm::vec3(0.35f, 0.72f, 0.98f) // Deep cyan prism
+              : glm::vec3(0.78f, 0.35f, 0.95f); // Resonant amethyst
+          tunnel_light.base_radius = 7.5f;
+          tunnel_light.base_intensity = 1.15f;
+          tunnel_light.type = LuminaryType::PrismaticCrystalRadiance;
+          tunnel_light.pulse_speed = 1.2f;
+          tunnel_light.pulse_depth = 0.15f;
+          tunnel_light.name = "Crevice Crystal Glint";
+          m_luminaries.push_back(tunnel_light);
+        } else {
+          // Rare bioluminescent spore node (only 6% of corridors)
+          tunnel_light.position = glm::vec3(mid.x, static_cast<float>(c.floor_y + 1.2f), mid.z);
+          tunnel_light.base_color = glm::vec3(0.18f, 0.85f, 0.62f); // Bioluminescent fungal teal
+          tunnel_light.base_radius = 8.0f;
+          tunnel_light.base_intensity = 1.05f;
+          tunnel_light.type = LuminaryType::FungoidSporeGlow;
+          tunnel_light.pulse_speed = 1.6f;
+          tunnel_light.pulse_depth = 0.22f;
+          tunnel_light.name = "Corridor Spore Luminary";
+          m_luminaries.push_back(tunnel_light);
+        }
       }
-      spore_light.base_radius = 12.0f;
-      spore_light.base_intensity = 1.35f;
-      spore_light.type = LuminaryType::FungoidSporeGlow;
-      spore_light.pulse_speed = 1.6f;
-      spore_light.pulse_depth = 0.22f;
-      spore_light.name = "Corridor Spore Luminary";
-      m_luminaries.push_back(spore_light);
     }
   }
 
@@ -3265,6 +3292,110 @@ void LevelGenerator::generate_luminaries() {
       m_luminaries.push_back(pool_lum);
     }
   }
+
+  // =========================================================================
+  // Spatial Lighting Density & Area Balancing Pass
+  // =========================================================================
+  // 1. Minimum distance / anti-clustering filter: Prevent unnatural luminary clumping
+  //    within 8.5m of each other (prioritize critical beacons and fluid sources).
+  // 2. Fluid luminary focal precedence: In rooms containing glowing fluids (lava,
+  //    acid, coolant, aquifer water), suppress secondary point lights within 12m
+  //    so the fluid pool serves as the dramatic primary illumination.
+  // 3. Dark zone preservation: Ensure rooms flagged is_dark_zone contain no
+  //    non-hazard luminaries, guaranteeing genuine tension-filled dark regions.
+  // 4. Starvation prevention: Ensure non-dark rooms have at least one illumination
+  //    source so areas without fluids or landmarks are not accidentally pitch-black.
+  std::vector<CavernLuminary> balanced_luminaries;
+  balanced_luminaries.reserve(m_luminaries.size());
+
+  // First pass: add all essential structural & fluid luminaries
+  for (const auto &lum : m_luminaries) {
+    bool is_priority = (lum.type == LuminaryType::ThermalMagmaVent ||
+                        lum.type == LuminaryType::AquiferOasisGlow ||
+                        lum.type == LuminaryType::ToxicMiasmaGreen ||
+                        lum.type == LuminaryType::CorridorBulkheadLight ||
+                        lum.type == LuminaryType::IndustrialVaultBeacon ||
+                        lum.type == LuminaryType::GrandVaultRadiance);
+
+    // If inside a dark zone, strictly filter out non-essential luminaries
+    if (is_dark_zone_at(lum.position)) {
+      if (lum.type != LuminaryType::ThermalMagmaVent &&
+          lum.type != LuminaryType::GrandVaultRadiance &&
+          lum.type != LuminaryType::IndustrialVaultBeacon) {
+        continue; // Maintain authentic darkness in designated dark zones
+      }
+    }
+
+    if (is_priority) {
+      balanced_luminaries.push_back(lum);
+    }
+  }
+
+  // Second pass: add decorative & ambient lights with anti-clustering checks
+  for (const auto &lum : m_luminaries) {
+    bool is_priority = (lum.type == LuminaryType::ThermalMagmaVent ||
+                        lum.type == LuminaryType::AquiferOasisGlow ||
+                        lum.type == LuminaryType::ToxicMiasmaGreen ||
+                        lum.type == LuminaryType::CorridorBulkheadLight ||
+                        lum.type == LuminaryType::IndustrialVaultBeacon ||
+                        lum.type == LuminaryType::GrandVaultRadiance);
+    if (is_priority) continue; // Already processed
+
+    if (is_dark_zone_at(lum.position)) {
+      continue; // Dark zone preservation
+    }
+
+    // Check distance against already approved luminaries
+    bool too_close = false;
+    for (const auto &accepted : balanced_luminaries) {
+      float d = glm::distance(lum.position, accepted.position);
+      // Extra clearance near fluid pools so the radiant liquid is the focal feature
+      float min_dist = (accepted.type == LuminaryType::ThermalMagmaVent ||
+                        accepted.type == LuminaryType::AquiferOasisGlow ||
+                        accepted.type == LuminaryType::ToxicMiasmaGreen) ? 12.0f : 8.5f;
+      if (d < min_dist) {
+        too_close = true;
+        break;
+      }
+    }
+
+    if (!too_close) {
+      balanced_luminaries.push_back(lum);
+    }
+  }
+
+  // Third pass: non-dark room starvation check
+  // If an unflagged room ended up with 0 luminaries, add a single balanced sconce
+  for (const auto &room : m_rooms) {
+    if (room.is_dark_zone) continue; // Intentionally dark
+
+    bool has_light = false;
+    for (const auto &lum : balanced_luminaries) {
+      if (lum.position.x >= room.min_x() - 2.0f && lum.position.x <= room.max_x() + 2.0f &&
+          lum.position.z >= room.min_z() - 2.0f && lum.position.z <= room.max_z() + 2.0f) {
+        has_light = true;
+        break;
+      }
+    }
+
+    if (!has_light) {
+      CavernLuminary fill_light;
+      fill_light.position = glm::vec3(
+          static_cast<float>(room.center.x),
+          static_cast<float>(room.floor_y + 2.4f),
+          static_cast<float>(room.center.z));
+      fill_light.base_color = glm::vec3(0.98f, 0.72f, 0.28f); // Warm halogen sconce
+      fill_light.base_radius = 12.0f;
+      fill_light.base_intensity = 1.35f;
+      fill_light.type = LuminaryType::WallIndustrialSconce;
+      fill_light.pulse_speed = 0.5f;
+      fill_light.pulse_depth = 0.08f;
+      fill_light.name = "Chamber Wall Worklight";
+      balanced_luminaries.push_back(fill_light);
+    }
+  }
+
+  m_luminaries = std::move(balanced_luminaries);
 }
 
 static inline bool sample_ravine_corridor(int x, int y, int z, float t,

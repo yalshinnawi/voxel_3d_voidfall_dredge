@@ -21,7 +21,7 @@ Voxel GreedyMesher::sample_voxel(
     }
 
     if (!get_neighbor) {
-        return Voxel{MAT_FRACTURED_GRANITE, 0};
+        return Voxel{MAT_GRANITE, 0};
     }
 
     ChunkPos pos = chunk.get_pos();
@@ -59,7 +59,7 @@ Voxel GreedyMesher::sample_voxel(
     }
 
     // Treat unloaded neighbor boundaries as solid granite (SHAPE_CUBE) to prevent void leaks and seam culling
-    return Voxel{MAT_FRACTURED_GRANITE, 0};
+    return Voxel{MAT_GRANITE, 0};
 }
 
 glm::vec3 GreedyMesher::calculate_diagonal_normal(VoxelShape shape) {

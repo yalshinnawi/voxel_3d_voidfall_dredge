@@ -83,6 +83,7 @@ uniform PointLight uPointLights[MAX_POINT_LIGHTS];
 // Sector biomes & animation
 uniform float uTime;
 uniform int uSector;
+uniform float uDarknessFactor;
 
 // Standard Material Tiers
 const uint MAT_AIR                 = 0u;
@@ -202,7 +203,7 @@ void main() {
         geoN = triN;
     }
 
-    vec2 baseUV = fract(vUV);
+    vec2 baseUV = vUV;
     bool isStepCascade = (vIsVerticalFlow > 0.5) || (isLiquid && abs(geoN.y) <= 0.35);
 
     // World-Space UV Mapping & Streaming Flow Motion for Liquids:
@@ -282,7 +283,7 @@ void main() {
 
         float currentLayerDepth = 0.0;
         vec2 currUV = baseUV;
-        float currentHeight = texture(uNormalArray, vec3(fract(currUV), float(vTexLayer))).a;
+        float currentHeight = texture(uNormalArray, vec3(currUV, float(vTexLayer))).a;
         float currentDepthMapValue = 1.0 - currentHeight;
 
         vec2 prevUV = currUV;
@@ -299,7 +300,7 @@ void main() {
 
             currUV -= deltaUV;
             currentLayerDepth += stepSize;
-            currentHeight = texture(uNormalArray, vec3(fract(currUV), float(vTexLayer))).a;
+            currentHeight = texture(uNormalArray, vec3(currUV, float(vTexLayer))).a;
             currentDepthMapValue = 1.0 - currentHeight;
         }
 
@@ -314,7 +315,7 @@ void main() {
         quadUV = baseUV;
     }
 
-    vec3 texCoord = vec3(fract(quadUV), float(vTexLayer));
+    vec3 texCoord = vec3(quadUV, float(vTexLayer));
 
     // 1. Sample Texture Arrays or procedural fallback
     vec3 albedo;
@@ -335,7 +336,7 @@ void main() {
         if (isCrystal) {
             // Interior Parallax Mapping: Look *into* the crystal volume!
             // As the camera moves, the deep glowing crystalline core shifts with true 3D depth
-            vec2 interiorUV = fract(quadUV - V_tangent.xy * 0.045);
+            vec2 interiorUV = quadUV - V_tangent.xy * 0.045;
             vec3 interiorTexCoord = vec3(interiorUV, float(vTexLayer));
 
             vec3 surfaceEmissive = texture(uEmissiveArray, texCoord).rgb;
@@ -394,22 +395,46 @@ void main() {
         albedo = mix(albedo, vec3(0.08, 0.07, 0.06), vDamage * 0.7);
     }
 
-    // Zero-Cost Procedural Edge Chamfering:
-    // To eliminate the razor-sharp digital 90° look on cubic faces without adding extra geometry:
+    // Seamless normal mapping: adjacent blocks of the same type mesh together smoothly without artificial block-edge grooves
     vec3 normal = N;
-    vec2 v_TexCoords = fract(vUV);
+    vec3 v_Normal = (isLiquid && abs(geoN.y) > 0.4) ? geoN : vNormal;
+
+    // Procedural Screen-Space Edge Chamfering: soften razor-sharp 90 deg block borders without adding geometry
+    vec2 v_TexCoords = fract(quadUV);
     vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
     float minEdge = min(edgeDist.x, edgeDist.y);
-    vec3 v_Normal = vNormal;
-    if (isLiquid && abs(geoN.y) > 0.4) {
-        v_Normal = geoN;
+    if (minEdge < 0.045 && vTexLayer != MAT_WATER && !isLiquid) {
+        float bevel = smoothstep(0.0, 0.045, minEdge);
+        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.16 + dFdy(v_FragPos) * 0.16);
+        normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
-    // Only bevel solid rock/metal edges; leave liquid surfaces perfectly smooth
-    if (!isLiquid && minEdge < 0.045) {
-        float bevel = smoothstep(0.0, 0.045, minEdge);
-        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.15 + dFdy(v_FragPos) * 0.15);
-        normal = normalize(mix(bevelNormal, normal, bevel));
+    // World-space triplanar mapping with low-frequency 3D strata noise on natural stone (MAT_GRANITE, MAT_BASALT)
+    if (uUseTextureArray == 1 && (vTexLayer == MAT_GRANITE || vTexLayer == MAT_BASALT)) {
+        vec3 blendWeights = pow(abs(v_Normal), vec3(4.0));
+        blendWeights /= (blendWeights.x + blendWeights.y + blendWeights.z + 0.0001);
+
+        float strataNoise = sin(v_FragPos.y * 0.45 + v_FragPos.x * 0.15) * cos(v_FragPos.z * 0.35) * 0.06;
+        vec2 uvX = v_FragPos.zy * 0.25 + strataNoise;
+        vec2 uvY = v_FragPos.xz * 0.25 + strataNoise;
+        vec2 uvZ = v_FragPos.xy * 0.25 + strataNoise;
+
+        float layerF = float(vTexLayer);
+        vec3 colX = texture(uAlbedoArray, vec3(uvX, layerF)).rgb;
+        vec3 colY = texture(uAlbedoArray, vec3(uvY, layerF)).rgb;
+        vec3 colZ = texture(uAlbedoArray, vec3(uvZ, layerF)).rgb;
+        albedo = colX * blendWeights.x + colY * blendWeights.y + colZ * blendWeights.z;
+
+        vec2 rmX = texture(uRoughMetalArray, vec3(uvX, layerF)).rg;
+        vec2 rmY = texture(uRoughMetalArray, vec3(uvY, layerF)).rg;
+        vec2 rmZ = texture(uRoughMetalArray, vec3(uvZ, layerF)).rg;
+        roughMetal = rmX * blendWeights.x + rmY * blendWeights.y + rmZ * blendWeights.z;
+
+        vec3 nX = texture(uNormalArray, vec3(uvX, layerF)).xyz * 2.0 - 1.0;
+        vec3 nY = texture(uNormalArray, vec3(uvY, layerF)).xyz * 2.0 - 1.0;
+        vec3 nZ = texture(uNormalArray, vec3(uvZ, layerF)).xyz * 2.0 - 1.0;
+        vec3 triNormal = normalize(nX * blendWeights.x + nY * blendWeights.y + nZ * blendWeights.z);
+        normal = normalize(mix(normal, normalize(TBN * triNormal), 0.75));
     }
 
     // Distance-Gated Surface Relief & Normal Micro-Detail:
@@ -460,7 +485,7 @@ void main() {
                 emissive = vec3(0.03, 0.20, 0.35);
             }
             alpha = 0.75;
-            roughness = 0.025;
+            roughness = 0.12; // Wet aquifer floor puddles at R = 0.12
             metallic = 0.02;
         } 
         else if (v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG) {
@@ -517,10 +542,17 @@ void main() {
 
     // Clamp roughness so stone and unpolished metal remain matte
     if (matType == MAT_STONE || matType == MAT_BASALT || matType == MAT_GRANITE) {
-        roughness = max(roughness, 0.75); // Natural rock should be diffuse and matte
+        roughness = max(roughness, 0.65); // Natural rock minimum roughness clamped to 0.65 to eliminate plastic sheen
     } else if (matType == MAT_BULKHEAD) {
-        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy, eliminate plastic glare
+        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy
+        metallic = max(metallic, 0.90);  // Titanium bulkheads at M = 0.90
     }
+
+    // Baked 2-Bit Vertex AO & Specular Occlusion factors
+    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    uint aoIndex = clamp(vAOIndex, 0u, 3u);
+    float ao = aoTable[aoIndex];
+    float specAO = ao * ao; // Specular AO to eliminate shiny glare inside dark crevices
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
@@ -541,6 +573,11 @@ void main() {
             float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
 
             if (spotFactor > 0.0) {
+                // Projected optical lens ring pattern
+                float lensAngle = acos(clamp(theta, -1.0, 1.0));
+                float lensRings = 1.0 + 0.08 * sin(lensAngle * 95.0) * smoothstep(0.0, 0.25, lensAngle);
+                spotFactor *= lensRings;
+
                 vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
                 float NdotL = max(dot(N, lightDir), 0.0);
 
@@ -578,8 +615,8 @@ void main() {
                     vec3 kS = F;
                     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                    // Attenuate specular intensity specifically for the suit headlamp
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.40));
+                    // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.40));
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
 
                     // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
@@ -606,8 +643,8 @@ void main() {
                     float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
                     vec3 specularColor = numerator / denominator;
 
-                    // Attenuate specular intensity specifically for the suit headlamp
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.30));
+                    // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.30));
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
                 }
             }
@@ -662,7 +699,7 @@ void main() {
                 vec3 kS = F;
                 vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                vec3 specular = ((NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001)) * specAO;
                 Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 
                 if (isCrystal) {
@@ -695,7 +732,7 @@ void main() {
                 vec3 kS = F;
                 vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                vec3 specular = ((NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001)) * specAO;
                 Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 
                 if (isCrystal) {
@@ -708,20 +745,24 @@ void main() {
         }
     }
 
-    // 4. Dynamic Subterranean Ambient Lighting modulated by Depth & Baked AO
-    float depthFactor = clamp((vWorldPos.y - 2.0) / 22.0, 0.12, 0.85);
+    // 4. Dynamic Subterranean Ambient Lighting modulated by Depth, Normal Curvature & Baked AO
+    float depthFactor = clamp((vWorldPos.y - 1.0) / 24.0, 0.35, 1.0);
 
-    vec3 baseSubterraneanAmbient = vec3(0.012, 0.016, 0.022); // Cold Slate
+    // Hemispherical ambient normal modulation: upward-facing surfaces catch subtle cavern sky/spore diffuse,
+    // side walls catch balanced fill, underhangs receive moody contact occlusion.
+    float hemiFactor = clamp(dot(N, vec3(0.0, 1.0, 0.0)) * 0.35 + 0.65, 0.45, 1.0);
+
+    // Sector-specific subterranean ambient palette (richer atmospheric floor reveals cave architecture)
+    vec3 baseSubterraneanAmbient = vec3(0.042, 0.056, 0.072); // Sector 1: Cold slate with phosphorescent cyan undertone
     if (uSector == 2) {
-        baseSubterraneanAmbient = vec3(0.022, 0.012, 0.007); // Magma Core
+        baseSubterraneanAmbient = vec3(0.065, 0.038, 0.024); // Sector 2: Volcanic magma core warmth
     } else if (uSector >= 3) {
-        baseSubterraneanAmbient = vec3(0.007, 0.020, 0.011); // Toxic Vault
+        baseSubterraneanAmbient = vec3(0.035, 0.062, 0.052); // Sector 3+: Toxic vault phosphorescent viridian / void
     }
 
-    // Unpack Baked Vertex AO
-    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
-    uint aoIndex = clamp(vAOIndex, 0u, 3u);
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * aoTable[aoIndex];
+    // Apply Baked Vertex AO & lower cavern ambient floor to 0.08 in pitch-black dark zones
+    float darknessMult = clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * ao * darknessMult;
 
     vec3 finalColor = ambient + Lo + emissive;
 

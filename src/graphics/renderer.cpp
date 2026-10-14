@@ -801,6 +801,8 @@ void Renderer::spawn_clutter_break_particles(const glm::vec3& clutter_pos, Clutt
         base_color = (tint.a > 0.0f) ? tint : glm::vec4(0.30f, 0.95f, 1.0f, 1.0f);
     } else if (type == ClutterType::BioluminescentSporePod) {
         base_color = (tint.a > 0.0f) ? tint : glm::vec4(0.20f, 0.95f, 0.70f, 1.0f);
+    } else if (type == ClutterType::WallIndustrialLamp) {
+        base_color = (tint.a > 0.0f) ? tint : glm::vec4(1.0f, 0.85f, 0.35f, 1.0f);
     } else if (type == ClutterType::CeilingStalactite || type == ClutterType::FloorStalagmiteRubble) {
         base_color = glm::vec4(0.52f, 0.50f, 0.48f, 1.0f);
     }
@@ -1510,7 +1512,7 @@ void Renderer::update_particles(float dt) {
 }
 
 void Renderer::update_ambient_spores(float dt, const glm::vec3& cam_pos) {
-    constexpr size_t TARGET_SPORES = 56;
+    constexpr size_t TARGET_SPORES = 14;
     size_t active_spores = 0;
     for (const auto& p : m_particles) {
         if (p.max_life > 3.0f) {

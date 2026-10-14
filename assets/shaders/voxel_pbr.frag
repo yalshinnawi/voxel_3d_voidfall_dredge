@@ -399,6 +399,44 @@ void main() {
     vec3 normal = N;
     vec3 v_Normal = (isLiquid && abs(geoN.y) > 0.4) ? geoN : vNormal;
 
+    // Procedural Screen-Space Edge Chamfering: soften razor-sharp 90 deg block borders without adding geometry
+    vec2 v_TexCoords = fract(quadUV);
+    vec2 edgeDist = min(v_TexCoords, 1.0 - v_TexCoords);
+    float minEdge = min(edgeDist.x, edgeDist.y);
+    if (minEdge < 0.045 && vTexLayer != MAT_WATER && !isLiquid) {
+        float bevel = smoothstep(0.0, 0.045, minEdge);
+        vec3 bevelNormal = normalize(v_Normal + dFdx(v_FragPos) * 0.16 + dFdy(v_FragPos) * 0.16);
+        normal = normalize(mix(bevelNormal, normal, bevel));
+    }
+
+    // World-space triplanar mapping with low-frequency 3D strata noise on natural stone (MAT_GRANITE, MAT_BASALT)
+    if (uUseTextureArray == 1 && (vTexLayer == MAT_GRANITE || vTexLayer == MAT_BASALT)) {
+        vec3 blendWeights = pow(abs(v_Normal), vec3(4.0));
+        blendWeights /= (blendWeights.x + blendWeights.y + blendWeights.z + 0.0001);
+
+        float strataNoise = sin(v_FragPos.y * 0.45 + v_FragPos.x * 0.15) * cos(v_FragPos.z * 0.35) * 0.06;
+        vec2 uvX = v_FragPos.zy * 0.25 + strataNoise;
+        vec2 uvY = v_FragPos.xz * 0.25 + strataNoise;
+        vec2 uvZ = v_FragPos.xy * 0.25 + strataNoise;
+
+        float layerF = float(vTexLayer);
+        vec3 colX = texture(uAlbedoArray, vec3(uvX, layerF)).rgb;
+        vec3 colY = texture(uAlbedoArray, vec3(uvY, layerF)).rgb;
+        vec3 colZ = texture(uAlbedoArray, vec3(uvZ, layerF)).rgb;
+        albedo = colX * blendWeights.x + colY * blendWeights.y + colZ * blendWeights.z;
+
+        vec2 rmX = texture(uRoughMetalArray, vec3(uvX, layerF)).rg;
+        vec2 rmY = texture(uRoughMetalArray, vec3(uvY, layerF)).rg;
+        vec2 rmZ = texture(uRoughMetalArray, vec3(uvZ, layerF)).rg;
+        roughMetal = rmX * blendWeights.x + rmY * blendWeights.y + rmZ * blendWeights.z;
+
+        vec3 nX = texture(uNormalArray, vec3(uvX, layerF)).xyz * 2.0 - 1.0;
+        vec3 nY = texture(uNormalArray, vec3(uvY, layerF)).xyz * 2.0 - 1.0;
+        vec3 nZ = texture(uNormalArray, vec3(uvZ, layerF)).xyz * 2.0 - 1.0;
+        vec3 triNormal = normalize(nX * blendWeights.x + nY * blendWeights.y + nZ * blendWeights.z);
+        normal = normalize(mix(normal, normalize(TBN * triNormal), 0.75));
+    }
+
     // Distance-Gated Surface Relief & Normal Micro-Detail:
     // For fragments close to the camera (< 7.0m), apply continuous 3D noise displacement to the surface normal
     if (!isLiquid && length(v_FragPos - uCameraPos) < 7.0) {
@@ -447,7 +485,7 @@ void main() {
                 emissive = vec3(0.03, 0.20, 0.35);
             }
             alpha = 0.75;
-            roughness = 0.025;
+            roughness = 0.12; // Wet aquifer floor puddles at R = 0.12
             metallic = 0.02;
         } 
         else if (v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG) {
@@ -504,10 +542,17 @@ void main() {
 
     // Clamp roughness so stone and unpolished metal remain matte
     if (matType == MAT_STONE || matType == MAT_BASALT || matType == MAT_GRANITE) {
-        roughness = max(roughness, 0.75); // Natural rock should be diffuse and matte
+        roughness = max(roughness, 0.65); // Natural rock minimum roughness clamped to 0.65 to eliminate plastic sheen
     } else if (matType == MAT_BULKHEAD) {
-        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy, eliminate plastic glare
+        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy
+        metallic = max(metallic, 0.90);  // Titanium bulkheads at M = 0.90
     }
+
+    // Baked 2-Bit Vertex AO & Specular Occlusion factors
+    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    uint aoIndex = clamp(vAOIndex, 0u, 3u);
+    float ao = aoTable[aoIndex];
+    float specAO = ao * ao; // Specular AO to eliminate shiny glare inside dark crevices
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
@@ -528,6 +573,11 @@ void main() {
             float spotFactor = smoothstep(uHeadlampOuterCutoff, uHeadlampInnerCutoff, theta);
 
             if (spotFactor > 0.0) {
+                // Projected optical lens ring pattern
+                float lensAngle = acos(clamp(theta, -1.0, 1.0));
+                float lensRings = 1.0 + 0.08 * sin(lensAngle * 95.0) * smoothstep(0.0, 0.25, lensAngle);
+                spotFactor *= lensRings;
+
                 vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
                 float NdotL = max(dot(N, lightDir), 0.0);
 
@@ -565,8 +615,8 @@ void main() {
                     vec3 kS = F;
                     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                    // Attenuate specular intensity specifically for the suit headlamp
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.40));
+                    // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.40));
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
 
                     // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
@@ -593,8 +643,8 @@ void main() {
                     float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
                     vec3 specularColor = numerator / denominator;
 
-                    // Attenuate specular intensity specifically for the suit headlamp
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor, vec3(0.30));
+                    // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.30));
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
                 }
             }
@@ -649,7 +699,7 @@ void main() {
                 vec3 kS = F;
                 vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                vec3 specular = ((NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001)) * specAO;
                 Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 
                 if (isCrystal) {
@@ -682,7 +732,7 @@ void main() {
                 vec3 kS = F;
                 vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-                vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001);
+                vec3 specular = ((NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001)) * specAO;
                 Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 
                 if (isCrystal) {
@@ -710,13 +760,9 @@ void main() {
         baseSubterraneanAmbient = vec3(0.035, 0.062, 0.052); // Sector 3+: Toxic vault phosphorescent viridian / void
     }
 
-    // Unpack Baked Vertex AO & apply area darkness factor.
-    // In dark zones, darkness factor lowers ambient for moody survival tension,
-    // but enforces a healthy 0.35 minimum floor so cave geometry and tunnels remain discernible.
-    const float aoTable[4] = float[](1.0, 0.78, 0.55, 0.35);
-    uint aoIndex = clamp(vAOIndex, 0u, 3u);
-    float darknessMult = clamp(1.0 - uDarknessFactor * 0.65, 0.35, 1.0);
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * aoTable[aoIndex] * darknessMult;
+    // Apply Baked Vertex AO & lower cavern ambient floor to 0.08 in pitch-black dark zones
+    float darknessMult = clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * ao * darknessMult;
 
     vec3 finalColor = ambient + Lo + emissive;
 

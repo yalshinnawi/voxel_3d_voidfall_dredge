@@ -203,7 +203,8 @@ enum class LuminaryType {
     TitanFossilAura,         // Deep ancient amber fossil luminescence
     GrandVaultRadiance,      // Celestial radiant violet/gold high-vault glow
     FirmamentStarlight,      // Deep cosmic starlight cyan/violet
-    CyclopeanFloodlight      // Industrial sodium amber beam
+    CyclopeanFloodlight,     // Industrial sodium amber beam
+    WallIndustrialSconce     // Heavy-duty wall bulkhead lamp / industrial worklight
 };
 
 struct CavernLuminary {

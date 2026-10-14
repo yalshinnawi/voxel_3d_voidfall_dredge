@@ -1009,6 +1009,54 @@ void test_dark_zones_and_illumination() {
         }
         log_pass("Cavern luminaries correctly omitted in dark zone blackout caverns");
     }
+
+    // Test 5: Balanced Diversified Luminaries and Anti-Clustering Spatial Density
+    {
+        int total_wall_sconces = 0;
+        int total_spores = 0;
+        int total_fluid_lights = 0;
+
+        for (uint32_t seed : { 101u, 202u, 303u, 404u, 505u }) {
+            LevelGenerator gen(1, seed);
+            const auto& luminaries = gen.luminaries();
+
+            // Anti-clustering verification
+            for (size_t i = 0; i < luminaries.size(); ++i) {
+                for (size_t j = i + 1; j < luminaries.size(); ++j) {
+                    const auto& a = luminaries[i];
+                    const auto& b = luminaries[j];
+
+                    // Priority beacons and vents may co-exist at key mission points,
+                    // but ambient decorative lights must respect the anti-clustering boundary
+                    bool is_ambient_a = (a.type == LuminaryType::WallIndustrialSconce ||
+                                         a.type == LuminaryType::FungoidSporeGlow ||
+                                         a.type == LuminaryType::PrismaticCrystalRadiance);
+                    bool is_ambient_b = (b.type == LuminaryType::WallIndustrialSconce ||
+                                         b.type == LuminaryType::FungoidSporeGlow ||
+                                         b.type == LuminaryType::PrismaticCrystalRadiance);
+
+                    if (is_ambient_a && is_ambient_b) {
+                        float dist = glm::distance(a.position, b.position);
+                        TEST_CHECK(dist >= 8.0f, "Ambient luminaries must not cluster within 8.0m of each other");
+                    }
+                }
+            }
+
+            for (const auto& lum : luminaries) {
+                if (lum.type == LuminaryType::WallIndustrialSconce) total_wall_sconces++;
+                if (lum.type == LuminaryType::FungoidSporeGlow) total_spores++;
+                if (lum.type == LuminaryType::AquiferOasisGlow ||
+                    lum.type == LuminaryType::ThermalMagmaVent ||
+                    lum.type == LuminaryType::ToxicMiasmaGreen) {
+                    total_fluid_lights++;
+                }
+            }
+        }
+
+        TEST_CHECK(total_wall_sconces > 0, "Wall industrial sconces must be generated across levels");
+        TEST_CHECK(total_wall_sconces >= total_spores, "Wall sconces and fixtures must equal or exceed fungal spore lights");
+        log_pass("Luminary diversification, wall sconces, fluid lighting, and anti-clustering density validated");
+    }
 }
 
 

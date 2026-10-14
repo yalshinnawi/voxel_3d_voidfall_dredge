@@ -91,6 +91,7 @@ void main() {
 
     // Prevent unbounded ray iterations in deep chasms or large procedural hollows
     float maxMarchDistance = min(linearDepth, 40.0);
+    float maxMarchDist = maxMarchDistance;
 
     const int NUM_STEPS = 16;
     float stepSize = maxMarchDistance / float(NUM_STEPS);
@@ -134,9 +135,19 @@ void main() {
             float spotFactor = clamp((theta - uHeadlampOuterCutoff) / max(epsilon, 0.001), 0.0, 1.0);
 
             if (spotFactor > 0.0) {
+                // Optical lens ring pattern modulation
+                float lensAngle = acos(clamp(theta, -1.0, 1.0));
+                float lensRings = 1.0 + 0.06 * sin(lensAngle * 90.0) * smoothstep(0.0, 0.25, lensAngle);
+                spotFactor *= lensRings;
+
                 float rangeFactor = clamp(1.0 - (distToLight / maxRange), 0.0, 1.0);
                 float attenuation = (rangeFactor * rangeFactor) / (1.0 + 0.08 * distToLight + 0.02 * distToLight * distToLight);
-                vec3 lightScatter = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor * phaseHeadlamp;
+
+                // Inject 3D procedural noise into the Henyey-Greenstein Mie scattering phase for swirling dust motes
+                float localAsym = clamp(0.35 + 0.25 * dust_noise(currentPos * 1.5), 0.0, 0.95);
+                float stepPhaseHeadlamp = henyey_greenstein(cosHeadlamp, localAsym);
+
+                vec3 lightScatter = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor * stepPhaseHeadlamp;
                 inscatter += lightScatter * density * transmittance * stepSize;
             }
         }

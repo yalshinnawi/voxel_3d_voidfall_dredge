@@ -49,7 +49,8 @@ public:
     static std::vector<ClutterInstance> generate_chunk_clutter(
         const Chunk& chunk,
         uint32_t seed,
-        const std::function<Voxel(int, int, int)>& get_world_voxel = nullptr
+        const std::function<Voxel(int, int, int)>& get_world_voxel = nullptr,
+        const std::function<bool(int, int, int)>& is_dark_zone = nullptr
     );
 
     // Creates an organic 3D faceted crystal cluster instance for an exposed mineral face
@@ -83,6 +84,7 @@ private:
     void build_crystal_mesh(ClutterMeshPrototype& proto);
     void build_prismatic_crystal_mesh(ClutterMeshPrototype& proto);
     void build_spore_pod_mesh(ClutterMeshPrototype& proto);
+    void build_wall_lamp_mesh(ClutterMeshPrototype& proto);
 
     Shader m_shader;
     std::array<ClutterMeshPrototype, static_cast<size_t>(ClutterType::Count)> m_prototypes{};

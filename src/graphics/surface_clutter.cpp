@@ -48,9 +48,10 @@ void SurfaceClutterSystem::init_gpu() {
     build_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::VoiditeCrystal)]);
     build_prismatic_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::PrismaticCrystal)]);
     build_spore_pod_mesh(m_prototypes[static_cast<size_t>(ClutterType::BioluminescentSporePod)]);
+    build_wall_lamp_mesh(m_prototypes[static_cast<size_t>(ClutterType::WallIndustrialLamp)]);
 
     m_gpu_initialized = true;
-    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals, prismatic diamonds, bioluminescent spore pods)");
+    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals, prismatic diamonds, spore pods, wall lamps)");
 }
 
 static void setup_proto_attributes(ClutterMeshPrototype& proto, const std::vector<ClutterVertex>& vertices, const std::vector<unsigned int>& indices) {
@@ -481,6 +482,81 @@ void SurfaceClutterSystem::build_spore_pod_mesh(ClutterMeshPrototype& proto) {
     setup_proto_attributes(proto, vertices, indices);
 }
 
+// 6. Wall Industrial Bulkhead Worklight: Rugged steel junction plate, stanchion bracket, protective wire cage, and glowing halogen amber emitter
+void SurfaceClutterSystem::build_wall_lamp_mesh(ClutterMeshPrototype& proto) {
+    std::vector<ClutterVertex> vertices;
+    std::vector<unsigned int> indices;
+
+    // Materials:
+    // Dark steel casing: metallic 0.85, roughness 0.45, zero emissive
+    glm::vec4 metal_mat(0.85f, 0.45f, 0.0f, 0.70f);
+    glm::vec4 metal_col(0.24f, 0.25f, 0.28f, 1.0f);
+    // Glowing incandescent/halogen bulb: metallic 0.05, roughness 0.12, emissive 2.8f
+    glm::vec4 bulb_mat(0.05f, 0.12f, 2.8f, 1.0f);
+    glm::vec4 bulb_col(1.0f, 0.78f, 0.32f, 1.0f);
+
+    auto add_box = [&](glm::vec3 min_p, glm::vec3 max_p, glm::vec4 col, glm::vec4 mat) {
+        glm::vec3 corners[8] = {
+            {min_p.x, min_p.y, min_p.z}, {max_p.x, min_p.y, min_p.z},
+            {max_p.x, max_p.y, min_p.z}, {min_p.x, max_p.y, min_p.z},
+            {min_p.x, min_p.y, max_p.z}, {max_p.x, min_p.y, max_p.z},
+            {max_p.x, max_p.y, max_p.z}, {min_p.x, max_p.y, max_p.z}
+        };
+        const int face_indices[6][4] = {
+            {0, 3, 2, 1}, // -Z
+            {4, 5, 6, 7}, // +Z
+            {0, 1, 5, 4}, // -Y
+            {3, 7, 6, 2}, // +Y
+            {0, 4, 7, 3}, // -X
+            {1, 2, 6, 5}  // +X
+        };
+        const glm::vec3 face_normals[6] = {
+            {0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {0, 1, 0}, {-1, 0, 0}, {1, 0, 0}
+        };
+
+        for (int f = 0; f < 6; ++f) {
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            glm::vec3 n = face_normals[f];
+            vertices.push_back({corners[face_indices[f][0]], n, col, mat});
+            vertices.push_back({corners[face_indices[f][1]], n, col, mat});
+            vertices.push_back({corners[face_indices[f][2]], n, col, mat});
+            vertices.push_back({corners[face_indices[f][3]], n, col, mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+            indices.push_back(idx);
+            indices.push_back(idx + 2);
+            indices.push_back(idx + 3);
+        }
+    };
+
+    // 1. Wall mounting backplate (sitting directly on wall surface y=0.0 to 0.025)
+    add_box(glm::vec3(-0.14f, 0.0f, -0.14f), glm::vec3(0.14f, 0.025f, 0.14f), metal_col, metal_mat);
+
+    // 2. Angled bracket neck / stanchion projecting outward
+    add_box(glm::vec3(-0.035f, 0.025f, -0.035f), glm::vec3(0.035f, 0.16f, 0.035f), metal_col, metal_mat);
+
+    // 3. Housing base collar
+    add_box(glm::vec3(-0.08f, 0.16f, -0.08f), glm::vec3(0.08f, 0.19f, 0.08f), metal_col, metal_mat);
+
+    // 4. Glowing bulb capsule inside cage
+    add_box(glm::vec3(-0.05f, 0.19f, -0.05f), glm::vec3(0.05f, 0.32f, 0.05f), bulb_col, bulb_mat);
+
+    // 5. Protective outer cage struts (4 corner bars)
+    float c_min = 0.07f;
+    float c_w = 0.018f;
+    add_box(glm::vec3(-c_min, 0.19f, -c_min), glm::vec3(-c_min + c_w, 0.34f, -c_min + c_w), metal_col, metal_mat);
+    add_box(glm::vec3(c_min - c_w, 0.19f, -c_min), glm::vec3(c_min, 0.34f, -c_min + c_w), metal_col, metal_mat);
+    add_box(glm::vec3(-c_min, 0.19f, c_min - c_w), glm::vec3(-c_min + c_w, 0.34f, c_min), metal_col, metal_mat);
+    add_box(glm::vec3(c_min - c_w, 0.19f, c_min - c_w), glm::vec3(c_min, 0.34f, c_min), metal_col, metal_mat);
+
+    // 6. Top angled protective reflector hood
+    add_box(glm::vec3(-0.11f, 0.34f, -0.11f), glm::vec3(0.11f, 0.37f, 0.11f), glm::vec4(0.35f, 0.36f, 0.40f, 1.0f), metal_mat);
+
+    setup_proto_attributes(proto, vertices, indices);
+}
+
 // Deterministic spatial hash for pseudo-random prop scattering
 static inline uint32_t spatial_hash(int x, int y, int z, uint32_t seed) {
     uint32_t h = seed ^ (static_cast<uint32_t>(x) * 73856093u) ^ (static_cast<uint32_t>(y) * 19349663u) ^ (static_cast<uint32_t>(z) * 83492791u);
@@ -536,7 +612,8 @@ ClutterInstance SurfaceClutterSystem::create_crystal_instance(
 std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
     const Chunk& chunk,
     uint32_t seed,
-    const std::function<Voxel(int, int, int)>& get_world_voxel
+    const std::function<Voxel(int, int, int)>& get_world_voxel,
+    const std::function<bool(int, int, int)>& is_dark_zone
 ) {
     std::vector<ClutterInstance> clutter;
     if (chunk.is_empty()) return clutter;
@@ -590,13 +667,14 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                         }
                     }
 
-                    // 2. Floor Stalagmite & Rubble Pass:
+                    // 2. Floor Stalagmite, Scree & Selective Fungal Pass:
                     // Solid rock voxel with open air above
                     if (wy < 31 && sample_neighbor(x, y + 1, z, wx, wy + 1, wz).material_id == MAT_AIR) {
                         uint32_t h = spatial_hash(wx, wy, wz, seed ^ 0xF100888u);
-                        if ((h % 100) < 5) { // ~5% chance on cavern floors
+                        bool in_dark = is_dark_zone && is_dark_zone(wx, wy + 1, wz);
+
+                        if ((h % 100) < 5) { // ~5% chance on cavern floors for scree / stalagmites
                             float yaw = (h % 360) * glm::pi<float>() / 180.0f;
-                            // Multi-tier sizes: small scree pebble (0.32x), medium boulder (0.62x), massive rock pile (1.15x)
                             int tier = (h >> 12) % 100;
                             float base_scale = (tier < 40) ? 0.32f : ((tier < 82) ? 0.62f : 1.15f);
                             float scale_var = base_scale * (0.80f + 0.35f * ((h >> 8) % 100) / 100.0f);
@@ -607,26 +685,32 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                             model = glm::scale(model, glm::vec3(scale_var));
 
                             clutter.push_back({anchor, model, ClutterType::FloorStalagmiteRubble, glm::vec4(1.0f), 0.0f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
-                        } else if ((h % 100) < 12) { // ~7% chance on cavern floors for bioluminescent fungal spore pods
-                            float yaw = (h % 360) * glm::pi<float>() / 180.0f;
-                            float scale_var = 0.65f + 0.35f * ((h >> 8) % 100) / 100.0f;
+                        } else if (!in_dark) {
+                            // Reduced mushroom spawn: only ~1.2% on standard floors, or ~4% on organic flora/moss blocks
+                            bool is_flora = (v.material_id == MAT_BIOLUMINESCENT_FLORA);
+                            bool spawn_mushroom = is_flora ? ((h % 100) < 9) : ((h % 100) == 7);
 
-                            glm::vec3 anchor(wx + 0.5f, wy + 1.0f, wz + 0.5f);
-                            glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
-                            model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                            model = glm::scale(model, glm::vec3(scale_var));
+                            if (spawn_mushroom) {
+                                float yaw = (h % 360) * glm::pi<float>() / 180.0f;
+                                float scale_var = 0.55f + 0.30f * ((h >> 8) % 100) / 100.0f;
 
-                            glm::vec4 tint = (v.material_id == MAT_VOLCANIC_BASALT)
-                                ? glm::vec4(1.0f, 0.62f, 0.18f, 1.0f) // Thermoluminescent volcanic ember pod
-                                : ((wy < 10)
-                                    ? glm::vec4(0.78f, 0.28f, 0.98f, 1.0f) // Deep void amethyst spore pod
-                                    : glm::vec4(0.20f, 0.95f, 0.70f, 1.0f)); // Cavern phosphorescent mint/cyan
+                                glm::vec3 anchor(wx + 0.5f, wy + 1.0f, wz + 0.5f);
+                                glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+                                model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                                model = glm::scale(model, glm::vec3(scale_var));
 
-                            clutter.push_back({anchor, model, ClutterType::BioluminescentSporePod, tint, 2.6f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
+                                glm::vec4 tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                    ? glm::vec4(1.0f, 0.62f, 0.18f, 1.0f) // Thermoluminescent volcanic ember pod
+                                    : ((wy < 10)
+                                        ? glm::vec4(0.78f, 0.28f, 0.98f, 1.0f) // Deep void amethyst spore pod
+                                        : glm::vec4(0.20f, 0.95f, 0.70f, 1.0f)); // Cavern phosphorescent mint/cyan
+
+                                clutter.push_back({anchor, model, ClutterType::BioluminescentSporePod, tint, 2.2f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
+                            }
                         }
                     }
 
-                    // 3. Exposed Wall-Face Detritus, Rock Outcrops, Fungal Spores & Crevice Crystals:
+                    // 3. Exposed Wall-Face Detritus, Rock Outcrops, Wall Lamps, Crevice Crystals & Fungal Spores:
                     // For vertical wall faces facing into open cavern air
                     if (v.material_id != MAT_REINFORCED_VAULT_DOOR && v.material_id != MAT_DREDGE_BEDROCK) {
                         const glm::ivec3 wall_dirs[4] = {
@@ -643,6 +727,8 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                             Voxel n_vox = sample_neighbor(nx, ny, nz, gnx, gny, gnz);
                             if (n_vox.material_id == MAT_AIR) {
                                 uint32_t wh = spatial_hash(gnx, gny, gnz, seed ^ (0xDA7A000u + d * 0x1337u));
+                                bool in_dark = is_dark_zone && is_dark_zone(gnx, gny, gnz);
+
                                 if ((wh % 100) < 7) { // ~7% chance on exposed wall faces
                                     int type_roll = (wh >> 8) % 100;
                                     ClutterType ctype = ClutterType::FloorStalagmiteRubble;
@@ -650,34 +736,64 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                                     float scale = 0.50f;
                                     float emissive_boost = 0.0f;
 
-                                    if (type_roll < 52) {
-                                        // Rock Spur outcropping jutting horizontally from wall
-                                        ctype = ClutterType::FloorStalagmiteRubble;
-                                        int tier = (wh >> 14) % 100;
-                                        float base_s = (tier < 35) ? 0.35f : ((tier < 80) ? 0.60f : 1.05f);
-                                        scale = base_s * (0.85f + 0.30f * ((wh >> 18) % 100) / 100.0f);
-                                        tint = (v.material_id == MAT_VOLCANIC_BASALT)
-                                            ? glm::vec4(0.82f, 0.84f, 0.86f, 1.0f)
-                                            : glm::vec4(1.04f, 0.98f, 0.92f, 1.0f);
-                                    } else if (type_roll < 72) {
-                                        // Wall Stalactite projection hanging along wall
-                                        ctype = ClutterType::CeilingStalactite;
-                                        scale = (0.45f + 0.35f * ((wh >> 16) % 100) / 100.0f) * 0.70f;
-                                        tint = glm::vec4(0.95f, 0.95f, 0.95f, 1.0f);
-                                    } else if (type_roll < 88) {
-                                        // Bioluminescent Wall Fungal Spore Cluster / shelf colony
-                                        ctype = ClutterType::BioluminescentSporePod;
-                                        scale = (0.45f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.75f;
-                                        emissive_boost = 2.6f;
-                                        tint = (v.material_id == MAT_VOLCANIC_BASALT)
-                                            ? glm::vec4(1.0f, 0.58f, 0.18f, 1.0f)
-                                            : glm::vec4(0.22f, 0.95f, 0.72f, 1.0f);
+                                    bool is_industrial_wall = (v.material_id == MAT_INDUSTRIAL_BULKHEAD);
+
+                                    if (in_dark) {
+                                        // Dark zones: strictly unpowered, non-emissive natural or industrial detritus
+                                        if (type_roll < 65) {
+                                            ctype = ClutterType::FloorStalagmiteRubble;
+                                            tint = is_industrial_wall ? glm::vec4(0.35f, 0.38f, 0.42f, 1.0f) : glm::vec4(0.92f, 0.90f, 0.88f, 1.0f);
+                                        } else {
+                                            ctype = ClutterType::CeilingStalactite;
+                                            scale = 0.42f;
+                                            tint = glm::vec4(0.90f, 0.90f, 0.90f, 1.0f);
+                                        }
+                                        emissive_boost = 0.0f;
+                                    } else if (is_industrial_wall) {
+                                        // Industrial bulkhead walls: wall lamps and metal struts
+                                        if (type_roll < 58) {
+                                            ctype = ClutterType::WallIndustrialLamp;
+                                            scale = 0.55f;
+                                            tint = glm::vec4(1.0f, 0.82f, 0.35f, 1.0f); // Warm halogen glow
+                                            emissive_boost = 2.4f;
+                                        } else {
+                                            ctype = ClutterType::FloorStalagmiteRubble; // Steel strut / brace
+                                            tint = glm::vec4(0.35f, 0.38f, 0.42f, 1.0f);
+                                            emissive_boost = 0.0f;
+                                        }
                                     } else {
-                                        // Small crystalline cluster in wall crevice
-                                        ctype = ClutterType::PrismaticCrystal;
-                                        scale = (0.40f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.60f;
-                                        emissive_boost = 1.0f;
-                                        tint = glm::vec4(0.42f, 0.88f, 0.95f, 0.85f);
+                                        // Natural rock cavern walls: rock spurs, stalactites, crevice crystals, miner lamps, and rare spores
+                                        if (type_roll < 48) {
+                                            ctype = ClutterType::FloorStalagmiteRubble; // Rock spur
+                                            int tier = (wh >> 14) % 100;
+                                            float base_s = (tier < 35) ? 0.35f : ((tier < 80) ? 0.60f : 1.05f);
+                                            scale = base_s * (0.85f + 0.30f * ((wh >> 18) % 100) / 100.0f);
+                                            tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                                ? glm::vec4(0.82f, 0.84f, 0.86f, 1.0f)
+                                                : glm::vec4(1.04f, 0.98f, 0.92f, 1.0f);
+                                        } else if (type_roll < 72) {
+                                            ctype = ClutterType::CeilingStalactite; // Wall stalactite
+                                            scale = (0.45f + 0.35f * ((wh >> 16) % 100) / 100.0f) * 0.70f;
+                                            tint = glm::vec4(0.95f, 0.95f, 0.95f, 1.0f);
+                                        } else if (type_roll < 86) {
+                                            ctype = ClutterType::PrismaticCrystal; // Wall crevice crystal cluster
+                                            scale = (0.40f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.60f;
+                                            emissive_boost = 1.0f;
+                                            tint = glm::vec4(0.38f, 0.85f, 0.95f, 0.85f);
+                                        } else if (type_roll < 95) {
+                                            ctype = ClutterType::WallIndustrialLamp; // Mining worklight staked into rock
+                                            scale = 0.52f;
+                                            tint = glm::vec4(1.0f, 0.75f, 0.30f, 1.0f);
+                                            emissive_boost = 2.4f;
+                                        } else {
+                                            // Very rare wall fungal colony (only ~5% of wall props)
+                                            ctype = ClutterType::BioluminescentSporePod;
+                                            scale = (0.45f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.70f;
+                                            emissive_boost = 2.2f;
+                                            tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                                ? glm::vec4(1.0f, 0.58f, 0.18f, 1.0f)
+                                                : glm::vec4(0.22f, 0.95f, 0.72f, 1.0f);
+                                        }
                                     }
 
                                     glm::vec3 norm = glm::vec3(wall_dirs[d]);

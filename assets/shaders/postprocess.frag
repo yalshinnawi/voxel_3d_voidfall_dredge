@@ -147,7 +147,7 @@ void main() {
         if (uRadiationGlitch > 0.0) {
             depthHazeColor = mix(depthHazeColor, vec3(0.05, 0.28, 0.10), uRadiationGlitch * 0.85);
         }
-        depthHazeColor *= clamp(1.0 - uDarknessFactor * 0.65, 0.35, 1.0); // Ambient depth haze preserved with 0.35 floor
+        depthHazeColor *= clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0); // Ambient depth haze lowers in deep dark zones
         float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
         scene = mix(scene, depthHazeColor, depthHazeFactor);
     }
@@ -177,10 +177,29 @@ void main() {
     vec3 mapped = pow(ldr, vec3(1.0 / 2.2));
     vec4 color = vec4(mapped, 1.0);
 
+    // 3x3 Contrast Adaptive Sharpening (CAS) Pass
+    ivec2 screenTexSize = textureSize(uSceneColor, 0);
+    vec2 texel = 1.0 / max(vec2(screenTexSize), vec2(1.0));
+
+    vec3 col_m = color.rgb;
+    vec3 col_n = pow(aces_filmic(texture(uSceneColor, uv + vec2(0.0, -texel.y)).rgb * uExposure), vec3(1.0 / 2.2));
+    vec3 col_s = pow(aces_filmic(texture(uSceneColor, uv + vec2(0.0,  texel.y)).rgb * uExposure), vec3(1.0 / 2.2));
+    vec3 col_w = pow(aces_filmic(texture(uSceneColor, uv + vec2(-texel.x, 0.0)).rgb * uExposure), vec3(1.0 / 2.2));
+    vec3 col_e = pow(aces_filmic(texture(uSceneColor, uv + vec2( texel.x, 0.0)).rgb * uExposure), vec3(1.0 / 2.2));
+
+    vec3 minCol = min(min(min(col_n, col_s), min(col_w, col_e)), col_m);
+    vec3 maxCol = max(max(max(col_n, col_s), max(col_w, col_e)), col_m);
+
+    vec3 amp = clamp(min(minCol, 2.0 - maxCol) / max(maxCol, vec3(0.0001)), 0.0, 1.0);
+    vec3 w = -sqrt(amp) * 0.18;
+
+    vec3 casColor = (col_m + (col_n + col_s + col_w + col_e) * w) / (1.0 + 4.0 * w);
+    color.rgb = clamp(casColor, 0.0, 1.0);
+
     // Apply shield strictly as an edge vignette, keeping center contrast intact
     if (u_ShieldActive > 0.0) {
-        vec2 uv = vUV - 0.5;
-        float vignette_edge = smoothstep(0.35, 0.75, length(uv)); // Confine to screen borders
+        vec2 uv_shield = vUV - 0.5;
+        float vignette_edge = smoothstep(0.35, 0.75, length(uv_shield)); // Confine to screen borders
         
         // Smooth fade-out over the final 1.0s instead of an abrupt pop
         float shieldAlpha = clamp(u_ShieldTimer / 1.0, 0.0, 1.0); 

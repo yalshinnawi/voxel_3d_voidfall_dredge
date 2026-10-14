@@ -146,7 +146,8 @@ bool Chunk::is_clutter_attached_to_face(const ClutterInstance& inst, const glm::
 
     bool is_omni_attached = (inst.type == ClutterType::VoiditeCrystal ||
                              inst.type == ClutterType::PrismaticCrystal ||
-                             inst.type == ClutterType::BioluminescentSporePod);
+                             inst.type == ClutterType::BioluminescentSporePod ||
+                             inst.type == ClutterType::WallIndustrialLamp);
 
     // Top face (+Y) - floor stalagmites, rubble, voidite / prismatic crystals, spore pods
     if (inst.type == ClutterType::FloorStalagmiteRubble || is_omni_attached) {

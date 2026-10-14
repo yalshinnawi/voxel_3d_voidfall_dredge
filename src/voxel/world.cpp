@@ -898,8 +898,14 @@ Voxel World::get_voxel_unlocked(int world_x, int world_y, int world_z) const {
 }
 
 void World::GenerateChunkClutter(Chunk& chunk) {
+    auto is_dark = [this](int wx, int wy, int wz) -> bool {
+        if (m_level_gen) {
+            return m_level_gen->is_dark_zone_at(glm::vec3(wx + 0.5f, wy + 0.5f, wz + 0.5f));
+        }
+        return false;
+    };
     chunk.set_clutter_instances(SurfaceClutterSystem::generate_chunk_clutter(
-        chunk, m_seed, [this](int wx, int wy, int wz) { return get_voxel(wx, wy, wz); }
+        chunk, m_seed, [this](int wx, int wy, int wz) { return get_voxel(wx, wy, wz); }, is_dark
     ));
 }
 
@@ -2071,6 +2077,7 @@ bool World::DestroyBlock(const glm::ivec3& pos) {
         SetBlock(pos, MAT_AIR);
         broke = true;
     }
+    clear_disconnected_clutter(pos);
     const glm::ivec3 offsets[6] = {
         { 1, 0, 0}, {-1, 0, 0},
         { 0, 1, 0}, { 0,-1, 0},

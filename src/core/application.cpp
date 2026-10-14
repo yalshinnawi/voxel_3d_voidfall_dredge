@@ -120,9 +120,9 @@ void Application::init_systems() {
 
     // 2. Renderer & First-Person Viewmodel
     m_renderer = std::make_unique<Renderer>(m_window->width(), m_window->height());
-    m_renderer->headlamp().inner_cutoff = glm::cos(glm::radians(22.0f));
-    m_renderer->headlamp().outer_cutoff = glm::cos(glm::radians(38.0f));
-    m_renderer->headlamp().max_range = 32.0f;
+    m_renderer->headlamp().inner_cutoff = glm::cos(glm::radians(18.0f));
+    m_renderer->headlamp().outer_cutoff = glm::cos(glm::radians(28.0f));
+    m_renderer->headlamp().max_range = 22.0f;
     m_renderer->headlamp().intensity = 5.2f;
     ParticleSystem::SetRenderer(m_renderer.get());
     DebriefMenu::SetRedeployHandler([this](int sector) {
