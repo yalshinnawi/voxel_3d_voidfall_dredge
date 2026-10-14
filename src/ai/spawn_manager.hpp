@@ -29,17 +29,23 @@ public:
     static constexpr float LEVEL_2_GRACE_PERIOD  = 35.0f; // Seconds before combat spawns trigger in Sector 2
     static constexpr float LEVEL_3_GRACE_PERIOD  = 25.0f; // Seconds before combat spawns trigger in Sector 3
     static constexpr float SPAWN_SAFE_RADIUS     = 28.0f; // Minimum meters from insertion point
+    static constexpr float BOSS_SPAWN_SAFE_RADIUS = 35.0f; // Minimum meters from insertion point for boss monsters
     static constexpr float SAFE_EXCLUSION_RADIUS = 28.0f; // Minimum Euclidean meters from insertion pod
     static constexpr float EARLY_RAMP_DURATION   = 120.0f; // Minutes 0-2 threat cap window
 
-    static bool IsSpawnPointSafe(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos) {
-        return glm::distance(candidatePos, playerSpawnPos) >= SPAWN_SAFE_RADIUS;
+    static bool IsSpawnPointSafe(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos, bool is_boss = false) {
+        float req_dist = is_boss ? BOSS_SPAWN_SAFE_RADIUS : SPAWN_SAFE_RADIUS;
+        return glm::distance(candidatePos, playerSpawnPos) >= req_dist;
+    }
+
+    static bool IsSpawnPointSafe(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos, StalkerRole role) {
+        return IsSpawnPointSafe(candidatePos, playerSpawnPos, role == StalkerRole::ChitinGoliath);
     }
 
     /// Enforces insertion quarantine sphere when picking runtime spawn points
-    glm::vec3 FindSpawnPoint(const glm::vec3& near_pos, const World& world, const glm::vec3& player_spawn_pos) const;
-    glm::vec3 FindSpawnPoint(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos) const {
-        return FindSpawnPoint(candidatePos, *(const World*)nullptr, playerSpawnPos);
+    glm::vec3 FindSpawnPoint(const glm::vec3& near_pos, const World& world, const glm::vec3& player_spawn_pos, bool is_boss = false) const;
+    glm::vec3 FindSpawnPoint(const glm::vec3& candidatePos, const glm::vec3& playerSpawnPos, bool is_boss = false) const {
+        return FindSpawnPoint(candidatePos, *(const World*)nullptr, playerSpawnPos, is_boss);
     }
 
     SpawnManager();
@@ -54,7 +60,7 @@ public:
     void on_block_broken(uint8_t material_id);
 
     /// Determines if a combat spawn is permitted based on grace period, exclusion radius, and threat caps
-    bool can_spawn(int current_active_enemies, const glm::vec3& candidate_pos) const;
+    bool can_spawn(int current_active_enemies, const glm::vec3& candidate_pos, StalkerRole role = StalkerRole::Melee) const;
 
     /// Request a telegraphed spawn (2.0s warning before emerging)
     bool request_spawn(const glm::vec3& pos, const glm::vec3& normal, StalkerRole role = StalkerRole::Melee);

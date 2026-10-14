@@ -122,6 +122,11 @@ To elevate vault encounters from generic wall cutouts into atmospheric, high-sta
    - *Boss Guardian*: `VaultGuardianRole::ChitinGoliath` — A colossal 3-meter armored apex aberrant terror guarding the ultimate vault treasure. Possesses a massive health pool, heavy ground slams causing ceiling cave-ins, and impenetrable chitin plating.
 
 ### 5.2 Seamless Room Integration & Doorway Clearance Invariants
+- **Spawn Distance Separation Invariant**: Precursor Vaults and Boss Monsters (`ChitinGoliath`) are strictly quarantined from player spawn (`m_playerSpawnPos`):
+  - Precursor Vault host rooms reject the spawn room $(0,0)$ and all spawn-adjacent rooms (enforcing Manhattan distance $\ge 2$ and room center distance $\ge 26.0\,\text{m}$).
+  - Dedicated vault room types (`AbyssalVaultChasm`, `SubterraneanVaultBastion`, `PrecursorSanctumVault`, `IndustrialVaultBunker`) are explicitly rejected from generating adjacent to spawn in the procedural shape grammar (`evaluate_candidate`).
+  - Precursor Vault entrance doors and chamber centers maintain a minimum spatial distance of $\ge 30.0\,\text{m}$ (`MIN_VAULT_SPAWN_SEPARATION`) from the player spawn coordinates.
+  - Boss Monsters (`ChitinGoliath` / apex vault guardians) maintain a minimum safe distance of $\ge 35.0\,\text{m}$ (`MIN_BOSS_SPAWN_DISTANCE`) from player spawn across all procedural generation seeds, pre-populated world fauna, and runtime dynamic waves (`SpawnManager::BOSS_SPAWN_SAFE_RADIUS = 35.0f`).
 - **Corridor Seam Collision Prevention**: `configure_vault_placement` verifies `has_unconnected_clear_wall` before picking host rooms. If all 4 cardinal walls have active corridors, the vault portal shifts off-center by $+4$ voxels along X, guaranteeing vault doors never collide with inter-chamber doorways or central traffic routes.
 - **Physical Load-Bearing Grounding**: All vault catwalks, arches, and stepping monoliths enforce 6-connected vertical face contact down to solid bedrock or ceiling anchors. Automatic post-generation solvers ensure zero unanchored blocks.
 - **Fluid & Hazard Isolation**: Dedicated vault chambers and designated vault host rooms are strictly excluded from procedural random fluid generation (`has_random_fluid`), preventing fluid puddles or slime from encroaching onto vault approaches or blocking breach explosive satchel placement.

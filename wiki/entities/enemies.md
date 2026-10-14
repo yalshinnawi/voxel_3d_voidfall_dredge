@@ -86,6 +86,7 @@ This document lists the hostile life forms native to the void sectors.
 ## 3. Chitin Goliath (Apex Vault Boss)
 - **Threat Level**: Lethal / Boss Encounter.
 - **Spawn Conditions**: Deep Precursor Vault chambers in Sector 3+, guarding high-tier alien artifacts and dense voidite geodes.
+- **Spawn Quarantine Distance**: Boss monsters are strictly prohibited from generating near player spawn / insertion pods. A mandatory exclusion radius of $\ge 35.0\,\text{m}$ (`MIN_BOSS_SPAWN_DISTANCE` / `SpawnManager::BOSS_SPAWN_SAFE_RADIUS = 35.0f`) is enforced across all procedural generation seeds, pre-placed world fauna, and runtime wave spawns.
 - **Model Anatomy & PBR Shading**:
   - Massive $2.2\times$ scale colossus with impenetrable frontal basalt plates and barbed dorsal spines.
   - Baseline eyes: Menacing amber-gold (`RGB(0.95, 0.70, 0.10)`).

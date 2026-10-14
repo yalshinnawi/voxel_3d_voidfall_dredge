@@ -103,6 +103,18 @@ bool is_extreme_spawn_hazard(RoomShapeType type) {
   }
 }
 
+bool is_vault_room_type(RoomShapeType type) {
+  switch (type) {
+    case RoomShapeType::AbyssalVaultChasm:
+    case RoomShapeType::SubterraneanVaultBastion:
+    case RoomShapeType::PrecursorSanctumVault:
+    case RoomShapeType::IndustrialVaultBunker:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool is_extraction_climax_room(RoomShapeType type) {
   switch (type) {
     case RoomShapeType::ColossalVaultedDredgeCathedral:
@@ -1489,8 +1501,8 @@ void LevelGenerator::generate_layout() {
         return -1.0f;
       }
 
-      // Spawn proximity safety: Never place extreme hazards adjacent to spawn!
-      if (is_spawn_adjacent && is_extreme_spawn_hazard(t)) {
+      // Spawn proximity safety: Never place extreme hazards or dedicated vault chambers adjacent to spawn!
+      if (is_spawn_adjacent && (is_extreme_spawn_hazard(t) || is_vault_room_type(t))) {
         return -1.0f;
       }
 

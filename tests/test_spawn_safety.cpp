@@ -5,6 +5,7 @@
 #include <string>
 #include <glm/glm.hpp>
 #include "../src/voxel/world.hpp"
+#include "../src/voxel/level_shapes.hpp"
 #include "../src/entities/enemies/void_stalker.hpp"
 #include "../src/entities/vault_door.hpp"
 #include "../src/systems/stealth_system.hpp"
@@ -273,6 +274,84 @@ TEST(SpawnSafetyTest, SpawnFadeFromBlackCountdown) {
     std::cout << "[PASS] SpawnSafetyTest.SpawnFadeFromBlackCountdown (0.6s smooth countdown and active flag verified)" << std::endl;
 }
 
+// ── Test 6: Boss Monsters and Vaults Safe Distance Separation ──
+TEST(SpawnSafetyTest, BossAndVaultDistanceSafety) {
+    std::cout << "[RUN] SpawnSafetyTest.BossAndVaultDistanceSafety" << std::endl;
+
+    const uint32_t seeds[] = { 101, 202, 303, 777, 1337, 2026, 4242 };
+
+    for (int sector = 1; sector <= 3; ++sector) {
+        for (uint32_t seed : seeds) {
+            LevelGenerator gen(sector, seed);
+            ASSERT_TRUE(gen.has_vault());
+            const auto& vp = gen.vault_placement();
+            ASSERT_TRUE(vp.exists);
+
+            const auto& host_room = gen.rooms()[vp.room_index];
+            // Vault host room must NEVER be the spawn room (0, 0)
+            ASSERT_FALSE(host_room.grid_x == 0 && host_room.grid_z == 0);
+            // Vault host room must NEVER be adjacent to spawn room (Manhattan distance >= 2)
+            int manhattan_to_spawn = std::abs(host_room.grid_x - 0) + std::abs(host_room.grid_z - 0);
+            ASSERT_GE(manhattan_to_spawn, 2);
+
+            glm::vec3 spawn_pos = gen.spawn_position();
+            float door_dist = glm::distance(glm::vec2(vp.door_pos.x, vp.door_pos.z), glm::vec2(spawn_pos.x, spawn_pos.z));
+            ASSERT_GE(door_dist, MIN_VAULT_SPAWN_SEPARATION); // >= 30.0m
+
+            float chamber_dist = glm::distance(glm::vec2(vp.chamber_center.x, vp.chamber_center.z), glm::vec2(spawn_pos.x, spawn_pos.z));
+            ASSERT_GE(chamber_dist, MIN_VAULT_SPAWN_SEPARATION); // >= 30.0m
+
+            if (vp.has_guardian && vp.is_boss_guardian) {
+                float boss_dist = glm::distance(vp.guardian_spawn_pos, spawn_pos);
+                ASSERT_GE(boss_dist, MIN_BOSS_SPAWN_DISTANCE); // >= 35.0m
+            }
+
+            // Also verify live World population
+            World world(seed, false);
+            world.generate_world(sector, seed);
+            const auto& entities = world.GetActiveEntities();
+            const glm::vec3& p_spawn = world.GetPlayerSpawnPos();
+
+            for (const auto& ent : entities) {
+                float dist = glm::distance(ent.pos, p_spawn);
+                if (ent.role == StalkerRole::ChitinGoliath) {
+                    ASSERT_GE(dist, MIN_BOSS_SPAWN_DISTANCE); // >= 35.0m
+                } else {
+                    ASSERT_GE(dist, 28.0f); // Standard enemies >= 28.0m
+                }
+            }
+        }
+    }
+
+    // Dynamic SpawnManager safety check for boss monsters vs standard enemies
+    SpawnManager sm;
+    glm::vec3 player_pos(100.0f, 10.0f, 100.0f);
+    // Point at 30.0m from player
+    glm::vec3 test_pt_30m = player_pos + glm::vec3(30.0f, 0.0f, 0.0f);
+    // For standard enemy (safe radius 28m), 30m is safe
+    ASSERT_TRUE(SpawnManager::IsSpawnPointSafe(test_pt_30m, player_pos, StalkerRole::Melee));
+    ASSERT_TRUE(SpawnManager::IsSpawnPointSafe(test_pt_30m, player_pos, false));
+    // For Boss monster (safe radius 35m), 30m is NOT safe!
+    ASSERT_FALSE(SpawnManager::IsSpawnPointSafe(test_pt_30m, player_pos, StalkerRole::ChitinGoliath));
+    ASSERT_FALSE(SpawnManager::IsSpawnPointSafe(test_pt_30m, player_pos, true));
+
+    // Point at 36.0m from player: safe for both!
+    glm::vec3 test_pt_36m = player_pos + glm::vec3(36.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(SpawnManager::IsSpawnPointSafe(test_pt_36m, player_pos, StalkerRole::ChitinGoliath));
+    ASSERT_TRUE(SpawnManager::IsSpawnPointSafe(test_pt_36m, player_pos, true));
+
+    // FindSpawnPoint corrects candidate points that are too close to spawn:
+    // If a boss monster candidate is at 10m from player, FindSpawnPoint pushes it to >= 35m
+    glm::vec3 close_pt = player_pos + glm::vec3(10.0f, 0.0f, 0.0f);
+    glm::vec3 safe_boss_pt = sm.FindSpawnPoint(close_pt, player_pos, true);
+    ASSERT_GE(glm::distance(safe_boss_pt, player_pos), SpawnManager::BOSS_SPAWN_SAFE_RADIUS);
+
+    glm::vec3 safe_std_pt = sm.FindSpawnPoint(close_pt, player_pos, false);
+    ASSERT_GE(glm::distance(safe_std_pt, player_pos), SpawnManager::SPAWN_SAFE_RADIUS);
+
+    std::cout << "[PASS] SpawnSafetyTest.BossAndVaultDistanceSafety (verified vault and boss monster >= 35m distance invariants)" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " RUNNING SPAWN SAFETY & VAULT REGRESSION TESTS" << std::endl;
@@ -283,6 +362,7 @@ int main() {
     VaultTest_VaultDoorResistsDrillMining();
     SpawnSafetyTest_SpawnCameraYawAlignsToOpenCorridor();
     SpawnSafetyTest_SpawnFadeFromBlackCountdown();
+    SpawnSafetyTest_BossAndVaultDistanceSafety();
 
     std::cout << "========================================" << std::endl;
     std::cout << " ALL SPAWN SAFETY & VAULT TESTS PASSED!" << std::endl;

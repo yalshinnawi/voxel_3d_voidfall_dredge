@@ -43,13 +43,16 @@ int SpawnManager::max_allowed_enemies() const {
     return (m_level <= 1) ? 2 : ((m_level == 2) ? 4 : 6);
 }
 
-bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candidate_pos) const {
+bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candidate_pos, StalkerRole role) const {
     if (is_in_grace_period()) {
         return false;
     }
 
-    // Enforce Safe Spawn Exclusion Radius: No enemies within 28m of insertion pod
-    if (!IsSpawnPointSafe(candidate_pos, m_insertion_pod_pos)) {
+    // Enforce Safe Spawn Exclusion Radius:
+    // Boss monsters (Chitin Goliath) must never spawn within 35m of insertion pod.
+    // Standard enemies must never spawn within 28m of insertion pod.
+    bool is_boss = (role == StalkerRole::ChitinGoliath);
+    if (!IsSpawnPointSafe(candidate_pos, m_insertion_pod_pos, is_boss)) {
         return false;
     }
 
@@ -60,8 +63,8 @@ bool SpawnManager::can_spawn(int current_active_enemies, const glm::vec3& candid
     return true;
 }
 
-glm::vec3 SpawnManager::FindSpawnPoint(const glm::vec3& near_pos, const World& /*world*/, const glm::vec3& player_spawn_pos) const {
-    if (IsSpawnPointSafe(near_pos, player_spawn_pos)) {
+glm::vec3 SpawnManager::FindSpawnPoint(const glm::vec3& near_pos, const World& /*world*/, const glm::vec3& player_spawn_pos, bool is_boss) const {
+    if (IsSpawnPointSafe(near_pos, player_spawn_pos, is_boss)) {
         return near_pos;
     }
     glm::vec3 dir = near_pos - player_spawn_pos;
@@ -70,7 +73,8 @@ glm::vec3 SpawnManager::FindSpawnPoint(const glm::vec3& near_pos, const World& /
     } else {
         dir = glm::normalize(dir);
     }
-    return player_spawn_pos + dir * (SPAWN_SAFE_RADIUS + 4.0f);
+    float req_dist = is_boss ? BOSS_SPAWN_SAFE_RADIUS : SPAWN_SAFE_RADIUS;
+    return player_spawn_pos + dir * (req_dist + 4.0f);
 }
 
 bool SpawnManager::request_spawn(const glm::vec3& pos, const glm::vec3& normal, StalkerRole role) {
@@ -86,7 +90,7 @@ bool SpawnManager::request_spawn(const glm::vec3& pos, const glm::vec3& normal, 
 }
 
 bool SpawnManager::try_immediate_spawn(VoidStalkerManager& stalker_mgr, const glm::vec3& pos, StalkerRole role) {
-    if (!can_spawn(stalker_mgr.active_count(), pos)) {
+    if (!can_spawn(stalker_mgr.active_count(), pos, role)) {
         return false;
     }
     stalker_mgr.spawn_emerging(pos, glm::vec3(0.0f, 1.0f, 0.0f), 1.0f, role);
@@ -119,7 +123,7 @@ void SpawnManager::update(float dt, World& world, VoidStalkerManager& stalker_mg
 
         if (it->timer <= 0.0f) {
             // Emerge entity into the world
-            if (can_spawn(stalker_mgr.active_count(), it->position)) {
+            if (can_spawn(stalker_mgr.active_count(), it->position, it->role)) {
                 stalker_mgr.spawn_emerging(it->position, it->normal, 1.0f, it->role);
             }
             it = m_pending_spawns.erase(it);

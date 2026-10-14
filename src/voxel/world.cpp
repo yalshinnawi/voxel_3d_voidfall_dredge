@@ -282,6 +282,30 @@ void World::PopulateFauna() {
         } else {
             guardian.role = StalkerRole::Melee;
         }
+
+        // Strict Enforcement: Boss monsters and vault guardians must NEVER spawn close to player spawn!
+        constexpr float MIN_BOSS_SPAWN_DIST = 35.0f;
+        constexpr float MIN_GUARDIAN_SPAWN_DIST = 28.0f;
+        bool is_boss = (guardian.role == StalkerRole::ChitinGoliath || vp.is_boss_guardian);
+        float req_dist = is_boss ? MIN_BOSS_SPAWN_DIST : MIN_GUARDIAN_SPAWN_DIST;
+
+        float dist_to_spawn = glm::distance(guardian.pos, m_playerSpawnPos);
+        if (dist_to_spawn < req_dist) {
+            glm::vec3 dir = guardian.pos - m_playerSpawnPos;
+            dir.y = 0.0f;
+            if (glm::length(dir) < 0.001f) dir = glm::vec3(0.0f, 0.0f, 1.0f);
+            dir = glm::normalize(dir);
+            glm::vec3 candidate_pos = m_playerSpawnPos + dir * (req_dist + 4.0f);
+            auto safe_pos = find_valid_room_spawn(candidate_pos);
+            if (safe_pos) {
+                guardian.pos = *safe_pos;
+                guardian.position = *safe_pos;
+            } else {
+                guardian.pos = candidate_pos;
+                guardian.position = candidate_pos;
+            }
+        }
+
         m_active_entities.push_back(guardian);
     }
 }

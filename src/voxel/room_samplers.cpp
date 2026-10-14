@@ -2404,64 +2404,157 @@ void LevelGenerator::configure_vault_placement(std::mt19937 &rng) {
   m_vault_placement = VaultPlacement{};
   if (m_rooms.empty()) return;
 
+  glm::vec3 spawn_pos = spawn_position();
+
+  auto get_door_and_chamber = [&](const RoomPlacement &r, int dx, int dz,
+                                  glm::ivec3 &door, glm::ivec3 &chamber) -> bool {
+    int door_x = r.center.x + (dx != 0 ? dx * (r.half_width - 1) : 0);
+    int door_z = r.center.z + (dz != 0 ? dz * (r.half_depth - 1) : 0);
+    if (r.connected_north && r.connected_south && r.connected_east && r.connected_west) {
+      if (dz != 0) {
+        door_x = (door_x + 4 <= world_width() - 8) ? (door_x + 4) : (door_x - 4);
+      } else if (dx != 0) {
+        door_z = (door_z + 4 <= world_depth() - 8) ? (door_z + 4) : (door_z - 4);
+      }
+    }
+    int door_y = r.floor_y + (r.type == RoomShapeType::PrecursorSanctumVault ? 1 : 0);
+
+    // Chamber center extends 4 blocks behind door in direction (dx, dz)
+    int chamber_cx = door_x + dx * 4;
+    int chamber_cz = door_z + dz * 4;
+
+    // Chamber extends +-3 blocks from center. Must stay strictly within bedrock borders:
+    // [4, world_width() - 5] and [4, world_depth() - 5]
+    if (chamber_cx - 3 < 4 || chamber_cx + 3 > world_width() - 5) return false;
+    if (chamber_cz - 3 < 4 || chamber_cz + 3 > world_depth() - 5) return false;
+
+    // Door must also be within world interior
+    if (door_x < 4 || door_x > world_width() - 5) return false;
+    if (door_z < 4 || door_z > world_depth() - 5) return false;
+
+    door = glm::ivec3(door_x, door_y, door_z);
+    chamber = glm::ivec3(chamber_cx, door_y, chamber_cz);
+    return true;
+  };
+
+  const int test_dirs[4][2] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+
   auto has_unconnected_clear_wall = [&](const RoomPlacement &r) -> bool {
-    if (!r.connected_north && (r.center.z + r.half_depth + 6 < world_depth() - 4)) return true;
-    if (!r.connected_south && (r.center.z - r.half_depth - 6 >= 4)) return true;
-    if (!r.connected_east && (r.center.x + r.half_width + 6 < world_width() - 4)) return true;
-    if (!r.connected_west && (r.center.x - r.half_width - 6 >= 4)) return true;
+    const bool conn[4] = {r.connected_north, r.connected_south, r.connected_east, r.connected_west};
+    glm::ivec3 d, c;
+    for (int k = 0; k < 4; ++k) {
+      if (!conn[k] && get_door_and_chamber(r, test_dirs[k][0], test_dirs[k][1], d, c)) {
+        return true;
+      }
+    }
     return false;
+  };
+
+  auto has_any_clear_wall = [&](const RoomPlacement &r) -> bool {
+    glm::ivec3 d, c;
+    for (int k = 0; k < 4; ++k) {
+      if (get_door_and_chamber(r, test_dirs[k][0], test_dirs[k][1], d, c)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Precursor Vaults and Boss Monsters must never generate so close to player spawn!
+  // Enforce minimum spatial separation from spawn room (0,0) and its immediate neighbors.
+  auto is_safe_from_spawn = [&](const RoomPlacement &r) -> bool {
+    // Never place in spawn room (0,0)
+    if (r.grid_x == 0 && r.grid_z == 0) return false;
+    // Avoid extraction landing bay if possible
+    if (r.grid_x == m_grid_w - 1 && r.grid_z == m_grid_d - 1) return false;
+    // Reject spawn-adjacent rooms (Manhattan distance <= 1)
+    if ((std::abs(r.grid_x - 0) + std::abs(r.grid_z - 0)) <= 1) return false;
+    // Reject rooms closer than 26m from spawn center
+    float d = glm::distance(glm::vec2(r.center.x, r.center.z), glm::vec2(spawn_pos.x, spawn_pos.z));
+    return d >= 26.0f;
   };
 
   // 1. Identify best host room
   int best_room_idx = -1;
-  // First priority: Dedicated vault room types with an unconnected outer wall
+  int best_score = -1;
+
+  // First priority: Dedicated vault room types with an unconnected outer wall AND safe from spawn.
+  // Prioritize the deepest room furthest from spawn!
   for (size_t i = 1; i < m_rooms.size() - 1; ++i) {
+    if (!is_safe_from_spawn(m_rooms[i])) continue;
     RoomShapeType t = m_rooms[i].type;
-    if ((t == RoomShapeType::AbyssalVaultChasm ||
-         t == RoomShapeType::SubterraneanVaultBastion ||
-         t == RoomShapeType::PrecursorSanctumVault ||
-         t == RoomShapeType::IndustrialVaultBunker) &&
-        has_unconnected_clear_wall(m_rooms[i])) {
-      best_room_idx = static_cast<int>(i);
-      break;
-    }
-  }
-
-  // Second priority: Any dedicated vault room
-  if (best_room_idx < 0) {
-    for (size_t i = 1; i < m_rooms.size() - 1; ++i) {
-      RoomShapeType t = m_rooms[i].type;
-      if (t == RoomShapeType::AbyssalVaultChasm ||
-          t == RoomShapeType::SubterraneanVaultBastion ||
-          t == RoomShapeType::PrecursorSanctumVault ||
-          t == RoomShapeType::IndustrialVaultBunker) {
+    if (is_vault_room_type(t) && has_unconnected_clear_wall(m_rooms[i])) {
+      int score = (m_rooms[i].grid_x + m_rooms[i].grid_z) * 100 +
+                  static_cast<int>(glm::distance(glm::vec2(m_rooms[i].center.x, m_rooms[i].center.z),
+                                                glm::vec2(spawn_pos.x, spawn_pos.z)));
+      if (score > best_score) {
+        best_score = score;
         best_room_idx = static_cast<int>(i);
-        break;
       }
     }
   }
 
-  // Third priority: Deepest room away from spawn with an unconnected outer wall
+  // Second priority: Deepest room away from spawn with an unconnected outer wall and safe from spawn
   if (best_room_idx < 0) {
-    int max_dist = -1;
+    best_score = -1;
     for (size_t i = 1; i < m_rooms.size() - 1; ++i) {
+      if (!is_safe_from_spawn(m_rooms[i])) continue;
       if (!has_unconnected_clear_wall(m_rooms[i])) continue;
-      int dist = m_rooms[i].grid_x + m_rooms[i].grid_z;
-      if (dist > max_dist) {
-        max_dist = dist;
+      int score = (m_rooms[i].grid_x + m_rooms[i].grid_z) * 100 +
+                  static_cast<int>(glm::distance(glm::vec2(m_rooms[i].center.x, m_rooms[i].center.z),
+                                                glm::vec2(spawn_pos.x, spawn_pos.z)));
+      if (score > best_score) {
+        best_score = score;
         best_room_idx = static_cast<int>(i);
       }
     }
   }
 
-  // Fallback for single room layouts or small layouts
+  // Third priority: Any dedicated vault room safe from spawn with any clear wall
   if (best_room_idx < 0) {
-    for (size_t i = 0; i < m_rooms.size(); ++i) {
-      if (has_unconnected_clear_wall(m_rooms[i])) {
+    best_score = -1;
+    for (size_t i = 1; i < m_rooms.size() - 1; ++i) {
+      if (!is_safe_from_spawn(m_rooms[i])) continue;
+      RoomShapeType t = m_rooms[i].type;
+      if (is_vault_room_type(t) && has_any_clear_wall(m_rooms[i])) {
+        int score = (m_rooms[i].grid_x + m_rooms[i].grid_z) * 100 +
+                    static_cast<int>(glm::distance(glm::vec2(m_rooms[i].center.x, m_rooms[i].center.z),
+                                                  glm::vec2(spawn_pos.x, spawn_pos.z)));
+        if (score > best_score) {
+          best_score = score;
+          best_room_idx = static_cast<int>(i);
+        }
+      }
+    }
+  }
+
+  // Fourth priority: Any room safe from spawn with any clear wall
+  if (best_room_idx < 0) {
+    best_score = -1;
+    for (size_t i = 1; i < m_rooms.size() - 1; ++i) {
+      if (!is_safe_from_spawn(m_rooms[i])) continue;
+      if (!has_any_clear_wall(m_rooms[i])) continue;
+      int score = (m_rooms[i].grid_x + m_rooms[i].grid_z) * 100 +
+                  static_cast<int>(glm::distance(glm::vec2(m_rooms[i].center.x, m_rooms[i].center.z),
+                                                glm::vec2(spawn_pos.x, spawn_pos.z)));
+      if (score > best_score) {
+        best_score = score;
+        best_room_idx = static_cast<int>(i);
+      }
+    }
+  }
+
+  // Fallback for tiny layouts or test harnesses with <= 2 rooms
+  if (best_room_idx < 0) {
+    for (size_t i = 1; i < m_rooms.size(); ++i) {
+      if (has_any_clear_wall(m_rooms[i])) {
         best_room_idx = static_cast<int>(i);
         break;
       }
     }
+  }
+  if (best_room_idx < 0 && m_rooms.size() > 1) {
+    best_room_idx = 1;
   }
   if (best_room_idx < 0 && !m_rooms.empty()) {
     best_room_idx = 0;
@@ -2480,48 +2573,57 @@ void LevelGenerator::configure_vault_placement(std::mt19937 &rng) {
   vp.room_type = host.type;
   vp.door_height = 3;
 
-  // 2. Select wall orientation (prefer North +Z, South -Z, East +X, West -X)
+  // 2. Select wall orientation: prefer unconnected wall with clearance, else any wall with clearance
   int dir_x = 0;
   int dir_z = 0;
-  if (!host.connected_north && (host.center.z + host.half_depth + 6 < world_depth() - 4)) {
-    dir_x = 0; dir_z = 1;
-  } else if (!host.connected_south && (host.center.z - host.half_depth - 6 >= 4)) {
-    dir_x = 0; dir_z = -1;
-  } else if (!host.connected_east && (host.center.x + host.half_width + 6 < world_width() - 4)) {
-    dir_x = 1; dir_z = 0;
-  } else if (!host.connected_west && (host.center.x - host.half_width - 6 >= 4)) {
-    dir_x = -1; dir_z = 0;
-  } else if (!host.connected_north) {
-    dir_x = 0; dir_z = 1;
-  } else if (!host.connected_south) {
-    dir_x = 0; dir_z = -1;
-  } else if (!host.connected_east) {
-    dir_x = 1; dir_z = 0;
-  } else if (!host.connected_west) {
-    dir_x = -1; dir_z = 0;
-  } else {
-    dir_x = 0; dir_z = 1;
+  glm::ivec3 chosen_door(0);
+  glm::ivec3 chosen_chamber(0);
+  bool placed = false;
+
+  const bool host_conn[4] = {host.connected_north, host.connected_south, host.connected_east, host.connected_west};
+  for (int k = 0; k < 4; ++k) {
+    if (!host_conn[k] && get_door_and_chamber(host, test_dirs[k][0], test_dirs[k][1], chosen_door, chosen_chamber)) {
+      dir_x = test_dirs[k][0];
+      dir_z = test_dirs[k][1];
+      placed = true;
+      break;
+    }
   }
 
-  // Door is flush along chosen wall
-  int door_x = host.center.x + (dir_x != 0 ? dir_x * (host.half_width - 1) : 0);
-  int door_z = host.center.z + (dir_z != 0 ? dir_z * (host.half_depth - 1) : 0);
-  if (host.connected_north && host.connected_south && host.connected_east && host.connected_west) {
-    // If all 4 cardinal walls have corridors, shift door off-center by +4 along X so doorway does not collide with central corridor!
-    door_x += 4;
+  if (!placed) {
+    for (int k = 0; k < 4; ++k) {
+      if (get_door_and_chamber(host, test_dirs[k][0], test_dirs[k][1], chosen_door, chosen_chamber)) {
+        dir_x = test_dirs[k][0];
+        dir_z = test_dirs[k][1];
+        placed = true;
+        break;
+      }
+    }
   }
-  int door_y = host.floor_y + (host.type == RoomShapeType::PrecursorSanctumVault ? 1 : 0);
 
-  vp.door_pos = glm::ivec3(door_x, door_y, door_z);
-  vp.approach_pos = glm::ivec3(door_x - dir_x * 2, door_y, door_z - dir_z * 2);
+  if (!placed) {
+    // Ultimate boundary fallback for very tight rooms
+    dir_x = 0;
+    dir_z = (host.center.z + host.half_depth + 7 <= world_depth() - 5) ? 1 : -1;
+    int door_x = host.center.x;
+    int door_z = host.center.z + dir_z * (host.half_depth - 1);
+    door_x = std::clamp(door_x, 5, world_width() - 6);
+    door_z = std::clamp(door_z, 5, world_depth() - 6);
+    int door_y = host.floor_y + (host.type == RoomShapeType::PrecursorSanctumVault ? 1 : 0);
+    int chamber_cx = door_x + dir_x * 4;
+    int chamber_cz = door_z + dir_z * 4;
+    chosen_door = glm::ivec3(door_x, door_y, door_z);
+    chosen_chamber = glm::ivec3(chamber_cx, door_y, chamber_cz);
+  }
 
-  // Chamber extends behind door in direction (dir_x, dir_z)
-  int chamber_cx = door_x + dir_x * 4;
-  int chamber_cz = door_z + dir_z * 4;
-  vp.chamber_center = glm::ivec3(chamber_cx, door_y, chamber_cz);
-  vp.chamber_min = glm::ivec3(chamber_cx - 3, host.floor_y, chamber_cz - 3);
-  vp.chamber_max = glm::ivec3(chamber_cx + 3, host.floor_y + 4, chamber_cz + 3);
-  vp.relic_pos = glm::ivec3(chamber_cx, door_y + 1, chamber_cz);
+  int door_y = chosen_door.y;
+  vp.door_pos = chosen_door;
+  vp.approach_pos = glm::ivec3(chosen_door.x - dir_x * 2, door_y, chosen_door.z - dir_z * 2);
+
+  vp.chamber_center = chosen_chamber;
+  vp.chamber_min = glm::ivec3(chosen_chamber.x - 3, host.floor_y, chosen_chamber.z - 3);
+  vp.chamber_max = glm::ivec3(chosen_chamber.x + 3, host.floor_y + 4, chosen_chamber.z + 3);
+  vp.relic_pos = glm::ivec3(chosen_chamber.x, door_y + 1, chosen_chamber.z);
 
   // 3. Level-specific Obstacles and Guardians
   if (m_sector_index <= 1) {
@@ -2546,6 +2648,24 @@ void LevelGenerator::configure_vault_placement(std::mt19937 &rng) {
     vp.is_boss_guardian = true; // Boss Monster: Chitin Goliath
     vp.guardian_role = VaultGuardianRole::ChitinGoliath;
     vp.guardian_spawn_pos = glm::vec3(vp.approach_pos.x, static_cast<float>(door_y), vp.approach_pos.z);
+  }
+
+  // Strict Boss Monster and Vault Guardian Spawn Separation Invariant:
+  // Boss monsters must NEVER be close to spawn (>= MIN_BOSS_SPAWN_DISTANCE = 35.0m),
+  // and vault sentry guardians must NEVER be within MIN_VAULT_SPAWN_SEPARATION (30.0m).
+  if (vp.has_guardian && m_rooms.size() > 2) {
+    float req_separation = vp.is_boss_guardian ? MIN_BOSS_SPAWN_DISTANCE : MIN_VAULT_SPAWN_SEPARATION;
+    float current_dist = glm::distance(vp.guardian_spawn_pos, spawn_pos);
+    if (current_dist < req_separation) {
+      glm::vec3 offset_dir = vp.guardian_spawn_pos - spawn_pos;
+      offset_dir.y = 0.0f;
+      if (glm::length(offset_dir) < 0.001f) {
+        offset_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+      }
+      offset_dir = glm::normalize(offset_dir);
+      vp.guardian_spawn_pos = spawn_pos + offset_dir * (req_separation + 2.0f);
+      vp.guardian_spawn_pos.y = static_cast<float>(door_y);
+    }
   }
 
   m_vault_placement = vp;

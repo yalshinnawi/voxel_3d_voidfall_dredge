@@ -70,6 +70,9 @@ RoomCategory get_room_category(RoomShapeType type);
 const char* get_room_category_name(RoomCategory cat);
 bool is_harsh_hazard_room(RoomShapeType type);
 bool is_extreme_spawn_hazard(RoomShapeType type);
+bool is_vault_room_type(RoomShapeType type);
+constexpr float MIN_VAULT_SPAWN_SEPARATION = 30.0f; // Minimum Euclidean meters from player spawn to vault entrance
+constexpr float MIN_BOSS_SPAWN_DISTANCE = 35.0f;    // Minimum Euclidean meters from player spawn to boss monster
 bool is_extraction_climax_room(RoomShapeType type);
 bool is_colossal_or_massive_room(RoomShapeType type);
 float get_room_adjacency_affinity(RoomShapeType typeA, RoomShapeType typeB);
