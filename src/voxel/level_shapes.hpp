@@ -158,6 +158,13 @@ struct RoomPlacement {
     int spawned_objective_voxels{0};
     bool has_vault{false};
     VaultPlacement vault;
+    bool is_dark_zone{false};        // True if room is an unlit / blackout cavern (no luminaries)
+    float darkness_factor{0.0f};     // Darkness intensity: 0.0 (normal ambient) to 1.0 (pitch-black void)
+
+    int min_x() const { return center.x - half_width; }
+    int max_x() const { return center.x + half_width; }
+    int min_z() const { return center.z - half_depth; }
+    int max_z() const { return center.z + half_depth; }
 };
 
 struct CorridorPlacement {
@@ -260,6 +267,12 @@ public:
 
     int sector_index() const { return m_sector_index; }
     uint32_t seed() const { return m_seed; }
+
+    // ── Dark Zone & Illumination Queries ──
+    bool is_dark_zone_at(const glm::vec3& pos) const;
+    float get_darkness_at(const glm::vec3& pos) const;
+    int dark_room_count() const;
+    float sector_darkness_ratio() const;
 
 struct RoomValidationReport {
     bool valid{true};

@@ -611,7 +611,8 @@ void SurfaceClutterSystem::render_chunk_clutter(
     const glm::vec3& headlamp_dir,
     const glm::vec3& headlamp_color,
     bool headlamp_enabled,
-    float time
+    float time,
+    float darkness_factor
 ) {
     if (instances.empty() || !m_gpu_initialized) return;
 
@@ -624,6 +625,7 @@ void SurfaceClutterSystem::render_chunk_clutter(
     m_shader.set_vec3("uHeadlampColor", headlamp_color);
     m_shader.set_float("uHeadlampEnabled", headlamp_enabled ? 1.0f : 0.0f);
     m_shader.set_float("uTime", time);
+    m_shader.set_float("uDarknessFactor", darkness_factor);
 
     const float MAX_DISTANCE_SQ = 32.0f * 32.0f; // 32-meter distance gate
 

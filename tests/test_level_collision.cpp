@@ -838,8 +838,63 @@ void test_extraction_pod_grounding_clearance_and_rigidity() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 16. STRUCTURAL CONNECTIVITY & FLOATING BLOCK PREVENTION TEST
+// 17. AUTO STEP-UP TRAVERSAL TOGGLE VERIFICATION TEST
 // ─────────────────────────────────────────────────────────────
+void test_auto_step_toggle_behavior() {
+    std::cout << "\n=== [MODULE 9] Auto Step-Up Traversal Toggle Verification ===" << std::endl;
+
+    World world(1234, false);
+    // Create flat floor at Y=5 with a 1-block step at X=10 (top at Y=6)
+    for (int x = 5; x <= 15; ++x) {
+        for (int z = 5; z <= 15; ++z) {
+            world.set_voxel(x, 5, z, Voxel{MAT_FRACTURED_GRANITE, 0});
+            for (int y = 6; y <= 10; ++y) {
+                world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+            }
+        }
+    }
+    // Place a 1-block high step obstacle at X=10 (Y=6)
+    for (int z = 5; z <= 15; ++z) {
+        world.set_voxel(10, 6, z, Voxel{MAT_FRACTURED_GRANITE, 0});
+    }
+
+    // CASE A: Auto-step DISABLED (default). Player moving forward into step must be blocked.
+    {
+        PlayerController player(glm::vec3(9.2f, 5.0f + 0.9f, 10.0f));
+        player.set_auto_step(false);
+        TEST_CHECK(player.auto_step() == false, "Player auto_step must default or be set to false");
+
+        // Attempt to walk across into the step at X=10 for 30 physics frames
+        for (int f = 0; f < 30; ++f) {
+            player.velocity_mut().x = 4.0f;
+            player.update_physics(1.0f / 60.0f, world);
+        }
+
+        // Must remain blocked in front of X=10 without popping onto Y=6
+        TEST_CHECK(player.position().x < 10.0f, "Player with auto_step disabled must NOT automatically step up over 1-block obstacle");
+        TEST_CHECK(std::abs(player.position().y - (5.0f + 0.9f)) < 0.15f, "Player Y must remain on lower floor");
+    }
+
+    // CASE B: Auto-step ENABLED. Player walking into step must smoothly elevate onto the step surface.
+    {
+        PlayerController player(glm::vec3(9.2f, 5.0f + 0.9f, 10.0f));
+        player.set_auto_step(true);
+        TEST_CHECK(player.auto_step() == true, "Player auto_step must be true when enabled");
+
+        for (int f = 0; f < 30; ++f) {
+            player.velocity_mut().x = 4.0f;
+            player.update_physics(1.0f / 60.0f, world);
+        }
+
+        // Successfully stepped up onto the block at Y=6 (foot at Y=7.0f, center at 7.9f)
+        TEST_CHECK(player.position().x >= 10.0f, "Player with auto_step enabled must cross onto the step");
+        TEST_CHECK(player.position().y >= 6.0f + 0.9f - 0.05f, "Player must be elevated onto top of step");
+        TEST_CHECK(!player.is_penetrating_solid(world), "Player must not penetrate step block");
+    }
+
+    log_pass("Auto Step-Up setting cleanly enables / disables automatic elevation over steps");
+}
+
 
 int main() {
     std::cout << "==========================================================" << std::endl;
@@ -854,6 +909,7 @@ int main() {
     test_flight_carving_and_mesh_integrity();
     test_environmental_room_dangers_and_mortality();
     test_extraction_pod_grounding_clearance_and_rigidity();
+    test_auto_step_toggle_behavior();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_passed_tests << " LEVEL COLLISION AND PHYSICS TESTS PASSED!" << std::endl;

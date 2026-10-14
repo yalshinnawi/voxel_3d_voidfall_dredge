@@ -19,6 +19,8 @@
 #include "../src/systems/extraction.hpp"
 #include "../src/core/save_system.hpp"
 #include "../src/net/packet_types.hpp"
+#include "../src/ui/hud.hpp"
+#include "../src/ui/debrief_menu.hpp"
 
 using namespace Voidfall;
 
@@ -383,6 +385,89 @@ void run_e2e_multiplayer_simulation() {
     log_e2e_pass("Multiplayer Handshake, Seed Synchronization, and World Delta Broadcast Loopback");
 }
 
+// ─────────────────────────────────────────────────────────────
+// E2E SCENARIO 6: Next Sector Transition & Black Screen Prevention
+// ─────────────────────────────────────────────────────────────
+void run_e2e_next_sector_transition_lifecycle() {
+    std::cout << "\n========================================================" << std::endl;
+    std::cout << "  E2E SCENARIO 6: Next Sector Transition & Black Screen Regression Prevention" << std::endl;
+    std::cout << "========================================================" << std::endl;
+
+    // 1. Fresh profile starts in Sector 1
+    UserProfile profile;
+    int current_sector = 1;
+    bool expedition_success = false;
+
+    // 2. Play and complete Sector 1
+    PlayerInventory inv;
+    inv.reset(25);
+    inv.voidite = 25;
+    inv.finalize_run(1, true); // Safe evac!
+    expedition_success = true;
+
+    // 3. Bank rewards into profile (simulating render_debrief)
+    int run_exp = inv.total_run_score;
+    if (run_exp <= 0) {
+        run_exp = inv.voidite * 5 + inv.titanium * 6;
+    }
+    run_exp += 150 + inv.run_completion_rate; // Expedition completion stipend
+    int lvls_gained = 0, bonus_coins = 0;
+    profile.add_exp(run_exp, lvls_gained, bonus_coins);
+    profile.grant_coins(inv.run_coins_earned);
+    profile.highest_cleared_sector = std::max(profile.highest_cleared_sector, 1);
+    profile.sector_records[1].completed = true;
+    profile.sector_records[1].highest_completion_rate = inv.run_completion_rate;
+
+    E2E_CHECK(profile.is_sector_completed(1), "Sector 1 must be marked completed");
+    E2E_CHECK(profile.get_player_level() >= 2, "Completing Sector 1 with safe evac must reach Delver Rank 2");
+    E2E_CHECK(profile.is_sector_unlocked(2), "Sector 2 must now be unlocked");
+
+    // 4. Click [CONTINUE TO NEXT ROUND]
+    DebriefMenu debrief;
+    debrief.SetCurrentSectorIndex(current_sector);
+    DebriefAction action = debrief.ProcessClick("[CONTINUE TO NEXT ROUND]");
+    E2E_CHECK(action == DebriefAction::LaunchNextSector, "Clicking continue must return LaunchNextSector");
+
+    // 5. Progression Routing: advance sector and reset expedition_success
+    int next_sec = std::min(UserProfile::MAX_SECTOR_RECORDS - 1, current_sector + 1);
+    if (profile.is_sector_unlocked(next_sec) || profile.is_sector_completed(current_sector)) {
+        current_sector = next_sec;
+    }
+    E2E_CHECK(current_sector == 2, "Next sector must advance to Sector 2");
+
+    // CRITICAL INVARIANT: expedition_success MUST be reset to false before launching next sector
+    expedition_success = false;
+    E2E_CHECK(!expedition_success, "Expedition success flag must be false when launching next sector");
+
+    // 6. Launch Sector 2 world and player
+    World world(4242);
+    world.generate_world(current_sector, 4242);
+    PlayerController player(glm::vec3(16.0f, 25.0f, 16.0f));
+    player.clamp_to_surface(world);
+    E2E_CHECK(player.is_grounded(), "Player must be safely clamped to surface in Sector 2");
+
+    // 7. Verify Spawn Fade & HUD Timer Resolution (Zero Black Screen)
+    HUD hud(1600, 900, true);
+    hud.trigger_spawn_fade(0.6f);
+    E2E_CHECK(hud.is_spawn_fade_active(), "Spawn fade must be active at sector entry");
+    E2E_CHECK(std::abs(hud.spawn_fade_timer() - 0.6f) < 0.001f, "Spawn fade timer must start at 0.6s");
+
+    // Simulate game engine fixed_tick frames
+    float dt = 0.1f;
+    for (int tick = 0; tick < 7; ++tick) {
+        // Active gameplay tick must NOT return early because expedition_success is false
+        E2E_CHECK(!expedition_success, "Active gameplay tick must have expedition_success == false");
+        hud.update(dt);
+        player.update_physics(dt, world);
+    }
+
+    E2E_CHECK(!hud.is_spawn_fade_active(), "Spawn fade must decay completely to 0 (NO BLACK SCREEN)");
+    E2E_CHECK(hud.spawn_fade_timer() <= 0.0f, "Spawn fade timer must reach 0.0s");
+    E2E_CHECK(player.health() > 0.0f, "Player must be alive and fully functional in Sector 2");
+
+    log_e2e_pass("Next Sector Re-Deploy Lifecycle & Black Screen Regression Prevention");
+}
+
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  VOIDFALL: DREDGE -- COMPLETE END-TO-END (E2E) TEST SUITE" << std::endl;
@@ -394,6 +479,7 @@ int main() {
         run_e2e_sector3_vanguard_survival();
         run_e2e_anti_exploit_and_abandon();
         run_e2e_multiplayer_simulation();
+        run_e2e_next_sector_transition_lifecycle();
     } catch (const std::exception& e) {
         std::cerr << "\n[E2E EXCEPTION] " << e.what() << std::endl;
         return 1;

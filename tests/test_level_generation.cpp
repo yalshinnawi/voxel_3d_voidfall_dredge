@@ -201,6 +201,7 @@ void test_random_shape_permutations_integration() {
                     float mid_x = static_cast<float>(corr_x->start_pos.x + corr_x->end_pos.x) * 0.5f;
 
                     PlayerController player_x(glm::vec3(start_x, start_y, start_z));
+                    player_x.set_auto_step(true);
                     player_x.clamp_to_surface(world);
                     TEST_CHECK(!player_x.is_penetrating_solid(world), "Player penetrating at corridor start");
 
@@ -237,6 +238,7 @@ void test_random_shape_permutations_integration() {
                     float mid_z = static_cast<float>(corr_z->start_pos.z + corr_z->end_pos.z) * 0.5f;
 
                     PlayerController player_z(glm::vec3(start_x, start_y, start_z));
+                    player_z.set_auto_step(true);
                     player_z.clamp_to_surface(world);
                     TEST_CHECK(!player_z.is_penetrating_solid(world), "Player penetrating at North corridor start");
 
@@ -517,6 +519,7 @@ void test_all_rooms_tour_and_visibility() {
 
             // 2. Physical Traversal Test: Delver walks through the corridor from Room A to Room B
             PlayerController delver(start_pos);
+            delver.set_auto_step(true);
             delver.clamp_to_surface(world);
             TEST_CHECK(!delver.is_penetrating_solid(world), "Delver must not penetrate at corridor entry");
 
@@ -918,6 +921,96 @@ void test_objective_material_scarcity_and_completeness() {
     log_pass("Objective resource scarcity, zero-near-spawn exploration gating, zero-extraction gating, all-archetype pre-determined offsets, and room decoration visual decoupling verified across all Sectors and Seeds");
 }
 
+// ─────────────────────────────────────────────────────────────
+// 6. DARK ZONES & TORCH ILLUMINATION SCALING TESTS
+// ─────────────────────────────────────────────────────────────
+void test_dark_zones_and_illumination() {
+    std::cout << "\n=== [MODULE 6] Dark Zones & Illumination Scaling ===" << std::endl;
+
+    // Test 1: Sector Darkness Scaling Progression
+    {
+        LevelGenerator s1(1, 1001);
+        LevelGenerator s2(2, 1002);
+        LevelGenerator s3(3, 1003);
+
+        float r1 = s1.sector_darkness_ratio();
+        float r2 = s2.sector_darkness_ratio();
+        float r3 = s3.sector_darkness_ratio();
+
+        TEST_CHECK(r1 <= 0.25f, "Sector 1 must have low dark zone ratio (<= 25%)");
+        TEST_CHECK(r2 > r1 || s2.dark_room_count() >= 3, "Sector 2 must feature more dark zones than Sector 1");
+        TEST_CHECK(r3 >= 0.45f, "Sector 3+ deep extraction must have high dark zone density (>= 45%)");
+
+        log_pass("Sector darkness progression scaling verified (Sector 1 gentle, Sector 2 moderate, Sector 3+ blackout caverns)");
+    }
+
+    // Test 2: Inviolable Safe Illumination for Spawn & Evac Pod bays across seeds
+    for (uint32_t seed : {42u, 1337u, 8888u, 99999u}) {
+        for (int sec = 1; sec <= 3; ++sec) {
+            LevelGenerator gen(sec, seed);
+
+            const RoomPlacement* spawn = gen.get_room_at_grid(0, 0);
+            TEST_CHECK(spawn != nullptr, "Spawn room must exist");
+            TEST_CHECK(!spawn->is_dark_zone, "Spawn staging cavern must NEVER be marked as dark zone");
+            TEST_CHECK(spawn->darkness_factor == 0.0f, "Spawn staging cavern must have 0 darkness factor");
+
+            glm::vec3 spawn_pos(spawn->center.x, 10.0f, spawn->center.z);
+            TEST_CHECK(!gen.is_dark_zone_at(spawn_pos), "is_dark_zone_at must return false at spawn staging center");
+            TEST_CHECK(gen.get_darkness_at(spawn_pos) == 0.0f, "get_darkness_at must return 0.0f at spawn staging center");
+
+            int evac_gx = gen.grid_width() - 1;
+            int evac_gz = gen.grid_depth() - 1;
+            const RoomPlacement* evac = gen.get_room_at_grid(evac_gx, evac_gz);
+            TEST_CHECK(evac != nullptr, "Evac room must exist");
+            TEST_CHECK(!evac->is_dark_zone, "Evac landing bay must NEVER be marked as dark zone");
+            TEST_CHECK(evac->darkness_factor == 0.0f, "Evac landing bay must have 0 darkness factor");
+
+            glm::vec3 evac_pos(evac->center.x, 10.0f, evac->center.z);
+            TEST_CHECK(!gen.is_dark_zone_at(evac_pos), "is_dark_zone_at must return false at evac center");
+            TEST_CHECK(gen.get_darkness_at(evac_pos) == 0.0f, "get_darkness_at must return 0.0f at evac center");
+        }
+    }
+    log_pass("Spawn staging and Extraction landing bays strictly guaranteed full illumination across all sectors and seeds");
+
+    // Test 3: Dark Room Spatial Lookup and Darkness Factors
+    {
+        LevelGenerator gen(3, 7777);
+        bool found_dark_room = false;
+        for (const auto& room : gen.rooms()) {
+            if (room.is_dark_zone) {
+                found_dark_room = true;
+                TEST_CHECK(room.darkness_factor >= 0.70f, "Dark zone rooms must have darkness factor >= 0.70f");
+                glm::vec3 center(room.center.x, 12.0f, room.center.z);
+                TEST_CHECK(gen.is_dark_zone_at(center), "is_dark_zone_at must return true within dark zone room");
+                TEST_CHECK(gen.get_darkness_at(center) >= 0.70f, "get_darkness_at must match dark zone factor");
+            }
+        }
+        TEST_CHECK(found_dark_room, "Sector 3 must have at least one dark zone room");
+        log_pass("Dark zone spatial query and darkness factors validated");
+    }
+
+    // Test 4: Luminary Suppression in Dark Rooms
+    {
+        LevelGenerator gen(2, 54321);
+        for (const auto& lum : gen.luminaries()) {
+            // Find which room (if any) this luminary is inside
+            for (const auto& r : gen.rooms()) {
+                if (r.is_dark_zone) {
+                    bool inside_room = (lum.position.x >= r.min_x() && lum.position.x <= r.max_x() &&
+                                        lum.position.z >= r.min_z() && lum.position.z <= r.max_z());
+                    if (inside_room) {
+                        // In dark zones, standard room cavern luminaries are suppressed.
+                        // Only high hazard incandescent magma / lava vents may exist.
+                        TEST_CHECK(lum.type == LuminaryType::ThermalMagmaVent,
+                                   "Standard decorative cavern luminaries must be suppressed in dark zone rooms");
+                    }
+                }
+            }
+        }
+        log_pass("Cavern luminaries correctly omitted in dark zone blackout caverns");
+    }
+}
+
 
 int main() {
     std::cout << "==========================================================" << std::endl;
@@ -929,6 +1022,7 @@ int main() {
     test_all_rooms_tour_and_visibility();
     test_spawn_safety_and_full_level_walk_flight();
     test_objective_material_scarcity_and_completeness();
+    test_dark_zones_and_illumination();
 
     std::cout << "\n==========================================================" << std::endl;
     std::cout << "  ALL " << s_passed_tests << " PROCEDURAL GENERATION TESTS PASSED!" << std::endl;

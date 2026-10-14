@@ -101,6 +101,7 @@ bool MissionSystem::check_satchel_vault_breach(World& world, const glm::vec3& bl
                 }
             }
         }
+        world.sync_remesh_box(glm::ivec3(vx - 1, vy, vz - 1), glm::ivec3(vx + 1, vy + 2, vz + 1));
 
         m_vault.state = VaultObjectiveState::Breached;
         if (m_on_notification) {

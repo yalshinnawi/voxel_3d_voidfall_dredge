@@ -11,13 +11,16 @@ enum class UpgradeType : int {
     DrillDurability = 1,     // Specialization: Thermal heat sinks & cooling (Max 3)
     MicroCharges = 6,        // Capstone: Surgical blast & mineral extraction yield (Max 2)
 
-    // Discipline 2: TRAVERSAL & SCAN (Exo-Suit Mobility & Sonar)
+    // Discipline 2: TRAVERSAL & MOBILITY (Exo-Suit Fuel & Traversal)
     ThrusterTank = 2,        // Foundation: Jetpack fuel capacity & hover endurance (Max 5)
     KineticDynamo = 3,       // Specialization: Sprint & fall kinetic recharge (Max 3)
+    ImpactDampeners = 18,    // Specialization: Fall impact & kinetic dampening (Max 3)
     SonarFrequency = 4,      // Foundation/Tech: Wide-spectrum seismic transceiver (Max 2)
 
-    // Discipline 3: DEFENSE (Bastion & Hazard Survival)
+    // Discipline 3: DEFENSE & HAZARD RESISTANCES (Bastion & Environmental Wards)
     ReinforcedPlating = 5,   // Foundation: Suit integrity HP & debris impact dampening (Max 5)
+    RadiationShielding = 19, // Specialization: Ionizing radiation resistance & hazard dampening (Max 3)
+    ThermalInsulation = 20,  // Specialization: Molten lava & thermal slag burn mitigation (Max 3)
     KineticShielding = 7,    // Specialization: Shield capacity buffer & fast recharge (Max 3)
     Defibrillator = 8,       // Capstone: Emergency second wind revive & barrier (Max 2)
 
@@ -31,12 +34,13 @@ enum class UpgradeType : int {
     CleaveShockwave = 13,    // Specialization: Wide 90-degree cleave cone & shock stun (Max 3)
     BerserkerOverdrive = 14, // Capstone: Melee strike shield siphon & speed burst (Max 2)
 
-    // Discipline 6: GUN DAMAGE (Ballistics & Precision Firepower)
+    // Discipline 6: GUN DAMAGE & APEX HUNTING (Ballistics & Boss Slayers)
     HyperVelocitySlugs = 15, // Foundation: Weapon projectile damage & penetration (Max 5)
     RapidCycling = 16,       // Specialization: Overclocked fire rate & rapid reload (Max 3)
+    ApexBossDamage = 21,     // Specialization: Apex boss damage vs Chitin Goliath (Max 3)
     CriticalWeakpoint = 17,  // Capstone: Piercing weakpoint critical strike damage (Max 2)
 
-    COUNT = 18
+    COUNT = 22
 };
 
 struct UpgradePrerequisite {
@@ -66,7 +70,7 @@ enum class NodeWebState {
     Available = 3,       // Ready to acquire with EXP
     Purchased = 4,       // Active tier 1 to MaxTier-1
     Mastered = 5,        // Max tier mastered
-    CampaignCapped = 6   // Prereq & level met, but player has reached 24 pts campaign cap
+    CampaignCapped = 6   // Prereq & level met, but player has reached campaign cap
 };
 
 struct TierCostInfo {
@@ -81,6 +85,9 @@ struct TierCostInfo {
 struct UpgradeInfo {
     UpgradeType type;
     std::string name;
+    std::string short_name;       // 1-2 words for web node ("DRILL SURGE", "RAD SHIELD", etc.)
+    std::string short_buff;       // 1-line buff effect ("+12% MINING SPD", "-25% RAD DMG", etc.)
+    std::string icon_tag;         // "<drill>", "<hazard>", "<flare>", "<shield>", "<skull>", etc.
     std::string category;
     std::string discipline;       // "EXCAVATION", "TRAVERSAL", "DEFENSE", "STEALTH", "MELEE", "GUN DAMAGE"
     std::string description;
@@ -90,6 +97,8 @@ struct UpgradeInfo {
     std::vector<std::string> tier_subtitles;
     std::string milestone_perk;
     int max_tier{5};
+    float web_x{0.0f};            // 2D Web layout position relative to nexus
+    float web_y{0.0f};
 };
 
 struct UpgradeTree {
@@ -101,10 +110,13 @@ struct UpgradeTree {
     // Discipline 2: TRAVERSAL & SCAN (Exo-Suit Mobility & Sonar)
     int thrusterTankTier{0};        // Max 5: +20% jetpack fuel capacity per tier
     int kineticDynamoTier{0};       // Max 3: Sprinting/falling recharges fuel +15% faster
+    int impactDampenersTier{0};      // Max 3: Fall impact damage reduced by -25% per tier
     int sonarFrequencyTier{0};      // Max 2: +2m scan radius, -1.0s CD (T2 unlocks HUD labels)
 
-    // Discipline 3: DEFENSE (Bastion & Hazard Survival)
+    // Discipline 3: DEFENSE & HAZARDS (Bastion & Environmental Wards)
     int reinforcedPlatingTier{0};   // Max 5: +15 Max HP, -10% cave-in/debris damage
+    int radiationShieldingTier{0};  // Max 3: -25% radiation exposure rate & damage per tier
+    int thermalInsulationTier{0};   // Max 3: -25% lava and thermal damage per tier
     int kineticShieldingTier{0};    // Max 3: +12 Max Shield, -0.5s shield recharge delay
     int defibrillatorTier{0};       // Max 2: Emergency second wind upon fatal damage
 
@@ -118,16 +130,17 @@ struct UpgradeTree {
     int cleaveShockwaveTier{0};     // Max 3: 90-degree cleave arc & stun duration
     int berserkerOverdriveTier{0};  // Max 2: Melee strike siphons +12 shield & speed burst
 
-    // Discipline 6: GUN DAMAGE (Ballistics & Precision Firepower)
+    // Discipline 6: GUN DAMAGE & APEX HUNTING (Ballistics & Precision Firepower)
     int hyperVelocitySlugsTier{0};  // Max 5: +12% firearm projectile damage per tier
     int rapidCyclingTier{0};        // Max 3: +8% fire rate & +10% reload speed per tier
+    int apexBossDamageTier{0};      // Max 3: +20% damage vs Chitin Goliath & Apex Bosses per tier
     int criticalWeakpointTier{0};   // Max 2: +35% critical damage on monster weakpoints
 
     bool can_identify_materials() const { return sonarFrequencyTier >= 2; }
 
     static constexpr int MAX_TIER = 5;
-    static constexpr int CAMPAIGN_POINT_CAP = 24;  // Max points assignable before beating the campaign
-    static constexpr int TOTAL_TREE_POINTS = 60;   // Exactly 60 points across the full 6-branch web
+    static constexpr int CAMPAIGN_POINT_CAP = 28;  // Max points assignable before beating the campaign
+    static constexpr int TOTAL_TREE_POINTS = 72;   // Exactly 72 points across the full 6-branch web
 
     static int get_max_tier(UpgradeType type);
 

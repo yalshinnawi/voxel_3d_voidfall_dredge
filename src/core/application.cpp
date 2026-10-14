@@ -45,6 +45,7 @@ Application* Application::instance() {
 
 void Application::LaunchSector(int sector_index) {
     m_selected_level = sector_index;
+    m_expedition_success = false;
     start_expedition(m_selected_level);
 }
 
@@ -79,6 +80,7 @@ void Application::TransitionState(GameState newState) {
 
     // Reset single-trigger death guard, trigger 0.6s fade-from-black, and pause shooting on entering active gameplay
     if (newState == GameState::Gameplay) {
+        m_expedition_success = false;
         if (m_state != GameState::Paused) {
             AudioSystem::instance().reset_death_sound();
             if (m_hud) {
@@ -213,13 +215,47 @@ void Application::init_systems() {
     });
 
     m_player->set_on_melee_shove([this](const glm::vec3& cam_pos, const glm::vec3& cam_dir) {
-        int hits = m_stalkers.apply_melee_shove(cam_pos, cam_dir, 2.5f, 0.65f, 15.0f);
-        m_player->add_trauma(0.15f);
+        float dmg = 15.0f * m_player->melee_damage_multiplier();
+        float shove_range = (m_player->upgrades().cleaveShockwaveTier > 0) ? 3.2f : 2.5f;
+        float min_cos = (m_player->upgrades().cleaveShockwaveTier > 0) ? 0.0f : 0.65f;
+
+        int hits = m_stalkers.apply_melee_shove(cam_pos, cam_dir, shove_range, min_cos, dmg);
+
+        // Weapon/Tool-specific melee swing audio whoosh
         if (m_audio) {
-            m_audio->play_sound_3d(SoundCue::BulkheadDismantle, cam_pos, 1.0f);
+            m_audio->play_melee_swing(
+                static_cast<int>(m_player->active_tool()),
+                static_cast<int>(m_player->weapon_archetype()),
+                cam_pos
+            );
         }
-        if (hits > 0 && m_hud) {
-            m_hud->trigger_hit_marker(false, 15.0f);
+
+        // Camera recoil / trauma impulse tailored to weapon heft & swing kinematics
+        if (m_player->active_tool() == ToolSlot::CombatWeapon) {
+            if (m_player->weapon_archetype() == WeaponArchetype::MagmaScattergun) {
+                m_player->add_trauma(0.20f); // Heavy horizontal cleave kick
+            } else if (m_player->weapon_archetype() == WeaponArchetype::NeedlerRailgun) {
+                m_player->add_trauma(0.12f); // Sharp centerline spear thrust
+            } else {
+                m_player->add_trauma(0.16f); // Upward muzzle uppercut kick
+            }
+        } else if (m_player->active_tool() == ToolSlot::MiningDrill) {
+            m_player->add_trauma(0.22f);     // Heavy industrial battering ram shudder
+        } else {
+            m_player->add_trauma(0.15f);
+        }
+
+        // Hostile creature melee impact feedback
+        if (hits > 0) {
+            if (m_hud) {
+                m_hud->trigger_hit_marker(false, dmg);
+            }
+            if (m_audio) {
+                m_audio->trigger_melee_hit_flesh(cam_pos + cam_dir * 1.5f);
+            }
+            if (m_player->upgrades().berserkerOverdriveTier > 0 && m_audio) {
+                m_audio->play_sound_2d(SoundCue::UIUpgrade, 0.70f, 1.45f);
+            }
         }
     });
 
@@ -285,6 +321,28 @@ void Application::init_systems() {
             m_trauma = std::min(1.0f, m_trauma + trauma_add);
             if (m_audio) {
                 m_audio->trigger_debris_impact(1.0f);
+            }
+        } else if (source == PlayerController::DamageSource::CorrosiveAcid) {
+            // CORROSIVE ACID: Sizzling chemical etching vignette & caustic hiss!
+            if (m_hud) {
+                m_hud->trigger_acid_flash(flash_intensity);
+                m_hud->set_acid_exposure(1.0f, 0.016f);
+            }
+            float trauma_add = std::clamp(dmg * 0.015f + 0.06f, 0.06f, 0.20f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio) {
+                m_audio->play_sound_2d(SoundCue::ToxicGasHiss, 0.70f);
+            }
+        } else if (source == PlayerController::DamageSource::CryogenicCoolant) {
+            // CRYOGENIC COOLANT: Frosted sub-zero ice crystallization & acoustic droplet ping
+            if (m_hud) {
+                m_hud->trigger_frost_flash(flash_intensity);
+                m_hud->set_frost_exposure(1.0f, 0.016f);
+            }
+            float trauma_add = std::clamp(dmg * 0.010f + 0.03f, 0.03f, 0.15f);
+            m_trauma = std::min(1.0f, m_trauma + trauma_add);
+            if (m_audio) {
+                m_audio->play_sound_2d(SoundCue::CavernDrip, 0.60f);
             }
         } else {
             // Kinetic / Spikes / Thermal Lava / Void Singularity
@@ -354,6 +412,7 @@ void Application::init_systems() {
     m_audio = std::make_unique<AudioEngine>();
     bool enable_audio = true;
     if (m_config.mute_audio || m_config.test_mode || m_config.test_enemy ||
+        m_config.test_enemy_load ||
         m_config.auto_play_test || m_config.capture_models || 
         m_config.capture_level_shapes || m_config.hidden_window ||
         !m_config.single_screenshot_path.empty() || m_config.is_test_save) {
@@ -448,6 +507,7 @@ void Application::init_systems() {
 void Application::sync_audio_settings() {
     if (m_audio) {
         m_audio->set_master_volume(m_settings.master_volume);
+        m_audio->set_music_volume(m_settings.music_volume);
         m_audio->set_sfx_volume(m_settings.sfx_volume);
         m_audio->set_enemy_volume(m_settings.enemy_volume);
         m_audio->set_ambient_volume(m_settings.ambient_volume);
@@ -479,6 +539,7 @@ bool Application::try_interact() {
 
                 int dummy_exp = 0, dummy_ti = 0;
                 m_world->vault_door_mut().interact_relic(dummy_exp, dummy_ti);
+                register_objective_interaction(MAT_PRISMATIC_CRYSTAL);
 
                 if (m_hud) {
                     m_hud->add_floating_loot(relic_pos + glm::vec3(0.0f, 0.6f, 0.0f),
@@ -503,6 +564,8 @@ void Application::sync_profile_with_player() {
     CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
     if (m_player) {
         m_player->apply_attributes_and_upgrades(cls, m_user_profile.upgrades);
+        m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
+        m_player->set_auto_step(m_settings.auto_step);
     }
     if (m_viewmodel) {
         m_viewmodel->set_character_class(cls);
@@ -514,6 +577,8 @@ void Application::sync_profile_with_player() {
 void Application::start_expedition(int level) {
     VF_LOG_INFO("Expedition", "Launching expedition into Sector " << level);
     m_selected_level = level;
+    m_expedition_success = false;
+    m_debris.clear();
     if (m_renderer) {
         m_renderer->set_sector(level);
     }
@@ -547,6 +612,7 @@ void Application::start_expedition(int level) {
     int astral_target = (level >= 3) ? (3 + (level - 3) * 2) : 0;
     m_inventory.reset(voidite_target, astral_target);
     m_expedition_time = 0.0f;
+    reset_all_objective_idle_timers();
 
     // Apply Delver Archetype & Upgrades
     CharacterClass cls = static_cast<CharacterClass>(m_user_profile.selected_class_id);
@@ -559,6 +625,7 @@ void Application::start_expedition(int level) {
 
     // Generate Level Sector Procedural Topology
     m_world->generate_world(level, seed_to_use, voidite_target);
+    m_world->verify_and_seed_objective_ores(astral_target);
     m_world->update(m_player->position(), 2);
 
     glm::vec3 spawn_pos = (m_world && m_world->level_generator()) ?
@@ -585,6 +652,7 @@ void Application::start_expedition(int level) {
     m_player->clear_breadcrumbs();
     m_player->reset_insertion_shield(6.0f);
     m_player->reset_spawn_shoot_pause(0.6f);
+    m_player->reset_radiation();
     m_terrain_scanner.reset();
     m_mission.reset(level);
     m_mission.embed_precursor_vault(*m_world, level);
@@ -607,6 +675,7 @@ void Application::start_expedition(int level) {
         for (const auto& fauna : m_world->GetActiveEntities()) {
             m_stalkers.spawn_roosting(fauna.pos, fauna.role);
         }
+        m_stalkers.assign_patrol_zones_from_world(*m_world);
     }
 
     // Pre-populate Burrowers for Sector 3+ (Endgame Abyssal Mantle)
@@ -620,14 +689,41 @@ void Application::start_expedition(int level) {
                            static_cast<float>(rooms[room_idx].center.z));
             m_burrowers.spawn_dormant_burrower(bpos, 1.2f + b * 0.1f);
         }
+        m_burrowers.assign_patrol_zones_from_world(*m_world);
     }
 
-    // All pre-placed fauna must initialize in AIState::ROOSTING (dormant on walls/ceilings) with spawn grace
-    for (auto& s : m_stalkers.stalkers_mut()) {
-        s.state = StalkerState::Roosting;
+    // Pre-placed fauna initialize with designated patrol zones and spawn grace.
+    // Half of the cavern fauna start as active prowling sentries in Idle state,
+    // while the others start dormant in Roosting with autonomous slumber timers.
+    for (size_t i = 0; i < m_stalkers.stalkers().size(); ++i) {
+        auto& s = m_stalkers.stalkers_mut()[i];
+        if (s.is_boss()) {
+            s.state = StalkerState::Idle;
+            s.surface_state = StalkerSurfaceState::FLOOR;
+            s.target_surface_state = StalkerSurfaceState::FLOOR;
+            s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+            s.patrol_pause_timer = 0.5f;
+            s.slumber_timer = 0.0f;
+            s.spawn_grace_timer = 0.0f;
+            s.detection_range = 28.0f;
+        } else {
+            bool is_active_sentry = (i % 2 == 0);
+            if (is_active_sentry && s.has_patrol_zone) {
+                s.state = StalkerState::Idle;
+                s.surface_state = StalkerSurfaceState::FLOOR;
+                s.target_surface_state = StalkerSurfaceState::FLOOR;
+                s.contact_normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                s.m_targetUpVector = glm::vec3(0.0f, 1.0f, 0.0f);
+                s.patrol_pause_timer = 0.5f;
+            } else {
+                s.state = StalkerState::Roosting;
+                s.slumber_timer = 90.0f + static_cast<float>((s.id * 17) % 60);
+            }
+            s.spawn_grace_timer = 4.0f;
+        }
         s.state_timer = 0.0f;
         s.velocity = glm::vec3(0.0f);
-        s.spawn_grace_timer = 4.0f;
         s.screech_timer = 12.0f;
         s.stuck_timer = 0.0f;
         s.stuck_checkpoint_pos = s.position;
@@ -655,17 +751,12 @@ void Application::start_expedition(int level) {
         m_audio->play_sound_2d(ambient_drone, 0.24f, 1.0f, true);
     }
 
-    // From Sector 3 onward, impose an escalating hard-extraction countdown.
-    // Sector 3 = 180s, each additional sector reduces by 10s, floor at 60s.
-    if (level >= 3) {
-        m_level3_timer = static_cast<float>(std::max(180 - (level - 3) * 10, 60));
-    }
-
     m_death_sequence = false;
     m_death_timer = 0.0f;
     m_debrief_input_lock = 0.0f;
     m_tremor_spall_timer = 0.0f;
     m_aftershock_wave_timer = 0.0f;
+    m_expedition_success = false;
     if (m_hud) {
         m_hud->set_death_sequence(false);
         m_hud->SetContractorBriefing(true, 8.0f);
@@ -683,6 +774,10 @@ void Application::setup_extraction_callbacks() {
 
     m_extraction->set_on_complete([this]() {
         m_expedition_success = true;
+        m_death_sequence = false;
+        if (m_player) {
+            m_player->reset_insertion_shield(999.0f); // Complete invulnerability upon extraction
+        }
         if (m_audio) m_audio->play_sound_2d(SoundCue::EvacTouchdown, 1.0f);
         if (m_mission.is_relic_retrieved()) {
             m_user_profile.total_exp += m_mission.total_bonus_xp();
@@ -809,6 +904,24 @@ void Application::on_block_broken(int x, int y, int z, const glm::ivec3& normal,
     VoxelShape shape = static_cast<VoxelShape>(flags & VOXEL_SHAPE_MASK);
     m_renderer->spawn_break_particles(glm::vec3(x, y, z), normal, mat, shape);
     m_spawn_mgr.on_block_broken(mat);
+
+    // Register delver interaction with objective materials and auto-remove active hint
+    register_objective_interaction(mat);
+
+    if (m_hud && m_hud->has_objective_hint()) {
+        glm::vec3 bpos(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+        float d = glm::distance(bpos, m_objective_hint_pos);
+        bool is_target_mat = (m_objective_hint_mat != 0 && mat == m_objective_hint_mat);
+        if (d <= 2.5f || is_target_mat) {
+            uint8_t hint_mat = m_objective_hint_mat != 0 ? m_objective_hint_mat : mat;
+            m_hud->clear_objective_hint();
+            m_objective_hint_given = false;
+            m_objective_hint_timer = 0.0f;
+            register_objective_interaction(hint_mat);
+            VF_LOG_INFO("Gameplay", "Objective hint removed on block broken: mat="
+                        << static_cast<int>(mat) << " at (" << x << ", " << y << ", " << z << ")");
+        }
+    }
 
     // Anchor Dependency & Auto-Despawn: clear surface props on broken voxel faces
     if (m_world) {
@@ -1051,9 +1164,10 @@ void Application::on_sonar_cast(const glm::vec3& origin) {
     bool extraction_active = m_extraction && (m_extraction->phase() == ExtractionPhase::BeaconDeployed || m_extraction->phase() == ExtractionPhase::PodLanded);
     glm::vec3 extraction_pos = m_extraction ? m_extraction->beacon_position() : glm::vec3(0.0f);
 
+    bool include_astral = m_inventory.target_astral_ore > 0;
     m_surveying.trigger_scan(origin, *m_world, radius, linger_bonus, effective_rank,
                              &m_stalkers.stalkers(), &m_burrowers.burrowers(),
-                             extraction_pos, extraction_active);
+                             extraction_pos, extraction_active, include_astral);
     m_renderer->trigger_sonar_pulse(origin);
     m_skills.add_surveying_xp(40);
 
@@ -1098,11 +1212,31 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
         m_renderer->trigger_dust_kickup(is_micro ? 2.5f : 3.8f);
     }
 
+    // Track bounding box of modified blocks to synchronously remesh affected chunks
+    glm::ivec3 min_affected = origin;
+    glm::ivec3 max_affected = origin;
+    bool any_blocks_destroyed = false;
+    size_t prev_debris_count = m_debris.size();
+
     // Check if blast breaches sealed Precursor Vault Bulkhead door (Secondary Objective)
-    m_mission.check_satchel_vault_breach(*m_world, blast_origin, is_micro ? 2.5f : 4.5f);
+    if (m_mission.check_satchel_vault_breach(*m_world, blast_origin, is_micro ? 2.5f : 4.5f)) {
+        register_objective_interaction(MAT_REINFORCED_VAULT_DOOR);
+        if (m_mission.vault().exists) {
+            glm::ivec3 vpos = m_mission.vault().door_pos;
+            min_affected = glm::min(min_affected, vpos - glm::ivec3(2, 1, 2));
+            max_affected = glm::max(max_affected, vpos + glm::ivec3(2, 4, 2));
+            any_blocks_destroyed = true;
+        }
+    }
 
     // Check if blast ignites nearby porous bio-gas pocket in a controlled fireball
-    m_mission.ignite_gas_pocket(*m_world, blast_origin, is_micro ? 3.5f : 6.0f, m_stalkers);
+    int ignited_gas = m_mission.ignite_gas_pocket(*m_world, blast_origin, is_micro ? 3.5f : 6.0f, m_stalkers);
+    if (ignited_gas > 0) {
+        float gas_rad = is_micro ? 3.5f : 6.0f;
+        min_affected = glm::min(min_affected, glm::ivec3(std::floor(blast_origin.x - gas_rad), std::floor(blast_origin.y - gas_rad), std::floor(blast_origin.z - gas_rad)));
+        max_affected = glm::max(max_affected, glm::ivec3(std::ceil(blast_origin.x + gas_rad), std::ceil(blast_origin.y + gas_rad), std::ceil(blast_origin.z + gas_rad)));
+        any_blocks_destroyed = true;
+    }
 
     if (is_micro) {
         // Surgical 1x1x3 (or 1x1x4 for Demolitionist) directional blast that removes a tunnel without destroying adjacent fragile ore
@@ -1116,6 +1250,9 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                 if (v.material_id != MAT_VOIDITE_CRYSTAL) {
                     m_world->set_voxel(bpos.x, bpos.y, bpos.z, Voxel{MAT_AIR, 0}, true);
                     on_block_broken(bpos.x, bpos.y, bpos.z, -forward_step, v.material_id, v.flags_and_damage);
+                    min_affected = glm::min(min_affected, bpos);
+                    max_affected = glm::max(max_affected, bpos);
+                    any_blocks_destroyed = true;
                 }
             }
         }
@@ -1132,11 +1269,28 @@ void Application::on_explosive_blast(const glm::ivec3& origin, const glm::ivec3&
                     if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK) {
                         m_world->set_voxel(bpos.x, bpos.y, bpos.z, Voxel{MAT_AIR, 0}, true);
                         on_block_broken(bpos.x, bpos.y, bpos.z, glm::ivec3(0, 1, 0), v.material_id, v.flags_and_damage);
+                        min_affected = glm::min(min_affected, bpos);
+                        max_affected = glm::max(max_affected, bpos);
+                        any_blocks_destroyed = true;
                     }
                 }
             }
         }
         m_trauma = std::min(m_trauma + 0.50f, 1.0f);
+    }
+
+    // Include any dynamic debris cave-ins detached during this detonation
+    for (size_t di = prev_debris_count; di < m_debris.size(); ++di) {
+        glm::ivec3 dpos = glm::ivec3(std::floor(m_debris[di].position().x), std::floor(m_debris[di].position().y), std::floor(m_debris[di].position().z));
+        min_affected = glm::min(min_affected, dpos - glm::ivec3(3));
+        max_affected = glm::max(max_affected, dpos + glm::ivec3(3));
+        any_blocks_destroyed = true;
+    }
+
+    // Synchronously remesh all chunks in and adjacent to the blast volume
+    // so crater walls and chunk seams NEVER appear temporarily see-through
+    if (any_blocks_destroyed && m_world) {
+        m_world->sync_remesh_box(min_affected, max_affected);
     }
 }
 
@@ -1152,6 +1306,10 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
         RaycastHit hit = m_world->raycast(eye, dir, 8.0f);
         glm::ivec3 center = hit.hit ? hit.block_pos : glm::ivec3(glm::floor(eye + dir * 5.0f));
 
+        bool any_shockwave_destroyed = false;
+        glm::ivec3 min_shock = center;
+        glm::ivec3 max_shock = center;
+
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
                 for (int dz = -1; dz <= 1; ++dz) {
@@ -1159,12 +1317,18 @@ void Application::on_tactical_ability(CharacterClass cls, const glm::vec3& pos, 
                     Voxel vox = m_world->get_voxel(bp.x, bp.y, bp.z);
                     if (vox.is_solid() && vox.material_id != MAT_DREDGE_BEDROCK && vox.material_id != MAT_REINFORCED_VAULT_DOOR) {
                         m_world->set_voxel(bp.x, bp.y, bp.z, Voxel{MAT_AIR, 0}, true);
+                        min_shock = glm::min(min_shock, bp);
+                        max_shock = glm::max(max_shock, bp);
+                        any_shockwave_destroyed = true;
                         if (m_renderer) {
                             m_renderer->spawn_break_particles(glm::vec3(bp) + glm::vec3(0.5f), glm::ivec3(0, 1, 0), vox.material_id);
                         }
                     }
                 }
             }
+        }
+        if (any_shockwave_destroyed && m_world) {
+            m_world->sync_remesh_box(min_shock, max_shock);
         }
         if (m_renderer) {
             m_renderer->trigger_dust_kickup(2.5f);
@@ -1483,6 +1647,10 @@ void Application::fixed_tick(float dt) {
         return;
     }
 
+    if (m_hud) {
+        m_hud->update(dt);
+    }
+
     // Active in-world death sequence: player collapses, camera slumps, telemetry uploads
     if (m_death_sequence) {
         m_death_timer += dt;
@@ -1642,6 +1810,9 @@ void Application::fixed_tick(float dt) {
                 float dmg = res.damage * 0.35f; // Scaled to balanced 7-17.5 HP so ceiling rocks do not wipe out delvers
                 if (m_extraction && m_extraction->is_player_in_perimeter(player_pos)) {
                     float resist = (m_selected_level <= 1) ? 0.40f : (m_selected_level == 2 ? 0.50f : 0.60f);
+                    if (m_extraction->phase() == ExtractionPhase::PodLanded) {
+                        resist = 0.10f; // 90% damage reduction while evac pod has landed
+                    }
                     dmg *= resist;
                 }
                 m_player->take_damage(dmg, PlayerController::DamageSource::FallingDebris);
@@ -1719,14 +1890,21 @@ void Application::fixed_tick(float dt) {
     // Dynamic Spatial Radiation Proximity Query
     if (m_world && m_player) {
         m_proximity_radiation = m_world->query_radiation_proximity(m_player->position(), 12.0f);
-        float amb_rad = m_hazard->radiation_level() / 100.0f;
-        m_effective_radiation = std::clamp(m_proximity_radiation + amb_rad * 0.40f, 0.0f, 1.0f);
+        m_effective_radiation = std::clamp(std::max(m_proximity_radiation, m_player->exo().radiation / 100.0f), 0.0f, 1.0f);
         if (m_audio) {
             m_audio->set_radiation_proximity(m_effective_radiation);
         }
     }
 
     m_extraction->update(dt, m_player->position());
+    if (m_state != GameState::Gameplay) {
+        return; // State exited (e.g. extraction completed into Debrief): halt further in-tick damage/updates
+    }
+    if (m_expedition_success) {
+        // Defensive self-healing: active Gameplay must never retain a completed flag
+        VF_LOG_WARN("Application", "m_expedition_success was unexpectedly true during active Gameplay. Clearing flag to prevent tick lock.");
+        m_expedition_success = false;
+    }
 
     // Spawn falling dust and spall from cavern ceiling directly above beacon during ceiling drill countdown
     if (m_extraction && m_extraction->is_ceiling_drill_active() && m_renderer) {
@@ -1825,7 +2003,7 @@ void Application::fixed_tick(float dt) {
     bool is_drilling = m_player->is_drilling();
 
     VoidStalkerManager::FrameResult stalker_res;
-    if (!m_config.test_enemy) {
+    if (!m_config.test_enemy && !m_config.test_enemy_load) {
         stalker_res = m_stalkers.update(
             dt,
             m_player->position(),
@@ -1848,6 +2026,9 @@ void Application::fixed_tick(float dt) {
         float dmg = stalker_res.total_damage;
         if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
             float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
+            if (m_extraction->phase() == ExtractionPhase::PodLanded) {
+                resist = 0.10f; // 90% damage reduction while evac pod has landed
+            }
             dmg *= resist;
         }
         m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
@@ -1865,6 +2046,31 @@ void Application::fixed_tick(float dt) {
     }
     if (stalker_res.any_lunge) {
         m_player->add_trauma(0.25f);
+    }
+    if (stalker_res.any_boss_slam) {
+        m_player->add_trauma(0.55f);
+        m_trauma = std::min(m_trauma + 0.55f, 1.0f);
+        if (m_renderer) {
+            m_renderer->trigger_dust_kickup(2.5f);
+        }
+        if (m_hazard) {
+            m_hazard->force_tremor(1.5f);
+        }
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::SeismicTremor, stalker_res.boss_slam_pos, 1.0f);
+        }
+    }
+    if (stalker_res.any_boss_charge) {
+        m_player->add_trauma(0.35f);
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::BurrowerRoar, m_player->position(), 1.0f);
+        }
+    }
+    if (stalker_res.any_boss_roar) {
+        m_player->add_trauma(0.40f);
+        if (m_audio) {
+            m_audio->play_sound_3d(SoundCue::StalkerEchoScreech, m_player->position(), 1.0f);
+        }
     }
     if (stalker_res.any_spotted) {
         if (m_audio && m_stalker_spotted_audio_cooldown <= 0.0f) {
@@ -1905,6 +2111,9 @@ void Application::fixed_tick(float dt) {
     // Update Seismic Burrower hostile entities AI, excavation & cave-in triggers
     auto burrower_res = m_burrowers.update(dt, m_player->position(), *m_world, m_noise_meter.recent_sounds(), is_crouching);
 
+    // Mutual hard depenetration between Void Stalkers and Seismic Burrowers
+    m_stalkers.resolve_burrower_penetrations(m_burrowers.burrowers_mut(), *m_world);
+
     // Localized visibility check: burrow particles should only spawn if visible from cavern without intervening walls
     auto is_burrow_visible = [&](const glm::vec3& world_pt) -> bool {
         if (!m_player || !m_world) return true;
@@ -1922,7 +2131,10 @@ void Application::fixed_tick(float dt) {
         static const glm::ivec3 air_dirs[6] = {
             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
         };
+        int spawned_particles_count = 0;
+        constexpr int MAX_BURROW_PARTICLES_PER_FRAME = 12;
         for (const auto& ev : burrower_res.excavated_voxels) {
+            if (spawned_particles_count >= MAX_BURROW_PARTICLES_PER_FRAME) break;
             bool on_surface = false;
             for (const auto& d : air_dirs) {
                 if (!m_world->is_solid(ev.pos + d)) {
@@ -1936,6 +2148,7 @@ void Application::fixed_tick(float dt) {
             if (is_burrow_visible(vpos)) {
                 m_renderer->spawn_burrow_particles(vpos, glm::vec3(0, 0, 1), ev.original_mat, 8);
                 m_renderer->spawn_crack_debris(vpos, glm::ivec3(0, 1, 0), 0.6f, ev.original_mat);
+                spawned_particles_count++;
             }
         }
     }
@@ -1952,6 +2165,9 @@ void Application::fixed_tick(float dt) {
         float dmg = burrower_res.total_damage;
         if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
             float resist = (m_selected_level <= 1) ? 0.60f : (m_selected_level == 2 ? 0.65f : 0.80f);
+            if (m_extraction->phase() == ExtractionPhase::PodLanded) {
+                resist = 0.10f; // 90% damage reduction while evac pod has landed
+            }
             dmg *= resist;
         }
         float applied = m_player->take_damage(dmg, PlayerController::DamageSource::EnemyAttack);
@@ -2135,8 +2351,9 @@ void Application::fixed_tick(float dt) {
         bool is_crit = false;
         float damage_dealt = 0.0f;
         glm::vec3 player_pos = m_player ? m_player->position() : (next_pos - bolt.velocity * 0.1f);
-        glm::vec3 shot_dir = glm::length(bolt.velocity) > 0.001f ? glm::normalize(bolt.velocity) : (m_player ? m_player->forward() : glm::vec3(0, 0, -1));
-        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage, true, &is_crit, &damage_dealt, &player_pos, &shot_dir)) {
+        glm::vec3 shot_dir = glm::length(bolt.velocity) > 0.001f ? glm::normalize(bolt.velocity) : glm::vec3(0.0f, 0.0f, 1.0f);
+        float boss_mult = m_player ? m_player->boss_damage_multiplier() : 1.0f;
+        if (m_stalkers.damage_nearest(next_pos, 1.4f, bolt.damage, true, &is_crit, &damage_dealt, &player_pos, &shot_dir, boss_mult)) {
             bolt.active = false;
             if (m_renderer) {
                 m_renderer->spawn_crack_debris(next_pos, glm::ivec3(0, 1, 0), 0.8f, MAT_VOIDITE_CRYSTAL);
@@ -2260,6 +2477,15 @@ void Application::fixed_tick(float dt) {
         }
 
         // Void Stalker 3D Audio Cues (Subtle, scary & atmospheric)
+        struct EnemyStepCandidate {
+            SoundCue cue;
+            glm::vec3 pos;
+            float volume;
+            float pitch;
+            float dist;
+        };
+        std::vector<EnemyStepCandidate> enemy_step_candidates;
+
         for (auto& s : m_stalkers.stalkers_mut()) {
             if (s.just_screeched) {
                 s.just_screeched = false;
@@ -2275,6 +2501,16 @@ void Application::fixed_tick(float dt) {
                 AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerChitter, 0.65f, &pitch);
                 m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 0.65f, pitch);
             }
+            if (s.just_stepped) {
+                s.just_stepped = false;
+                float d = glm::distance(s.position, m_player->position());
+                if (d <= 28.0f) {
+                    SoundCue step_cue = (s.role == StalkerRole::ChitinGoliath)
+                                            ? SoundCue::GoliathStep
+                                            : (s.step_is_run ? SoundCue::StalkerRun : SoundCue::StalkerStep);
+                    enemy_step_candidates.push_back({step_cue, s.position, s.step_volume, s.step_pitch, d});
+                }
+            }
             glm::vec3 burrow_loc = (glm::length(s.burrow_entry) > 0.01f) ? s.burrow_entry : s.position;
             if (s.state == StalkerState::Emerging && m_renderer) {
                 float progress = std::clamp(s.state_timer / std::max(0.1f, s.burrow_duration), 0.0f, 1.0f);
@@ -2285,11 +2521,23 @@ void Application::fixed_tick(float dt) {
             if (s.just_emerged) {
                 s.just_emerged = false;
                 if (m_audio) {
-                    m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 1.0f);
+                    if (s.role == StalkerRole::ChitinGoliath) {
+                        m_audio->play_sound_3d(SoundCue::BurrowerRoar, s.position, 1.10f);
+                        m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, s.position, 0.95f);
+                    } else if (s.role == StalkerRole::Shooter) {
+                        float pitch = 1.25f;
+                        AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerHiss, 0.85f, &pitch);
+                        m_audio->play_sound_3d(SoundCue::StalkerHiss, s.position, 0.85f, pitch);
+                    } else {
+                        m_audio->play_sound_3d(SoundCue::StalkerChitter, s.position, 1.0f);
+                    }
                 }
                 if (m_renderer && is_burrow_visible(s.position)) {
                     float dust_amt = (s.role == StalkerRole::ChitinGoliath) ? 2.5f : 1.2f;
                     m_renderer->trigger_dust_kickup(dust_amt);
+                    if (s.role == StalkerRole::ChitinGoliath) {
+                        m_renderer->spawn_crack_debris(s.position, glm::ivec3(0, 1, 0), 1.4f, MAT_VOLCANIC_BASALT);
+                    }
                 }
             }
             if (s.state == StalkerState::Burrowing && m_renderer) {
@@ -2351,6 +2599,18 @@ void Application::fixed_tick(float dt) {
 
         // Seismic Burrower 3D Audio & Particle Cues
         for (auto& b : m_burrowers.burrowers_mut()) {
+            if (b.just_breached) {
+                b.just_breached = false;
+                if (m_audio) {
+                    m_audio->play_sound_3d(SoundCue::BurrowerRoar, b.position, 1.15f);
+                    m_audio->play_sound_3d(SoundCue::BurrowerGrind, b.position, 1.0f);
+                    m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, b.position, 0.95f);
+                }
+                if (m_renderer && is_burrow_visible(b.position)) {
+                    m_renderer->spawn_crack_debris(b.position, glm::ivec3(0, 1, 0), 1.2f, MAT_VOLCANIC_BASALT);
+                    m_renderer->trigger_dust_kickup(2.5f);
+                }
+            }
             if (b.just_roared) {
                 b.just_roared = false;
                 m_audio->play_sound_3d(SoundCue::BurrowerRoar, b.position, 1.05f);
@@ -2360,6 +2620,13 @@ void Application::fixed_tick(float dt) {
                 float pitch = 0.82f;
                 AudioSystem::instance().TriggerRandomizedCue(SoundCue::StalkerChitter, 0.60f, &pitch);
                 m_audio->play_sound_3d(SoundCue::StalkerChitter, b.position, 0.60f, pitch);
+            }
+            if (b.just_stepped) {
+                b.just_stepped = false;
+                float d = glm::distance(b.position, m_player->position());
+                if (d <= 28.0f) {
+                    enemy_step_candidates.push_back({SoundCue::BurrowerStep, b.position, b.step_volume, b.step_pitch, d});
+                }
             }
             if (b.just_ground) {
                 b.just_ground = false;
@@ -2387,16 +2654,40 @@ void Application::fixed_tick(float dt) {
             }
             if (b.just_died) {
                 b.just_died = false;
-                m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, b.position, 0.80f);
+                m_audio->play_sound_3d(SoundCue::VoxelBreakBasalt, b.position, 0.95f);
+                m_audio->play_sound_3d(SoundCue::BurrowerGrind, b.position, 0.70f);
                 if (m_renderer && is_burrow_visible(b.position)) {
-                    m_renderer->spawn_burrow_particles(b.position, glm::vec3(0, 1, 0), MAT_VOLCANIC_BASALT, 24);
-                    m_renderer->spawn_crack_debris(b.position, glm::ivec3(0, 1, 0), 1.0f, MAT_VOLCANIC_BASALT);
+                    m_renderer->spawn_burrow_particles(b.position, glm::vec3(0, 1, 0), MAT_VOLCANIC_BASALT, 28);
+                    m_renderer->spawn_crack_debris(b.position, glm::ivec3(0, 1, 0), 1.2f, MAT_VOLCANIC_BASALT);
                     m_renderer->trigger_dust_kickup(2.0f);
                 }
                 SwarmManager::instance().on_hostile_killed();
             }
         }
         m_burrowers.remove_dead();
+
+        // Swarm Footstep Arbiter & Density Companding:
+        // Dynamically balance footstep volume and rate across heavy enemy foot traffic
+        static float s_enemy_step_spacing = 0.0f;
+        s_enemy_step_spacing = std::max(0.0f, s_enemy_step_spacing - dt);
+
+        if (!enemy_step_candidates.empty() && m_audio) {
+            // Prioritize closest enemy footsteps
+            std::sort(enemy_step_candidates.begin(), enemy_step_candidates.end(),
+                      [](const EnemyStepCandidate& a, const EnemyStepCandidate& b) {
+                          return a.dist < b.dist;
+                      });
+
+            int walker_count = static_cast<int>(enemy_step_candidates.size());
+            float swarm_compand = 1.0f / (1.0f + 0.35f * std::max(0, walker_count - 1));
+
+            // Pace footstep playback so rapid multi-enemy steps are staggered naturally
+            if (s_enemy_step_spacing <= 0.0f || enemy_step_candidates.front().cue == SoundCue::GoliathStep) {
+                const auto& best = enemy_step_candidates.front();
+                m_audio->play_sound_3d(best.cue, best.pos, best.volume * swarm_compand, best.pitch);
+                s_enemy_step_spacing = (best.cue == SoundCue::GoliathStep) ? 0.09f : 0.065f;
+            }
+        }
 
         // Extraction Beacon Siren Pulse (Clean, spacious harmonic chime every 2.4s)
         if (m_extraction->phase() == ExtractionPhase::BeaconDeployed) {
@@ -2569,9 +2860,8 @@ void Application::fixed_tick(float dt) {
         m_nearest_gas_distance = gas_dist;
         m_nearest_lava_distance = lava_dist;
 
-        float amb_rad_val = m_hazard->radiation_level();
         float prox_rad_val = m_proximity_radiation * 100.0f;
-        float rad_val = std::max(amb_rad_val, prox_rad_val);
+        float rad_val = std::max(m_player->exo().radiation, prox_rad_val);
         m_audio->update_hazard_proximity_audio(dt, lava_dist, rad_val, spike_dist, void_dist, gas_dist);
 
         // Update player biometrics (cardiac heartbeat vitals)
@@ -2593,17 +2883,20 @@ void Application::fixed_tick(float dt) {
     }
 
     // ═══ Reduced & Balanced Radiation HP Drain ═══
-    // Radiation escalation is telegraphed early via audio geiger clicks, HUD dosimeter, and glowing green mist haze.
+    // Radiation only occurs in radiation-related areas (proximity to MAT_RADIOACTIVE_ORE / radioactive chasms).
+    // Safe cavern areas have 0 exposure, allowing suit scrubbers to actively vent and lower the radiation meter.
     // HP damage only begins at extreme exposure (>= 75%) so exploration is not suffocated by early tick damage.
     // < 75%:  safe buffer (0 HP/s — exosuit filters hold completely)
     // 75-89%: very gentle warning corrosion (~0.03 * (rad-75) HP/s = 0 - 0.42 HP/s)
     // 90-97%: moderate hazard (0.45 + (rad-90) * 0.08 HP/s = 0.45 - 1.01 HP/s)
     // 98%+:   critical hazard (capped at 1.5 HP/s max, down from 5.0 HP/s)
     {
-        float amb_rad = m_hazard->radiation_level();
+        bool in_decon = (m_extraction && m_extraction->is_player_in_perimeter(m_player->position()));
         float prox_rad = m_proximity_radiation * 100.0f;
-        float rad = std::max(amb_rad, prox_rad);
-        m_player->exo_mut().radiation = rad;
+        float target_rad = in_decon ? 0.0f : prox_rad;
+
+        m_player->update_radiation(target_rad, dt, in_decon);
+        float rad = m_player->exo().radiation;
 
         float rad_damage = 0.0f;
         if (rad >= 98.0f) {
@@ -2615,7 +2908,7 @@ void Application::fixed_tick(float dt) {
         }
 
         if (rad_damage > 0.0f) {
-            if (m_extraction && m_extraction->is_player_in_perimeter(m_player->position())) {
+            if (in_decon) {
                 float resist = (m_selected_level <= 1) ? 0.10f : (m_selected_level == 2 ? 0.15f : 0.20f);
                 rad_damage *= resist;
             }
@@ -2633,9 +2926,9 @@ void Application::fixed_tick(float dt) {
             }
         }
 
-        // Exosuit integrity drain only at extreme levels
+        // Exosuit damage only at extreme radiation levels (100%)
         if (rad >= 100.0f) {
-            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo_mut().integrity - dt * 6.0f);
+            m_player->take_damage(2.0f * dt, PlayerController::DamageSource::Radiation);
         }
     }
 
@@ -2651,7 +2944,6 @@ void Application::fixed_tick(float dt) {
         if (gas_check.material_id == MAT_GAS || gas_head.material_id == MAT_GAS) {
             // Toxic gas damage: subtle cough shudder only (0.02f), NOT violent screen shake!
             m_player->take_damage(1.0f * dt, PlayerController::DamageSource::ToxicGas);
-            m_player->exo_mut().integrity = std::max(0.0f, m_player->exo().integrity - 3.0f * dt);
 
             // Trigger on-screen visor toxic mist particles and asphyxiation coughing
             if (m_hud) {
@@ -2667,6 +2959,17 @@ void Application::fixed_tick(float dt) {
                 }
             }
 
+        }
+
+        if (m_hud) {
+            if (m_player->is_in_acid() || m_player->acid_burn_timer() > 0.0f) {
+                float acid_exp = m_player->is_in_acid() ? 1.0f : (m_player->acid_burn_timer() / 2.0f);
+                m_hud->set_acid_exposure(acid_exp, dt);
+            }
+            if (m_player->is_in_coolant() || m_player->frost_chill_timer() > 0.0f) {
+                float frost_exp = m_player->is_in_coolant() ? 1.0f : (m_player->frost_chill_timer() / 2.5f);
+                m_hud->set_frost_exposure(frost_exp, dt);
+            }
         }
     }
 
@@ -2745,24 +3048,8 @@ void Application::fixed_tick(float dt) {
         }
     }
 
-    // Check Level 3 strict countdown
-    if (m_selected_level == 3) {
-        m_level3_timer -= dt;
-        if (m_level3_timer <= 0.0f && !m_death_sequence) {
-            m_death_sequence = true;
-            m_death_timer = 0.0f;
-            m_inventory.suit_failed = true;
-            m_expedition_success = false;
-            m_trauma = 1.0f;
-            AudioSystem::PlayDeathSound();
-            if (m_audio) {
-                m_audio->play_sound_2d(SoundCue::DamageWarning, 1.0f);
-            }
-        }
-    }
-
-    // Check player health / suit integrity failure
-    if (m_player->exo().integrity <= 0.0f && !m_death_sequence) {
+    // Check player health failure (only when not extracted)
+    if (!m_expedition_success && !m_death_sequence && m_player->health() <= 0.0f) {
         m_death_sequence = true;
         m_death_timer = 0.0f;
         m_inventory.suit_failed = true;
@@ -2775,6 +3062,10 @@ void Application::fixed_tick(float dt) {
         std::string death_cause = "SUIT INTEGRITY COMPROMISED // DELVER M.I.A.";
         if (m_player->is_in_lava()) {
             death_cause = "INCINERATED // DELVER CONSUMED BY THERMITE SLAG";
+        } else if (m_player->is_in_acid() || m_player->acid_burn_timer() > 0.0f) {
+            death_cause = "DISSOLVED // DELVER CONSUMED BY CORROSIVE NEON ACID";
+        } else if (m_player->is_in_coolant()) {
+            death_cause = "FROZEN // CRYOGENIC SHOCK AND CELLULAR CRYSTALLIZATION";
         } else if (m_player->is_in_spikes()) {
             death_cause = "IMPALED // FATAL PUNCTURE TRAUMA IN SPIKE TRENCH";
         } else if (m_player->position().y <= 2.2f) {
@@ -2800,6 +3091,193 @@ void Application::fixed_tick(float dt) {
     // Railgun muzzle flash decay
     if (m_muzzle_flash_timer > 0.0f) {
         m_muzzle_flash_timer = std::max(0.0f, m_muzzle_flash_timer - dt);
+    }
+
+    // 6. Delver Assistance: Delayed acoustic scan hint when player hasn't interacted with a given objective in a long time
+    m_astral_hint_idle_timer += dt;
+    m_voidite_hint_idle_timer += dt;
+    m_vault_hint_idle_timer += dt;
+    m_objective_hint_timer += dt;
+
+    // Check active player drill contact with objective materials to reset idle time continuously
+    if (m_player && m_world && m_player->target_block_damage() > 0.0f && m_player->target_block().x != -1) {
+        glm::ivec3 tb = m_player->target_block();
+        Voxel tv = m_world->get_voxel(tb.x, tb.y, tb.z);
+        if (tv.material_id == MAT_ASTRAL_ORE || tv.material_id == MAT_VOIDITE_CRYSTAL ||
+            tv.material_id == MAT_REINFORCED_VAULT_DOOR || tv.material_id == MAT_PRISMATIC_CRYSTAL) {
+            register_objective_interaction(tv.material_id);
+        }
+    }
+
+    bool needs_astral = (m_inventory.target_astral_ore > 0 && m_inventory.astral_ore < m_inventory.target_astral_ore);
+    bool needs_voidite = (m_inventory.target_voidite > 0 && m_inventory.voidite < m_inventory.target_voidite);
+    bool needs_vault = (m_mission.vault().exists && !m_mission.is_vault_breached() && !m_mission.is_relic_retrieved());
+
+    // Only hint the player at an objective if they haven't interacted with the given objective in a long time (>= 75s)
+    bool astral_qualifies = needs_astral && (m_astral_hint_idle_timer >= OBJECTIVE_HINT_IDLE_THRESHOLD);
+    bool voidite_qualifies = needs_voidite && (m_voidite_hint_idle_timer >= OBJECTIVE_HINT_IDLE_THRESHOLD);
+    bool vault_qualifies = needs_vault && (m_vault_hint_idle_timer >= OBJECTIVE_HINT_IDLE_THRESHOLD);
+
+    if (!m_objective_hint_given && (astral_qualifies || voidite_qualifies || vault_qualifies)) {
+        uint8_t target_mat = 0;
+        std::string ore_name = "";
+        glm::vec4 hint_col = glm::vec4(1.0f);
+        glm::vec3 hint_target_pos(0.0f);
+        bool has_target = false;
+
+        // Candidate selection: choose unfulfilled objective that has gone longest without interaction
+        if (astral_qualifies && voidite_qualifies) {
+            if (m_astral_hint_idle_timer >= m_voidite_hint_idle_timer) {
+                target_mat = MAT_ASTRAL_ORE;
+            } else {
+                target_mat = MAT_VOIDITE_CRYSTAL;
+            }
+        } else if (astral_qualifies) {
+            target_mat = MAT_ASTRAL_ORE;
+        } else if (voidite_qualifies) {
+            target_mat = MAT_VOIDITE_CRYSTAL;
+        } else if (vault_qualifies) {
+            target_mat = MAT_REINFORCED_VAULT_DOOR;
+        }
+
+        if (target_mat == MAT_ASTRAL_ORE) {
+            ore_name = "ASTRAL ORE";
+            hint_col = glm::vec4(1.0f, 0.82f, 0.20f, 1.0f);
+            auto ore_positions = m_world->query_material_positions(MAT_ASTRAL_ORE, 32);
+            if (!ore_positions.empty()) {
+                glm::vec3 player_pos = m_player->position();
+                glm::vec3 closest_pos = glm::vec3(ore_positions[0]);
+                float min_d = glm::distance(player_pos, closest_pos);
+                for (size_t i = 1; i < ore_positions.size(); ++i) {
+                    glm::vec3 cand = glm::vec3(ore_positions[i]);
+                    float d = glm::distance(player_pos, cand);
+                    if (d < min_d) {
+                        min_d = d;
+                        closest_pos = cand;
+                    }
+                }
+                hint_target_pos = closest_pos;
+                has_target = true;
+            }
+        } else if (target_mat == MAT_VOIDITE_CRYSTAL) {
+            ore_name = "VOIDITE CRYSTAL";
+            hint_col = glm::vec4(0.88f, 0.30f, 1.0f, 1.0f);
+            auto ore_positions = m_world->query_material_positions(MAT_VOIDITE_CRYSTAL, 32);
+            if (!ore_positions.empty()) {
+                glm::vec3 player_pos = m_player->position();
+                glm::vec3 closest_pos = glm::vec3(ore_positions[0]);
+                float min_d = glm::distance(player_pos, closest_pos);
+                for (size_t i = 1; i < ore_positions.size(); ++i) {
+                    glm::vec3 cand = glm::vec3(ore_positions[i]);
+                    float d = glm::distance(player_pos, cand);
+                    if (d < min_d) {
+                        min_d = d;
+                        closest_pos = cand;
+                    }
+                }
+                hint_target_pos = closest_pos;
+                has_target = true;
+            }
+        } else if (target_mat == MAT_REINFORCED_VAULT_DOOR) {
+            ore_name = "PRECURSOR VAULT";
+            hint_col = glm::vec4(1.0f, 0.0f, 0.85f, 1.0f);
+            hint_target_pos = glm::vec3(m_mission.vault().door_pos);
+            has_target = true;
+        }
+
+        if (has_target) {
+            m_objective_hint_given = true;
+            m_objective_hint_pos = hint_target_pos;
+            m_objective_hint_mat = target_mat;
+            float dist = glm::distance(m_player->position(), hint_target_pos);
+
+            if (m_hud) {
+                m_hud->set_objective_hint(hint_target_pos, ore_name, hint_col, 60.0f, target_mat);
+                std::string hint_msg = "DEEP SCAN: " + ore_name + " DETECTED [" +
+                                      std::to_string(static_cast<int>(dist)) + "m BEARING]";
+                m_hud->show_warning(hint_msg, 6.0f);
+            }
+            if (m_audio) {
+                m_audio->play_sound_2d(SoundCue::UIBlip, 1.0f);
+            }
+            VF_LOG_INFO("Gameplay", "Provided delayed exploration hint pointing to " << ore_name
+                                    << " at (" << hint_target_pos.x << ", " << hint_target_pos.y << ", "
+                                    << hint_target_pos.z << ") dist=" << dist << "m"
+                                    << " (idle_time=" << get_objective_idle_time(target_mat) << "s)");
+        }
+    }
+
+    // 7. Auto-removal of objective hint once player reaches, interacts with, or mines the material
+    if (m_hud && m_hud->has_objective_hint() && m_player && m_world) {
+        glm::vec3 hint_pos = m_hud->hint_waypoint_pos();
+        glm::vec3 hint_center = hint_pos + glm::vec3(0.5f, 0.5f, 0.5f);
+        float dist_pos = glm::distance(m_player->position(), hint_center);
+        float dist_eye = glm::distance(m_player->eye_position(), hint_center);
+
+        // Reached: physical proximity <= 3.5m or direct line-of-sight within drill reach (<= 5.0m)
+        bool reached = (dist_pos <= 3.5f || dist_eye <= 3.5f);
+        if (!reached && dist_eye <= 5.0f) {
+            glm::vec3 to_hint = (hint_center - m_player->eye_position()) / dist_eye;
+            RaycastHit los = m_world->raycast(m_player->eye_position(), to_hint, dist_eye - 0.2f);
+            if (!los.hit) {
+                reached = true;
+            }
+        }
+
+        // Mined: block at hint position was destroyed or turned to air
+        int hx = static_cast<int>(std::floor(hint_pos.x + 0.1f));
+        int hy = static_cast<int>(std::floor(hint_pos.y + 0.1f));
+        int hz = static_cast<int>(std::floor(hint_pos.z + 0.1f));
+        Voxel v = m_world->get_voxel(hx, hy, hz);
+        bool mined = (v.material_id == MAT_AIR);
+        if (m_objective_hint_mat != 0 && v.material_id != m_objective_hint_mat) {
+            mined = true;
+        }
+
+        // Quota fulfilled: player collected all required objective ores / breached vault
+        bool quota_done = (m_objective_hint_mat == MAT_ASTRAL_ORE && !needs_astral) ||
+                          (m_objective_hint_mat == MAT_VOIDITE_CRYSTAL && !needs_voidite) ||
+                          (m_objective_hint_mat == MAT_REINFORCED_VAULT_DOOR && !needs_vault);
+
+        if (reached || mined || quota_done) {
+            m_hud->clear_objective_hint();
+            m_objective_hint_given = false;
+            m_objective_hint_timer = 0.0f;
+            register_objective_interaction(m_objective_hint_mat);
+            VF_LOG_INFO("Gameplay", "Objective hint auto-removed (reached=" << reached
+                                    << " mined=" << mined << " quota_done=" << quota_done
+                                    << ") at (" << hint_pos.x << ", " << hint_pos.y << ", " << hint_pos.z << ")");
+        }
+    } else if (m_objective_hint_given && (!m_hud || !m_hud->has_objective_hint())) {
+        // If HUD auto-dismissed the hint (e.g. proximity check during render), sync state
+        m_objective_hint_given = false;
+        m_objective_hint_timer = 0.0f;
+        register_objective_interaction(m_objective_hint_mat);
+    }
+
+    // 8. Darkness Hazard Warning: Alert player when entering a pitch-black zone without illumination
+    if (m_hud && m_player && m_world && m_world->level_generator()) {
+        float darkness = m_world->level_generator()->get_darkness_at(m_player->eye_position());
+        if (darkness >= 0.75f && !m_player->is_headlamp_on()) {
+            bool flare_nearby = false;
+            for (const auto& flare : FlareManager::instance().flares()) {
+                if (flare.is_alive() && glm::distance(flare.position, m_player->position()) <= 15.0f) {
+                    flare_nearby = true;
+                    break;
+                }
+            }
+            if (!flare_nearby) {
+                m_darkness_warning_cooldown -= dt;
+                if (m_darkness_warning_cooldown <= 0.0f) {
+                    m_hud->show_warning("DARK ZONE: ZERO LUMENS - DEPLOY FLARES [T] / HEADLAMP [F]", 3.0f);
+                    m_darkness_warning_cooldown = 15.0f; // Throttle to every 15s
+                }
+            }
+        } else {
+            if (m_darkness_warning_cooldown > 0.0f) {
+                m_darkness_warning_cooldown -= dt;
+            }
+        }
     }
 }
 
@@ -2862,9 +3340,17 @@ void Application::render(float dt) {
             flicker = 0.95f;
         }
         m_renderer->set_headlamp_flicker(flicker);
+
+        if (m_world && m_world->level_generator()) {
+            float darkness = m_world->level_generator()->get_darkness_at(m_player->eye_position());
+            m_renderer->set_area_darkness(darkness);
+        } else {
+            m_renderer->set_area_darkness(0.0f);
+        }
     } else {
         if (m_renderer) {
             m_renderer->set_headlamp_flicker(0.0f);
+            m_renderer->set_area_darkness(0.0f);
         }
         // Cinematic rotating cavern background for Main Menu, Orbital Hub, and Debrief
         static float menu_cam_angle = 0.0f;
@@ -2980,6 +3466,16 @@ void Application::render(float dt) {
         PointLight sl;
         sl.position = s.position + glm::vec3(0.0f, 0.35f, 0.0f);
         switch (s.state) {
+            case StalkerState::GroundSlam:
+                sl.color = glm::vec3(1.0f, 0.45f, 0.05f);
+                sl.radius = 12.0f;
+                sl.intensity = 4.5f;
+                break;
+            case StalkerState::Charging:
+                sl.color = glm::vec3(1.0f, 0.05f, 0.05f);
+                sl.radius = 11.0f;
+                sl.intensity = 4.0f;
+                break;
             case StalkerState::Lunging:
                 sl.color = glm::vec3(1.0f, 0.08f, 0.12f);
                 sl.radius = 9.0f;
@@ -3011,6 +3507,16 @@ void Application::render(float dt) {
                 sl.radius = 5.0f;
                 sl.intensity = 1.0f;
                 break;
+        }
+        if (s.is_boss()) {
+            if (s.is_enraged) {
+                sl.color = glm::mix(sl.color, glm::vec3(1.0f, 0.08f, 0.05f), 0.75f);
+                sl.radius *= 1.4f;
+                sl.intensity *= 1.5f;
+            } else {
+                sl.radius *= 1.25f;
+                sl.intensity *= 1.25f;
+            }
         }
         m_renderer->add_point_light(sl);
         added_stalker_lights++;
@@ -3174,6 +3680,7 @@ void Application::render(float dt) {
         float horizontal_speed = glm::length(glm::vec2(m_player->velocity().x, m_player->velocity().z));
         bool is_grounded = m_player->is_grounded();
 
+        m_viewmodel->set_weapon_archetype(m_player->weapon_archetype());
         m_viewmodel->render(
             dt,
             aspect,
@@ -3199,9 +3706,9 @@ void Application::render(float dt) {
     float shield_timer = (m_state == GameState::Gameplay && m_player) ? m_player->insertion_shield_timer() : 0.0f;
     glm::vec3 danger_haze_color(0.12f, 0.65f, 0.22f); // Default radioactive toxic emerald
     float effective_haze = 0.0f;
-    float effective_rad = (m_hazard) ? m_hazard->radiation_level() : 0.0f;
-    if (m_state == GameState::Gameplay && m_player && m_hazard) {
-        effective_rad = std::max(m_hazard->radiation_level(), m_proximity_radiation * 100.0f);
+    float effective_rad = (m_player) ? m_player->exo().radiation : 0.0f;
+    if (m_state == GameState::Gameplay && m_player) {
+        effective_rad = std::max(m_player->exo().radiation, m_proximity_radiation * 100.0f);
         float rad_haze = effective_rad / 100.0f;
         float gas_haze = (m_nearest_gas_distance < 20.0f) ? std::clamp(1.0f - (m_nearest_gas_distance / 20.0f), 0.0f, 0.85f) : 0.0f;
         float lava_haze = (m_nearest_lava_distance < 16.0f) ? std::clamp(1.0f - (m_nearest_lava_distance / 16.0f), 0.0f, 0.85f) : 0.0f;
@@ -3278,14 +3785,16 @@ void Application::render(float dt) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             if (m_expedition_success) {
                 int next_sec = std::min(UserProfile::MAX_SECTOR_RECORDS - 1, m_selected_level + 1);
-                if (m_user_profile.is_sector_unlocked(next_sec)) {
+                if (m_user_profile.is_sector_unlocked(next_sec) || m_user_profile.is_sector_completed(m_selected_level)) {
                     m_selected_level = next_sec;
                 }
             }
+            m_expedition_success = false;
             LaunchSector(m_selected_level);
         } else if (action == DebriefAction::RedeployExpedition) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
             // Retain selected sector index, reset mission runtime data, and launch immediately
+            m_expedition_success = false;
             LaunchSector(m_selected_level);
         } else if (action == DebriefAction::ReturnToHub) {
             SaveSystem::save_profile(m_user_profile, m_active_save_file);
@@ -3529,7 +4038,7 @@ void Application::run() {
     std::cout << "  State Machine Active: Main Menu -> Orbital Hub -> Gameplay -> Debrief" << std::endl;
     std::cout << "========================================================\n" << std::endl;
 
-    if (m_config.test_enemy || m_config.test_relic || m_config.capture_models || m_config.capture_level_shapes) {
+    if (m_config.test_enemy || m_config.test_enemy_load || m_config.test_relic || m_config.capture_models || m_config.capture_level_shapes) {
         start_expedition(1);
     }
 
@@ -3687,7 +4196,11 @@ void Application::run() {
             static bool lbrk_down_last = false;
             bool lbrk_now = m_window->is_key_down(GLFW_KEY_LEFT_BRACKET);
             if (lbrk_now && !lbrk_down_last) {
-                m_settings.brightness = std::max(0.40f, m_settings.brightness - 0.10f);
+                m_settings.brightness = std::max(0.40f, std::round((m_settings.brightness - 0.10f) * 10.0f) / 10.0f);
+                m_user_profile.settings.brightness = m_settings.brightness;
+                if (m_renderer) {
+                    m_renderer->set_brightness(m_settings.brightness);
+                }
                 if (m_hud) {
                     m_hud->show_warning("CAVERN BRIGHTNESS: " + std::to_string(static_cast<int>(std::round(m_settings.brightness * 100.0f))) + "%", 1.5f);
                 }
@@ -3697,7 +4210,11 @@ void Application::run() {
             static bool rbrk_down_last = false;
             bool rbrk_now = m_window->is_key_down(GLFW_KEY_RIGHT_BRACKET);
             if (rbrk_now && !rbrk_down_last) {
-                m_settings.brightness = std::min(2.00f, m_settings.brightness + 0.10f);
+                m_settings.brightness = std::min(2.00f, std::round((m_settings.brightness + 0.10f) * 10.0f) / 10.0f);
+                m_user_profile.settings.brightness = m_settings.brightness;
+                if (m_renderer) {
+                    m_renderer->set_brightness(m_settings.brightness);
+                }
                 if (m_hud) {
                     m_hud->show_warning("CAVERN BRIGHTNESS: " + std::to_string(static_cast<int>(std::round(m_settings.brightness * 100.0f))) + "%", 1.5f);
                 }
@@ -3739,6 +4256,7 @@ void Application::run() {
                 m_player->set_combat_inputs_paused(false);
                 m_terrain_scanner.update(static_cast<float>(frame_time), false, m_player->position(), 0.0f, 0.0f, false);
                 m_player->set_mouse_sensitivity(m_settings.mouse_sensitivity);
+                m_player->set_auto_step(m_settings.auto_step);
                 m_player->handle_input(*m_window, static_cast<float>(frame_time));
             }
         }
@@ -4217,6 +4735,127 @@ void Application::run() {
             }
         }
 
+        // ── Automated Multi-Monster Load & Anti-Invisibility Stress Test (--test-enemy-load) ──
+        if (m_config.test_enemy_load) {
+            m_auto_test_frame++;
+
+            if (m_auto_test_frame == 1) {
+                m_player->set_position(glm::vec3(16.0f, 22.0f, 16.0f));
+                m_player->clamp_to_surface(*m_world);
+                m_player->set_look_angles(90.0f, -4.0f); // Looking towards +Z into the cavern
+                m_renderer->headlamp().enabled = true;
+                m_renderer->headlamp().intensity = 2.8f;
+                m_renderer->clear_point_lights();
+                // Three-point cavern illumination
+                m_renderer->add_point_light({m_player->position() + glm::vec3(0.0f, 4.0f, 6.0f), glm::vec3(1.0f, 0.95f, 0.90f), 24.0f, 2.5f});
+                m_renderer->add_point_light({m_player->position() + glm::vec3(-6.0f, 2.0f, 4.0f), glm::vec3(0.4f, 0.65f, 0.95f), 20.0f, 1.8f});
+                m_renderer->add_point_light({m_player->position() + glm::vec3(6.0f, 2.0f, 4.0f), glm::vec3(0.85f, 0.45f, 1.0f), 20.0f, 1.8f});
+
+                m_stalkers.reset();
+                m_burrowers.reset();
+                CarcassManager::instance().clear();
+
+                // Stage high-load monster horde in forward visual cone:
+                // 35 Stalkers (15 Melee, 10 Shooter, 10 Goliath)
+                // 6 Seismic Burrowers
+                // 12 Void Spike Projectiles
+                // 8 Carcasses
+                glm::vec3 forward_center = m_player->position() + glm::vec3(0.0f, 0.0f, 6.5f);
+
+                // Row 1: 15 Melee Stalkers (front arc)
+                for (int i = 0; i < 15; ++i) {
+                    float u = (i - 7) * 0.7f;
+                    glm::vec3 pos = forward_center + glm::vec3(u, -0.35f, -1.5f + std::abs(u) * 0.3f);
+                    m_stalkers.spawn_melee(pos);
+                }
+
+                // Row 2: 10 Shooter Stalkers (mid arc)
+                for (int i = 0; i < 10; ++i) {
+                    float u = (i - 4.5f) * 1.1f;
+                    glm::vec3 pos = forward_center + glm::vec3(u, 0.4f, 1.0f + std::abs(u) * 0.2f);
+                    m_stalkers.spawn_shooter(pos);
+                }
+
+                // Row 3: 10 Chitin Goliath Breachers (elevated / flanking)
+                for (int i = 0; i < 10; ++i) {
+                    float u = (i - 4.5f) * 1.3f;
+                    glm::vec3 pos = forward_center + glm::vec3(u, 1.2f, 3.2f + std::abs(u) * 0.2f);
+                    m_stalkers.spawn_goliath(pos);
+                }
+
+                // 6 Seismic Burrowers
+                for (int i = 0; i < 6; ++i) {
+                    float u = (i - 2.5f) * 1.8f;
+                    glm::vec3 pos = forward_center + glm::vec3(u, -0.2f, 5.0f);
+                    m_burrowers.spawn_burrower(pos, 1.0f, true);
+                }
+
+                // 12 Void Spike Projectiles
+                for (int i = 0; i < 12; ++i) {
+                    VoidSpikeProjectile proj;
+                    proj.id = static_cast<uint32_t>(i + 1);
+                    float u = (i - 5.5f) * 0.8f;
+                    proj.position = forward_center + glm::vec3(u, 0.8f, 0.5f);
+                    proj.velocity = glm::vec3(0.0f, 0.0f, -5.0f);
+                    proj.lifetime = 10.0f;
+                    proj.active = true;
+                    m_stalkers.projectiles_mut().push_back(proj);
+                }
+
+                // 8 Carcasses
+                for (int i = 0; i < 8; ++i) {
+                    float u = (i - 3.5f) * 1.2f;
+                    glm::vec3 pos = forward_center + glm::vec3(u, -0.4f, -2.6f);
+                    CarcassManager::instance().spawn_carcass(pos, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(0.0f), StalkerRole::Melee, 1.0f);
+                }
+
+                VF_LOG_INFO("EnemyLoadTest", "Staged massive monster horde: 35 Stalkers, 6 Burrowers, 12 Projectiles, 8 Carcasses.");
+            }
+
+            // Keep stalkers facing the player/camera with slight animation progress
+            for (auto& s : m_stalkers.stalkers_mut()) {
+                s.target_pos = m_player->position();
+                s.yaw = 3.14159f;
+                s.anim_controller.update(0.016f, StalkerSurfaceState::FLOOR, glm::vec3(0.0f, 0.0f, 0.5f), 1.0f);
+            }
+
+            if (m_auto_test_frame == 18) {
+                // Take screenshot and verify rendering
+                capture_screenshot_png("screenshots/enemy_load_test.png", m_window->width(), m_window->height());
+                VF_LOG_INFO("EnemyLoadTest", "Captured screenshots/enemy_load_test.png.");
+
+                // Write report json
+                size_t stalker_verts = 0;
+                for (const auto& s : m_stalkers.stalkers()) {
+                    stalker_verts += (s.role == StalkerRole::ChitinGoliath) ? 952 : 916;
+                }
+                size_t burrower_verts = m_burrowers.burrowers().size() * 720;
+                size_t proj_verts = m_stalkers.projectiles().size() * 60;
+                size_t carcass_verts = CarcassManager::instance().carcasses().size() * 324;
+                size_t total_verts = stalker_verts + burrower_verts + proj_verts + carcass_verts;
+
+                std::ofstream report("screenshots/enemy_load_report.json");
+                if (report.is_open()) {
+                    report << "{\n"
+                           << "  \"stalker_count\": " << m_stalkers.stalkers().size() << ",\n"
+                           << "  \"burrower_count\": " << m_burrowers.burrowers().size() << ",\n"
+                           << "  \"projectile_count\": " << m_stalkers.projectiles().size() << ",\n"
+                           << "  \"carcass_count\": " << CarcassManager::instance().carcasses().size() << ",\n"
+                           << "  \"stalker_vertices\": " << stalker_verts << ",\n"
+                           << "  \"burrower_vertices\": " << burrower_verts << ",\n"
+                           << "  \"projectile_vertices\": " << proj_verts << ",\n"
+                           << "  \"carcass_vertices\": " << carcass_verts << ",\n"
+                           << "  \"total_monster_vertices\": " << total_verts << ",\n"
+                           << "  \"vbo_capacity\": " << m_renderer->stalker_vbo_capacity() << ",\n"
+                           << "  \"status\": \"PASS\"\n"
+                           << "}\n";
+                }
+            } else if (m_auto_test_frame >= 22) {
+                VF_LOG_INFO("EnemyLoadTest", "Multi-monster load test completed successfully! Exiting.");
+                break;
+            }
+        }
+
         // ── Automated Character & Enemy 3D Model Showcase Capture (--capture-models) ──
         if (m_config.capture_models) {
             m_auto_test_frame++;
@@ -4278,7 +4917,7 @@ void Application::run() {
                 // Transition to Stage 3: Delver Kaelen (Demolitionist)
                 m_showcase_render_delver = true;
                 m_showcase_delver_class = CharacterClass::Demolitionist;
-                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, -0.42f, 2.2f);
+                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, 0.0f, 2.45f);
                 m_showcase_delver_yaw = 3.25f;
                 VF_LOG_INFO("ModelShowcase", "Staged Delver Kaelen (Demolitionist) for Slot 3.");
             }
@@ -4288,7 +4927,7 @@ void Application::run() {
                 // Transition to Stage 4: Delver Rhodes (Vanguard)
                 m_showcase_render_delver = true;
                 m_showcase_delver_class = CharacterClass::Vanguard;
-                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, -0.42f, 2.2f);
+                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, 0.0f, 2.45f);
                 m_showcase_delver_yaw = 3.25f;
                 VF_LOG_INFO("ModelShowcase", "Staged Delver Rhodes (Vanguard) for Slot 4.");
             }
@@ -4298,7 +4937,7 @@ void Application::run() {
                 // Transition to Stage 5: Delver Vesper (Scout)
                 m_showcase_render_delver = true;
                 m_showcase_delver_class = CharacterClass::Scout;
-                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, -0.42f, 2.2f);
+                m_showcase_delver_pos = m_player->position() + glm::vec3(0.0f, 0.0f, 2.45f);
                 m_showcase_delver_yaw = 3.25f;
                 VF_LOG_INFO("ModelShowcase", "Staged Delver Vesper (Scout) for Slot 5.");
             }
@@ -4306,6 +4945,7 @@ void Application::run() {
             else if (m_auto_test_frame == 84) {
                 VisualTestHarness::instance().record_model_phase(5, "VESPER (SCOUT)", "docs/models/character_scout_vesper.png", m_window->width(), m_window->height());
             }
+
             // Frame 92: Finalize model showcase & exit
             else if (m_auto_test_frame >= 92) {
                 VisualTestHarness::instance().finalize_model_showcase();
@@ -4433,6 +5073,62 @@ void Application::run() {
 
         m_window->swap_buffers();
     }
+}
+
+void Application::register_objective_interaction(uint8_t mat) {
+    if (mat == MAT_ASTRAL_ORE || mat == MAT_ASTRAL) {
+        m_astral_hint_idle_timer = 0.0f;
+    } else if (mat == MAT_VOIDITE_CRYSTAL || mat == MAT_VOIDITE) {
+        m_voidite_hint_idle_timer = 0.0f;
+    } else if (mat == MAT_REINFORCED_VAULT_DOOR || mat == MAT_VAULT_DOOR || mat == MAT_PRISMATIC_CRYSTAL) {
+        m_vault_hint_idle_timer = 0.0f;
+    } else if (mat == 0 && m_objective_hint_mat != 0) {
+        register_objective_interaction(m_objective_hint_mat);
+        return;
+    }
+    m_objective_hint_timer = 0.0f;
+
+    // If an active hint is pointing to this objective, dismiss it
+    if (m_hud && m_hud->has_objective_hint()) {
+        if (m_objective_hint_mat != 0 && (mat == m_objective_hint_mat ||
+            ((mat == MAT_ASTRAL || mat == MAT_ASTRAL_ORE) && (m_objective_hint_mat == MAT_ASTRAL || m_objective_hint_mat == MAT_ASTRAL_ORE)) ||
+            ((mat == MAT_VOIDITE || mat == MAT_VOIDITE_CRYSTAL) && (m_objective_hint_mat == MAT_VOIDITE || m_objective_hint_mat == MAT_VOIDITE_CRYSTAL)) ||
+            ((mat == MAT_REINFORCED_VAULT_DOOR || mat == MAT_PRISMATIC_CRYSTAL) && m_objective_hint_mat == MAT_REINFORCED_VAULT_DOOR))) {
+            m_hud->clear_objective_hint();
+            m_objective_hint_given = false;
+        }
+    }
+}
+
+float Application::get_objective_idle_time(uint8_t mat) const {
+    if (mat == MAT_ASTRAL_ORE || mat == MAT_ASTRAL) {
+        return m_astral_hint_idle_timer;
+    } else if (mat == MAT_VOIDITE_CRYSTAL || mat == MAT_VOIDITE) {
+        return m_voidite_hint_idle_timer;
+    } else if (mat == MAT_REINFORCED_VAULT_DOOR || mat == MAT_VAULT_DOOR || mat == MAT_PRISMATIC_CRYSTAL) {
+        return m_vault_hint_idle_timer;
+    }
+    return 0.0f;
+}
+
+void Application::set_objective_idle_timer(uint8_t mat, float time) {
+    if (mat == MAT_ASTRAL_ORE || mat == MAT_ASTRAL) {
+        m_astral_hint_idle_timer = time;
+    } else if (mat == MAT_VOIDITE_CRYSTAL || mat == MAT_VOIDITE) {
+        m_voidite_hint_idle_timer = time;
+    } else if (mat == MAT_REINFORCED_VAULT_DOOR || mat == MAT_VAULT_DOOR || mat == MAT_PRISMATIC_CRYSTAL) {
+        m_vault_hint_idle_timer = time;
+    }
+}
+
+void Application::reset_all_objective_idle_timers() {
+    m_astral_hint_idle_timer = 0.0f;
+    m_voidite_hint_idle_timer = 0.0f;
+    m_vault_hint_idle_timer = 0.0f;
+    m_objective_hint_timer = 0.0f;
+    m_objective_hint_given = false;
+    m_objective_hint_pos = glm::vec3(0.0f);
+    m_objective_hint_mat = 0;
 }
 
 } // namespace Voidfall

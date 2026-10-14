@@ -326,7 +326,7 @@ PauseMenuAction PauseMenu::render(
         in_y += 18.0f * ui_scale;
 
         std::string vol_summary = "Master Audio: " + std::to_string(static_cast<int>(std::round(settings.master_volume * 100.0f))) + "%" + (settings.mute_all ? " [MUTED]" : "");
-        std::string fov_summary = "FOV: " + std::to_string(static_cast<int>(settings.fov)) + " Deg  |  Sensitivity: " + std::to_string(static_cast<int>(settings.mouse_sensitivity * 100.0f)) + "%";
+        std::string fov_summary = "FOV: " + std::to_string(static_cast<int>(settings.fov)) + " Deg  |  Sens: " + std::to_string(static_cast<int>(settings.mouse_sensitivity * 100.0f)) + "%  |  Auto-Step: " + (settings.auto_step ? "ON" : "OFF");
         draw_text(vol_summary, rx, in_y, 0.95f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
         in_y += 16.0f * ui_scale;
         draw_text(fov_summary, rx, in_y, 0.95f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
@@ -532,8 +532,10 @@ PauseMenuAction PauseMenu::render(
             }
         };
 
-        float row_spacing = std::clamp(28.0f * ui_scale, 24.0f, 32.0f);
+        float row_spacing = std::clamp(25.0f * ui_scale, 21.0f, 29.0f);
         draw_volume_row("MASTER VOLUME", settings.master_volume, r_y, true);
+        r_y += row_spacing;
+        draw_volume_row("MUSIC SOUNDTRACK", settings.music_volume, r_y, false);
         r_y += row_spacing;
         draw_volume_row("SFX & MINING TOOLS", settings.sfx_volume, r_y, false);
         r_y += row_spacing;
@@ -581,6 +583,21 @@ PauseMenuAction PauseMenu::render(
         if (mouse_clicked && f_hover2) settings.fov = std::min(105.0f, settings.fov + 5.0f);
         r_y += adj_btn_h + 6.0f * ui_scale;
 
+        // Cavern Brightness Setting Row
+        char bright_buf[32];
+        std::snprintf(bright_buf, sizeof(bright_buf), "CAVERN BRIGHTNESS: %d%%", static_cast<int>(std::round(settings.brightness * 100.0f)));
+        draw_text_fitted(bright_buf, panel_x + pad + 14.0f * ui_scale, r_y + (adj_btn_h - FontRenderer::get_rendered_height(1.00f * ui_scale)) * 0.5f,
+                         btn1_x - (panel_x + pad + 14.0f * ui_scale) - 8.0f, 1.00f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+        bool b_hover1 = (mouse_x >= btn1_x && mouse_x <= btn1_x + adj_btn_w && mouse_y >= r_y && mouse_y <= r_y + adj_btn_h);
+        bool b_hover2 = (mouse_x >= btn2_x && mouse_x <= btn2_x + adj_btn_w && mouse_y >= r_y && mouse_y <= r_y + adj_btn_h);
+        draw_panel_with_border(btn1_x, r_y, adj_btn_w, adj_btn_h, b_hover1 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_panel_with_border(btn2_x, r_y, adj_btn_w, adj_btn_h, b_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
+        draw_text_centered("-", btn1_x, r_y, adj_btn_w, adj_btn_h, 1.15f * ui_scale, glm::vec4(1.0f));
+        draw_text_centered("+", btn2_x, r_y, adj_btn_w, adj_btn_h, 1.15f * ui_scale, glm::vec4(1.0f));
+        if (mouse_clicked && b_hover1) settings.brightness = std::max(0.40f, std::round((settings.brightness - 0.10f) * 10.0f) / 10.0f);
+        if (mouse_clicked && b_hover2) settings.brightness = std::min(2.00f, std::round((settings.brightness + 0.10f) * 10.0f) / 10.0f);
+        r_y += adj_btn_h + 6.0f * ui_scale;
+
         char shake_buf[32];
         if (settings.screen_shake <= 0.001f) {
             std::snprintf(shake_buf, sizeof(shake_buf), "SCREEN SHAKE: OFF (0%%)");
@@ -597,6 +614,24 @@ PauseMenuAction PauseMenu::render(
         draw_text_centered("+", btn2_x, r_y, adj_btn_w, adj_btn_h, 1.15f * ui_scale, glm::vec4(1.0f));
         if (mouse_clicked && shk_hover1) settings.screen_shake = std::max(0.0f, settings.screen_shake - 0.10f);
         if (mouse_clicked && shk_hover2) settings.screen_shake = std::min(1.0f, settings.screen_shake + 0.10f);
+        r_y += adj_btn_h + 6.0f * ui_scale;
+
+        // Auto-Step / Step Traversal Toggle
+        float tog_btn_w = adj_btn_w * 2.0f + 4.0f * ui_scale;
+        float tog_btn_x = btn1_x;
+        std::string step_label = std::string("AUTO STEP-UP: ") + (settings.auto_step ? "ENABLED" : "DISABLED");
+        draw_text_fitted(step_label, panel_x + pad + 14.0f * ui_scale, r_y + (adj_btn_h - FontRenderer::get_rendered_height(1.00f * ui_scale)) * 0.5f,
+                         tog_btn_x - (panel_x + pad + 14.0f * ui_scale) - 8.0f, 1.00f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+        bool step_hover = (mouse_x >= tog_btn_x && mouse_x <= tog_btn_x + tog_btn_w && mouse_y >= r_y && mouse_y <= r_y + adj_btn_h);
+        glm::vec4 step_bg = settings.auto_step ? (step_hover ? glm::vec4(0.12f, 0.35f, 0.28f, 1.0f) : glm::vec4(0.06f, 0.22f, 0.18f, 1.0f)) :
+                                                (step_hover ? glm::vec4(0.25f, 0.15f, 0.15f, 1.0f) : glm::vec4(0.14f, 0.08f, 0.08f, 1.0f));
+        glm::vec4 step_border = settings.auto_step ? glm::vec4(0.2f, 0.8f, 0.5f, 0.8f) : glm::vec4(0.6f, 0.25f, 0.25f, 0.6f);
+        draw_panel_with_border(tog_btn_x, r_y, tog_btn_w, adj_btn_h, step_bg, step_border);
+        draw_text_centered_fitted(settings.auto_step ? "ON" : "OFF", tog_btn_x, r_y, tog_btn_w, adj_btn_h, 1.05f * ui_scale,
+                                  settings.auto_step ? glm::vec4(0.3f, 1.0f, 0.6f, 1.0f) : glm::vec4(1.0f, 0.5f, 0.5f, 0.9f));
+        if (mouse_clicked && step_hover) {
+            settings.auto_step = !settings.auto_step;
+        }
         r_y += adj_btn_h + 6.0f * ui_scale;
 
         // Test Audio Button
@@ -641,18 +676,19 @@ PauseMenuAction PauseMenu::render(
             {"[1-3 / MWHEEL]", "Equip Drill / Weapon / Demo", Typography::COLOR_CYAN},
             {"[LMB]",          "Mining Drill / Attack",       Typography::COLOR_AMBER},
             {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
-            {"[F]",            "Toggle Flashlight / Headlamp",Typography::COLOR_CYAN},
+            {"[F]",            "Toggle Flashlight / Torch",   Typography::COLOR_CYAN},
             {"[G]",            "Grappling Hook Tether",       Typography::COLOR_GREEN},
             {"[E]",            "Interact / Retrieve Relic / Reel", Typography::COLOR_GREEN},
-            {"[T]",            "Deploy Chemical Flare",       Typography::COLOR_CYAN},
+            {"[T]",            "Deploy Flare / Torch",        Typography::COLOR_CYAN},
             {"[Q]",            "Seismic Sonar Pulse",         Typography::COLOR_CYAN},
             {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},
             {"[I]",            "Cargo Inventory & Jettison",  Typography::COLOR_CYAN},
+            {"[ [ / ] ]",      "Decrease / Increase Brightness", Typography::COLOR_CYAN},
             {"[B]",            "Deploy Evacuation Beacon",    Typography::COLOR_GREEN},
             {"[H / F1]",       "Toggle Contractor Guide",     Typography::COLOR_PRIMARY}
         };
 
-        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 15.0f, 14.0f * ui_scale, 19.0f * ui_scale);
+        float b_step = std::clamp((content_box_h - 45.0f * ui_scale) / 16.0f, 13.0f * ui_scale, 19.0f * ui_scale);
         float key_col_w = std::clamp(92.0f * ui_scale, 75.0f, 105.0f);
         for (const auto& b : bindings) {
             draw_text_fitted(b.key, col1_x, c1_y, key_col_w, 0.92f * ui_scale, Typography::COLOR_CYAN, 0.65f * ui_scale, FontType::Tech);

@@ -109,6 +109,7 @@ private:
     void init_gl();
     void init_font_atlas();
     void draw_rect(float x, float y, float w, float h, const glm::vec4& color);
+    void draw_line_conduit(float x0, float y0, float x1, float y1, float thickness, const glm::vec4& color);
     void draw_text(const std::string& text, float x, float y, float scale, const glm::vec4& color, FontType font = FontType::Body);
     void draw_text_fitted(const std::string& text, float x, float y, float max_w, float base_scale, const glm::vec4& color, float min_scale = 0.50f, FontType font = FontType::Body);
     void draw_text_centered(const std::string& text, float box_x, float box_y, float box_w, float box_h, float scale, const glm::vec4& color, FontType font = FontType::Body);
@@ -142,14 +143,22 @@ private:
     bool  m_carousel_needs_focus{true};
     int   m_focused_sector{1};
 
-    // Draggable upgrade tree state
-    float m_upgrades_scroll_x{0.0f};
-    float m_upgrades_target_x{0.0f};
+    // Interactive 2D Neural Skill Web State (Free 2D Pan, Momentum Fling, Zoom & Node Focus)
+    float m_upgrades_pan_x{0.0f};
+    float m_upgrades_pan_y{0.0f};
+    float m_upgrades_target_pan_x{0.0f};
+    float m_upgrades_target_pan_y{0.0f};
     float m_upgrades_velocity_x{0.0f};
-    bool  m_is_dragging_upgrades{false};
-    float m_drag_start_upgrades_x{0.0f};
-    float m_drag_total_dist_upgrades{0.0f};
-    float m_last_upgrades_mouse_x{0.0f};
+    float m_upgrades_velocity_y{0.0f};
+    float m_upgrades_zoom{1.0f};
+    float m_upgrades_target_zoom{1.0f};
+    bool  m_is_dragging_web{false};
+    float m_drag_start_web_mouse_x{0.0f};
+    float m_drag_start_web_mouse_y{0.0f};
+    float m_last_web_mouse_x{0.0f};
+    float m_last_web_mouse_y{0.0f};
+    float m_drag_total_dist_web{0.0f};
+    bool  m_web_needs_center{true};
 
     std::string m_terminal_msg;
     glm::vec4 m_terminal_msg_col{0.2f, 0.95f, 0.4f, 1.0f};

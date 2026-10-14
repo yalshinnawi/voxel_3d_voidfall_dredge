@@ -29,14 +29,15 @@ struct ChunkMeshData {
     Chunk* chunk{nullptr};
     std::shared_ptr<Chunk> chunk_ref{nullptr};
     std::vector<PackedVoxelVertex> vertices;
+    uint32_t version{0};
 
     void UploadToGPU() {
         Chunk* c = chunk ? chunk : chunk_ref.get();
         if (c) {
-            if (!vertices.empty()) {
+            if (version >= c->mesh_version()) {
                 c->stage_mesh(std::move(vertices));
+                c->upload_mesh();
             }
-            c->upload_mesh();
         }
     }
 };
@@ -148,6 +149,11 @@ public:
 
     float get_highest_solid_surface(int x, int z) const;
 
+    // Material queries & objective ore verification
+    int count_material(uint8_t mat_id) const;
+    std::vector<glm::ivec3> query_material_positions(uint8_t mat_id, size_t max_results = 64) const;
+    void verify_and_seed_objective_ores(int target_astral);
+
     // Raycast through voxel grid (DDA algorithm)
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& direction, float max_distance = 12.0f) const;
 
@@ -169,6 +175,7 @@ public:
     void push_pending_upload(std::unique_ptr<ChunkMeshData> data);
     size_t upload_queue_size() const;
     size_t pending_upload_count() const { return upload_queue_size(); }
+    size_t mesh_queue_size() const;
     std::queue<std::unique_ptr<ChunkMeshData>>& pending_uploads() { return m_pendingUploads; }
     const std::queue<std::unique_ptr<ChunkMeshData>>& pending_uploads() const { return m_pendingUploads; }
 
@@ -242,6 +249,10 @@ public:
 
     // Synchronously meshes and uploads all chunks immediately (for staging/testing)
     void force_mesh_all_sync();
+
+    // Synchronously meshes and uploads specific chunks immediately (e.g. after explosive blasts)
+    void sync_remesh_chunks(const std::unordered_set<ChunkPos, ChunkPosHash>& chunk_positions);
+    void sync_remesh_box(const glm::ivec3& min_block, const glm::ivec3& max_block);
 
     const std::unordered_map<ChunkPos, std::shared_ptr<Chunk>, ChunkPosHash>& chunks() const {
         return m_chunks;
@@ -350,6 +361,7 @@ private:
     bool m_enable_background_meshing{true};
     std::vector<std::thread> m_workers;
     std::queue<ChunkPos> m_mesh_queue;
+    std::unordered_set<ChunkPos, ChunkPosHash> m_mesh_queued_set;
     std::mutex m_queue_mutex;
     std::condition_variable m_queue_cv;
     std::atomic<bool> m_running{true};
@@ -357,6 +369,7 @@ private:
     // Mesh GPU upload queue
     mutable std::mutex m_upload_mutex;
     std::unordered_set<ChunkPos, ChunkPosHash> m_upload_queued_set;
+    std::unordered_map<ChunkPos, ChunkMeshData*, ChunkPosHash> m_pending_upload_map;
     size_t m_uploads_this_frame{0};
 
     // Camera view frustum culling

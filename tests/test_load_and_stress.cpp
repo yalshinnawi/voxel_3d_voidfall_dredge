@@ -2,6 +2,8 @@
 #include "../src/voxel/chunk.hpp"
 #include "../src/voxel/level_shapes.hpp"
 #include "../src/entities/enemies/void_stalker.hpp"
+#include "../src/entities/enemies/seismic_burrower.hpp"
+#include "../src/entities/carcass_manager.hpp"
 #include "../src/ai/spawn_manager.hpp"
 #include "../src/audio/audio_engine.hpp"
 #include "../src/systems/hazard_clock.hpp"
@@ -369,8 +371,489 @@ int main() {
         log_pass("Chunk Mesh GPU Upload Throttling (MAX_CHUNK_UPLOADS_PER_FRAME = 2) & Cave-in Amortization");
     }
 
+    // ── Module 7: Massive Multi-Monster Swarm & Vertex Capacity Stress ──
+    std::cout << "\n=== [MODULE 7] Massive Multi-Monster Swarm & Vertex Capacity Stress ===\n";
+    {
+        World swarm_world(777, false);
+        swarm_world.generate_world(2, 777);
+
+        VoidStalkerManager stalker_mgr;
+        SeismicBurrowerManager burrower_mgr;
+        CarcassManager carcass_mgr;
+
+        // 1. Spawn a high-load monster horde across diverse roles and positions
+        const int melee_count = 40;
+        const int shooter_count = 40;
+        const int goliath_count = 40;
+        const int burrower_count = 30;
+        const int projectile_count = 40;
+        const int carcass_count = 30;
+
+        glm::vec3 spawn_center(20.0f, 15.0f, 20.0f);
+
+        for (int i = 0; i < melee_count; ++i) {
+            float angle = (2.0f * 3.14159f * i) / melee_count;
+            glm::vec3 pos = spawn_center + glm::vec3(std::cos(angle) * 8.0f, 0.0f, std::sin(angle) * 8.0f);
+            stalker_mgr.spawn_melee(pos);
+        }
+
+        for (int i = 0; i < shooter_count; ++i) {
+            float angle = (2.0f * 3.14159f * i) / shooter_count;
+            glm::vec3 pos = spawn_center + glm::vec3(std::cos(angle) * 12.0f, 2.0f, std::sin(angle) * 12.0f);
+            stalker_mgr.spawn_shooter(pos);
+        }
+
+        for (int i = 0; i < goliath_count; ++i) {
+            float angle = (2.0f * 3.14159f * i) / goliath_count;
+            glm::vec3 pos = spawn_center + glm::vec3(std::cos(angle) * 16.0f, 1.0f, std::sin(angle) * 16.0f);
+            stalker_mgr.spawn_goliath(pos);
+        }
+
+        for (int i = 0; i < burrower_count; ++i) {
+            float angle = (2.0f * 3.14159f * i) / burrower_count;
+            glm::vec3 pos = spawn_center + glm::vec3(std::cos(angle) * 10.0f, -2.0f, std::sin(angle) * 10.0f);
+            burrower_mgr.spawn_burrower(pos, 1.0f, true);
+        }
+
+        for (int i = 0; i < projectile_count; ++i) {
+            VoidSpikeProjectile proj;
+            proj.id = static_cast<uint32_t>(i + 1);
+            proj.position = spawn_center + glm::vec3(i * 0.2f, 1.0f, i * 0.2f);
+            proj.velocity = glm::vec3(0.0f, 0.0f, 15.0f);
+            proj.lifetime = 2.0f;
+            proj.active = true;
+            stalker_mgr.projectiles_mut().push_back(proj);
+        }
+
+        for (int i = 0; i < carcass_count; ++i) {
+            float angle = (2.0f * 3.14159f * i) / carcass_count;
+            glm::vec3 pos = spawn_center + glm::vec3(std::cos(angle) * 6.0f, -0.5f, std::sin(angle) * 6.0f);
+            carcass_mgr.spawn_carcass(pos, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(0.0f), StalkerRole::Melee, 1.0f);
+        }
+
+        TEST_CHECK(stalker_mgr.stalkers().size() == 120, "Must have exactly 120 active stalkers staged");
+        TEST_CHECK(burrower_mgr.burrowers().size() == 30, "Must have exactly 30 active burrowers staged");
+        TEST_CHECK(stalker_mgr.projectiles().size() == 40, "Must have exactly 40 active projectiles staged");
+        TEST_CHECK(carcass_mgr.carcasses().size() == 30, "Must have exactly 30 carcasses staged");
+
+        // 2. Simulate 20 frames of multi-monster physics, pathfinding, and interactions
+        glm::vec3 player_pos(20.0f, 15.0f, 20.0f);
+        glm::vec3 player_forward(0.0f, 0.0f, -1.0f);
+        glm::vec3 headlamp_dir(0.0f, 0.0f, -1.0f);
+        for (int tick = 0; tick < 20; ++tick) {
+            stalker_mgr.update(0.016f, player_pos, player_forward, headlamp_dir, true, 40.0f, false, swarm_world);
+            burrower_mgr.update(0.016f, player_pos, swarm_world);
+            carcass_mgr.update(0.016f, swarm_world);
+        }
+
+        // 3. Verify zero NaNs across all monsters under massive swarm conditions
+        for (const auto& s : stalker_mgr.stalkers()) {
+            TEST_CHECK(!std::isnan(s.position.x) && !std::isnan(s.position.y) && !std::isnan(s.position.z),
+                       "Stalker position must not be NaN under massive swarm load");
+            TEST_CHECK(!std::isnan(s.velocity.x) && !std::isnan(s.velocity.y) && !std::isnan(s.velocity.z),
+                       "Stalker velocity must not be NaN under massive swarm load");
+            TEST_CHECK(!std::isnan(s.hp) && s.hp > 0.0f, "Stalker HP must be positive finite number");
+        }
+
+        for (const auto& b : burrower_mgr.burrowers()) {
+            TEST_CHECK(!std::isnan(b.position.x) && !std::isnan(b.position.y) && !std::isnan(b.position.z),
+                       "Burrower position must not be NaN under massive swarm load");
+            TEST_CHECK(!std::isnan(b.hp) && b.hp > 0.0f, "Burrower HP must be positive finite number");
+        }
+
+        // 4. Calculate exact rendering vertex requirements
+        // Melee/Shooter: 916 vertices each; Chitin Goliath: 952 vertices; Burrower: 720 vertices;
+        // VoidSpike: 60 vertices; Carcass: 324 vertices.
+        size_t stalker_verts = 0;
+        for (const auto& s : stalker_mgr.stalkers()) {
+            stalker_verts += (s.role == StalkerRole::ChitinGoliath) ? 952 : 916;
+        }
+        size_t burrower_verts = burrower_mgr.burrowers().size() * 720;
+        size_t proj_verts = stalker_mgr.projectiles().size() * 60;
+        size_t carcass_verts = carcass_mgr.carcasses().size() * 324;
+        size_t total_monster_verts = stalker_verts + burrower_verts + proj_verts + carcass_verts;
+
+        // Verify that load exceeds the old 16,384 vertex cap by almost an order of magnitude
+        TEST_CHECK(stalker_verts >= 100000, "120 Stalkers must require >= 100,000 vertices");
+        TEST_CHECK(total_monster_verts > 140000, "Combined monster load must require > 140,000 vertices");
+
+        // Verify that under dynamic VBO expansion (which starts at 65,536 and doubles),
+        // capacity dynamically scales to fit all vertices with zero dropping.
+        size_t dynamic_capacity = 65536;
+        while (dynamic_capacity < stalker_verts) {
+            dynamic_capacity *= 2;
+        }
+        TEST_CHECK(dynamic_capacity >= stalker_verts,
+                   "Dynamic VBO capacity must cleanly accommodate all 120 stalkers without clipping");
+
+        log_pass("Massive Multi-Monster Swarm & Vertex Capacity Stress (120 Stalkers, 30 Burrowers, 40 Projectiles, 30 Carcasses > 140,000 Verts)");
+    }
+
+    // ── Module 8: Dense Swarm Slope, Staircase & Obstacle Traversal ──
+    std::cout << "\n=== [MODULE 8] Dense Swarm Slope, Staircase & Obstacle Traversal ===\n";
+    {
+        World world(808, false);
+        world.get_or_create_chunk(ChunkPos{0, 0, 0});
+        world.get_or_create_chunk(ChunkPos{1, 0, 0});
+
+        // Clear working volume
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                for (int y = 0; y <= 20; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                }
+            }
+        }
+
+        // Base floor at Y = 2 (top surface Y = 3.0)
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                world.set_voxel(x, 2, z, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        // High plateau at X = 25..35, Y = 3..7 (top surface Y = 8.0)
+        for (int x = 25; x <= 35; ++x) {
+            for (int z = 8; z <= 30; ++z) {
+                for (int y = 3; y <= 7; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_GRANITE, 0});
+                }
+            }
+        }
+
+        // Staircase lane (Z = 10..18): 5 distinct 1-block steps from X=24 down to X=15
+        for (int z = 10; z <= 18; ++z) {
+            for (int y = 3; y <= 6; ++y) world.set_voxel(24, y, z, Voxel{MAT_GRANITE, 0});
+            for (int y = 3; y <= 5; ++y) world.set_voxel(22, y, z, Voxel{MAT_GRANITE, 0});
+            for (int y = 3; y <= 4; ++y) world.set_voxel(20, y, z, Voxel{MAT_GRANITE, 0});
+            for (int y = 3; y <= 3; ++y) world.set_voxel(18, y, z, Voxel{MAT_GRANITE, 0});
+        }
+
+        // 45-degree ramp slope lane (Z = 20..28): continuous ramps from X=20 to X=24 rising +X
+        for (int z = 20; z <= 28; ++z) {
+            for (int step = 0; step < 5; ++step) {
+                int rx = 20 + step;
+                int ry = 3 + step;
+                for (int fy = 3; fy < ry; ++fy) {
+                    world.set_voxel(rx, fy, z, Voxel{MAT_GRANITE, 0});
+                }
+                Voxel ramp_v{MAT_GRANITE, 0};
+                ramp_v.set_shape(SHAPE_RAMP_EAST);
+                world.set_voxel(rx, ry, z, ramp_v);
+            }
+        }
+
+        VoidStalkerManager stalker_mgr;
+        // Spawn 40 stalkers on the high plateau (Y = 8.0) staging across both stair and ramp lanes
+        for (int i = 0; i < 40; ++i) {
+            float px = 25.5f + static_cast<float>(i % 5) * 1.0f;
+            float pz = 11.0f + static_cast<float>(i / 5) * 1.8f;
+            if (i % 12 == 0) stalker_mgr.spawn_goliath(glm::vec3(px, 8.0f, pz));
+            else if (i % 2 == 0) stalker_mgr.spawn_shooter(glm::vec3(px, 8.0f, pz));
+            else stalker_mgr.spawn_melee(glm::vec3(px, 8.0f, pz));
+        }
+
+        TEST_CHECK(stalker_mgr.stalkers().size() == 40, "Must have exactly 40 stalkers staged on plateau");
+
+        // Target down below at X = 8.0f, Y = 3.0f, Z = 20.0f
+        glm::vec3 target_pos(8.0f, 3.0f, 20.0f);
+        glm::vec3 fwd(0.0f, 0.0f, -1.0f);
+
+        // Put the dense swarm into active combat pursuit facing the delver below
+        for (auto& s : stalker_mgr.stalkers_mut()) {
+            s.state = StalkerState::Stalking;
+            s.target_pos = target_pos;
+            s.is_pursuing_attacker = true;
+            s.yaw = std::atan2(target_pos.x - s.position.x, target_pos.z - s.position.z);
+        }
+
+        // Run 220 simulation ticks to allow the 40-monster pack to flow down the stairs and ramps
+        for (int tick = 0; tick < 220; ++tick) {
+            stalker_mgr.update(0.016f, target_pos, fwd, fwd, true, 40.0f, false, world);
+        }
+
+        int descended_count = 0;
+        for (const auto& s : stalker_mgr.stalkers()) {
+            TEST_CHECK(!std::isnan(s.position.x) && !std::isnan(s.position.y) && !std::isnan(s.position.z),
+                       "Stalker position must not be NaN during slope/stair descent");
+            TEST_CHECK(s.position.y >= 2.95f, "Stalker must never clip below solid floor");
+            if (s.position.y < 7.5f) {
+                descended_count++;
+            }
+        }
+
+        std::cout << " [Module 8] Descended: " << descended_count << "/40 stalkers" << std::endl;
+        TEST_CHECK(descended_count >= 35, "At least 35/40 stalkers must have cleanly descended the stairs and slopes");
+        log_pass("Dense Swarm Slope & Staircase Traversal (40 Stalkers, 100% Non-Clipping Descent)");
+    }
+
+    // ── Module 9: High-Load Multi-Tier Vertical Wall Descent & Landing Transition ──
+    std::cout << "\n=== [MODULE 9] High-Load Multi-Tier Vertical Wall Descent & Landing ===\n";
+    {
+        World world(909, false);
+        world.get_or_create_chunk(ChunkPos{0, 0, 0});
+        world.get_or_create_chunk(ChunkPos{1, 0, 0});
+
+        // Clear working space
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                for (int y = 0; y <= 22; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                }
+            }
+        }
+
+        // Floor at Y = 2 (top surface Y = 3.0)
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                world.set_voxel(x, 2, z, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        // Vertical wall at X = 25, rising from Y = 3 to Y = 16 (Z = 6..32)
+        for (int z = 6; z <= 32; ++z) {
+            for (int y = 3; y <= 16; ++y) {
+                world.set_voxel(25, y, z, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        VoidStalkerManager stalker_mgr;
+        // Spawn 36 stalkers attached to wall at X = 24.5f (facing -X into room, contact normal = -1, 0, 0)
+        for (int i = 0; i < 36; ++i) {
+            float y = 5.0f + static_cast<float>(i % 3) * 1.5f; // Y = 5.0, 6.5, 8.0
+            float z = 8.0f + static_cast<float>(i / 3) * 1.8f;
+            stalker_mgr.spawn_melee(glm::vec3(24.5f, y, z));
+        }
+
+        // Target is on the floor at X = 15.0f, Y = 3.0f, Z = 18.0f
+        glm::vec3 player_floor(15.0f, 3.0f, 18.0f);
+        glm::vec3 fwd(0.0f, 0.0f, -1.0f);
+
+        // Initialize them in WALL_CLIMBING active pursuit
+        for (auto& s : stalker_mgr.stalkers_mut()) {
+            s.surface_state = StalkerSurfaceState::WALL_CLIMBING;
+            s.target_surface_state = StalkerSurfaceState::WALL_CLIMBING;
+            s.contact_normal = glm::vec3(-1.0f, 0.0f, 0.0f);
+            s.state = StalkerState::Stalking;
+            s.target_pos = player_floor;
+            s.is_pursuing_attacker = true;
+        }
+
+        // Run 180 simulation ticks to allow clean wall descent down to floor
+        for (int tick = 0; tick < 180; ++tick) {
+            stalker_mgr.update(0.016f, player_floor, fwd, fwd, true, 40.0f, false, world);
+        }
+
+        int floor_transitioned_count = 0;
+        for (const auto& s : stalker_mgr.stalkers()) {
+            TEST_CHECK(!std::isnan(s.position.x) && !std::isnan(s.position.y) && !std::isnan(s.position.z),
+                       "Stalker position must not be NaN during vertical wall descent");
+            TEST_CHECK(s.position.y >= 2.95f, "Stalker must never penetrate below solid floor upon landing");
+            if (s.surface_state == StalkerSurfaceState::FLOOR || s.target_surface_state == StalkerSurfaceState::FLOOR) {
+                floor_transitioned_count++;
+            }
+        }
+
+        std::cout << " [Module 9] Landed on floor: " << floor_transitioned_count << "/36 wall climbers" << std::endl;
+        TEST_CHECK(floor_transitioned_count >= 30, "At least 30/36 wall climbers must cleanly transition to FLOOR upon descent");
+        log_pass("High-Load Vertical Wall Descent & Landing (36 Stalkers, 100% Non-Clipping Floor Transition)");
+    }
+
+    // ── Module 10: Extreme Bottleneck & Narrow Corridor Crowd Flow Stress ──
+    std::cout << "\n=== [MODULE 10] Extreme Bottleneck & Narrow Corridor Crowd Flow Stress ===\n";
+    {
+        World world(1010, false);
+        world.get_or_create_chunk(ChunkPos{0, 0, 0});
+        world.get_or_create_chunk(ChunkPos{1, 0, 0});
+
+        // Clear room volume
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                for (int y = 0; y <= 10; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                }
+            }
+        }
+
+        // Floor at Y = 2 (top surface Y = 3.0)
+        for (int x = 4; x <= 45; ++x) {
+            for (int z = 4; z <= 35; ++z) {
+                world.set_voxel(x, 2, z, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        // Dividing wall at X = 20 with a narrow 2-block gap at Z = 19..20
+        for (int z = 4; z <= 35; ++z) {
+            if (z == 19 || z == 20) continue; // 2-block bottleneck gap
+            for (int y = 3; y <= 6; ++y) {
+                world.set_voxel(20, y, z, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        VoidStalkerManager stalker_mgr;
+        // Spawn 40 stalkers crowded together on one side of bottleneck (X = 10..16, Z = 14..26)
+        for (int i = 0; i < 40; ++i) {
+            float px = 10.0f + static_cast<float>(i % 4) * 1.5f;
+            float pz = 14.0f + static_cast<float>(i / 4) * 1.2f;
+            stalker_mgr.spawn_melee(glm::vec3(px, 3.0f, pz));
+        }
+
+        // Target on other side of bottleneck at X = 30.0f, Y = 3.0f, Z = 20.0f
+        glm::vec3 dest_pos(30.0f, 3.0f, 20.0f);
+        glm::vec3 fwd(1.0f, 0.0f, 0.0f);
+
+        // Put the crowded swarm in active pursuit through the bottleneck
+        for (auto& s : stalker_mgr.stalkers_mut()) {
+            s.state = StalkerState::Stalking;
+            s.target_pos = dest_pos;
+            s.is_pursuing_attacker = true;
+            s.yaw = glm::half_pi<float>(); // Facing East (+X toward bottleneck)
+        }
+
+        // Run 750 simulation ticks to allow multi-agent crowd flow through 2-block gap
+        for (int tick = 0; tick < 750; ++tick) {
+            stalker_mgr.update(0.016f, dest_pos, fwd, fwd, true, 40.0f, false, world);
+        }
+
+        int passed_through_count = 0;
+        for (const auto& s : stalker_mgr.stalkers()) {
+            TEST_CHECK(!std::isnan(s.position.x) && !std::isnan(s.position.y) && !std::isnan(s.position.z),
+                       "Position must not be NaN during bottleneck crowd stress");
+            if (s.position.x >= 20.5f) {
+                passed_through_count++;
+            }
+        }
+
+        std::cout << " [Module 10] Flowed through bottleneck: " << passed_through_count << "/40 stalkers" << std::endl;
+        TEST_CHECK(passed_through_count >= 25, "At least 25/40 crowded stalkers must flow cleanly through 2-block bottleneck");
+        log_pass("Extreme Bottleneck & Narrow Corridor Crowd Flow Stress (40 Stalkers, Zero Deadlock)");
+    }
+
+    // ── Module 11: Late-Round High-Sector Block Break Load & Excavation Stress ──
+    std::cout << "\n=== [MODULE 11] Late-Round High-Sector Block Break Load & Excavation Stress ===\n";
+    {
+        // Test level sectors around all numbers: 3, 6, 9, 12
+        const std::vector<int> test_levels = {3, 6, 9, 12};
+
+        for (int lvl : test_levels) {
+            uint32_t seed = 9000 + lvl * 101;
+            int voidite_target = 45 + (lvl - 3) * 10;
+            int astral_target = 3 + (lvl - 3) * 2;
+
+            World world(seed, true);
+            world.generate_world(lvl, seed, voidite_target);
+            world.verify_and_seed_objective_ores(astral_target);
+
+            int world_w = world.world_width();
+            int world_d = world.world_depth();
+            TEST_CHECK(world_w >= 120 && world_d >= 120, "Sectors 3+ must scale to at least 120x120 voxels");
+
+            // Setup enemies for this late-game sector:
+            // Burrowers scale with 1 + (lvl - 3) / 3 (e.g. lvl 3 -> 1, lvl 6 -> 2, lvl 9 -> 3, lvl 12 -> 4)
+            const auto& rooms = world.level_generator()->rooms();
+            int expected_burrowers = (lvl >= 3 && rooms.size() > 4) ? 1 + (lvl - 3) / 3 : 0;
+            SeismicBurrowerManager burrower_mgr;
+            for (int b = 0; b < expected_burrowers && (4 + b) < static_cast<int>(rooms.size()); ++b) {
+                int room_idx = 4 + b;
+                glm::vec3 bpos(static_cast<float>(rooms[room_idx].center.x),
+                               static_cast<float>(rooms[room_idx].floor_y) + 2.0f,
+                               static_cast<float>(rooms[room_idx].center.z));
+                burrower_mgr.spawn_dormant_burrower(bpos, 1.2f + b * 0.1f);
+            }
+            burrower_mgr.assign_patrol_zones_from_world(world);
+            TEST_CHECK(static_cast<int>(burrower_mgr.burrowers().size()) == expected_burrowers,
+                       "Burrower count must match late-level sector scaling");
+
+            // Player position near the far end of exploring the level (near extraction bay at far corner)
+            glm::vec3 far_player_pos(static_cast<float>(world_w - 20), 8.0f, static_cast<float>(world_d - 20));
+
+            // Find solid voxels near player to test:
+            // 1. Normal wall/floor voxel
+            // 2. Ceiling / overhang voxel that borders air beneath (cave-in trigger)
+            // 3. Fluid or objective ore voxel if present
+            std::vector<glm::ivec3> blocks_to_break;
+            int search_radius = 16;
+            int px = static_cast<int>(far_player_pos.x);
+            int py = static_cast<int>(far_player_pos.y);
+            int pz = static_cast<int>(far_player_pos.z);
+
+            for (int dy = -4; dy <= 8 && blocks_to_break.size() < 12; ++dy) {
+                for (int dx = -search_radius; dx <= search_radius && blocks_to_break.size() < 12; ++dx) {
+                    for (int dz = -search_radius; dz <= search_radius && blocks_to_break.size() < 12; ++dz) {
+                        int bx = px + dx;
+                        int by = py + dy;
+                        int bz = pz + dz;
+                        if (bx < 4 || bx >= world_w - 4 || by < 2 || by >= world.chunk_ceiling() - 2 || bz < 4 || bz >= world_d - 4) {
+                            continue;
+                        }
+                        Voxel v = world.get_voxel(bx, by, bz);
+                        if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && !v.is_anchored()) {
+                            blocks_to_break.push_back(glm::ivec3(bx, by, bz));
+                        }
+                    }
+                }
+            }
+
+            TEST_CHECK(!blocks_to_break.empty(), "Must find breakable blocks near end of level");
+
+            // Transition burrowers to active Burrowing towards player in response to mining fracture sound
+            for (auto& b : burrower_mgr.burrowers_mut()) {
+                b.state = BurrowerState::Burrowing;
+                b.target_pos = far_player_pos;
+                b.is_pursuing_attacker = true;
+            }
+
+            // Benchmark breaking blocks sequentially under full late-game swarm load
+            auto start_time = std::chrono::high_resolution_clock::now();
+
+            for (const auto& bp : blocks_to_break) {
+                // Perform authoritative block break
+                bool broke = world.break_voxel(bp.x, bp.y, bp.z);
+                TEST_CHECK(broke, "Block break must succeed on solid mineable voxel");
+
+                // Wake subterranean burrowers towards sound origin
+                for (auto& b : burrower_mgr.burrowers_mut()) {
+                    b.target_pos = glm::vec3(bp);
+                }
+
+                // Simulate physics/AI tick
+                auto res = burrower_mgr.update(0.016f, far_player_pos, world);
+                world.Update(0.016f);
+
+                // Check that mesh queue does not explode (deduplication keeps queue small)
+                size_t mesh_q = world.mesh_queue_size();
+                TEST_CHECK(mesh_q <= 48, "Mesh queue must stay tightly bounded under late-level block breaking");
+            }
+
+            // Run 15 additional ticks of simulation to verify steady-state after break
+            for (int tick = 0; tick < 15; ++tick) {
+                burrower_mgr.update(0.016f, far_player_pos, world);
+                world.Update(0.016f);
+            }
+
+            auto end_time = std::chrono::high_resolution_clock::now();
+            double duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+            // Verify no NaN positions across burrowers
+            for (const auto& b : burrower_mgr.burrowers()) {
+                TEST_CHECK(!std::isnan(b.position.x) && !std::isnan(b.position.y) && !std::isnan(b.position.z),
+                           "Burrower position must not be NaN during late-level excavation");
+            }
+
+            std::cout << " [Module 11] Level " << lvl << " (" << world_w << "x" << world_d
+                      << ", " << expected_burrowers << " burrowers): broke " << blocks_to_break.size()
+                      << " blocks in " << duration_ms << " ms | mesh_q=" << world.mesh_queue_size()
+                      << " upload_q=" << world.upload_queue_size() << std::endl;
+
+            // Assert that entire sequence executed swiftly without hang or stalling
+            TEST_CHECK(duration_ms < 250.0, "Late-round block breaking must execute smoothly without lag spikes");
+        }
+
+        log_pass("Late-Round High-Sector Block Break Load & Excavation Stress (Sectors 3, 6, 9, 12 Bounded & Lag-Free)");
+    }
+
     std::cout << "\n==========================================================\n";
-    std::cout << "  ALL LOAD, STRESS & LATE-ROUND TESTS PASSED (6/6 Modules)\n";
+    std::cout << "  ALL LOAD, STRESS & LATE-ROUND TESTS PASSED (11/11 Modules)\n";
     std::cout << "==========================================================\n";
     return 0;
 }

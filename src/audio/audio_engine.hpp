@@ -35,6 +35,10 @@ enum class SoundCue : uint16_t {
     BurrowerRoar,          // Deep tectonic subterranean borer roar and earth rumble
     BurrowerGrind,         // High-torque borer teeth grinding through stone
     MonsterDigging,        // High-torque claws and borer teeth drilling/digging into rock walls
+    StalkerStep,           // Chitinous claw click on rock floor/wall/ceiling (stalker walking)
+    StalkerRun,            // Rapid aggressive chitinous claw skittering & scuttle (stalker running/pursuit)
+    GoliathStep,           // Heavy concussive exo-carapace footstep / armored stomp (boss goliath)
+    BurrowerStep,          // Heavy subterranean segmented crawler tread & rock grind (burrower locomotion)
 
     // ── Ambience, Hazards & Biome Atmosphere ──
     AmbientCavern,         // Legacy/fallback deep subterranean sub-bass drone and void wind
@@ -64,6 +68,14 @@ enum class SoundCue : uint16_t {
     PlasmaCarbineReload,   // Vanguard: Thermal cell eject, plasma canister slam & charge chirp
     ScattergunReload,      // Demolitionist: Heavy drum latch release, cylinder ratchet & solid clamp
     RailgunReload,         // Scout: Pneumatic needle rack eject, magnetic cell insert & coil whine
+
+    // ── Melee Weapons & Close Combat ──
+    MeleeSwingDrill,       // Heavy hydraulic piston surge & high-torque motor rev whoosh
+    MeleeSwingScattergun,  // Heavy steel stock bludgeon swing & air displacement
+    MeleeSwingCarbine,     // Crisp tactical butt-stroke whip with capacitor energy snap
+    MeleeSwingRailgun,     // Supersonic bayonet spear thrust & electromagnetic coil whip
+    MeleeSwingDetonator,   // Heavy exo-gauntlet punch whoosh & servo latch
+    MeleeHitFlesh,         // Brutal visceral chitin crunch & concussive alien flesh impact
 
     // ── Player & Abilities ──
     Footstep,              // Subterranean boot strike on stone floor
@@ -120,6 +132,7 @@ enum class SoundCue : uint16_t {
 /// Sound category buses for independent sound volume control
 enum class SoundCategory : uint8_t {
     Master = 0,
+    Music,      // Sector soundtracks, orbital hub theme, arrival stingers
     SFX,        // Tools, mining, voxel breaks, player kinetics, explosions
     Enemy,      // Hostile creatures, stalkers
     Ambience,   // Cavern wind, seismic tremors, geiger counter, beacons
@@ -139,12 +152,23 @@ inline SoundCategory get_sound_category(SoundCue cue) {
         case SoundCue::BurrowerRoar:
         case SoundCue::BurrowerGrind:
         case SoundCue::MonsterDigging:
+        case SoundCue::StalkerStep:
+        case SoundCue::StalkerRun:
+        case SoundCue::GoliathStep:
+        case SoundCue::BurrowerStep:
             return SoundCategory::Enemy;
 
         case SoundCue::AmbientCavern:
         case SoundCue::AmbientSector1:
         case SoundCue::AmbientSector2:
         case SoundCue::AmbientSector3:
+        case SoundCue::SectorArrival1:
+        case SoundCue::SectorArrival2:
+        case SoundCue::SectorArrival3:
+        case SoundCue::SectorArrival4:
+        case SoundCue::SectorArrival5:
+            return SoundCategory::Music;
+
         case SoundCue::CavernDrip:
         case SoundCue::CavernGroan:
         case SoundCue::CavernSettling:
@@ -244,6 +268,9 @@ public:
     float master_volume() const { return m_master_volume; }
 
     /// Category volume controls [0.0 .. 1.0] for turning down specific sound channels
+    void set_music_volume(float volume);
+    float music_volume() const { return m_music_volume; }
+
     void set_sfx_volume(float volume);
     float sfx_volume() const { return m_sfx_volume; }
 
@@ -286,6 +313,12 @@ public:
 
     /// Play class-specific weapon reload sound with organic pitch modulation
     void play_weapon_reload(int archetype);
+
+    /// Play tool/weapon-specific melee swing whoosh (Drill, Scattergun, Carbine, Railgun, Detonator)
+    void play_melee_swing(int tool_slot, int weapon_archetype, const glm::vec3& world_pos);
+
+    /// Trigger visceral alien chitin fracture / concussive flesh impact sound on melee hit
+    void trigger_melee_hit_flesh(const glm::vec3& world_pos);
 
     /// Modulate active continuous sounds
     void set_drill_active(bool active, float progress = 0.0f, const glm::vec3& pos = glm::vec3(0.0f));
@@ -395,6 +428,7 @@ private:
 
     // State
     float m_master_volume{1.0f};
+    float m_music_volume{1.0f};
     float m_sfx_volume{1.0f};
     float m_enemy_volume{1.0f};
     float m_ambient_volume{1.0f};

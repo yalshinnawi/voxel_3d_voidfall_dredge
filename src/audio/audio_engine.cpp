@@ -82,6 +82,10 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::BurrowerRoar:          return "burrower_roar.wav";
         case SoundCue::BurrowerGrind:         return "burrower_grind.wav";
         case SoundCue::MonsterDigging:        return "monster_digging.wav";
+        case SoundCue::StalkerStep:           return "stalker_step.wav";
+        case SoundCue::StalkerRun:            return "stalker_run.wav";
+        case SoundCue::GoliathStep:           return "goliath_step.wav";
+        case SoundCue::BurrowerStep:          return "burrower_step.wav";
 
         case SoundCue::AmbientCavern:         return "ambient_orbit_hub.mp3";
         case SoundCue::AmbientSector1:        return "ambient_sector1_music.mp3";
@@ -109,6 +113,13 @@ const char* get_sound_cue_filename(SoundCue cue) {
         case SoundCue::PlasmaCarbineReload:   return "plasma_carbine_reload.wav";
         case SoundCue::ScattergunReload:      return "scattergun_reload.wav";
         case SoundCue::RailgunReload:         return "railgun_reload.wav";
+
+        case SoundCue::MeleeSwingDrill:       return "melee_swing_drill.wav";
+        case SoundCue::MeleeSwingScattergun:  return "melee_swing_scattergun.wav";
+        case SoundCue::MeleeSwingCarbine:     return "melee_swing_carbine.wav";
+        case SoundCue::MeleeSwingRailgun:     return "melee_swing_railgun.wav";
+        case SoundCue::MeleeSwingDetonator:   return "melee_swing_detonator.wav";
+        case SoundCue::MeleeHitFlesh:         return "melee_hit_flesh.wav";
 
         case SoundCue::Footstep:              return "footstep.wav";
         case SoundCue::Jump:                  return "jump.wav";
@@ -347,6 +358,10 @@ float get_cue_default_duration(SoundCue cue) {
         case SoundCue::BurrowerRoar:          return 0.95f;
         case SoundCue::BurrowerGrind:         return 0.70f;
         case SoundCue::MonsterDigging:        return 0.45f;
+        case SoundCue::StalkerStep:           return 0.12f;
+        case SoundCue::StalkerRun:            return 0.15f;
+        case SoundCue::GoliathStep:           return 0.22f;
+        case SoundCue::BurrowerStep:          return 0.20f;
         case SoundCue::AmbientCavern:         return 10.0f;
         case SoundCue::AmbientSector1:        return 10.0f;
         case SoundCue::AmbientSector2:        return 10.0f;
@@ -379,6 +394,12 @@ float get_cue_default_duration(SoundCue cue) {
         case SoundCue::PlasmaCarbineReload:   return 1.25f;
         case SoundCue::ScattergunReload:      return 1.60f;
         case SoundCue::RailgunReload:         return 1.10f;
+        case SoundCue::MeleeSwingDrill:       return 0.32f;
+        case SoundCue::MeleeSwingScattergun:  return 0.35f;
+        case SoundCue::MeleeSwingCarbine:     return 0.28f;
+        case SoundCue::MeleeSwingRailgun:     return 0.26f;
+        case SoundCue::MeleeSwingDetonator:   return 0.28f;
+        case SoundCue::MeleeHitFlesh:         return 0.35f;
         case SoundCue::DamageWarning:         return 0.40f;
         case SoundCue::LavaBubble:            return 0.70f;
         case SoundCue::ThermalHiss:           return 0.95f;
@@ -560,6 +581,10 @@ void AudioEngine::set_master_volume(float volume) {
     m_master_volume = std::clamp(volume, 0.0f, 1.0f);
 }
 
+void AudioEngine::set_music_volume(float volume) {
+    m_music_volume = std::clamp(volume, 0.0f, 1.0f);
+}
+
 void AudioEngine::set_sfx_volume(float volume) {
     m_sfx_volume = std::clamp(volume, 0.0f, 1.0f);
 }
@@ -580,6 +605,7 @@ void AudioEngine::set_channel_volume(SoundCategory category, float volume) {
     float clamped = std::clamp(volume, 0.0f, 1.0f);
     switch (category) {
         case SoundCategory::Master: set_master_volume(clamped); break;
+        case SoundCategory::Music: m_music_volume = clamped; break;
         case SoundCategory::SFX: m_sfx_volume = clamped; break;
         case SoundCategory::Enemy: m_enemy_volume = clamped; break;
         case SoundCategory::Ambience: m_ambient_volume = clamped; break;
@@ -590,6 +616,7 @@ void AudioEngine::set_channel_volume(SoundCategory category, float volume) {
 float AudioEngine::channel_volume(SoundCategory category) const {
     switch (category) {
         case SoundCategory::Master: return m_master_volume;
+        case SoundCategory::Music: return m_music_volume;
         case SoundCategory::SFX: return m_sfx_volume;
         case SoundCategory::Enemy: return m_enemy_volume;
         case SoundCategory::Ambience: return m_ambient_volume;
@@ -606,6 +633,7 @@ float AudioEngine::get_cue_volume_factor(SoundCue cue) const {
     if (m_mute_all) return 0.0f;
     SoundCategory cat = get_sound_category(cue);
     switch (cat) {
+        case SoundCategory::Music: return m_music_volume;
         case SoundCategory::SFX: return m_sfx_volume;
         case SoundCategory::Enemy: return m_enemy_volume;
         case SoundCategory::Ambience: return m_ambient_volume;
@@ -640,8 +668,8 @@ void AudioEngine::update_spatial_pan(AudioVoice& voice) {
 
     // Inverse distance attenuation with reference distance and cavern roll-off
     // Monster echoing screeches and subterranean roars carry further down cavern tunnels (up to 58m)
-    float ref_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging) ? 4.0f : 2.5f;
-    float max_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging) ? 58.0f : 45.0f;
+    float ref_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging || voice.cue == SoundCue::GoliathStep || voice.cue == SoundCue::BurrowerStep) ? 4.0f : ((voice.cue == SoundCue::StalkerStep || voice.cue == SoundCue::StalkerRun) ? 3.0f : 2.5f);
+    float max_dist = (voice.cue == SoundCue::StalkerEchoScreech || voice.cue == SoundCue::BurrowerRoar || voice.cue == SoundCue::BurrowerGrind || voice.cue == SoundCue::MonsterDigging) ? 58.0f : ((voice.cue == SoundCue::GoliathStep || voice.cue == SoundCue::BurrowerStep) ? 42.0f : ((voice.cue == SoundCue::StalkerStep || voice.cue == SoundCue::StalkerRun) ? 36.0f : 45.0f));
     float att = 1.0f;
     if (dist > ref_dist) {
         att = ref_dist / (ref_dist + (dist - ref_dist) * 1.15f);
@@ -699,6 +727,10 @@ static int get_cue_priority(SoundCue cue) {
         case SoundCue::VoidStalkerRoar:
         case SoundCue::BurrowerGrind:
         case SoundCue::MonsterDigging:
+        case SoundCue::StalkerStep:
+        case SoundCue::StalkerRun:
+        case SoundCue::GoliathStep:
+        case SoundCue::BurrowerStep:
         case SoundCue::VoxelBreakTitanium:
         case SoundCue::VoxelBreakVoidite:
         case SoundCue::VoxelBreakBulkhead:
@@ -709,6 +741,12 @@ static int get_cue_priority(SoundCue cue) {
         case SoundCue::PlasmaCarbineReload:
         case SoundCue::ScattergunReload:
         case SoundCue::RailgunReload:
+        case SoundCue::MeleeSwingDrill:
+        case SoundCue::MeleeSwingScattergun:
+        case SoundCue::MeleeSwingCarbine:
+        case SoundCue::MeleeSwingRailgun:
+        case SoundCue::MeleeSwingDetonator:
+        case SoundCue::MeleeHitFlesh:
             return 2; // Combat & essential feedback
 
         case SoundCue::Footstep:
@@ -754,6 +792,35 @@ static int get_cue_priority(SoundCue cue) {
 }
 
 int AudioEngine::find_or_steal_voice_slot(SoundCue cue) {
+    // 0. Footstep Voice Polyphony & Concurrency Cap:
+    // Prevent enemy swarm foot traffic from overwhelming the soundscape or dominating voice channels.
+    bool is_footstep = (cue == SoundCue::StalkerStep || cue == SoundCue::StalkerRun ||
+                        cue == SoundCue::BurrowerStep || cue == SoundCue::GoliathStep ||
+                        cue == SoundCue::Footstep);
+    if (is_footstep) {
+        int footstep_count = 0;
+        int oldest_slot = -1;
+        float oldest_time = -1.0f;
+        for (size_t i = 0; i < MAX_VOICES; ++i) {
+            if (m_voices[i].active) {
+                SoundCue c = m_voices[i].cue;
+                if (c == SoundCue::StalkerStep || c == SoundCue::StalkerRun ||
+                    c == SoundCue::BurrowerStep || c == SoundCue::GoliathStep ||
+                    c == SoundCue::Footstep) {
+                    footstep_count++;
+                    if (m_voices[i].time > oldest_time) {
+                        oldest_time = m_voices[i].time;
+                        oldest_slot = static_cast<int>(i);
+                    }
+                }
+            }
+        }
+        // At most 3 simultaneous footstep voices active across the entire engine
+        if (footstep_count >= 3 && oldest_slot >= 0) {
+            return oldest_slot;
+        }
+    }
+
     // 1. Search for any completely inactive voice slot
     for (size_t i = 0; i < MAX_VOICES; ++i) {
         if (!m_voices[i].active) {
@@ -1017,6 +1084,33 @@ void AudioEngine::play_weapon_reload(int archetype) {
 
     float pitch = 0.98f + fast_rand(m_ambience_seed) * 0.04f;
     play_sound_2d(cue, 0.85f, pitch);
+}
+
+void AudioEngine::play_melee_swing(int tool_slot, int weapon_archetype, const glm::vec3& world_pos) {
+    SoundCue cue = SoundCue::MeleeSwingDrill;
+    if (tool_slot == 0) { // MiningDrill
+        cue = SoundCue::MeleeSwingDrill;
+    } else if (tool_slot == 1) { // CombatWeapon
+        if (weapon_archetype == 0) { // MagmaScattergun
+            cue = SoundCue::MeleeSwingScattergun;
+        } else if (weapon_archetype == 2) { // NeedlerRailgun
+            cue = SoundCue::MeleeSwingRailgun;
+        } else { // PlasmaCarbine
+            cue = SoundCue::MeleeSwingCarbine;
+        }
+    } else if (tool_slot == 2) { // DemolitionCharge
+        cue = SoundCue::MeleeSwingDetonator;
+    } else {
+        cue = SoundCue::MeleeSwingCarbine;
+    }
+
+    float pitch = 0.96f + fast_rand(m_ambience_seed) * 0.08f;
+    play_sound_3d(cue, world_pos, 1.0f, pitch);
+}
+
+void AudioEngine::trigger_melee_hit_flesh(const glm::vec3& world_pos) {
+    float pitch = 0.95f + fast_rand(m_ambience_seed) * 0.10f;
+    play_sound_3d(SoundCue::MeleeHitFlesh, world_pos, 1.15f, pitch);
 }
 
 void AudioEngine::set_current_sector(int sector) {
@@ -1871,6 +1965,116 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             float attack = std::min(1.0f, t / 0.012f);
             float env = attack * std::exp(-t * 2.2f);
             sample = (bite1 * 0.35f + bite2 * 0.25f + bp * 0.40f) * scrape_pulse * env * 0.85f;
+            break;
+        }
+
+        case SoundCue::StalkerStep: {
+            // Predatory void stalker stealth footstep: sharp chitinous claw click on rock floor/wall/ceiling
+            // 1. High-frequency chitin tip impact transient (2400 Hz)
+            voice.phase[0] += (2400.0f * voice.pitch) * dt;
+            float tip_click = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 85.0f);
+
+            // 2. Stone surface contact thump (320 Hz)
+            voice.phase[1] += (320.0f * voice.pitch) * dt;
+            float stone_thump = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 55.0f);
+
+            // 3. Crisp grit scrape noise (filtered around 1800 Hz)
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(1800.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+            float grit = voice.filter_state[0] * std::exp(-t * 65.0f);
+
+            // Secondary claw micro-contact at 28ms for articulate multi-legged gait
+            float secondary_click = 0.0f;
+            if (t > 0.028f) {
+                float dt_sec = t - 0.028f;
+                voice.phase[2] += (2850.0f * voice.pitch) * dt;
+                secondary_click = fast_sin(TWO_PI * voice.phase[2]) * std::exp(-dt_sec * 90.0f) * 0.45f;
+            }
+
+            sample = (tip_click * 0.45f + stone_thump * 0.35f + grit * 0.25f + secondary_click) * 0.45f;
+            break;
+        }
+
+        case SoundCue::StalkerRun: {
+            // Rapid predatory scurrying / running claw clatter in the dark:
+            // Multi-legged staccato attack with aggressive stone gouge and claw scrape
+            // Claw 1: immediate sharp puncture tap (2800 Hz)
+            voice.phase[0] += (2800.0f * voice.pitch) * dt;
+            float claw1 = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 70.0f);
+
+            // Claw 2: rapid follow-up strike at 35ms (2450 Hz)
+            float claw2 = 0.0f;
+            if (t > 0.035f) {
+                float dt2 = t - 0.035f;
+                voice.phase[1] += (2450.0f * voice.pitch) * dt;
+                claw2 = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-dt2 * 75.0f) * 0.65f;
+            }
+
+            // Claw 3: trailing leg claw scrape at 70ms (3100 Hz)
+            float claw3 = 0.0f;
+            if (t > 0.070f) {
+                float dt3 = t - 0.070f;
+                voice.phase[2] += (3100.0f * voice.pitch) * dt;
+                claw3 = fast_sin(TWO_PI * voice.phase[2]) * std::exp(-dt3 * 80.0f) * 0.50f;
+            }
+
+            // Rapid stone friction scrape noise (bandpass filtered around 2200 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(raw_noise, 2200.0f, 3.5f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float scrape = bp * std::exp(-t * 35.0f) * 0.35f;
+
+            // Kinetic body displacement thud (420 Hz)
+            voice.phase[3] += (420.0f * voice.pitch) * dt;
+            float thud = fast_sin(TWO_PI * voice.phase[3]) * std::exp(-t * 45.0f) * 0.30f;
+
+            sample = (claw1 * 0.50f + claw2 + claw3 + scrape + thud) * 0.85f;
+            break;
+        }
+
+        case SoundCue::GoliathStep: {
+            // Apex Vault Guardian Chitin Goliath heavy seismic stomp / armored footstep
+            // 1. Heavy sub-bass subterranean mass thump (52 Hz)
+            voice.phase[0] += (52.0f * voice.pitch) * dt;
+            float sub_thump = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 18.0f);
+
+            // 2. Dense rock strata fracture / stone crumble crunch
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(420.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (noise - voice.filter_state[0]);
+            float rock_crunch = voice.filter_state[0] * std::exp(-t * 22.0f);
+
+            // 3. Resonant exo-carapace plate buckle overtone (165 Hz)
+            voice.phase[1] += (165.0f * voice.pitch) * dt;
+            float plate_ring = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 28.0f) * 0.35f;
+
+            sample = (sub_thump * 0.65f + rock_crunch * 0.45f + plate_ring * 0.20f) * 0.90f;
+            break;
+        }
+
+        case SoundCue::BurrowerStep: {
+            // Seismic Burrower subterranean serpentine slither & armored scale friction
+            // 1. Serpentine crawl envelope: smooth sinusoidal body wiggle undulation
+            float slither_env = fast_sin(PI * std::clamp(t / 0.35f, 0.0f, 1.0f));
+
+            // 2. Armored basalt scale friction (bandpass filtered around 1050 Hz)
+            float noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float bp = process_resonator(noise, 1050.0f * voice.pitch, 2.2f, static_cast<float>(SAMPLE_RATE),
+                                         voice.filter_state[0], voice.filter_state[1]);
+            float scale_friction = bp * slither_env * 0.45f;
+
+            // 3. Subterranean fine stone grit slide (filtered around 520 Hz)
+            float alpha = calc_lp_alpha(520.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[2] += alpha * (noise - voice.filter_state[2]);
+            float grit_slide = voice.filter_state[2] * slither_env * 0.35f;
+
+            // 4. Low body displacement glide (subtle 55 Hz warmth)
+            voice.phase[0] += (55.0f * voice.pitch) * dt;
+            float body_glide = fast_sin(TWO_PI * voice.phase[0]) * slither_env * 0.25f;
+
+            // Tuned significantly quieter (-11 dBFS / ~0.45f peak) for subtle serpentine crawling
+            sample = (scale_friction + grit_slide + body_glide) * 0.45f;
             break;
         }
 
@@ -2958,6 +3162,138 @@ float AudioEngine::synth_sample(AudioVoice& voice, float dt) {
             break;
         }
 
+        case SoundCue::MeleeSwingDrill: {
+            // Heavy hydraulic piston surge & high-torque motor rev whoosh (0.32s)
+            // Low-frequency air displacement swoosh: rapid pitch sweep (130 Hz -> 50 Hz)
+            float sweep_freq = (130.0f - t * 250.0f) * voice.pitch;
+            if (sweep_freq < 45.0f) sweep_freq = 45.0f;
+            voice.phase[0] += sweep_freq * dt;
+            float whoosh = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 14.0f);
+
+            // High-torque auger motor spool / gear harmonic (320 Hz -> 170 Hz)
+            float motor_freq = (320.0f - t * 450.0f) * voice.pitch;
+            if (motor_freq < 160.0f) motor_freq = 160.0f;
+            voice.phase[1] += motor_freq * dt;
+            float motor = (0.60f * fast_sin(TWO_PI * voice.phase[1]) + 0.40f * fast_sin(4.0f * PI * voice.phase[1])) * std::exp(-t * 12.0f);
+
+            // Filtered turbulent pneumatic exhaust hiss (650 Hz low-pass)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(650.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float hiss = voice.filter_state[0] * std::exp(-t * 9.0f);
+
+            sample = (whoosh * 0.45f + motor * 0.35f + hiss * 0.40f) * 0.90f;
+            break;
+        }
+
+        case SoundCue::MeleeSwingScattergun: {
+            // Heavy steel stock bludgeon swing & massive air displacement (0.35s)
+            // Sub-bass turbulent heave: 48 Hz -> 26 Hz drop
+            float sweep_freq = (48.0f - t * 65.0f) * voice.pitch;
+            if (sweep_freq < 24.0f) sweep_freq = 24.0f;
+            voice.phase[0] += sweep_freq * dt;
+            float sub_whoosh = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 10.0f);
+
+            // Solid steel stock body resonance (240 Hz decaying metal thump)
+            voice.phase[1] += 240.0f * voice.pitch * dt;
+            float metal_thump = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 18.0f);
+
+            // Heavy turbulent air displacement (lowpass filtered at 420 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(420.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float air = voice.filter_state[0] * std::exp(-t * 8.0f);
+
+            sample = (sub_whoosh * 0.50f + metal_thump * 0.35f + air * 0.45f) * 0.92f;
+            break;
+        }
+
+        case SoundCue::MeleeSwingCarbine: {
+            // Crisp tactical butt-stroke whip with capacitor energy snap (0.28s)
+            // Aerodynamic whip: fast pitch sweep (180 Hz -> 65 Hz)
+            float whip_freq = (180.0f - t * 400.0f) * voice.pitch;
+            if (whip_freq < 60.0f) whip_freq = 60.0f;
+            voice.phase[0] += whip_freq * dt;
+            float whip = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 18.0f);
+
+            // High-voltage capacitor ionization zap (920 Hz down-chirp)
+            float zap_freq = (920.0f - t * 1800.0f) * voice.pitch;
+            if (zap_freq < 360.0f) zap_freq = 360.0f;
+            voice.phase[1] += zap_freq * dt;
+            float plasma_zap = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 24.0f);
+
+            // High-speed composite material swish (resonator filtered at 1100 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float swish = process_resonator(raw_noise, 1100.0f * voice.pitch, 1.8f, static_cast<float>(SAMPLE_RATE),
+                                            voice.filter_state[0], voice.filter_state[1]) * std::exp(-t * 15.0f);
+
+            sample = (whip * 0.45f + plasma_zap * 0.35f + swish * 0.45f) * 0.88f;
+            break;
+        }
+
+        case SoundCue::MeleeSwingRailgun: {
+            // Supersonic bayonet spear thrust & electromagnetic coil whip (0.26s)
+            // Sharp supersonic air whip (480 Hz -> 110 Hz in 0.07s)
+            float thrust_freq = (480.0f - t * 1400.0f) * voice.pitch;
+            if (thrust_freq < 95.0f) thrust_freq = 95.0f;
+            voice.phase[0] += thrust_freq * dt;
+            float thrust = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 26.0f);
+
+            // High-frequency electromagnetic coil whistle & inductive zing (1650 Hz)
+            voice.phase[1] += 1650.0f * voice.pitch * dt;
+            float coil_zing = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 20.0f);
+
+            // Needle-sharp aerodynamic pierce noise (resonator filtered at 1800 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float needle_air = process_resonator(raw_noise, 1800.0f * voice.pitch, 2.5f, static_cast<float>(SAMPLE_RATE),
+                                                 voice.filter_state[0], voice.filter_state[1]) * std::exp(-t * 22.0f);
+
+            sample = (thrust * 0.50f + coil_zing * 0.30f + needle_air * 0.40f) * 0.88f;
+            break;
+        }
+
+        case SoundCue::MeleeSwingDetonator: {
+            // Heavy exo-gauntlet punch whoosh & servo latch (0.28s)
+            // Solid fist punch whoosh (95 Hz -> 42 Hz drop)
+            float punch_freq = (95.0f - t * 180.0f) * voice.pitch;
+            if (punch_freq < 40.0f) punch_freq = 40.0f;
+            voice.phase[0] += punch_freq * dt;
+            float punch_whoosh = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 16.0f);
+
+            // Tactical military clacker spring latch click at t=0.03s
+            float click = (t > 0.025f && t < 0.065f) ? fast_sin(TWO_PI * 1150.0f * t) * std::exp(-(t - 0.025f) * 75.0f) : 0.0f;
+
+            // Exo-skeleton pneumatic arm actuator hiss
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float alpha = calc_lp_alpha(850.0f, static_cast<float>(SAMPLE_RATE));
+            voice.filter_state[0] += alpha * (raw_noise - voice.filter_state[0]);
+            float servo = voice.filter_state[0] * std::exp(-t * 14.0f);
+
+            sample = (punch_whoosh * 0.50f + click * 0.35f + servo * 0.35f) * 0.90f;
+            break;
+        }
+
+        case SoundCue::MeleeHitFlesh: {
+            // Brutal visceral alien chitin crunch & concussive alien flesh impact (0.35s)
+            // Stage 1: Concussive sub-bass body thump (55 Hz -> 35 Hz)
+            voice.phase[0] += (55.0f - t * 40.0f) * voice.pitch * dt;
+            float thump = fast_sin(TWO_PI * voice.phase[0]) * std::exp(-t * 18.0f);
+
+            // Stage 2: Heavy chitinous fracture / bone-cracking transient (2200 Hz down-sweep)
+            float snap_freq = (2200.0f - t * 4000.0f) * voice.pitch;
+            if (snap_freq < 650.0f) snap_freq = 650.0f;
+            voice.phase[1] += snap_freq * dt;
+            float crunch = fast_sin(TWO_PI * voice.phase[1]) * std::exp(-t * 30.0f);
+
+            // Stage 3: Wet alien flesh tearing & shudder (resonator filtered at 780 Hz)
+            float raw_noise = (fast_rand(voice.seed) * 2.0f - 1.0f);
+            float flesh_squelch = process_resonator(raw_noise, 780.0f * voice.pitch, 2.2f, static_cast<float>(SAMPLE_RATE),
+                                                    voice.filter_state[0], voice.filter_state[1]) * std::exp(-t * 14.0f);
+
+            sample = (thump * 0.55f + crunch * 0.45f + flesh_squelch * 0.40f) * 0.95f;
+            break;
+        }
+
         default:
             sample = 0.0f;
             break;
@@ -2980,12 +3316,9 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
 
     constexpr float dt = 1.0f / static_cast<float>(SAMPLE_RATE);
 
-    // Dynamic Hazard & Proximity Geiger Counter Click Generation (Phases 1 to 4 and Proximity to Radioactive Ores)
-    float phase_rad = (m_hazard_phase == 1) ? 0.20f :
-                      (m_hazard_phase == 2) ? 0.45f :
-                      (m_hazard_phase == 3) ? 0.75f :
-                      (m_hazard_phase == 4) ? 0.95f : 0.0f;
-    float effective_radiation = std::clamp(std::max(m_radiation_proximity, phase_rad), 0.0f, 1.0f);
+    // Environmental Radiation Geiger Counter Click Generation (Proximity to Radioactive Ores & Hazard Zones)
+    // Abstract hazard phases do not artificially tick; clicks only trigger when in actual environmental radiation proximity.
+    float effective_radiation = std::clamp(m_radiation_proximity, 0.0f, 1.0f);
 
     if (effective_radiation > 0.015f && m_ambient_volume > 0.001f) {
         float buffer_seconds = static_cast<float>(num_frames) * dt;
@@ -3057,11 +3390,12 @@ void AudioEngine::render_mix(float* output_interleaved, size_t num_frames) {
                 continue;
             }
 
-            // Duck ambient / drill noise when threat stings occur (stingers themselves never duck)
+            // Duck ambient / music / drill noise when threat stings occur (stingers themselves never duck)
             bool is_stinger = (voice.cue == SoundCue::SectorArrival1 || voice.cue == SoundCue::SectorArrival2 ||
                                voice.cue == SoundCue::SectorArrival3 || voice.cue == SoundCue::SectorArrival4 ||
                                voice.cue == SoundCue::SectorArrival5);
-            if (!is_stinger && (get_sound_category(voice.cue) == SoundCategory::Ambience || voice.cue == SoundCue::DrillLoop)) {
+            SoundCategory cue_cat = get_sound_category(voice.cue);
+            if (!is_stinger && (cue_cat == SoundCategory::Ambience || cue_cat == SoundCategory::Music || voice.cue == SoundCue::DrillLoop)) {
                 category_mult *= m_ducking_attenuation;
             }
 

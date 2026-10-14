@@ -13,9 +13,11 @@ struct GameSettings {
     float fov{75.0f};
     float brightness{1.0f};       // 0.40x to 2.00x cavern brightness/exposure modifier
     float screen_shake{0.20f};    // 0.00x to 1.00x screen shake trauma multiplier (comfort setting)
+    bool auto_step{false};        // Automatically step up onto 1-block steps/ledges (off by default)
 
     // ── Granular Audio Channel Options [0.0 .. 1.0] ──
     float master_volume{1.0f};    // Overall output gain
+    float music_volume{1.0f};     // Sector themes, orbital soundtrack, arrival stingers
     float sfx_volume{1.0f};       // Mining drill, voxel fractures, explosives, footsteps
     float enemy_volume{1.0f};     // Void stalker chitter, snarling, lunge, death
     float ambient_volume{1.0f};   // Subterranean cavern drone, seismic tremors, geiger radiation
@@ -28,11 +30,14 @@ struct GameSettings {
         brightness = std::clamp(brightness, 0.40f, 2.00f);
         screen_shake = std::clamp(screen_shake, 0.0f, 1.0f);
         master_volume = std::clamp(master_volume, 0.0f, 1.0f);
+        music_volume = std::clamp(music_volume, 0.0f, 1.0f);
         sfx_volume = std::clamp(sfx_volume, 0.0f, 1.0f);
         enemy_volume = std::clamp(enemy_volume, 0.0f, 1.0f);
         ambient_volume = std::clamp(ambient_volume, 0.0f, 1.0f);
         ui_volume = std::clamp(ui_volume, 0.0f, 1.0f);
     }
+
+    void clamp() { sanitize(); }
 };
 
 } // namespace Voidfall

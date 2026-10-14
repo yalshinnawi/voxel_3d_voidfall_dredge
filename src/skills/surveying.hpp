@@ -49,7 +49,8 @@ public:
         const std::vector<VoidStalker>* stalkers = nullptr,
         const std::vector<SeismicBurrower>* burrowers = nullptr,
         const glm::vec3& extraction_pos = glm::vec3(0.0f),
-        bool extraction_active = false
+        bool extraction_active = false,
+        bool include_astral = false
     );
 
     void update(float dt);

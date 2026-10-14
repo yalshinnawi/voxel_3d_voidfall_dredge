@@ -16,6 +16,7 @@ uniform float uTime;
 uniform float uNear;
 uniform float uFar;
 uniform int uSector;
+uniform float uDarknessFactor;
 uniform float u_ShieldActive;
 uniform float u_ShieldTimer;
 
@@ -140,6 +141,7 @@ void main() {
         if (uRadiationGlitch > 0.0) {
             depthHazeColor = mix(depthHazeColor, vec3(0.05, 0.28, 0.10), uRadiationGlitch * 0.85);
         }
+        depthHazeColor *= clamp(1.0 - uDarknessFactor, 0.0, 1.0); // True pitch black distance in dark zones
         float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
         scene = mix(scene, depthHazeColor, depthHazeFactor);
     }

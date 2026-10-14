@@ -89,7 +89,7 @@ bool SpawnManager::try_immediate_spawn(VoidStalkerManager& stalker_mgr, const gl
     if (!can_spawn(stalker_mgr.active_count(), pos)) {
         return false;
     }
-    stalker_mgr.spawn_stalker(pos, 1.0f, role);
+    stalker_mgr.spawn_emerging(pos, glm::vec3(0.0f, 1.0f, 0.0f), 1.0f, role);
     return true;
 }
 

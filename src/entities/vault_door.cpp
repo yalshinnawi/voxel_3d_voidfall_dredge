@@ -36,6 +36,7 @@ bool VaultDoor::apply_satchel_blast(const glm::vec3& blast_pos, float blast_radi
         for (int dy = 0; dy < m_height; ++dy) {
             world.set_voxel(m_door_pos.x, m_door_pos.y + dy, m_door_pos.z, Voxel{MAT_AIR, 0}, true);
         }
+        world.sync_remesh_box(m_door_pos, m_door_pos + glm::ivec3(0, m_height - 1, 0));
 
         VF_LOG_INFO("VaultDoor", "Precursor Vault bulkhead fractured and breached by satchel charge!");
         return true;

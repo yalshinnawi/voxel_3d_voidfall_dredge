@@ -230,6 +230,16 @@ def generate_railgun_reload():
     return samples
 
 def main():
+    # Prefer enhanced multi-track CC0 online asset pipeline if available
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    enhanced_script = os.path.join(script_dir, "build_enhanced_sounds.py")
+    if os.path.exists(enhanced_script):
+        print("[*] Invoking enhanced multi-track sound pipeline...")
+        ret = os.system(f"python \"{enhanced_script}\"")
+        if ret == 0:
+            print("[+] Successfully generated enhanced weapon reload assets via build_enhanced_sounds.py")
+            return
+
     dirs = [
         "assets/sounds",
         "build/Release/assets/sounds",

@@ -64,9 +64,21 @@ To protect the player's hearing from sharp clicks, digital overs, and ear-pierci
 | | `MONSTER_DIGGING` | High-torque dual FM rotary grinding friction (135/210 Hz) + 1400 Hz fracture noise | Wall excavation, drilling, & burrowing escape through rock |
 | | `STALKER_SNARL` | Aggressive sawtooth growl (160 Hz) with sub-bass distortion | Void Stalker lunge charge |
 | | `STALKER_ATTACK_IMPACT` | Dull claw impact slap with suit damage thud | Melee impact on player |
-| | `STALKER_DEATH` | Descending frequency dissipation whistle (600 -> 80 Hz) | Void Stalker elimination |
+| | `STALKER_STEP` | Quiet chitin claw tip tap (2400 Hz) + gentle stone grit brush (1800 Hz) | Void Stalker stealth prowl (quiet, -12.5 dBFS) |
+| | `STALKER_RUN` | Rapid staccato multi-claw scamper (0ms, 42ms, 88ms taps) + 1600 Hz friction scrape | Void Stalker sprinting / stalking / lunging pursuit (0.22s cadence) |
+| | `GOLIATH_STEP` | Sub-bass seismic foot stomp (52 Hz) + stone crumble crunch + resonant carapace plate buckle (165 Hz) | Chitin Goliath sentinel advance & juggernaut charge |
+| | `BURROWER_STEP` | Subterranean serpentine slither (1050 Hz scale friction, 520 Hz basalt grit slide, 55 Hz body displacement glide) | Seismic Burrower serpentine crawl & charge (quiet, -11 dBFS) |
+| **Combat & Weapon Reloads** | `PLASMA_CARBINE_RELOAD` | Multi-stage tactical reload: cell eject latch click & decompression hiss puff, battery rail slide, magnetic lock slam & electronic charge chirp | Vanguard Plasma Carbine reload (1.25s) |
+| | `SCATTERGUN_RELOAD` | Heavy mechanical breacher reload: heavy steel breech unlock, rotating multi-tooth drum ratcheting, heavy steel drum slam shut, forepump rack | Demolitionist Magma Scattergun reload (1.60s) |
+| | `RAILGUN_RELOAD` | Precision surgical electromagnetic reload: pneumatic needle rack release puff, linear magnetic needle rail slide, magnetic bolt clamp & inductive coil whine | Scout Needler Railgun reload (1.10s) |
+| **Combat & Melee** | `MELEE_SWING_DRILL` | Heavy hydraulic piston surge & high-torque motor rev whoosh (120 -> 55 Hz) | Mining Drill rotary thrust strike |
+| | `MELEE_SWING_SCATTERGUN` | Heavy steel stock bludgeon roundhouse & air turbulence heave (48 -> 24 Hz) | Magma Scattergun stock cleave |
+| | `MELEE_SWING_CARBINE` | Crisp tactical butt-stroke whip (180 -> 60 Hz) + plasma capacitor zap | Plasma Carbine muzzle uppercut |
+| | `MELEE_SWING_RAILGUN` | Supersonic bayonet lance thrust (480 -> 95 Hz) + 1650 Hz coil whistle | Needler Railgun spear thrust |
+| | `MELEE_SWING_DETONATOR` | Heavy exo-gauntlet punch whoosh (95 -> 40 Hz) + clacker spring latch click | Demolition Charge punch strike |
+| | `MELEE_HIT_FLESH` | Visceral chitin fracture crunch (2200 Hz down-sweep) + sub-bass body thump (55 Hz) | Melee strike impact on hostile entity |
 | **Hazards & Environment**| `SEISMIC_RUMBLE` | 35-55 Hz sub-audible cavern tremor with brown noise | Structural instability & cave-ins |
-| | `GEIGER_CLICK` | Poisson-distributed impulse clicks (rate scales with hazard) | Approaching radioactive hazards |
+| | `GEIGER_CLICK` | Poisson-distributed impulse clicks (strictly environmental proximity; zero artificial background ticking) | Entering proximity of radioactive mineral veins & anomalies |
 | | `CAVERN_DRONE` | 3-oscillator detuned infrasonic bed + swept resonant void wind draft | Continuous expedition atmosphere |
 | | `CAVERN_DRIP` | Subterranean moisture droplet chirp (1850 -> 1200 Hz) with 130ms cavern slapback | Procedural micro-ambience event |
 | | `CAVERN_GROAN` | Deep tectonic rock stress shift (56 -> 42 Hz) with frequency-modulated tremolo | Procedural micro-ambience event |
@@ -77,7 +89,7 @@ To protect the player's hearing from sharp clicks, digital overs, and ear-pierci
 
 ---
 
-## 4. 3D Spatial Audio
+## 4. 3D Spatial Audio & Swarm Footstep Arbitration
 
 The engine implements 3D binaural positioning:
 $$\text{Pan} = \text{clamp}\left(\frac{\mathbf{v}_{\text{rel}} \cdot \mathbf{R}_{\text{listener}}}{\|\mathbf{v}_{\text{rel}}\|}, -1.0, 1.0\right)$$
@@ -86,6 +98,22 @@ $$\text{Attenuation} = \frac{1.0}{1.0 + 0.08 \cdot d + 0.015 \cdot d^2}$$
 - **Left / Right Equal-Power Panning**:
   $$G_L = \sqrt{0.5 \times (1.0 - \text{Pan})}, \quad G_R = \sqrt{0.5 \times (1.0 + \text{Pan})}$$
 - **Proximity Falloff**: 3D voices attenuate smoothly over distance, preventing jarring volume spikes when enemies approach.
+
+### 4.1 Swarm Footstep Arbiter & Anti-Stuck Suppression
+In high-enemy scenarios (swarms, ambushes, or tight corridors), enemy locomotion footsteps can quickly devolve into an abrasive wall of sound if left unthrottled. To guarantee balanced, punchy audio:
+1. **Engine-Wide Footstep Voice Cap**:
+   - `find_or_steal_voice_slot` enforces a maximum of **3 concurrent active footstep voices** across the entire engine. Any excess footsteps steal the oldest active footstep voice rather than multiplying sound pressure.
+2. **Swarm Crowd Companding**:
+   - When multiple enemies are walking/sprinting within hearing distance, `Application::update_audio_sources` aggregates step candidates and applies dynamic crowd volume companding:
+     $$\text{Volume Compand} = \frac{1.0}{1.0 + 0.35 \times \max(0, N_{\text{walkers}} - 1)}$$
+   - This keeps the collective acoustic energy of a dense pack at a comfortable, mastered ceiling without drowning out other cavern SFX or combat cues.
+3. **Distance Prioritization & Rate Pacing**:
+   - Step candidates are sorted by distance to the player. The closest threats are granted priority dispatch, while footsteps from enemies $> 28\,\text{m}$ away are aggressively culled.
+   - A minimum spacing interval ($\Delta t \ge 65\,\text{ms}$) prevents multiple enemies from firing transient clicks on the exact same audio buffer frame.
+4. **Stuck Enemy Footstep Suppression**:
+   - If an enemy becomes physically wedged against cavern walls, solid voxels, or bulkheads (`stuck_timer > 0.15f` or `wall_stuck_timer > 0.15f`), its footstep timer is immediately clamped to zero. Footsteps are completely silenced until the creature regains free forward movement.
+5. **Decoupled Ambient Radiation Clicks**:
+   - Geiger clicking is strictly bound to real environmental radiation sources (`m_radiation_proximity > 0.0f`). Synthetic background clicks previously tied to global expedition phase timers have been eliminated to ensure pure ambient silence when delvers are outside hazardous mineral zones.
 
 ---
 
@@ -139,14 +167,15 @@ The engine partitions all procedural synthesis into independent sound channels:
 | Category | Channel Bus | Affected Sound Cues | Default Level |
 |---|---|---|---|
 | **Master** | Master Output | Multiplies total output across all active voices | `100%` (`1.0`) |
+| **Music Soundtrack** | `SoundCategory::Music` | Extended instrumental sector themes, orbital hub soundtrack, arrival stingers | `100%` (`1.0`) |
 | **SFX / Tools** | `SoundCategory::SFX` | Rotary drill loop, voxel break sounds, explosions, kinetic thrusters, footsteps | `100%` (`1.0`) |
 | **Hostile Creatures** | `SoundCategory::Enemy` | Void Stalker alerts, predatory lunges, claw impacts, elimination dissolution | `100%` (`1.0`) |
-| **Ambience & Hazards** | `SoundCategory::Ambience` | Cavern drone, seismic tremors, Geiger radiation clicks, evac beacon sirens | `90%` (`0.9`) |
+| **Ambience & Hazards** | `SoundCategory::Ambience` | Cavern wind, seismic tremors, Geiger radiation clicks, evac beacon sirens | `90%` (`0.9`) |
 | **UI & Alarms** | `SoundCategory::UI` | Terminal blips, upgrade chimes, low-health cardiovascular emergency alarms | `90%` (`0.9`) |
 
 ### 6.2 Zero-Overhead Mute & Turn-Down Invariants
 - **Instant Mute All**: Toggling `mute_all` or setting `master_volume = 0.0` immediately short-circuits `render_mix()`, outputting pure digital silence (`0.0f`) with zero CPU synthesis overhead.
-- **Granular Silence**: When any individual channel (e.g. `sfx_volume`, `enemy_volume`) is adjusted down to `0.0`, voices on that bus advance their internal timeline without executing sample synthesis or writing energy to the master buffer, preventing memory leaks and orphaned voices.
+- **Granular Silence**: When any individual channel (e.g. `music_volume`, `sfx_volume`, `enemy_volume`) is adjusted down to `0.0`, voices on that bus advance their internal timeline without executing sample synthesis or writing energy to the master buffer, preventing memory leaks and orphaned voices.
 
 ### 6.3 In-Game & Hub UI Controls
 1. **In-Game Pause Menu (`ESC`)**:

@@ -119,7 +119,7 @@ void PlayerController::handle_input(const Window& window, float dt) {
     if (window.is_key_down(GLFW_KEY_A)) { wish_dir -= flat_right; m_current_buttons |= BTN_LEFT; }
     if (window.is_key_down(GLFW_KEY_D)) { wish_dir += flat_right; m_current_buttons |= BTN_RIGHT; }
     if (window.is_key_down(GLFW_KEY_LEFT_SHIFT)) { m_current_buttons |= BTN_SPRINT; }
-    bool crouch_held = window.is_key_down(GLFW_KEY_LEFT_CONTROL);
+    bool crouch_held = window.is_key_down(GLFW_KEY_LEFT_CONTROL) || window.is_key_down(GLFW_KEY_RIGHT_CONTROL);
     ProcessStanceChange(crouch_held);
 
     if (glm::length(wish_dir) > 0.001f) {
@@ -132,8 +132,15 @@ void PlayerController::handle_input(const Window& window, float dt) {
     }
     if (m_is_in_lava) {
         move_speed *= 0.40f; // Trudging through viscous molten slag
+    } else if (m_is_in_coolant) {
+        move_speed *= 0.45f; // Chilled frozen servos heavily restricted
+    } else if (m_is_in_acid) {
+        move_speed *= 0.55f; // Sloshing through caustic bubbling acid
     } else if (m_is_in_water) {
         move_speed *= 0.70f; // Wading through water pool
+    } else if (m_frost_chill_timer > 0.0f) {
+        float frost_slow = 1.0f - 0.35f * (m_frost_chill_timer / 2.5f);
+        move_speed *= frost_slow;
     }
 
     if (m_on_ground) {
@@ -151,7 +158,12 @@ void PlayerController::handle_input(const Window& window, float dt) {
     m_thruster_air_braking = false;
     if (window.is_key_down(GLFW_KEY_SPACE)) {
         if (m_on_ground) {
-            m_velocity.y = m_is_in_lava ? 4.5f : (m_is_in_water ? 6.5f : 8.5f);
+            float jump_vel = 8.5f;
+            if (m_is_in_lava) jump_vel = 4.5f;
+            else if (m_is_in_coolant) jump_vel = 5.0f;
+            else if (m_is_in_acid) jump_vel = 5.5f;
+            else if (m_is_in_water) jump_vel = 6.5f;
+            m_velocity.y = jump_vel;
             m_on_ground = false;
             m_current_buttons |= BTN_JUMP;
             if (m_on_jump) {
@@ -163,12 +175,18 @@ void PlayerController::handle_input(const Window& window, float dt) {
             if (m_is_in_lava) {
                 // Struggling upward against dense molten slag
                 m_velocity.y = std::min(2.0f, m_velocity.y + 14.0f * dt);
+            } else if (m_is_in_coolant) {
+                // Frost-stiffened joints: slower struggle upward
+                m_velocity.y = std::min(2.5f, m_velocity.y + 15.0f * dt);
+            } else if (m_is_in_acid) {
+                // Struggling upward against caustic acid
+                m_velocity.y = std::min(3.2f, m_velocity.y + 17.0f * dt);
             } else {
-                // Swimming upward in clear water/coolant
+                // Swimming upward in clear water/aquifer
                 m_velocity.y = std::min(3.8f, m_velocity.y + 20.0f * dt);
             }
-            if (!m_exo.overheated && m_exo.power > 3.0f) {
-                // Thruster boost assistance in liquid
+            if (!m_exo.overheated && m_exo.power > 3.0f && !m_is_in_coolant) {
+                // Thruster boost assistance in liquid (cannot fire when frozen in coolant!)
                 m_velocity.y += 10.0f * dt;
                 m_exo.power = std::max(0.0f, m_exo.power - 15.0f * dt);
                 m_current_buttons |= BTN_THRUSTER;
@@ -493,63 +511,92 @@ void PlayerController::update_physics(float dt, World& world) {
     int max_bz = static_cast<int>(std::floor(box_max.z - 0.05f));
 
     bool in_lava = false;
+    bool in_acid = false;
+    bool in_coolant = false;
     bool in_water = false;
     float max_liquid_surface = box_min.y;
+    uint8_t detected_liquid_mat = MAT_AIR;
+
+    auto inspect_voxel_liquid = [&](const Voxel& v, int block_y) {
+        if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
+            in_lava = true;
+            detected_liquid_mat = MAT_THERMITE_SLAG;
+            float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+            max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(block_y) + lvl);
+        } else if (v.material_id == MAT_ACID) {
+            in_acid = true;
+            if (detected_liquid_mat != MAT_THERMITE_SLAG) detected_liquid_mat = MAT_ACID;
+            float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+            max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(block_y) + lvl);
+        } else if (v.material_id == MAT_COOLANT) {
+            in_coolant = true;
+            if (detected_liquid_mat != MAT_THERMITE_SLAG && detected_liquid_mat != MAT_ACID) detected_liquid_mat = MAT_COOLANT;
+            float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+            max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(block_y) + lvl);
+        } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER) {
+            in_water = true;
+            if (detected_liquid_mat == MAT_AIR) detected_liquid_mat = MAT_CRYSTAL_AQUIFER;
+            float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
+            max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(block_y) + lvl);
+        } else if (v.is_waterlogged()) {
+            in_water = true;
+            if (detected_liquid_mat == MAT_AIR) detected_liquid_mat = MAT_CRYSTAL_AQUIFER;
+            float surf = (v.shape() == SHAPE_SLAB_BOTTOM) ? 0.5f : 1.0f;
+            max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(block_y) + surf);
+        }
+    };
 
     for (int y = min_by; y <= max_by; ++y) {
         for (int x = min_bx; x <= max_bx; ++x) {
             for (int z = min_bz; z <= max_bz; ++z) {
-                Voxel v = world.get_voxel(x, y, z);
-                if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
-                    in_lava = true;
-                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT || v.material_id == MAT_ACID) {
-                    in_water = true;
-                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + lvl);
-                } else if (v.is_waterlogged()) {
-                    in_water = true;
-                    float surf = (v.shape() == SHAPE_SLAB_BOTTOM) ? 0.5f : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(y) + surf);
-                }
+                inspect_voxel_liquid(world.get_voxel(x, y, z), y);
             }
         }
     }
 
     // Also check immediate underfoot for wading contact
-    if (!in_lava && !in_water) {
+    if (!in_lava && !in_acid && !in_coolant && !in_water) {
         int foot_y = static_cast<int>(std::floor(box_min.y - 0.05f));
         for (int x = min_bx; x <= max_bx; ++x) {
             for (int z = min_bz; z <= max_bz; ++z) {
-                Voxel v = world.get_voxel(x, foot_y, z);
-                if (v.material_id == MAT_THERMITE_SLAG || v.material_id == MAT_MOLTEN_MAGMA || v.material_id == MAT_LAVA) {
-                    in_lava = true;
-                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
-                } else if (v.material_id == MAT_CRYSTAL_AQUIFER || v.material_id == MAT_WATER || v.material_id == MAT_AQUIFER || v.material_id == MAT_COOLANT || v.material_id == MAT_ACID) {
-                    in_water = true;
-                    float lvl = (v.fluid_level() > 0) ? (static_cast<float>(v.fluid_level()) / 5.0f) : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + lvl);
-                } else if (v.is_waterlogged()) {
-                    in_water = true;
-                    float surf = (v.shape() == SHAPE_SLAB_BOTTOM) ? 0.5f : 1.0f;
-                    max_liquid_surface = std::max(max_liquid_surface, static_cast<float>(foot_y) + surf);
-                }
+                inspect_voxel_liquid(world.get_voxel(x, foot_y, z), foot_y);
             }
         }
     }
 
     m_is_in_lava = in_lava;
+    m_is_in_acid = in_acid;
+    m_is_in_coolant = in_coolant;
     m_is_in_water = in_water;
-    m_is_in_liquid = in_lava || in_water;
+    m_is_in_liquid = in_lava || in_acid || in_coolant || in_water;
     if (m_is_in_liquid) {
         float player_height = 2.0f * half_extents().y;
         m_liquid_submersion = std::clamp((max_liquid_surface - box_min.y) / player_height, 0.0f, 1.0f);
-        m_current_liquid_material = in_lava ? MAT_THERMITE_SLAG : MAT_CRYSTAL_AQUIFER;
+        m_current_liquid_material = detected_liquid_mat;
     } else {
         m_liquid_submersion = 0.0f;
         m_current_liquid_material = MAT_AIR;
+    }
+
+    // Dynamic timer updates:
+    if (m_is_in_acid) {
+        m_acid_burn_timer = 2.0f; // Continuously refresh lingering burn while submerged
+    } else if (m_is_in_water) {
+        // Clean subterranean aquifer water instantly neutralizes and washes off lingering acid!
+        m_acid_burn_timer = 0.0f;
+    } else if (m_acid_burn_timer > 0.0f) {
+        m_acid_burn_timer = std::max(0.0f, m_acid_burn_timer - dt);
+    }
+
+    if (m_is_in_coolant) {
+        m_frost_chill_timer = 2.5f; // Continuously refresh frost chill while submerged
+    } else if (m_is_in_lava) {
+        m_frost_chill_timer = 0.0f; // Searing magma instantly thaws frozen servos!
+    } else if (m_is_in_water) {
+        // Warm subterranean aquifer water speeds up thawing
+        m_frost_chill_timer = std::max(0.0f, m_frost_chill_timer - 2.5f * dt);
+    } else if (m_frost_chill_timer > 0.0f) {
+        m_frost_chill_timer = std::max(0.0f, m_frost_chill_timer - dt);
     }
 
     // 2b. Gravity & Fluid Dynamics
@@ -568,6 +615,32 @@ void PlayerController::update_physics(float dt, World& world) {
         // Viscous fluid drag - dampens horizontal movement
         m_velocity.x *= std::max(0.0f, 1.0f - 8.5f * dt);
         m_velocity.z *= std::max(0.0f, 1.0f - 8.5f * dt);
+    } else if (m_is_in_coolant) {
+        // Viscous sub-zero cryogenic fluid
+        if (m_velocity.y < -2.4f) {
+            m_velocity.y = glm::mix(m_velocity.y, -2.4f, std::min(1.0f, 9.5f * dt));
+        } else if (!m_on_ground) {
+            m_velocity.y -= 6.5f * dt;
+            if (m_velocity.y < -2.4f) {
+                m_velocity.y = -2.4f;
+            }
+        }
+        // Heavy cryogenic drag
+        m_velocity.x *= std::max(0.0f, 1.0f - 5.5f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 5.5f * dt);
+    } else if (m_is_in_acid) {
+        // Bubbling caustic neon acid
+        if (m_velocity.y < -2.6f) {
+            m_velocity.y = glm::mix(m_velocity.y, -2.6f, std::min(1.0f, 8.5f * dt));
+        } else if (!m_on_ground) {
+            m_velocity.y -= 7.0f * dt;
+            if (m_velocity.y < -2.6f) {
+                m_velocity.y = -2.6f;
+            }
+        }
+        // Moderate caustic drag
+        m_velocity.x *= std::max(0.0f, 1.0f - 4.5f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 4.5f * dt);
     } else if (m_is_in_water) {
         // Subterranean crystal aquifer water / coolant
         // Plunge braking towards buoyant terminal velocity (-3.0 m/s)
@@ -595,14 +668,14 @@ void PlayerController::update_physics(float dt, World& world) {
     // 3. Subterranean Voxel Collision Resolution (AABB vs Voxel Grid)
     resolve_voxel_collisions(world, m_position, m_velocity, dt);
 
-    // 3b. Environmental Hazard Interaction (Lava, Spikes, Void Chasm)
+    // 3b. Environmental Hazard Interaction (Lava, Acid, Coolant, Spikes, Void Chasm)
     m_is_in_spikes = false;
     if (m_spike_damage_timer > 0.0f) {
         m_spike_damage_timer -= dt;
     }
 
     if (m_is_in_lava) {
-        float lava_dmg = 12.0f * dt;
+        float lava_dmg = 14.0f * dt;
         take_damage(lava_dmg, DamageSource::ThermalLava);
         m_exo.heat = std::min(100.0f, m_exo.heat + 40.0f * dt);
         if (m_exo.heat >= 100.0f) {
@@ -616,16 +689,79 @@ void PlayerController::update_physics(float dt, World& world) {
                 if (m_health <= 0.0f) {
                     m_on_warning("VITAL SIGNS LOST: DELVER INCINERATED IN THERMITE SLAG");
                 } else {
-                    m_on_warning("CRITICAL: THERMAL BURNS / LAVA CONTACT (-12 HP/s)");
+                    m_on_warning("CRITICAL: THERMAL BURNS / LAVA CONTACT (-14 HP/s)");
+                }
+            }
+        }
+    }
+
+    if (m_is_in_acid) {
+        // Caustic acid actively dissolves energy shield layers rapidly
+        if (m_shield > 0.0f) {
+            m_shield = std::max(0.0f, m_shield - 25.0f * dt);
+        }
+        // Continuous caustic damage and chemical corrosion
+        float acid_dmg = 14.0f * dt;
+        take_damage(acid_dmg, DamageSource::CorrosiveAcid);
+        m_time_since_damage = 0.0f; // Chemical etching delays shield recharge start
+
+        static float s_acid_warn = 0.0f;
+        s_acid_warn += dt;
+        if (s_acid_warn >= 1.2f) {
+            s_acid_warn = 0.0f;
+            if (m_on_warning) {
+                if (m_health <= 0.0f) {
+                    m_on_warning("VITAL SIGNS LOST: DELVER DISSOLVED IN CORROSIVE ACID");
+                } else {
+                    m_on_warning("CORROSIVE HAZARD: NEON ACID CONTACT (-14 HP/s // SHIELD CORROSION)");
+                }
+            }
+        }
+    } else if (m_acid_burn_timer > 0.0f) {
+        // Lingering chemical burn while residual acid clings to the suit
+        float lingering_dmg = 4.5f * dt;
+        take_damage(lingering_dmg, DamageSource::CorrosiveAcid);
+        m_time_since_damage = 0.0f; // Lingering acid prevents shield regeneration
+
+        static float s_lingering_acid_warn = 0.0f;
+        s_lingering_acid_warn += dt;
+        if (s_lingering_acid_warn >= 1.4f) {
+            s_lingering_acid_warn = 0.0f;
+            if (m_on_warning) {
+                m_on_warning("WARNING: RESIDUAL ACID ETCHING SUIT // SUBMERGE IN WATER TO CLEANSE");
+            }
+        }
+    }
+
+    if (m_is_in_coolant) {
+        // Sub-zero cryogenic coolant flash-freezes suit: clears heat immediately
+        m_exo.heat = 0.0f;
+        m_exo.overheated = false;
+        // Extreme cold drains suit battery kinetics
+        m_exo.power = std::max(0.0f, m_exo.power - 15.0f * dt);
+        // Hypothermic embrittlement / frostbite damage
+        float cryo_dmg = 6.0f * dt;
+        take_damage(cryo_dmg, DamageSource::CryogenicCoolant);
+
+        static float s_coolant_warn = 0.0f;
+        s_coolant_warn += dt;
+        if (s_coolant_warn >= 1.2f) {
+            s_coolant_warn = 0.0f;
+            if (m_on_warning) {
+                if (m_health <= 0.0f) {
+                    m_on_warning("VITAL SIGNS LOST: DELVER FROZEN IN CRYOGENIC COOLANT");
+                } else {
+                    m_on_warning("SUB-ZERO HAZARD: CRYOGENIC COOLANT // SERVOS FROZEN (-55% SPD, -6 HP/s)");
                 }
             }
         }
     }
 
     if (m_is_in_water) {
-        // Water immersion: rapid exo cooling and buoyant fluid drag
+        // Subterranean crystal aquifer water: rapid exo cooling and buoyant fluid drag
         m_exo.heat = std::max(0.0f, m_exo.heat - 75.0f * dt);
         m_exo.overheated = false;
+        m_acid_burn_timer = 0.0f; // Neutralizes any residual acid!
     }
 
     int center_x = static_cast<int>(std::floor(m_position.x));
@@ -1464,7 +1600,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
             if (has_collision) {
                 float step_height = step_surf_y - box_min.y;
-                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                bool can_step = m_auto_step && (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
                                 (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
@@ -1583,7 +1719,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
             if (has_collision) {
                 float step_height = step_surf_y - box_min.y;
-                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                bool can_step = m_auto_step && (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
                                 (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int z = min_bz; z <= max_bz; ++z) {
@@ -1730,7 +1866,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
             if (has_collision) {
                 float step_height = step_surf_y - box_min.y;
-                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                bool can_step = m_auto_step && (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
                                 (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
@@ -1849,7 +1985,7 @@ void PlayerController::resolve_axis_collision(int axis, const glm::vec3& half_ex
             }
             if (has_collision) {
                 float step_height = step_surf_y - box_min.y;
-                bool can_step = (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
+                bool can_step = m_auto_step && (m_on_ground || m_isGrounded) && (highest_solid_y != -1) &&
                                 (step_height > 0.0f && step_height <= 1.35f);
                 if (can_step) {
                     for (int x = min_bx; x <= max_bx; ++x) {
@@ -2108,6 +2244,21 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
     if (source == DamageSource::FallingDebris) {
         float reduction = debris_damage_reduction();
         dmg *= (1.0f - reduction);
+    } else if (source == DamageSource::Radiation) {
+        float reduction = radiation_damage_reduction();
+        dmg *= (1.0f - reduction);
+    } else if (source == DamageSource::ThermalLava) {
+        float reduction = lava_damage_reduction();
+        dmg *= (1.0f - reduction);
+    } else if (source == DamageSource::CorrosiveAcid) {
+        float reduction = acid_damage_reduction();
+        dmg *= (1.0f - reduction);
+    } else if (source == DamageSource::CryogenicCoolant) {
+        float reduction = coolant_damage_reduction();
+        dmg *= (1.0f - reduction);
+    } else if (source == DamageSource::FallImpact) {
+        float reduction = fall_damage_reduction();
+        dmg *= (1.0f - reduction);
     }
     if (dmg <= 0.0f) return 0.0f;
 
@@ -2143,6 +2294,8 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
     // Apply trauma screen shake based on specific damage scenario:
     // - Radiation causes invisible cellular breakdown -> ZERO screen shaking! (Telegraphed by Geiger counter & groaning)
     // - Toxic gas causes respiratory distress -> subtle cough spasm (0.02f), NOT violent screen shaking!
+    // - Cryogenic coolant causes sub-zero frostbite -> subtle shudder (0.03f)
+    // - Corrosive acid causes chemical hull etching -> mild sizzle shudder (0.06f)
     // - Thermal lava causes burn distress -> mild heat tremor
     // - Enemy attack -> visceral physical trauma
     // - Kinetic / Falling Debris / Fall Impact / Spikes -> punchy camera trauma
@@ -2150,6 +2303,10 @@ float PlayerController::take_damage(float dmg, DamageSource source) {
         // Zero screen shaking for radiation
     } else if (source == DamageSource::ToxicGas) {
         add_trauma(0.02f);
+    } else if (source == DamageSource::CryogenicCoolant) {
+        add_trauma(0.03f);
+    } else if (source == DamageSource::CorrosiveAcid) {
+        add_trauma(0.06f);
     } else if (source == DamageSource::ThermalLava) {
         float trauma_to_add = std::clamp(0.10f + dmg * 0.015f, 0.10f, 0.35f);
         add_trauma(trauma_to_add);
@@ -2202,6 +2359,33 @@ void PlayerController::update_shield_recharge(float dt) {
         float recharge = m_shield_recharge_rate * dt;
         m_shield = std::min(m_max_shield, m_shield + recharge);
         m_exo.shield = (m_max_shield > 0.0f) ? (m_shield / m_max_shield * 100.0f) : 0.0f;
+    }
+}
+
+void PlayerController::update_radiation(float target_exposure, float dt, bool in_decon_zone) {
+    if (m_health <= 0.0f || dt <= 0.0f) return;
+
+    if (in_decon_zone) {
+        // Active decontamination scrubbers at evac extraction pod rapidly purge ionizing radiation
+        float decon_rate = 25.0f; // 25% per second -> clears 100% in 4 seconds
+        m_exo.radiation = std::max(0.0f, m_exo.radiation - decon_rate * dt);
+        return;
+    }
+
+    float target = std::clamp(target_exposure, 0.0f, 100.0f);
+
+    if (target > m_exo.radiation) {
+        // Accumulating radiation in active radiation hazard zones (proximity to MAT_RADIOACTIVE_ORE)
+        // Delver's RadiationShielding upgrade dampens accumulation rate (-25% per tier, up to -75%)
+        float shield_mitigation = radiation_damage_reduction();
+        float buildup_rate = 18.0f * (1.0f - shield_mitigation);
+        m_exo.radiation = std::min(target, m_exo.radiation + buildup_rate * dt);
+    } else if (target < m_exo.radiation) {
+        // Moving away or retreating to a cleaner / non-radioactive area:
+        // Suit scrubbers naturally vent and dissipate the accumulated radiation dose!
+        // RadiationShielding upgrades also enhance venting efficiency (+25% per tier)
+        float vent_rate = 10.0f * (1.0f + m_upgrades.radiationShieldingTier * 0.25f);
+        m_exo.radiation = std::max(target, m_exo.radiation - vent_rate * dt);
     }
 }
 

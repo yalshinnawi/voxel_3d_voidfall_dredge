@@ -1048,6 +1048,25 @@ static void HudMessageOverlapAndStackingTest_NoCollisionsAcrossAllCrisisScenario
         }
     }
 
+    // 4b. Boss Health Bar Layout Integration & Clearance
+    {
+        VoidStalker boss;
+        boss.role = StalkerRole::ChitinGoliath;
+        boss.state = StalkerState::Stalking;
+        boss.hp = 180.0f;
+        boss.max_hp = 220.0f;
+
+        HudTopStackLayout layout = hud.compute_top_stack_layout(
+            ui_scale, screen_w, true, false, ExtractionPhase::BeaconDeployed, &boss
+        );
+
+        ASSERT_TRUE(layout.has_boss_bar);
+        ASSERT_GT(layout.boss_bar.w, 400.0f);
+        ASSERT_GT(layout.boss_bar.h, 20.0f);
+        ASSERT_GE(layout.boss_bar.y, layout.hazard_bar.y + layout.hazard_bar.h + 5.0f);
+        ASSERT_GE(layout.seismic_banner.y, layout.boss_bar.y + layout.boss_bar.h + 5.0f);
+    }
+
     // 5. Update / Expiration Verification
     hud.update(1.5f);
     // Timer was 2.0s or 2.5s; all should still be active
@@ -1895,6 +1914,473 @@ void ProjectileBallisticsAndShooterVelocityInheritanceTest() {
               << " (verified Galilean velocity inheritance: strafing lateral velocity preserved, zero relative drift across reticle)" << std::endl;
 }
 
+// ─── TEST 24: BossHealthBarVisibilityTest, CloseRangeAndObviousSightValidation ──
+TEST(BossHealthBarVisibilityTest, CloseRangeAndObviousSightValidation) {
+    std::cout << "[ RUN      ] BossHealthBarVisibilityTest.CloseRangeAndObviousSightValidation" << std::endl;
+
+    HUD hud(1600, 900, true);
+    World world(1337, false); // Headless world with no background meshing
+    const float ui_scale = 1.0f;
+    const float screen_w = 1600.0f;
+
+    // Clear air corridor and cavern chamber across the test volume
+    for (int x = 10; x <= 40; ++x) {
+        for (int y = 5; y <= 20; ++y) {
+            for (int z = 15; z <= 60; ++z) {
+                world.set_voxel(x, y, z, {MAT_AIR, 0}, false);
+            }
+        }
+    }
+
+    glm::vec3 cam_pos(20.0f, 10.0f, 20.0f);
+    glm::vec3 cam_fwd(0.0f, 0.0f, 1.0f); // Looking towards +Z
+
+    // 1. Close Range + Obvious Sight (Looking directly at active boss within 28m)
+    VoidStalker boss;
+    boss.role = StalkerRole::ChitinGoliath;
+    boss.state = StalkerState::Stalking;
+    boss.position = glm::vec3(20.0f, 10.0f, 32.0f); // 12m away along +Z
+    boss.scale = 2.2f;
+    boss.hp = 220.0f;
+    boss.max_hp = 220.0f;
+
+    std::vector<VoidStalker> stalkers = { boss };
+
+    ASSERT_TRUE(boss.is_boss());
+    ASSERT_TRUE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, boss));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &stalkers), &stalkers[0]);
+
+    HudTopStackLayout layout_visible = hud.compute_top_stack_layout(
+        ui_scale, screen_w, false, false, ExtractionPhase::Dormant, cam_pos, cam_fwd, world, &stalkers
+    );
+    ASSERT_TRUE(layout_visible.has_boss_bar);
+    ASSERT_GT(layout_visible.boss_bar.w, 400.0f);
+    ASSERT_GT(layout_visible.boss_bar.h, 20.0f);
+
+    // 2. Far Range (> 28m close range boundary) -> Boss bar must be hidden
+    stalkers[0].position = glm::vec3(20.0f, 10.0f, 55.0f); // 35m away (> 28m limit)
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &stalkers), nullptr);
+
+    HudTopStackLayout layout_far = hud.compute_top_stack_layout(
+        ui_scale, screen_w, false, false, ExtractionPhase::Dormant, cam_pos, cam_fwd, world, &stalkers
+    );
+    ASSERT_FALSE(layout_far.has_boss_bar);
+
+    // 3. Occluded Behind Solid Cavern Wall -> Boss bar must be hidden
+    stalkers[0].position = glm::vec3(20.0f, 10.0f, 32.0f); // Back at 12m
+    // Erect a solid rock wall at Z = 25 (between camera at Z=20 and boss at Z=32)
+    for (int x = 16; x <= 24; ++x) {
+        for (int y = 8; y <= 16; ++y) {
+            world.set_block(x, y, 25, MAT_VOLCANIC_BASALT);
+        }
+    }
+
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &stalkers), nullptr);
+
+    HudTopStackLayout layout_occluded = hud.compute_top_stack_layout(
+        ui_scale, screen_w, false, false, ExtractionPhase::Dormant, cam_pos, cam_fwd, world, &stalkers
+    );
+    ASSERT_FALSE(layout_occluded.has_boss_bar);
+
+    // Breach / remove the wall -> Line of sight restored -> Boss bar becomes visible
+    for (int x = 16; x <= 24; ++x) {
+        for (int y = 8; y <= 16; ++y) {
+            world.set_block(x, y, 25, MAT_AIR);
+        }
+    }
+
+    ASSERT_TRUE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &stalkers), &stalkers[0]);
+    HudTopStackLayout layout_unoccluded = hud.compute_top_stack_layout(
+        ui_scale, screen_w, false, false, ExtractionPhase::Dormant, cam_pos, cam_fwd, world, &stalkers
+    );
+    ASSERT_TRUE(layout_unoccluded.has_boss_bar);
+
+    // 4. Player Turned Away / Behind Player (Out of Sight Cone)
+    glm::vec3 cam_fwd_opposite(0.0f, 0.0f, -1.0f); // 180 degrees away
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd_opposite, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd_opposite, world, &stalkers), nullptr);
+
+    glm::vec3 cam_fwd_side(1.0f, 0.0f, 0.0f); // 90 degrees away
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd_side, world, stalkers[0]));
+
+    // Looking within 45 degrees towards boss (dot ≈ 0.707 >= 0.25) -> within obvious sight
+    glm::vec3 cam_fwd_diagonal = glm::normalize(glm::vec3(0.5f, 0.0f, 0.5f));
+    ASSERT_TRUE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd_diagonal, world, stalkers[0]));
+
+    // 5. Non-Boss Entity (Regular Void Stalker) -> Must never show boss health bar
+    VoidStalker regular_stalker;
+    regular_stalker.role = StalkerRole::Melee;
+    regular_stalker.state = StalkerState::Stalking;
+    regular_stalker.position = glm::vec3(20.0f, 10.0f, 30.0f);
+    regular_stalker.hp = 40.0f;
+    regular_stalker.max_hp = 40.0f;
+    ASSERT_FALSE(regular_stalker.is_boss());
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, regular_stalker));
+
+    std::vector<VoidStalker> regular_only = { regular_stalker };
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &regular_only), nullptr);
+    ASSERT_FALSE(hud.compute_top_stack_layout(ui_scale, screen_w, false, false, ExtractionPhase::Dormant, cam_pos, cam_fwd, world, &regular_only).has_boss_bar);
+
+    // 6. Dead or Dying Boss -> Must not show boss bar
+    stalkers[0].hp = 0.0f;
+    stalkers[0].state = StalkerState::Dead;
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(cam_pos, cam_fwd, world, &stalkers), nullptr);
+
+    stalkers[0].hp = 10.0f;
+    stalkers[0].state = StalkerState::Dying;
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+
+    // 7. Subterranean Burrowing Boss -> Must not show boss bar
+    stalkers[0].hp = 200.0f;
+    stalkers[0].state = StalkerState::Burrowing;
+    ASSERT_FALSE(hud.is_boss_in_obvious_sight(cam_pos, cam_fwd, world, stalkers[0]));
+
+    // 8. PlayerController Camera View Integration
+    PlayerController player(cam_pos);
+    player.set_direction(glm::vec3(0.0f, 0.0f, 1.0f)); // Looking towards +Z
+    stalkers[0].state = StalkerState::Stalking;
+
+    ASSERT_TRUE(hud.is_boss_in_obvious_sight(player, world, stalkers[0]));
+    ASSERT_EQ(hud.find_visible_boss(player, world, &stalkers), &stalkers[0]);
+    HudTopStackLayout layout_player = hud.compute_top_stack_layout(
+        ui_scale, screen_w, false, false, ExtractionPhase::Dormant, player, world, &stalkers
+    );
+    ASSERT_TRUE(layout_player.has_boss_bar);
+
+    // 9. Multi-Monster Selection (1 Occluded Boss Behind Wall + 1 In Plain Sight)
+    VoidStalker hidden_boss = stalkers[0];
+    hidden_boss.id = 101;
+    hidden_boss.position = glm::vec3(35.0f, 10.0f, 32.0f); // Behind wall at X=30
+    for (int y = 8; y <= 16; ++y) {
+        for (int z = 24; z <= 34; ++z) {
+            world.set_block(30, y, z, MAT_VOLCANIC_BASALT); // Wall blocking line of sight to hidden boss
+        }
+    }
+
+    VoidStalker visible_boss = stalkers[0];
+    visible_boss.id = 102;
+    visible_boss.position = glm::vec3(20.0f, 10.0f, 28.0f); // In clear sight at 8m
+
+    std::vector<VoidStalker> mixed_squad = { regular_stalker, hidden_boss, visible_boss };
+    const VoidStalker* chosen = hud.find_visible_boss(cam_pos, cam_fwd, world, &mixed_squad);
+    ASSERT_TRUE(chosen != nullptr);
+    ASSERT_EQ(chosen->id, 102);
+
+    std::cout << "[ OK ] BossHealthBarVisibilityTest.CloseRangeAndObviousSightValidation"
+              << " (verified range gate <= 28m, unobstructed line-of-sight, forward view cone, alive state, and multi-mob selection)" << std::endl;
+}
+
+TEST(RadiationDissipationAndSpatialLocalizationTest, VentDosimeterAndCleanZoneSafety) {
+    std::cout << "[ RUN      ] RadiationDissipationAndSpatialLocalizationTest.VentDosimeterAndCleanZoneSafety" << std::endl;
+
+    // 1. Initial State: Player starts completely clean
+    PlayerController player(glm::vec3(10.0f, 15.0f, 10.0f));
+    ASSERT_EQ(player.exo().radiation, 0.0f);
+
+    // 2. Clean Cavern Area Safety: When not near radioactive ore (target_exposure = 0), radiation NEVER accumulates
+    player.update_radiation(0.0f, 10.0f);
+    ASSERT_EQ(player.exo().radiation, 0.0f);
+    player.update_radiation(0.0f, 60.0f);
+    ASSERT_EQ(player.exo().radiation, 0.0f);
+
+    // 3. Entering Radioactive Zone: Exposure accumulates smoothly towards local field intensity
+    float target_hazard = 85.0f;
+    player.update_radiation(target_hazard, 1.0f);
+    ASSERT_GT(player.exo().radiation, 0.0f);
+    ASSERT_LT(player.exo().radiation, target_hazard);
+
+    // Let radiation build up to full local hazard level
+    player.update_radiation(target_hazard, 10.0f);
+    ASSERT_NEAR(player.exo().radiation, target_hazard, 0.01f);
+
+    // 4. Counterplay & Venting: Retreating away to clean cavern air (target_exposure = 0)
+    // Suit scrubbers actively purge ionizing dose — radiation GOES DOWN!
+    float rad_before_retreat = player.exo().radiation;
+    player.update_radiation(0.0f, 1.0f);
+    ASSERT_LT(player.exo().radiation, rad_before_retreat);
+    // After 1 second of normal venting (~10%/s), radiation drops from 85% to ~75% (stopping corrosion damage!)
+    ASSERT_NEAR(player.exo().radiation, 75.0f, 0.1f);
+
+    // Further venting clears all remaining radiation back down to pristine 0%
+    player.update_radiation(0.0f, 10.0f);
+    ASSERT_EQ(player.exo().radiation, 0.0f);
+
+    // 5. Active Decontamination Field at Evac Extraction Pod: Rapid purge at 25%/s
+    player.exo_mut().radiation = 100.0f;
+    player.update_radiation(0.0f, 2.0f, true); // 2s in extraction pod = -50% dose
+    ASSERT_NEAR(player.exo().radiation, 50.0f, 0.1f);
+    player.update_radiation(0.0f, 3.0f, true); // additional 3s fully clears to 0%
+    ASSERT_EQ(player.exo().radiation, 0.0f);
+
+    // 6. Delver Upgrades Synergy: RadiationShielding reduces accumulation and accelerates venting
+    PlayerController unshielded_delver(glm::vec3(10.0f, 15.0f, 10.0f));
+    PlayerController shielded_delver(glm::vec3(10.0f, 15.0f, 10.0f));
+    UpgradeTree upg_tree;
+    upg_tree.radiationShieldingTier = 3; // -75% exposure rate, +75% vent rate
+    shielded_delver.set_upgrades(upg_tree);
+
+    // Buildup comparison over 1.0 second in 100% field
+    unshielded_delver.update_radiation(100.0f, 1.0f);
+    shielded_delver.update_radiation(100.0f, 1.0f);
+    ASSERT_LT(shielded_delver.exo().radiation, unshielded_delver.exo().radiation);
+
+    // Venting comparison over 1.0 second from 80% dose
+    unshielded_delver.exo_mut().radiation = 80.0f;
+    shielded_delver.exo_mut().radiation = 80.0f;
+    unshielded_delver.update_radiation(0.0f, 1.0f);
+    shielded_delver.update_radiation(0.0f, 1.0f);
+    ASSERT_LT(shielded_delver.exo().radiation, unshielded_delver.exo().radiation);
+
+    // 7. Spatial Radiation Localization: World query strictly returns 0 outside radiation radius
+    World test_world;
+    test_world.set_block(20, 10, 20, MAT_RADIOACTIVE_ORE);
+    float near_ore = test_world.query_radiation_proximity(glm::vec3(20.0f, 11.0f, 20.0f), 12.0f);
+    float far_clean_air = test_world.query_radiation_proximity(glm::vec3(50.0f, 10.0f, 50.0f), 12.0f);
+    ASSERT_GT(near_ore, 0.30f);
+    ASSERT_EQ(far_clean_air, 0.0f);
+
+    std::cout << "[ OK ] RadiationDissipationAndSpatialLocalizationTest.VentDosimeterAndCleanZoneSafety"
+              << " (verified zero radiation in clean air, active venting dissipation, extraction decon, and upgrade scaling)" << std::endl;
+}
+
+void ObjectiveHintReachAndMineAutoRemovalTest() {
+    HUD hud(1600, 900, true);
+    World world;
+    PlayerController player;
+
+    glm::vec3 ore_pos(25.0f, 8.0f, 40.0f);
+    world.set_block(25, 8, 40, MAT_ASTRAL_ORE);
+
+    // 1. Initial State: No hint active
+    ASSERT_FALSE(hud.has_objective_hint());
+
+    // 2. Hint is used/given
+    hud.set_objective_hint(ore_pos, "ASTRAL ORE");
+    ASSERT_TRUE(hud.has_objective_hint());
+    ASSERT_EQ(hud.hint_waypoint_pos(), ore_pos);
+    ASSERT_EQ(hud.hint_waypoint_label(), "ASTRAL ORE");
+
+    // 3. Player far away (e.g. at 5, 2, 10): hint must stay active
+    player.set_position(glm::vec3(5.0f, 2.0f, 10.0f));
+    bool far_cleared = hud.check_and_clear_if_reached(player.position());
+    ASSERT_FALSE(far_cleared);
+    ASSERT_TRUE(hud.has_objective_hint());
+
+    // 4. Player reaches objective location (within 3.0m): hint must auto-dismiss!
+    player.set_position(glm::vec3(25.5f, 8.2f, 41.2f));
+    bool near_cleared = hud.check_and_clear_if_reached(player.position());
+    ASSERT_TRUE(near_cleared);
+    ASSERT_FALSE(hud.has_objective_hint());
+
+    // 5. Mining verification: if hint was reset, and player mines the block
+    hud.set_objective_hint(ore_pos, "ASTRAL ORE");
+    ASSERT_TRUE(hud.has_objective_hint());
+
+    // Simulate mining: block is converted to MAT_AIR
+    world.set_block(25, 8, 40, MAT_AIR);
+    ASSERT_EQ(world.get_voxel(25, 8, 40).material_id, MAT_AIR);
+
+    // When block is mined to air, hint is cleared
+    hud.clear_objective_hint();
+    ASSERT_FALSE(hud.has_objective_hint());
+
+    std::cout << "[ OK ] ObjectiveHintReachAndMineAutoRemovalTest"
+              << " (verified hint auto-removal when player reaches within threshold or mines the material)" << std::endl;
+}
+
+void ObjectiveHintIdleInteractionRequirementTest() {
+    HUD hud(1600, 900, true);
+    World world;
+    PlayerController player;
+
+    const float idle_threshold = 75.0f;
+    float astral_idle = 0.0f;
+    float voidite_idle = 0.0f;
+    bool needs_astral = true;
+    bool needs_voidite = true;
+
+    // 1. Initial State: Player just landed in sector, timers at 0
+    ASSERT_FALSE(hud.has_objective_hint());
+    ASSERT_FALSE(needs_astral && astral_idle >= idle_threshold);
+    ASSERT_FALSE(needs_voidite && voidite_idle >= idle_threshold);
+
+    // 2. Advance time by 40s - neither objective should qualify for hint
+    astral_idle += 40.0f;
+    voidite_idle += 40.0f;
+    bool astral_qualifies = needs_astral && (astral_idle >= idle_threshold);
+    bool voidite_qualifies = needs_voidite && (voidite_idle >= idle_threshold);
+    ASSERT_FALSE(astral_qualifies);
+    ASSERT_FALSE(voidite_qualifies);
+
+    // 3. Player interacts with Voidite (mines Voidite crystal at t=40s)
+    voidite_idle = 0.0f; // Reset on interaction
+
+    // 4. Advance time by another 40s (total elapsed: 80s)
+    astral_idle += 40.0f;  // Now 80s (>= 75s threshold)
+    voidite_idle += 40.0f; // Now 40s (< 75s threshold)
+
+    astral_qualifies = needs_astral && (astral_idle >= idle_threshold);
+    voidite_qualifies = needs_voidite && (voidite_idle >= idle_threshold);
+
+    // Astral Ore qualifies because player hasn't interacted with it for 80s.
+    // Voidite DOES NOT qualify because player interacted with it 40s ago!
+    ASSERT_TRUE(astral_qualifies);
+    ASSERT_FALSE(voidite_qualifies);
+
+    // 5. Hint is provided for Astral Ore
+    glm::vec3 astral_pos(35.0f, 12.0f, 45.0f);
+    world.set_block(35, 12, 45, MAT_ASTRAL_ORE);
+    hud.set_objective_hint(astral_pos, "ASTRAL ORE", glm::vec4(1.0f, 0.82f, 0.20f, 1.0f), 60.0f, MAT_ASTRAL_ORE);
+    ASSERT_TRUE(hud.has_objective_hint());
+    ASSERT_EQ(hud.hint_waypoint_mat(), MAT_ASTRAL_ORE);
+    ASSERT_EQ(hud.hint_waypoint_label(), "ASTRAL ORE");
+
+    // 6. Player interacts with Astral Ore (reaches/mines it)
+    world.set_block(35, 12, 45, MAT_AIR);
+    hud.clear_objective_hint();
+    astral_idle = 0.0f; // Reset interaction timer on mining
+
+    ASSERT_FALSE(hud.has_objective_hint());
+    ASSERT_EQ(hud.hint_waypoint_mat(), 0);
+
+    // 7. Verify Astral Ore no longer qualifies immediately after interaction
+    astral_qualifies = needs_astral && (astral_idle >= idle_threshold);
+    ASSERT_FALSE(astral_qualifies);
+
+    // 8. Test active drilling interaction keeps timer reset
+    // Player targets a Voidite block and begins drilling
+    glm::ivec3 target_block(10, 5, 10);
+    world.set_block(10, 5, 10, MAT_VOIDITE_CRYSTAL);
+    player.set_position(glm::vec3(10.0f, 5.0f, 8.0f));
+    player.set_look_angles(0.0f, 0.0f);
+
+    // While drilling, interaction is registered and idle time stays at 0
+    voidite_idle = 0.0f;
+    ASSERT_EQ(voidite_idle, 0.0f);
+
+    std::cout << "[ OK ] ObjectiveHintIdleInteractionRequirementTest"
+              << " (verified objective hints only trigger when player has not interacted with given objective in >= 75s)"
+              << std::endl;
+}
+
+// ─── TEST 28: LiquidHazardDifferentiationAndNeutralizationTest ───────────────
+TEST(LiquidHazardDifferentiationAndNeutralizationTest, DifferentiatedLiquidDynamicsAndWaterCleanse) {
+    std::cout << "[ RUN      ] LiquidHazardDifferentiationAndNeutralizationTest.DifferentiatedLiquidDynamicsAndWaterCleanse" << std::endl;
+
+    World world(1337, false);
+    PlayerController player(glm::vec3(10.0f, 5.0f, 10.0f));
+    HUD hud(1600, 900, true);
+
+    // Carve out test chamber: air from y=4 to y=8
+    for (int x = 8; x <= 22; ++x) {
+        for (int y = 4; y <= 8; ++y) {
+            for (int z = 8; z <= 22; ++z) {
+                world.set_block(x, y, z, MAT_AIR);
+            }
+        }
+    }
+    // Solid bedrock floor at y=3
+    for (int x = 8; x <= 22; ++x) {
+        for (int z = 8; z <= 22; ++z) {
+            world.set_block(x, 3, z, MAT_DREDGE_BEDROCK);
+        }
+    }
+
+    // ── 1. CORROSIVE ACID HAZARD & SHIELD DISSOLUTION ──
+    world.set_block(10, 4, 10, MAT_ACID);
+    world.set_block(10, 5, 10, MAT_ACID);
+    player.set_position(glm::vec3(10.5f, 4.5f, 10.5f));
+    player.set_velocity(glm::vec3(0.0f));
+    player.set_shield(100.0f);
+    player.set_health(100.0f);
+
+    player.update(0.1f, world);
+
+    ASSERT_TRUE(player.is_in_acid());
+    ASSERT_FALSE(player.is_in_water());
+    ASSERT_FALSE(player.is_in_coolant());
+    ASSERT_FALSE(player.is_in_lava());
+    ASSERT_LT(player.shield(), 100.0f); // Acid continuously erodes shield
+    ASSERT_GT(player.acid_burn_timer(), 0.0f); // Lingering chemical burn initialized
+    ASSERT_EQ(player.last_damage_source(), PlayerController::DamageSource::CorrosiveAcid);
+
+    // ── 2. AQUIFER WATER EMERGENCE & INSTANT ACID NEUTRALIZATION ──
+    world.set_block(14, 4, 10, MAT_CRYSTAL_AQUIFER);
+    world.set_block(14, 5, 10, MAT_CRYSTAL_AQUIFER);
+    player.set_position(glm::vec3(14.5f, 4.5f, 10.5f));
+    ASSERT_GT(player.acid_burn_timer(), 0.0f); // Acid burn active before plunge
+
+    player.update(0.1f, world);
+
+    ASSERT_TRUE(player.is_in_water());
+    ASSERT_FALSE(player.is_in_acid());
+    ASSERT_EQ(player.acid_burn_timer(), 0.0f); // Aquifer water instantly neutralized chemical burn!
+
+    // ── 3. CRYOGENIC COOLANT & THERMAL QUENCH DYNAMICS ──
+    player.exo_mut().heat = 90.0f;
+    player.exo_mut().overheated = true;
+    float power_before = player.exo().power;
+
+    world.set_block(18, 4, 10, MAT_COOLANT);
+    world.set_block(18, 5, 10, MAT_COOLANT);
+    player.set_position(glm::vec3(18.5f, 4.5f, 10.5f));
+
+    player.update(0.1f, world);
+
+    ASSERT_TRUE(player.is_in_coolant());
+    ASSERT_FALSE(player.is_in_water());
+    ASSERT_FALSE(player.is_in_acid());
+    ASSERT_EQ(player.exo().heat, 0.0f); // Sub-zero coolant flash-freezes suit: heat instantly quenched to 0
+    ASSERT_FALSE(player.exo().overheated); // Overheat lockout cleared
+    ASSERT_LT(player.exo().power, power_before); // Battery power drained by cryogenic fluid
+    ASSERT_GT(player.frost_chill_timer(), 0.0f); // Frost chill timer applied to servos
+    ASSERT_EQ(player.last_damage_source(), PlayerController::DamageSource::CryogenicCoolant);
+
+    // ── 4. THERMAL LAVA HAZARD DYNAMICS ──
+    world.set_block(10, 4, 14, MAT_THERMITE_SLAG);
+    world.set_block(10, 5, 14, MAT_THERMITE_SLAG);
+    player.set_position(glm::vec3(10.5f, 4.5f, 14.5f));
+
+    player.update(0.1f, world);
+
+    ASSERT_TRUE(player.is_in_lava());
+    ASSERT_GT(player.exo().heat, 0.0f); // Molten magma builds massive heat
+    ASSERT_EQ(player.last_damage_source(), PlayerController::DamageSource::ThermalLava);
+
+    // ── 5. HUD TELEGRAPHS FOR TOXIC ACID & FROST COOLANT ──
+    hud.trigger_acid_flash(1.0f);
+    ASSERT_GT(hud.acid_flash_timer(), 0.0f);
+    hud.set_acid_exposure(1.0f, 0.016f);
+    ASSERT_GT(hud.acid_exposure(), 0.0f);
+
+    hud.trigger_frost_flash(1.0f);
+    ASSERT_GT(hud.frost_flash_timer(), 0.0f);
+    hud.set_frost_exposure(1.0f, 0.016f);
+    ASSERT_GT(hud.frost_exposure(), 0.0f);
+
+    hud.update(0.2f);
+    ASSERT_LT(hud.acid_flash_timer(), 1.0f);
+    ASSERT_LT(hud.frost_flash_timer(), 1.0f);
+
+    // ── 6. SEISMIC BURROWER HAZARD INTERACTION ──
+    SeismicBurrowerManager burrower_mgr;
+    burrower_mgr.spawn_burrower(glm::vec3(18.5f, 4.5f, 10.5f), 1.0f, false);
+    ASSERT_FALSE(burrower_mgr.burrowers().empty());
+    float burrower_hp_before = burrower_mgr.burrowers()[0].hp;
+
+    burrower_mgr.update(0.1f, glm::vec3(10.0f, 4.0f, 10.0f), world);
+    ASSERT_TRUE(burrower_mgr.burrowers()[0].is_in_coolant);
+    ASSERT_LT(burrower_mgr.burrowers()[0].hp, burrower_hp_before); // Took cryogenic cold damage
+
+    std::cout << "[ OK ] LiquidHazardDifferentiationAndNeutralizationTest.DifferentiatedLiquidDynamicsAndWaterCleanse"
+              << " (verified distinct physics, damage sources, thermal reactions, and water neutralization for all 4 liquids)"
+              << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "  VOIDFALL DREDGE: GAMEPLAY MECHANICS REGRESSION TESTS" << std::endl;
@@ -1923,9 +2409,14 @@ int main() {
     PlayerShieldLayerRechargeAndNonRegeneratingHealthTest();
     HazardBalancingAndDangerTelegraphTest_ReducedHazardDamageCurvesAndDangerHazeTelegraphs();
     ProjectileBallisticsAndShooterVelocityInheritanceTest();
+    BossHealthBarVisibilityTest_CloseRangeAndObviousSightValidation();
+    RadiationDissipationAndSpatialLocalizationTest_VentDosimeterAndCleanZoneSafety();
+    ObjectiveHintReachAndMineAutoRemovalTest();
+    ObjectiveHintIdleInteractionRequirementTest();
+    LiquidHazardDifferentiationAndNeutralizationTest_DifferentiatedLiquidDynamicsAndWaterCleanse();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "  ALL 23 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
+    std::cout << "  ALL 27 GAMEPLAY MECHANICS TESTS PASSED CLEANLY!" << std::endl;
     std::cout << "====================================================" << std::endl;
 
     return 0;

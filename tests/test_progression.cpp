@@ -702,12 +702,12 @@ int main() {
 
     // Test 11: 6-Discipline Progressive Skill Tree, Campaign Cap, 100% Respec, and Post-Game Grandmaster Unlock
     {
-        std::cout << "[Test 11] Testing 6-Discipline Skill Tree, 24-Pt Campaign Cap, Respec & Post-Game Unlock..." << std::endl;
+        std::cout << "[Test 11] Testing 6-Discipline Skill Tree, 28-Pt Campaign Cap, Respec & Post-Game Unlock..." << std::endl;
 
-        // 1. Verify 18 upgrades, 6 disciplines, and 60 total points
-        CHECK(static_cast<int>(UpgradeType::COUNT) == 18, "Tree must have exactly 18 upgrades");
-        CHECK(UpgradeTree::CAMPAIGN_POINT_CAP == 24, "Pre-completion campaign cap must be 24 points");
-        CHECK(UpgradeTree::TOTAL_TREE_POINTS == 60, "Total skill tree must have 60 points");
+        // 1. Verify 22 upgrades, 6 disciplines, 28-pt campaign cap, and 72 total points
+        CHECK(static_cast<int>(UpgradeType::COUNT) == 22, "Tree must have exactly 22 upgrades");
+        CHECK(UpgradeTree::CAMPAIGN_POINT_CAP == 28, "Pre-completion campaign cap must be 28 points");
+        CHECK(UpgradeTree::TOTAL_TREE_POINTS == 72, "Total skill tree must have 72 points");
 
         // Verify tier allocations: Foundation (5) + Specialization (3) + Capstone (2) = 10 pts per branch
         CHECK(UpgradeTree::get_max_tier(UpgradeType::DrillSpeed) == 5, "Excavation Foundation max tier must be 5");
@@ -730,7 +730,13 @@ int main() {
         CHECK(UpgradeTree::get_max_tier(UpgradeType::KineticShielding) == 3, "Defense Specialization max tier must be 3");
         CHECK(UpgradeTree::get_max_tier(UpgradeType::Defibrillator) == 2, "Defense Capstone max tier must be 2");
 
-        // 2. Sequential Branch Prerequisites: Specialization requires Foundation; Capstone requires Specialization
+        // Verify new hazard resistance, fall damage, and boss damage skills
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::ImpactDampeners) == 3, "Fall Impact Dampeners max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::RadiationShielding) == 3, "Radiation Shielding max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::ThermalInsulation) == 3, "Thermal Lava Insulation max tier must be 3");
+        CHECK(UpgradeTree::get_max_tier(UpgradeType::ApexBossDamage) == 3, "Apex Boss Damage max tier must be 3");
+
+        // 2. Sequential Branch Prerequisites
         UpgradeTree branch_tree;
         int exp_pool = 100000;
         int player_lvl = 20;
@@ -747,24 +753,36 @@ int main() {
         CHECK(branch_tree.get_lock_reason(UpgradeType::BerserkerOverdrive, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
               "BerserkerOverdrive must require CleaveShockwave >= 1");
 
-        // Gun Damage branch prerequisite check
+        // Gun Damage & Boss Slayer branch prerequisite check
         CHECK(branch_tree.get_lock_reason(UpgradeType::RapidCycling, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
               "RapidCycling must require HyperVelocitySlugs >= 1");
         CHECK(branch_tree.get_lock_reason(UpgradeType::CriticalWeakpoint, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
               "CriticalWeakpoint must require RapidCycling >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::ApexBossDamage, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "ApexBossDamage must require HyperVelocitySlugs >= 1");
 
-        // Defense branch prerequisite check
+        // Defense & Hazard Wards branch prerequisite check
         CHECK(branch_tree.get_lock_reason(UpgradeType::KineticShielding, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
               "KineticShielding must require ReinforcedPlating >= 1");
         CHECK(branch_tree.get_lock_reason(UpgradeType::Defibrillator, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
               "Defibrillator must require KineticShielding >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::RadiationShielding, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "RadiationShielding must require ReinforcedPlating >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::ThermalInsulation, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "ThermalInsulation must require ReinforcedPlating >= 1");
 
-        // 3. Campaign Point Cap Enforcement (24 points)
+        // Traversal branch prerequisite check
+        CHECK(branch_tree.get_lock_reason(UpgradeType::KineticDynamo, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "KineticDynamo must require ThrusterTank >= 1");
+        CHECK(branch_tree.get_lock_reason(UpgradeType::ImpactDampeners, player_lvl, exp_pool) == UpgradeLockReason::PrerequisiteLocked,
+              "ImpactDampeners must require ThrusterTank >= 1");
+
+        // 3. Campaign Point Cap Enforcement (28 points)
         UserProfile camp_profile;
-        camp_profile.total_exp = 50000;
-        camp_profile.lifetime_exp = 50000;
+        camp_profile.total_exp = 60000;
+        camp_profile.lifetime_exp = 60000;
         CHECK(!camp_profile.is_game_completed(), "Fresh campaign must not be marked completed");
-        CHECK(camp_profile.get_max_assignable_points() == 24, "Pre-completion max points must be 24");
+        CHECK(camp_profile.get_max_assignable_points() == 28, "Pre-completion max points must be 28");
 
         // Allocate points: Max Excavation (5 + 3 + 2 = 10 pts)
         for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillSpeed, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
@@ -778,32 +796,34 @@ int main() {
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::CriticalWeakpoint, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
         CHECK(camp_profile.upgrades.get_total_assigned_points() == 20, "Should have 20 points allocated");
 
-        // Allocate 4 points into Defense (ReinforcedPlating T4) -> Exactly 24 points (CAP REACHED!)
-        for (int i = 0; i < 4; ++i) camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
-        CHECK(camp_profile.upgrades.get_total_assigned_points() == 24, "Should be capped at 24 points");
+        // Allocate 5 points into Defense (ReinforcedPlating T5) + 3 points into RadiationShielding (T3) -> Exactly 28 points (CAP REACHED!)
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::RadiationShielding, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 28, "Should be capped at 28 points");
 
-        // Attempting to buy a 25th point must fail because of CampaignCapReached even with abundant EXP!
-        CHECK(!camp_profile.upgrades.can_purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()),
-              "Cannot purchase beyond 24 points during campaign");
-        CHECK(camp_profile.upgrades.get_lock_reason(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == UpgradeLockReason::CampaignCapReached,
+        // Attempting to buy a 29th point must fail because of CampaignCapReached even with abundant EXP!
+        CHECK(!camp_profile.upgrades.can_purchase(UpgradeType::KineticShielding, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()),
+              "Cannot purchase beyond 28 points during campaign");
+        CHECK(camp_profile.upgrades.get_lock_reason(UpgradeType::KineticShielding, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == UpgradeLockReason::CampaignCapReached,
               "Lock reason must be CampaignCapReached");
-        CHECK(camp_profile.upgrades.get_node_web_state(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == NodeWebState::CampaignCapped,
+        CHECK(camp_profile.upgrades.get_node_web_state(UpgradeType::KineticShielding, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed()) == NodeWebState::CampaignCapped,
               "Web node state must be CampaignCapped");
 
-        bool extra_purchase = camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
-        CHECK(!extra_purchase, "25th point purchase must return false");
-        CHECK(camp_profile.upgrades.get_total_assigned_points() == 24, "Points must remain strictly at 24");
+        bool extra_purchase = camp_profile.upgrades.purchase(UpgradeType::KineticShielding, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(!extra_purchase, "29th point purchase must return false");
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 28, "Points must remain strictly at 28");
 
-        // 4. Respec Necessity: To spec into Stealth or Melee, player MUST respec!
+        // 4. Respec: Resets all 22 upgrades and refunds 100% of spent EXP
         int spent_exp_before_respec = camp_profile.upgrades.get_total_spent_exp();
         CHECK(spent_exp_before_respec > 0, "Spent EXP must be > 0");
         int refund = 0;
         camp_profile.upgrades.respec(refund);
         CHECK(refund == spent_exp_before_respec, "Respec must refund 100% spent EXP");
         CHECK(camp_profile.upgrades.get_total_assigned_points() == 0, "Assigned points must reset to 0");
+        CHECK(camp_profile.upgrades.radiationShieldingTier == 0, "Radiation shielding must reset to 0");
         camp_profile.total_exp += refund;
 
-        // Now specialize down Stealth (10 pts) and Melee (10 pts) + 4 pts Defense!
+        // Now specialize down Stealth (10 pts) and Melee (10 pts) + 5 pts Traversal + 3 pts Fall Dampeners!
         for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::AcousticDampening, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
         for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::ShadowVeil, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::AmbushProtocol, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
@@ -814,36 +834,43 @@ int main() {
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::BerserkerOverdrive, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
         CHECK(camp_profile.upgrades.berserkerOverdriveTier == 2, "Berserker overdrive capstone acquired");
 
-        // 5. Post-Game Grandmaster Unlock (Beating Sector 3 Void Cradle expands cap to 60)
+        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ThrusterTank, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::ImpactDampeners, camp_profile.get_player_level(), camp_profile.total_exp, camp_profile.is_game_completed());
+        CHECK(camp_profile.upgrades.impactDampenersTier == 3, "Impact dampeners T3 acquired");
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 28, "Must reach 28 points");
+
+        // 5. Post-Game Grandmaster Unlock (Beating Sector 3 Void Cradle expands cap to 72)
         camp_profile.mark_sector_completed(3, 100, "CLEARED", 99999);
         CHECK(camp_profile.is_game_completed(), "Profile must now be marked game completed");
-        CHECK(camp_profile.get_max_assignable_points() == 60, "Post-game max assignable points must expand to 60");
+        CHECK(camp_profile.get_max_assignable_points() == 72, "Post-game max assignable points must expand to 72");
 
-        // Now the player can unlock additional points beyond 24, progressing all the way to 60!
-        camp_profile.total_exp = 500000; // Abundant post-game EXP
+        // Now unlock all remaining 22 skills up to 72/72 points!
+        camp_profile.total_exp = 5000000;
         int cur_level = camp_profile.get_player_level();
 
-        // Fill remaining 4 disciplines
+        // Fill remaining nodes
         for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillSpeed, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::DrillDurability, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::MicroCharges, cur_level, camp_profile.total_exp, true);
 
-        for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ThrusterTank, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::KineticDynamo, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::SonarFrequency, cur_level, camp_profile.total_exp, true);
 
         for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::ReinforcedPlating, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::KineticShielding, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::Defibrillator, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::RadiationShielding, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::ThermalInsulation, cur_level, camp_profile.total_exp, true);
 
         for (int i = 0; i < 5; ++i) camp_profile.upgrades.purchase(UpgradeType::HyperVelocitySlugs, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::RapidCycling, cur_level, camp_profile.total_exp, true);
         for (int i = 0; i < 2; ++i) camp_profile.upgrades.purchase(UpgradeType::CriticalWeakpoint, cur_level, camp_profile.total_exp, true);
+        for (int i = 0; i < 3; ++i) camp_profile.upgrades.purchase(UpgradeType::ApexBossDamage, cur_level, camp_profile.total_exp, true);
 
-        // Entire tree is now 100% complete: exactly 60/60 points!
-        CHECK(camp_profile.upgrades.get_total_assigned_points() == 60, "Must reach exactly 60/60 points post-game");
+        // Entire tree is now 100% complete: exactly 72/72 points!
+        CHECK(camp_profile.upgrades.get_total_assigned_points() == 72, "Must reach exactly 72/72 points post-game");
 
-        // 6. PlayerController Combat & Attribute Integration
+        // 6. PlayerController Combat, Hazard & Boss Integration
         PlayerController test_delver(glm::vec3(0.0f));
         test_delver.apply_attributes_and_upgrades(CharacterClass::Demolitionist, camp_profile.upgrades);
 
@@ -857,13 +884,29 @@ int main() {
         CHECK(std::abs(test_delver.weakpoint_critical_multiplier() - 1.70f) < 0.01f, "Weakpoint critical damage should be +70% (1.70x)");
         CHECK(std::abs(test_delver.mineral_yield_multiplier() - 1.40f) < 0.01f, "Mineral harvest yield should be +40% (1.40x)");
 
+        // Hazard reductions & Boss bonus
+        CHECK(std::abs(test_delver.radiation_damage_reduction() - 0.75f) < 0.01f, "Radiation reduction must be 75% at T3");
+        CHECK(std::abs(test_delver.lava_damage_reduction() - 0.75f) < 0.01f, "Lava reduction must be 75% at T3");
+        CHECK(std::abs(test_delver.fall_damage_reduction() - 0.75f) < 0.01f, "Fall damage reduction must be 75% at T3");
+        CHECK(std::abs(test_delver.boss_damage_multiplier() - 1.75f) < 0.01f, "Boss damage multiplier must be 1.75x at T3");
+
+        // Damage mitigation tests
+        float rad_dmg_applied = test_delver.take_damage(40.0f, PlayerController::DamageSource::Radiation);
+        CHECK(std::abs(rad_dmg_applied - 10.0f) < 0.1f, "40 rad dmg should be mitigated to 10 dmg (75% reduction)");
+
+        float lava_dmg_applied = test_delver.take_damage(40.0f, PlayerController::DamageSource::ThermalLava);
+        CHECK(std::abs(lava_dmg_applied - 10.0f) < 0.1f, "40 lava dmg should be mitigated to 10 dmg (75% reduction)");
+
+        float fall_dmg_applied = test_delver.take_damage(40.0f, PlayerController::DamageSource::FallImpact);
+        CHECK(std::abs(fall_dmg_applied - 10.0f) < 0.1f, "40 fall dmg should be mitigated to 10 dmg (75% reduction)");
+
         // Defibrillator emergency second wind upon lethal damage
         test_delver.take_damage(9999.0f, PlayerController::DamageSource::Kinetic);
         CHECK(test_delver.health() == 35.0f, "Defibrillator should preserve player at 35 HP on fatal trauma");
         CHECK(test_delver.shield() > 0.0f, "Defibrillator should restore shield barrier");
         CHECK(test_delver.defibrillator_timer() > 0.0f, "Defibrillator cooldown must be triggered");
 
-        std::cout << " -> Progressive 6-discipline skill tree, 24-pt campaign cap, respec, and post-game Grandmaster unlock verified!" << std::endl;
+        std::cout << " -> Progressive 22-node skill web, 28-pt campaign cap, respec, and post-game Grandmaster unlock verified!" << std::endl;
     }
 
     std::cout << "========================================" << std::endl;

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <glm/glm.hpp>
 #include "../src/entities/enemies/seismic_burrower.hpp"
+#include "../src/entities/carcass_manager.hpp"
 #include "../src/voxel/world.hpp"
 
 using namespace Voidfall;
@@ -146,13 +147,19 @@ int main() {
         CHECK(manager.burrowers()[0].state == BurrowerState::Stunned, "Explosives should stun the burrower");
 
         // Lethal explosive blast
+        CarcassManager::instance().clear();
         manager.damage_nearest(spawn_pos, 5.0f, 30.0f, true);
-        CHECK(manager.burrowers()[0].is_dead(), "Expected burrower to die when HP reaches 0");
+        CHECK(manager.burrowers()[0].is_dying() || manager.burrowers()[0].is_dead(), "Expected burrower to enter dying or dead state when HP reaches 0");
+
+        // Advance death animation and collapse
+        manager.update(1.0f, glm::vec3(30.0f, 20.0f, 30.0f), world);
+        CHECK(manager.burrowers()[0].is_dead(), "Expected burrower to transition to Dead after collapse");
 
         manager.remove_dead();
         CHECK(manager.active_count() == 0, "Expected 0 active burrowers after cleanup");
+        CHECK(CarcassManager::instance().GetActiveCount() >= 1, "Expected persistent physical carcass spawned on cavern floor");
 
-        std::cout << " -> Explosive vulnerability (2.5x) and death verified." << std::endl;
+        std::cout << " -> Explosive vulnerability (2.5x), death animation, and carcass verified." << std::endl;
     }
 
     // Test 6: Enraged State Tectonic Cave-In Emission
@@ -535,8 +542,159 @@ int main() {
         std::cout << " -> Crouched delver sneak approach & unalerted point-blank critical verified." << std::endl;
     }
 
+    // Test 17: Environmental Hazard Damage & Lava Stun
+    {
+        std::cout << "[Test 17] Testing Seismic Burrower Environmental Lava/Acid Damage & Stun..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(30.0f, 20.0f, 30.0f);
+        manager.spawn_burrower(spawn_pos);
+        auto& b = manager.burrowers_mut()[0];
+
+        // 17a: Charging into lava deals thermal damage and stuns the burrower
+        b.state = BurrowerState::Charging;
+        b.yaw = 0.0f; // Facing South (+Z)
+        world.set_voxel(30, 20, 30, Voxel{MAT_THERMITE_SLAG, 0}, false);
+        world.set_voxel(30, 20, 31, Voxel{MAT_THERMITE_SLAG, 0}, false);
+
+        glm::vec3 player_pos(30.0f, 20.0f, 40.0f);
+        manager.update(0.1f, player_pos, world);
+
+        CHECK(b.is_in_lava, "Burrower touching lava must register is_in_lava = true");
+        CHECK(b.is_in_hazard, "Burrower in lava must register is_in_hazard = true");
+        CHECK(b.hp < 120.0f, "Burrower in lava must take thermal damage");
+        CHECK(b.state == BurrowerState::Stunned, "Charging into lava pool must stun the burrower");
+        CHECK(b.stun_timer > 0.0f, "Stun timer should be active after lava plunge");
+
+        // 17b: Sustained lava exposure results in fatality
+        for (int step = 0; step < 40 && b.hp > 0.0f; ++step) {
+            b.position = glm::vec3(30.0f, 20.0f, 30.5f);
+            manager.update(0.1f, player_pos, world);
+        }
+        CHECK(b.hp <= 0.0f, "Sustained lava immersion must reduce burrower HP to 0");
+        CHECK(b.is_dying() || b.is_dead(), "Sustained lava immersion must trigger death throes or destruction");
+        for (int step = 0; step < 20 && !b.is_dead(); ++step) {
+            manager.update(0.1f, player_pos, world);
+        }
+        CHECK(b.is_dead(), "Sustained lava exposure must destroy the burrower after death animation");
+
+        // 17c: Burrower is immune to radiation ore lore-wise
+        SeismicBurrowerManager manager_rad;
+        glm::vec3 rad_spawn(35.0f, 20.0f, 35.0f);
+        manager_rad.spawn_burrower(rad_spawn);
+        auto& b_rad = manager_rad.burrowers_mut()[0];
+        world.set_voxel(35, 20, 35, Voxel{MAT_RADIOACTIVE_ORE, 0}, false);
+        manager_rad.update(0.2f, player_pos, world);
+        CHECK(!b_rad.is_in_hazard, "Burrower must be immune to radiation ore hazards");
+        CHECK(b_rad.hp == 120.0f, "Burrower must take zero damage from radioactive ore");
+
+        std::cout << " -> Seismic Burrower lava hazard reaction, thermal damage, charge stun, and incineration verified." << std::endl;
+    }
+
+    // Test 18: Subterranean Territory Wandering & Unalerted Stealth Passage
+    {
+        std::cout << "[Test 18] Testing Subterranean Territory Wandering & Unalerted Stealth..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 spawn_pos(25.0f, 20.0f, 25.0f);
+        manager.spawn_burrower(spawn_pos);
+        auto& b = manager.burrowers_mut()[0];
+
+        PatrolZone zone;
+        zone.zone_id = 42;
+        zone.center = spawn_pos;
+        zone.bounds_min = glm::vec3(15.0f, 10.0f, 15.0f);
+        zone.bounds_max = glm::vec3(35.0f, 30.0f, 35.0f);
+        zone.has_bounds = true;
+        zone.radius = 10.0f;
+        b.set_patrol_zone(zone);
+        CHECK(b.has_patrol_zone, "Burrower must register has_patrol_zone = true");
+
+        // Player is crouching 22m away in stealth
+        glm::vec3 sneaking_player(47.0f, 20.0f, 25.0f);
+        manager.update(0.5f, sneaking_player, world, {}, true);
+
+        // Burrower must wander its territory waypoint and NOT home onto sneaking player
+        CHECK(b.target_pos != sneaking_player, "Unalerted burrower must NOT home in on crouching sneaking player through rock");
+        CHECK(zone.contains(b.target_pos), "Burrower wander target must stay within assigned territory zone");
+
+        // Now emit a heavy mining drill acoustic vibration near the player
+        SoundEvent drill_sound;
+        drill_sound.position = sneaking_player;
+        drill_sound.intensity = 55.0f;
+        drill_sound.audible_radius = 28.0f;
+        drill_sound.type = SoundEventType::DrillVibration;
+
+        manager.update(0.2f, sneaking_player, world, {drill_sound}, false);
+        CHECK(b.has_sound_target, "Drill acoustic vibration must be detected by burrower's seismic hearing");
+        CHECK(b.target_pos == drill_sound.position, "Burrower must re-route to investigate drilling sound origin");
+
+        std::cout << " -> Subterranean territory wandering and stealth passage verified." << std::endl;
+    }
+
+    // Test 19: Crawling & Charging Locomotion Audio, Adaptive Proximity Volume & System Isolation
+    {
+        std::cout << "[Test 19] Testing Seismic Burrower Locomotion Footsteps & Audio Isolation..." << std::endl;
+        SeismicBurrowerManager manager;
+        glm::vec3 player_pos(25.0f, 20.0f, 25.0f);
+        glm::vec3 far_spawn(25.0f, 20.0f, 48.0f); // 23m away
+        manager.spawn_burrower(far_spawn);
+        auto& b = manager.burrowers_mut()[0];
+
+        // 19a: Crawling step cadence & non-charge step flag
+        b.velocity = glm::vec3(0.0f, 0.0f, -2.0f); // 2 m/s crawling crawl
+        b.state = BurrowerState::Burrowing;
+        bool heard_crawl_step = false;
+        float far_crawl_vol = 0.0f;
+
+        for (int frame = 0; frame < 20; ++frame) {
+            auto res = manager.update(0.033f, player_pos, world);
+            if (res.any_step) {
+                heard_crawl_step = true;
+                far_crawl_vol = b.step_volume;
+                CHECK(!b.step_is_run, "Slow tunneling crawl must not be marked as charging/running");
+                CHECK(!res.any_charge_step, "Normal crawl step must not flag any_charge_step");
+                break;
+            }
+        }
+        CHECK(heard_crawl_step, "Crawling burrower must trigger periodic crawler tread footsteps");
+
+        // 19b: High-speed charging step cadence
+        b.velocity = glm::vec3(0.0f, 0.0f, -6.5f); // 6.5 m/s charge
+        b.state = BurrowerState::Charging;
+        b.footstep_timer = 0.0f;
+        bool heard_charge_step = false;
+
+        for (int frame = 0; frame < 15; ++frame) {
+            auto res = manager.update(0.033f, player_pos, world);
+            if (res.any_step) {
+                heard_charge_step = true;
+                CHECK(b.step_is_run, "Charging burrower must be marked as running/charging");
+                CHECK(res.any_charge_step, "Charging burrower step must flag any_charge_step = true");
+                break;
+            }
+        }
+        CHECK(heard_charge_step, "Charging burrower must trigger charging step");
+
+        // 19c: Adaptive Proximity Volume (closer burrower approaching player is louder)
+        b.position = glm::vec3(25.0f, 20.0f, 29.0f); // 4m point-blank
+        b.velocity = glm::vec3(0.0f, 0.0f, -5.0f);   // moving directly towards player
+        b.footstep_timer = 1.0f;                      // force step on next update
+        auto close_res = manager.update(0.016f, player_pos, world);
+        CHECK(close_res.any_step, "Step must fire when timer exceeds interval");
+        float close_vol = b.step_volume;
+        CHECK(close_vol > far_crawl_vol * 1.30f,
+              "Close approaching burrower must have significantly louder volume than distant crawling burrower");
+
+        // 19d: Noise Isolation: burrower step sounds do NOT feed back into sound events or trigger tremor spikes
+        std::vector<SoundEvent> sound_events;
+        manager.update(0.033f, player_pos, world, sound_events);
+        CHECK(sound_events.empty(), "Burrower footstep sounds must NOT inject acoustic disturbance events");
+        CHECK(!b.has_sound_target, "Burrower must NOT be distracted by its own footstep sounds");
+
+        std::cout << " -> Seismic Burrower crawling/charging step cadence, proximity volume & isolation verified." << std::endl;
+    }
+
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (16/16)" << std::endl;
+    std::cout << "ALL SEISMIC BURROWER TESTS PASSED (19/19)" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }

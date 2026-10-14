@@ -440,6 +440,7 @@ void ViewModel::add_forearm_and_gauntlet(
 void ViewModel::set_character_class(CharacterClass cls) {
     if (m_character_class != cls) {
         m_character_class = cls;
+        m_weapon_archetype = get_class_weapon_archetype(cls);
         init_geometry();
     }
 }
@@ -1502,80 +1503,155 @@ void ViewModel::render(
 
         if (melee_p > 0.0f) {
             float p = melee_p;
-            if (p < 0.22f) {
-                // Phase 1: Wind-up / Coiling back toward delver's chest & shoulder (0.0 -> 0.22)
-                float t = p / 0.22f;
-                float ease = t * t;
-                gun_melee_x = 0.035f * ease;
-                gun_melee_y = 0.030f * ease;
-                gun_melee_z = 0.070f * ease; // Pull back toward camera
-                gun_melee_pitch = 10.0f * ease;
-                gun_melee_yaw = 20.0f * ease;
-                gun_melee_roll = 15.0f * ease;
-            } else if (p < 0.45f) {
-                // Phase 2: Explosive Forward Strike & Butt-Stroke Slash (0.22 -> 0.45)
-                float t = (p - 0.22f) / 0.23f;
-                float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // Cubic snap forward
+            if (m_weapon_archetype == WeaponArchetype::MagmaScattergun || m_character_class == CharacterClass::Demolitionist) {
+                // =============================================================
+                // 1. MAGMA SCATTERGUN: HEAVY HORIZONTAL BUTT-STROKE CLEAVE
+                // (Massive 15kg blunderbuss roundhouse swing sweeping across screen)
+                // =============================================================
+                if (p < 0.22f) {
+                    // Phase 1: Heavy Heave & Chamber Lift (0.0 -> 0.22)
+                    float t = p / 0.22f;
+                    float ease = t * t;
+                    gun_melee_x = 0.080f * ease;   // Swings outward right
+                    gun_melee_y = 0.040f * ease;   // Lifts upward
+                    gun_melee_z = 0.120f * ease;   // Pulls heavy stock back to shoulder
+                    gun_melee_pitch = 18.0f * ease;
+                    gun_melee_yaw = 32.0f * ease;  // Cocks outward to right
+                    gun_melee_roll = 24.0f * ease; // Reinforced buttplate leading
+                } else if (p < 0.46f) {
+                    // Phase 2: Brutal Horizontal Stock Cleave Arc (0.22 -> 0.46)
+                    float t = (p - 0.22f) / 0.24f;
+                    float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // Cubic snap
+                    gun_melee_x = glm::mix(0.080f, -0.240f, snap); // Devastating horizontal sweep across FOV
+                    gun_melee_y = glm::mix(0.040f, -0.050f, snap);
+                    gun_melee_z = glm::mix(0.120f, -0.280f, snap); // Drives deep forward into enemy
+                    gun_melee_pitch = glm::mix(18.0f, -8.0f, snap);
+                    gun_melee_yaw = glm::mix(32.0f, -52.0f, snap); // 84-degree sweep across view
+                    gun_melee_roll = glm::mix(24.0f, -38.0f, snap);
 
-                // Weapon archetype strike variations
-                float target_z = -0.25f;
-                float target_x = -0.09f;
-                float target_roll = -22.0f;
-                if (m_character_class == CharacterClass::Scout) {
-                    // Needler Railgun: Long bayonet-style forward spear thrust
-                    target_z = -0.29f;
-                    target_x = -0.06f;
-                    target_roll = -16.0f;
-                } else if (m_character_class == CharacterClass::Demolitionist) {
-                    // Magma Scattergun: Heavy bludgeon horizontal sweep
-                    target_z = -0.23f;
-                    target_x = -0.12f;
-                    target_roll = -28.0f;
+                    if (t >= 0.40f) {
+                        float hit_pulse = std::sin((t - 0.40f) / 0.60f * 3.14159f);
+                        gun_melee_emissive = 0.90f * hit_pulse; // Superheated magma heat vents flare amber
+                    }
+                } else if (p < 0.62f) {
+                    // Phase 3: Heavy Inertial Deceleration & Weapon Rattle (0.46 -> 0.62)
+                    float t = (p - 0.46f) / 0.16f;
+                    float shake = std::sin(t * 36.0f) * std::exp(-t * 5.0f) * 0.010f;
+                    gun_melee_x = -0.240f + 0.050f * t + shake * 0.5f;
+                    gun_melee_y = -0.050f + shake;
+                    gun_melee_z = -0.280f + 0.060f * t + shake;
+                    gun_melee_pitch = -8.0f + 2.0f * t;
+                    gun_melee_yaw = -52.0f + 8.0f * t;
+                    gun_melee_roll = -38.0f + 6.0f * t;
+                    gun_melee_emissive = 0.40f * (1.0f - t);
+                } else {
+                    // Phase 4: Delver Re-Centers Shotgun to Hip (0.62 -> 1.0)
+                    float t = (p - 0.62f) / 0.38f;
+                    float ret = (1.0f - t) * (1.0f - t);
+                    gun_melee_x = -0.190f * ret;
+                    gun_melee_y = -0.050f * ret;
+                    gun_melee_z = -0.220f * ret;
+                    gun_melee_pitch = -6.0f * ret;
+                    gun_melee_yaw = -44.0f * ret;
+                    gun_melee_roll = -32.0f * ret;
                 }
-
-                gun_melee_x = glm::mix(0.035f, target_x, snap);
-                gun_melee_y = glm::mix(0.030f, -0.055f, snap);
-                gun_melee_z = glm::mix(0.070f, target_z, snap); // Drives deeply forward into the screen (-Z)
-                gun_melee_pitch = glm::mix(10.0f, -16.0f, snap);
-                gun_melee_yaw = glm::mix(20.0f, -24.0f, snap);
-                gun_melee_roll = glm::mix(15.0f, target_roll, snap);
-
-                if (t >= 0.50f) {
-                    float hit_pulse = std::sin((t - 0.50f) / 0.50f * 3.14159f);
-                    gun_melee_emissive = 0.45f * hit_pulse;
+            } else if (m_weapon_archetype == WeaponArchetype::NeedlerRailgun || m_character_class == CharacterClass::Scout) {
+                // =============================================================
+                // 2. NEEDLER RAILGUN: SUPERSONIC BAYONET LANCE / SPEAR THRUST
+                // (Laser-focused centerline impalement with helical rifling twist)
+                // =============================================================
+                if (p < 0.18f) {
+                    // Phase 1: Centerline Retraction & Coil Charge (0.0 -> 0.18)
+                    float t = p / 0.18f;
+                    float ease = t * t;
+                    gun_melee_x = 0.010f * ease;   // Dead-center laser alignment
+                    gun_melee_y = -0.020f * ease;
+                    gun_melee_z = 0.140f * ease;   // Deep retraction into chest
+                    gun_melee_pitch = -4.0f * ease;
+                    gun_melee_yaw = 2.0f * ease;
+                    gun_melee_roll = -12.0f * ease;
+                    gun_melee_emissive = 0.35f * ease; // Induction coils hum
+                } else if (p < 0.38f) {
+                    // Phase 2: Supersonic Lance Thrust with Helical Rifling Snap (0.18 -> 0.38)
+                    float t = (p - 0.18f) / 0.20f;
+                    float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t) * (1.0f - t); // Quartic snap
+                    gun_melee_x = glm::mix(0.010f, -0.020f, snap);
+                    gun_melee_y = glm::mix(-0.020f, 0.010f, snap);
+                    gun_melee_z = glm::mix(0.140f, -0.380f, snap); // Huge -0.38m forward spear reach!
+                    gun_melee_pitch = glm::mix(-4.0f, 4.0f, snap);
+                    gun_melee_yaw = glm::mix(2.0f, -4.0f, snap);
+                    gun_melee_roll = glm::mix(-12.0f, 34.0f, snap); // 46-degree dynamic helical twist!
+                    gun_melee_emissive = 0.95f * std::sin(t * 3.14159f); // Emerald rail discharge
+                } else if (p < 0.52f) {
+                    // Phase 3: High-Frequency Ultrasonic Coil Vibration (0.38 -> 0.52)
+                    float t = (p - 0.38f) / 0.14f;
+                    float shake = std::sin(t * 55.0f) * std::exp(-t * 6.5f) * 0.005f;
+                    gun_melee_x = -0.020f + shake;
+                    gun_melee_y = 0.010f + shake;
+                    gun_melee_z = -0.380f + 0.080f * t + shake;
+                    gun_melee_pitch = 4.0f - 2.0f * t;
+                    gun_melee_yaw = -4.0f + 1.0f * t;
+                    gun_melee_roll = 34.0f - 6.0f * t;
+                    gun_melee_emissive = 0.45f * (1.0f - t);
+                } else {
+                    // Phase 4: Crisp Sniper Withdrawal (0.52 -> 1.0)
+                    float t = (p - 0.52f) / 0.48f;
+                    float ret = (1.0f - t) * (1.0f - t);
+                    gun_melee_x = -0.020f * ret;
+                    gun_melee_y = 0.010f * ret;
+                    gun_melee_z = -0.300f * ret;
+                    gun_melee_pitch = 2.0f * ret;
+                    gun_melee_yaw = -3.0f * ret;
+                    gun_melee_roll = 28.0f * ret;
                 }
-            } else if (p < 0.58f) {
-                // Phase 3: Impact Shudder & Kinetic Shock Deceleration (0.45 -> 0.58)
-                float t = (p - 0.45f) / 0.13f;
-                float shake = std::sin(t * 38.0f) * std::exp(-t * 6.0f) * 0.007f;
-                float rebound_z = 0.035f * t;
-
-                float target_z = (m_character_class == CharacterClass::Scout) ? -0.29f : ((m_character_class == CharacterClass::Demolitionist) ? -0.23f : -0.25f);
-                float target_x = (m_character_class == CharacterClass::Demolitionist) ? -0.12f : ((m_character_class == CharacterClass::Scout) ? -0.06f : -0.09f);
-                float target_roll = (m_character_class == CharacterClass::Demolitionist) ? -28.0f : ((m_character_class == CharacterClass::Scout) ? -16.0f : -22.0f);
-
-                gun_melee_x = target_x + shake * 0.5f;
-                gun_melee_y = -0.055f + shake;
-                gun_melee_z = target_z + rebound_z + shake;
-                gun_melee_pitch = -16.0f + 2.0f * t;
-                gun_melee_yaw = -24.0f + 3.0f * t;
-                gun_melee_roll = target_roll + 3.0f * t;
-                gun_melee_emissive = 0.35f * (1.0f - t);
             } else {
-                // Phase 4: Fluid Return to Ready Hip/Aim Stance (0.58 -> 1.0)
-                float t = (p - 0.58f) / 0.42f;
-                float ret = (1.0f - t) * (1.0f - t);
-
-                float start_z = ((m_character_class == CharacterClass::Scout) ? -0.29f : ((m_character_class == CharacterClass::Demolitionist) ? -0.23f : -0.25f)) + 0.035f;
-                float start_x = (m_character_class == CharacterClass::Demolitionist) ? -0.12f : ((m_character_class == CharacterClass::Scout) ? -0.06f : -0.09f);
-                float start_roll = ((m_character_class == CharacterClass::Demolitionist) ? -28.0f : ((m_character_class == CharacterClass::Scout) ? -16.0f : -22.0f)) + 3.0f;
-
-                gun_melee_x = start_x * ret;
-                gun_melee_y = -0.055f * ret;
-                gun_melee_z = start_z * ret;
-                gun_melee_pitch = -14.0f * ret;
-                gun_melee_yaw = -21.0f * ret;
-                gun_melee_roll = start_roll * ret;
+                // =============================================================
+                // 3. PLASMA CARBINE: TACTICAL CQC MUZZLE STRIKE & CHIN-CHECK UPPERCUT
+                // (Explosive upward chin-check muzzle smash with cyan plasma venting)
+                // =============================================================
+                if (p < 0.20f) {
+                    // Phase 1: Tactical Coil & Muzzle Dip (0.0 -> 0.20)
+                    float t = p / 0.20f;
+                    float ease = t * t;
+                    gun_melee_x = 0.030f * ease;
+                    gun_melee_y = -0.070f * ease;  // Muzzle dips down to wind up uppercut
+                    gun_melee_z = 0.080f * ease;
+                    gun_melee_pitch = -22.0f * ease; // Angles downward
+                    gun_melee_yaw = 14.0f * ease;
+                    gun_melee_roll = 10.0f * ease;
+                } else if (p < 0.44f) {
+                    // Phase 2: Explosive Vertical Uppercut Muzzle Smash (0.20 -> 0.44)
+                    float t = (p - 0.20f) / 0.24f;
+                    float snap = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+                    gun_melee_x = glm::mix(0.030f, -0.060f, snap);
+                    gun_melee_y = glm::mix(-0.070f, 0.110f, snap); // Soars +11cm upward in brutal uppercut!
+                    gun_melee_z = glm::mix(0.080f, -0.280f, snap); // Drives deep forward into enemy
+                    gun_melee_pitch = glm::mix(-22.0f, 30.0f, snap); // Muzzle snaps upward into creature chin
+                    gun_melee_yaw = glm::mix(14.0f, -12.0f, snap);
+                    gun_melee_roll = glm::mix(10.0f, -18.0f, snap);
+                    gun_melee_emissive = 0.85f * std::sin(t * 3.14159f); // Cyan plasma capacitor vent flare
+                } else if (p < 0.60f) {
+                    // Phase 3: Tactical Recoil & Bounce (0.44 -> 0.60)
+                    float t = (p - 0.44f) / 0.16f;
+                    float shake = std::sin(t * 40.0f) * std::exp(-t * 5.0f) * 0.008f;
+                    gun_melee_x = -0.060f + shake;
+                    gun_melee_y = 0.110f - 0.030f * t + shake;
+                    gun_melee_z = -0.280f + 0.060f * t + shake;
+                    gun_melee_pitch = 30.0f - 6.0f * t;
+                    gun_melee_yaw = -12.0f + 2.0f * t;
+                    gun_melee_roll = -18.0f + 3.0f * t;
+                    gun_melee_emissive = 0.40f * (1.0f - t);
+                } else {
+                    // Phase 4: Fast Tactical Recovery to Shoulder (0.60 -> 1.0)
+                    float t = (p - 0.60f) / 0.40f;
+                    float ret = (1.0f - t) * (1.0f - t);
+                    gun_melee_x = -0.060f * ret;
+                    gun_melee_y = 0.080f * ret;
+                    gun_melee_z = -0.220f * ret;
+                    gun_melee_pitch = 24.0f * ret;
+                    gun_melee_yaw = -10.0f * ret;
+                    gun_melee_roll = -15.0f * ret;
+                }
             }
         }
 

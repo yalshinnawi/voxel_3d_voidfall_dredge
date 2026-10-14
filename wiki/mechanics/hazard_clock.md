@@ -9,19 +9,19 @@ Governs the extraction loop, environmental escalation, and expedition pacing in 
 The hazard clock activates the moment the player touches down in a sector. Environmental instability escalates across four distinct phases:
 
 - **Phase 1: Stable (0:00 - 4:00)**:
-  - Baseline cavern acoustics and nominal tectonic stability.
-  - Spatial proximity radiation active: approaching radioactive mineral veins (`MAT_RADIOACTIVE_ORE`) triggers authentic stochastic Geiger counter clicks and HUD millisievert dosimetry.
+  - Baseline cavern acoustics and nominal tectonic stability. Clean cavern air outside radioactive zones carries $0\%$ radiation exposure.
+  - Spatial proximity radiation active: approaching radioactive mineral veins (`MAT_RADIOACTIVE_ORE`) triggers authentic stochastic Geiger counter clicks and HUD dosimetry.
 - **Phase 2: Agitation (4:00 - 8:00)**:
-  - Background radiation accumulates gently ($+0.05\% / \text{sec}$ to $+0.16\% / \text{sec}$). Safe buffer holds completely until $75\%$ exposure.
-  - Suit Geiger counter clicks increase with Poisson arrival distribution; subtle HUD emerald dosimetry telemetry.
+  - Background geological instability builds. In radioactive ore areas, exposure accumulates smoothly; safe buffer holds until $75\%$ exposure.
+  - Delvers retreating to clean cavern air benefit from active lead-polymorphic suit scrubbers ($10\%/\text{s}$ base vent rate, up to $17.5\%/\text{s}$ with `RadiationShielding`), bringing dosimeter levels back down to $0\%$.
 - **Phase 3: Critical (8:00 - 12:00)**:
   - Cavern structural faults become volatile: aggressive rock mining and ballistic gunfire accumulate tectonic seismic strain.
   - When strain exceeds $85\%$, further mining and gunfire roll low-probability tremor collapses; reaching $100\%$ forces fault failure.
   - Pre-tremor acoustic warning triggers before ceiling detachment, followed by screen trauma and falling `DynamicDebris` (6-12 voxels).
   - Tremor completion relieves accumulated tectonic stress back to $0\%$ with an extended $75\,\text{s}$ refractory recovery window.
 - **Phase 4: Catastrophic (12:00+)**:
-  - Radiation crosses $75\% - 90\%$, initiating mild tissue corrosion ($0.15 - 0.85\,\text{HP/s}$, capped at $1.5\,\text{HP/s}$ max at $\ge 98\%$).
-  - Atmospheric emerald mist haze intensifies, telegraphed visually and auditorily without overwhelming disorientation. Swarms escalate and extraction becomes imperative.
+  - Cavern volatility peaks with increased monster swarm pacing. Unmitigated prolonged standing inside radioactive ore zones crosses $75\% - 90\%$, initiating tissue corrosion ($0.15 - 0.85\,\text{HP/s}$, capped at $1.5\,\text{HP/s}$ max at $\ge 98\%$).
+  - Delvers can always retreat to clean air to vent accumulated radiation or utilize the Extraction Pod's medical decontamination scrubbers ($25\%/\text{s}$). Swarms escalate and extraction becomes imperative.
 
 ---
 

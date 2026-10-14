@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <glm/glm.hpp>
 #include "../src/entities/enemies/void_stalker.hpp"
+#include "../src/entities/enemies/seismic_burrower.hpp"
 #include "../src/systems/stealth_system.hpp"
 #include "../src/systems/noise_meter.hpp"
 #include "../src/voxel/world.hpp"
@@ -75,6 +76,7 @@ int main() {
         glm::vec3 player_pos(16.0f, 20.0f, 16.0f);
         glm::vec3 stalker_pos(16.0f, 20.0f, 26.0f); // 10 units away (within 18m detection range)
         manager.spawn_melee(stalker_pos);
+        manager.stalkers_mut()[0].yaw = glm::pi<float>(); // Facing towards player at -Z
 
         glm::vec3 player_forward(0.0f, 0.0f, -1.0f); // Looking away from stalker
         glm::vec3 headlamp_dir(0.0f, 0.0f, -1.0f);
@@ -94,6 +96,7 @@ int main() {
 
         // Spawn Shooter and verify toxic emerald green stalking eye color
         manager.spawn_shooter(stalker_pos + glm::vec3(3.0f, 0.0f, 0.0f));
+        manager.stalkers_mut()[1].yaw = glm::pi<float>(); // Facing towards player at -Z
         manager.update(0.1f, player_pos, player_forward, headlamp_dir, headlamp_on, noise, drilling, world);
         const auto& shooter = manager.stalkers()[1];
         CHECK(shooter.state == StalkerState::Stalking, "Shooter within range should transition to Stalking");
@@ -281,6 +284,7 @@ int main() {
         glm::vec3 player_pos(16.0f, 20.0f, 16.0f);
         glm::vec3 stalker_pos(16.0f, 20.0f, 26.0f); // 10m away
         manager.spawn_melee(stalker_pos);
+        manager.stalkers_mut()[0].yaw = glm::pi<float>(); // Facing player at -Z
 
         // 8a: Throat Hiss on initial perception transition from Idle to Stalking
         auto hiss_res = manager.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 45.0f, false, world);
@@ -313,6 +317,7 @@ int main() {
         pack_mgr.spawn_melee(glm::vec3(16.0f, 20.0f, 24.0f)); // 8m away
         pack_mgr.spawn_melee(glm::vec3(18.0f, 20.0f, 24.0f)); // 8m away
         pack_mgr.spawn_melee(glm::vec3(14.0f, 20.0f, 24.0f)); // 8m away
+        for (auto& s : pack_mgr.stalkers_mut()) s.yaw = glm::pi<float>(); // Facing player at -Z
 
         // Initial alert frame
         auto alert_frame = pack_mgr.update(0.1f, player_pos, glm::vec3(0,0,-1), glm::vec3(0,0,-1), false, 80.0f, false, world);
@@ -1718,7 +1723,669 @@ int main() {
         std::cout << " -> Stealth sneaking behind unalerted enemies, vision cone gating, and sneak attack crits verified." << std::endl;
     }
 
-    std::cout << "\n>>> ALL 32 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
+    // Module 33: Obstacle Fear, Hazard Steering & Environmental Lava/Spike Lethality
+    {
+        std::cout << "[Module 33] Testing Obstacle Fear, Hazard Steering & Environmental Lethality..." << std::endl;
+        VoidStalkerManager mgr;
+
+        // 33a: Enemy fears obstacle: AberrantAI::steer_around_obstacles deflects away from lava pool
+        glm::vec3 stalker_pos(16.0f, 20.0f, 24.0f);
+        for (int x = 12; x <= 20; ++x) {
+            for (int z = 22; z <= 30; ++z) {
+                world.set_voxel(x, 19, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+                world.set_voxel(x, 20, z, Voxel{MAT_AIR, 0}, false);
+            }
+        }
+        // Place lava pool directly in front (+Z at Z=26)
+        world.set_voxel(16, 19, 26, Voxel{MAT_THERMITE_SLAG, 0}, false);
+        world.set_voxel(16, 20, 26, Voxel{MAT_THERMITE_SLAG, 0}, false);
+
+        glm::vec3 desired_dir(0.0f, 0.0f, 1.0f);
+        glm::vec3 steered = AberrantAI::steer_around_obstacles(stalker_pos, desired_dir, glm::vec3(0, 1, 0), world, 2.5f);
+        CHECK(std::abs(steered.x) > 0.1f, "Steering MUST deflect laterally to avoid stepping into molten lava");
+
+        // 33b: Stalker refuses to lunge across a lava pit (fear of launching into lethal obstacle)
+        glm::vec3 player_across_lava(16.0f, 20.0f, 28.0f);
+        CHECK(AberrantAI::has_hazard_between(stalker_pos, player_across_lava, world),
+              "Path across lava pool must be recognized as having lethal hazard between");
+
+        mgr.spawn_melee(stalker_pos);
+        auto& s = mgr.stalkers_mut()[0];
+        s.state = StalkerState::Stalking;
+        s.has_player_los = true;
+        glm::vec3 p_fwd(0.0f, 0.0f, -1.0f);
+        mgr.update(0.1f, player_across_lava, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        CHECK(s.state != StalkerState::Lunging, "Stalker must NOT lunge into lava; should fear obstacle and circle/flank");
+        CHECK(s.state == StalkerState::Circling, "Stalker should transition to Circling to path around lava pool");
+
+        // 33c: Environmental damage & incineration: when knocked into lava, stalker takes thermal damage and panics/dies
+        for (int lx = 14; lx <= 18; ++lx) {
+            for (int lz = 25; lz <= 27; ++lz) {
+                world.set_voxel(lx, 19, lz, Voxel{MAT_THERMITE_SLAG, 0}, false);
+                world.set_voxel(lx, 20, lz, Voxel{MAT_THERMITE_SLAG, 0}, false);
+            }
+        }
+        s.position = glm::vec3(16.0f, 20.0f, 26.0f); // In lava pool
+        float initial_hp = s.hp;
+        mgr.update(0.1f, player_across_lava, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        CHECK(s.is_in_lava, "Stalker in molten slag must register is_in_lava = true");
+        CHECK(s.is_in_hazard, "Stalker in lava must register is_in_hazard = true");
+        CHECK(s.hp < initial_hp, "Stalker in lava must take continuous thermal damage");
+        CHECK(s.state == StalkerState::Fleeing, "Stalker caught in lava must enter Fleeing state to scramble out");
+
+        // Extended immersion results in fatal incineration
+        for (int step = 0; step < 40 && s.hp > 0.0f; ++step) {
+            s.position = glm::vec3(16.0f, 20.0f, 26.0f);
+            mgr.update(0.1f, player_across_lava, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        }
+        CHECK(s.hp <= 0.0f, "Sustained lava immersion must reduce stalker HP to 0");
+        CHECK(s.is_dead() || s.is_dying(), "Extended immersion in lava must result in fatal incineration");
+
+        // 33d: Obsidian punji spikes puncture damage & slow
+        mgr.stalkers_mut().clear();
+        glm::vec3 spike_pos(18.0f, 20.0f, 23.0f);
+        world.set_voxel(18, 19, 23, Voxel{MAT_OBSIDIAN_SPIKES, 0}, false);
+        world.set_voxel(18, 20, 23, Voxel{MAT_AIR, 0}, false);
+        mgr.spawn_melee(spike_pos);
+        auto& s_spike = mgr.stalkers_mut()[0];
+        mgr.update(0.1f, player_across_lava, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        CHECK(s_spike.is_in_hazard, "Stalker stepping onto punji spikes must register is_in_hazard = true");
+        CHECK(s_spike.hp < 40.0f, "Stalker stepping onto spikes must take puncture damage");
+        CHECK(s_spike.hp == 20.0f, "Spikes deal exactly 20.0 HP puncture damage");
+
+        // 33e: Monsters are immune to radiation (radioactive creatures lore)
+        mgr.stalkers_mut().clear();
+        glm::vec3 rad_pos(18.0f, 20.0f, 23.0f);
+        world.set_voxel(18, 19, 23, Voxel{MAT_RADIOACTIVE_ORE, 0}, false);
+        world.set_voxel(18, 20, 23, Voxel{MAT_RADIOACTIVE_ORE, 0}, false);
+        mgr.spawn_melee(rad_pos);
+        auto& s_rad = mgr.stalkers_mut()[0];
+        mgr.update(0.2f, player_across_lava, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        CHECK(!s_rad.is_in_lava, "Radioactive ore must not be lava");
+        CHECK(!s_rad.is_in_hazard, "Radioactive ore must not harm stalker (radiation immunity)");
+        CHECK(s_rad.hp == 40.0f, "Stalker must take zero damage from radioactive ore (immune lore-wise)");
+
+        std::cout << " -> Obstacle avoidance steering, hazard-gated lunges, and lethal lava/spike damage verified." << std::endl;
+    }
+
+    // Module 34: Territory Patrol Zones, Autonomous Wandering & Dynamic Sneak Challenge
+    {
+        std::cout << "[Module 34] Testing Territory Patrol Zones, Autonomous Wandering & Dynamic Sneak..." << std::endl;
+        VoidStalkerManager mgr;
+
+        // Ensure open chamber for Module 34 territory patrol testing (solid floor at y=19, air y=20..26)
+        for (int x = 10; x <= 22; ++x) {
+            for (int z = 10; z <= 30; ++z) {
+                world.set_voxel(x, 19, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+                for (int y = 20; y <= 26; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+
+        // 34a: Territory Patrol Zone Bounding & Autonomous Wandering
+        glm::vec3 chamber_center(16.0f, 20.0f, 20.0f);
+        mgr.spawn_melee(chamber_center);
+        auto& stalker = mgr.stalkers_mut()[0];
+        stalker.state = StalkerState::Idle;
+
+        PatrolZone zone;
+        zone.zone_id = 1;
+        zone.center = chamber_center;
+        zone.bounds_min = glm::vec3(12.0f, 18.0f, 12.0f);
+        zone.bounds_max = glm::vec3(20.0f, 24.0f, 28.0f);
+        zone.has_bounds = true;
+        zone.radius = 8.0f;
+        zone.waypoints = AberrantAI::generate_zone_waypoints(zone, world, 4);
+        CHECK(zone.waypoints.size() >= 2, "Zone waypoints must generate at least 2 valid waypoints");
+        stalker.set_patrol_zone(zone);
+        CHECK(stalker.has_patrol_zone, "Stalker must register has_patrol_zone = true");
+
+        // Advance 50 physics steps (5.0s) of autonomous wander with player far away
+        glm::vec3 far_player(80.0f, 20.0f, 80.0f);
+        glm::vec3 p_fwd(0.0f, 0.0f, 1.0f);
+        for (int step = 0; step < 50; ++step) {
+            mgr.update(0.1f, far_player, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+            // Verify creature stays strictly constrained within its assigned territory zone
+            CHECK(zone.contains(stalker.position), "Autonomous roaming stalker MUST stay inside assigned PatrolZone bounds");
+        }
+        CHECK(stalker.walk_cycle > 0.0f, "Wandering stalker must animate crawling locomotion cycle");
+
+        // 34b: Waypoint Navigation & Vigilant Scanning Pauses
+        // Force arrival at waypoint
+        stalker.position = stalker.patrol_waypoint;
+        mgr.update(0.1f, far_player, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        CHECK(stalker.patrol_pause_timer > 0.0f, "Reaching waypoint must enter vigilant scanning pause");
+        CHECK(glm::length(stalker.velocity) == 0.0f, "Creature must halt movement during scanning pause");
+
+        float initial_yaw = stalker.yaw;
+        // Step during pause: creature scans the room (yaw rotates)
+        for (int step = 0; step < 15; ++step) {
+            mgr.update(0.1f, far_player, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        }
+        CHECK(stalker.yaw != initial_yaw, "Creature must rotate facing yaw to scan room angles during pause");
+
+        // 34c: Autonomous Roosting Slumber Waking
+        mgr.stalkers_mut().clear();
+        glm::vec3 roost_pos(16.0f, 20.0f, 20.0f);
+        mgr.spawn_roosting(roost_pos, StalkerRole::Melee);
+        auto& roosting = mgr.stalkers_mut()[0];
+        roosting.slumber_timer = 0.4f; // Short slumber for test
+        roosting.spawn_grace_timer = 0.0f;
+        CHECK(roosting.state == StalkerState::Roosting, "Must begin in Roosting state");
+
+        // Advance 0.6s without player disturbance
+        for (int step = 0; step < 6; ++step) {
+            mgr.update(0.1f, far_player, p_fwd, p_fwd, false, 0.0f, false, world, {}, false);
+        }
+        CHECK(roosting.state == StalkerState::Idle, "Roosting fauna must awaken autonomously into Idle state after slumber timer");
+        CHECK(roosting.surface_state == StalkerSurfaceState::FLOOR, "Awakened creature must transition to floor for zone wander");
+
+        // 34d: Dynamic Sneak Challenge with Sweeping Vision Cones
+        mgr.stalkers_mut().clear();
+        glm::vec3 patrol_pos(16.0f, 20.0f, 20.0f);
+        mgr.spawn_melee(patrol_pos);
+        auto& sentry = mgr.stalkers_mut()[0];
+        sentry.state = StalkerState::Idle;
+        sentry.yaw = 0.0f; // Facing South (+Z)
+
+        // Player is crouched 2.5m behind the sentry (at -Z, z = 17.5)
+        glm::vec3 sneaking_delver(16.0f, 20.0f, 17.5f);
+        glm::vec3 to_sentry(0.0f, 0.0f, 1.0f);
+        auto res = mgr.update(0.1f, sneaking_delver, to_sentry, to_sentry, false, 0.0f, false, world, {}, true);
+        CHECK(!res.any_spotted, "Sneaking player behind sentry must NOT be spotted while sentry looks away");
+        CHECK(sentry.is_unalerted(), "Sentry must remain unalerted when sneaked from behind");
+
+        // Now sentry turns to face North (-Z, yaw = pi) during its patrol scan
+        sentry.yaw = glm::pi<float>(); // Facing directly towards sneaking player!
+        res = mgr.update(0.1f, sneaking_delver, to_sentry, to_sentry, false, 0.0f, false, world, {}, true);
+        CHECK(res.any_spotted, "Sentry sweeping its vision cone towards crouched player MUST spot them in open line of sight!");
+        CHECK(sentry.state == StalkerState::Stalking || sentry.state == StalkerState::Lunging,
+              "Spotted player triggers immediate alert into Stalking or Lunging");
+
+        std::cout << " -> Territory patrol zones, waypoint navigation, autonomous waking, and dynamic sneak verified." << std::endl;
+    }
+
+    // Test 35: Chitin Goliath Boss AI Overhaul: Sentinel Vigilance, Never Flees, Titan Ground Slam, Bull Charge & Wall Stun Armor Breach, Apex Frenzy Enrage
+    {
+        std::cout << "[Test 35] Testing Chitin Goliath Boss AI Overhaul & Special Attacks..." << std::endl;
+        VoidStalkerManager mgr;
+        glm::vec3 boss_pos(16.0f, 20.0f, 20.0f);
+        mgr.spawn_stalker(boss_pos, 1.0f, StalkerRole::ChitinGoliath);
+
+        auto& boss = mgr.stalkers_mut()[0];
+        CHECK(boss.is_boss(), "Boss check must be true for ChitinGoliath");
+        CHECK(boss.hp == 220.0f, "Boss baseline HP must be 220.0");
+        CHECK(boss.flee_hp_threshold == 0.0f, "Boss flee HP threshold must be 0 (never flees)");
+        CHECK(boss.damage == 36.0f, "Boss baseline damage must be 36.0");
+
+        // 35a: Roosting Boss awakens immediately upon player proximity or sound
+        mgr.stalkers_mut().clear();
+        mgr.spawn_roosting(boss_pos, StalkerRole::ChitinGoliath);
+        auto& roosting_boss = mgr.stalkers_mut()[0];
+        CHECK(roosting_boss.slumber_timer == 0.0f, "Boss slumber timer must initialize to 0");
+        CHECK(roosting_boss.spawn_grace_timer == 0.0f, "Boss spawn grace timer must initialize to 0");
+
+        glm::vec3 player_near(16.0f, 20.0f, 28.0f); // 8m away
+        glm::vec3 p_fwd(0.0f, 0.0f, -1.0f);
+        auto roar_res = mgr.update(0.1f, player_near, p_fwd, p_fwd, false, 25.0f, false, world);
+        CHECK(roosting_boss.state == StalkerState::Stalking, "Boss must awaken immediately into Stalking combat pursuit");
+        CHECK(roar_res.any_boss_roar, "Boss awakening must trigger apex battle roar event");
+
+        // 35b: Boss Never Flees or Circles
+        roosting_boss.hp = 15.0f; // Extremely low HP
+        roosting_boss.is_in_light = true;
+        glm::vec3 close_player(16.0f, 20.0f, 22.0f); // 2m away
+        mgr.update(0.1f, close_player, p_fwd, p_fwd, true, 0.0f, false, world);
+        CHECK(roosting_boss.state != StalkerState::Fleeing, "Boss must NEVER enter Fleeing state at low HP or in light");
+        CHECK(roosting_boss.state != StalkerState::Circling, "Boss must NEVER circle around player passively");
+
+        // 35c: Apex Frenzy Enrage (at <= 50% HP)
+        mgr.stalkers_mut().clear();
+        mgr.spawn_stalker(boss_pos, 1.0f, StalkerRole::ChitinGoliath);
+        auto& goliath = mgr.stalkers_mut()[0];
+        goliath.state = StalkerState::Stalking;
+        goliath.hp = 100.0f; // <= 50% of 220
+        mgr.update(0.1f, player_near, p_fwd, p_fwd, false, 0.0f, false, world);
+        CHECK(goliath.is_enraged, "Boss must trigger Apex Frenzy Enrage at <= 50% HP");
+        CHECK(goliath.move_speed >= 3.5f, "Enraged boss movement speed must increase (>= 3.5 m/s)");
+        glm::vec4 enraged_eye = goliath.get_eye_color();
+        CHECK(enraged_eye.r > 0.8f && enraged_eye.g < 0.2f, "Enraged boss eyes must glow infernal crimson");
+
+        // 35d: Titan Ground Slam Special Attack
+        goliath.boss_slam_cooldown = 0.0f;
+        glm::vec3 slam_target(16.0f, 20.0f, 23.5f); // 3.5m away (within <= 5.5m slam reach)
+        mgr.update(0.05f, slam_target, p_fwd, p_fwd, false, 0.0f, false, world);
+        CHECK(goliath.state == StalkerState::GroundSlam, "Boss within 5.5m must initiate Titan Ground Slam attack");
+
+        // Progress past slam windup to trigger concussive shockwave impact
+        auto slam_res = mgr.update(goliath.boss_attack_windup + 0.05f, slam_target, p_fwd, p_fwd, false, 0.0f, false, world);
+        CHECK(slam_res.any_boss_slam, "Completing slam windup must emit boss slam shockwave event");
+        CHECK(slam_res.total_damage > 20.0f, "Titan Ground Slam must deal heavy shockwave AOE damage");
+        CHECK(goliath.boss_slam_cooldown > 0.0f, "Titan Ground Slam must enter cooldown");
+
+        // 35e: Juggernaut Bull Charge & Wall Crash Stun Armor Breach
+        goliath.state = StalkerState::Stalking;
+        goliath.boss_slam_cooldown = 10.0f; // Put slam on cooldown so charge is picked
+        goliath.boss_charge_cooldown = 0.0f;
+        glm::vec3 charge_target(16.0f, 20.0f, 32.0f); // 12m away (within 6-22m charge reach)
+        mgr.update(0.05f, charge_target, p_fwd, p_fwd, false, 0.0f, false, world);
+        CHECK(goliath.state == StalkerState::Charging, "Boss at mid-range (12m) must initiate Juggernaut Bull Charge");
+
+        // Place solid wall in front of charge trajectory across chamber
+        for (int wx = 12; wx <= 20; ++wx) {
+            for (int wy = 17; wy <= 22; ++wy) {
+                world.set_voxel(wx, wy, 22, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+            }
+        }
+        // Step charge past windup (0.05s ticks) so it moves forward and impacts the wall
+        for (int step = 0; step < 20; ++step) {
+            mgr.update(0.05f, charge_target, p_fwd, p_fwd, false, 0.0f, false, world);
+            if (goliath.state == StalkerState::Stunned) break;
+        }
+        CHECK(goliath.state == StalkerState::Stunned, "Charging into solid wall MUST stun the boss");
+        CHECK(goliath.stun_timer >= 2.0f, "Wall-stunned boss must have >= 2.0s vulnerability window");
+
+        // 35f: Front Armor Breach Vulnerability during Stunned State
+        // Facing East (+X, yaw = 0), shot from front (+X)
+        goliath.yaw = 0.0f;
+        float stunned_front_dmg = 0.0f;
+        glm::vec3 front_shooter = goliath.position + glm::vec3(3.0f, 0.0f, 0.0f);
+        mgr.damage_nearest(front_shooter, 5.0f, 50.0f, false, nullptr, &stunned_front_dmg);
+        CHECK(stunned_front_dmg >= 45.0f, "Front armor deflection must be breached (full damage) while boss is Stunned");
+
+        // Clean up testing chamber voxels
+        for (int wx = 12; wx <= 20; ++wx) {
+            for (int wy = 18; wy <= 22; ++wy) {
+                world.set_voxel(wx, wy, 22, Voxel{MAT_AIR, 0}, false);
+            }
+        }
+
+        std::cout << " -> Chitin Goliath Sentinel Vigilance, Attacks, Wall Stun & Armor Breach verified." << std::endl;
+    }
+
+    // Test 36: Natural Continuous Movement & Zero Teleportation / Snapping Invariants
+    {
+        std::cout << "[Test 36] Testing Natural Continuous Movement & Zero Teleportation Invariants..." << std::endl;
+        // Reset testing chamber floor at y=17 and air at y=18..26
+        for (int x = 10; x <= 22; ++x) {
+            for (int z = 10; z <= 30; ++z) {
+                world.set_voxel(x, 17, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+                for (int y = 18; y <= 26; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+
+        VoidStalkerManager manager;
+        glm::vec3 player_pos(16.0f, 18.0f, 16.0f);
+        glm::vec3 stalker_spawn(16.0f, 18.0f, 21.0f); // 5m away
+        manager.spawn_melee(stalker_spawn);
+
+        auto& stalkers = const_cast<std::vector<VoidStalker>&>(manager.stalkers());
+        VoidStalker& stalker = stalkers[0];
+        stalker.state = StalkerState::Lunging;
+        stalker.state_timer = 0.0f;
+
+        // A. Verify lunge attack has continuous, bounded displacement per frame with ZERO teleportation
+        constexpr float dt = 0.016f;
+        glm::vec3 last_pos = stalker.position;
+        float max_frame_disp = 0.0f;
+
+        for (int frame = 0; frame < 60; ++frame) {
+            manager.update(dt, player_pos, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 0.0f, 1.0f), true, 0.0f, false, world);
+            float frame_disp = glm::distance(stalker.position, last_pos);
+            max_frame_disp = std::max(max_frame_disp, frame_disp);
+
+            // Per-frame movement must strictly remain bounded by physical velocity * dt (no teleportation jumps)
+            CHECK(frame_disp <= (stalker.lunge_speed * dt + 0.08f),
+                  "Lunge displacement per frame must be smooth and continuous, never teleporting or snapping");
+
+            last_pos = stalker.position;
+        }
+
+        // Must maintain stand-off distance smoothly without snapping
+        float final_dist = glm::distance(stalker.position, player_pos);
+        CHECK(final_dist >= AberrantAI::MIN_STRIKE_DISTANCE - 0.10f,
+              "Stalker must decelerate and maintain stand-off distance smoothly without phasing");
+
+        // B. Wall and Corner Collision: high-speed approach into wall must slide smoothly without popping into ceiling
+        glm::vec3 corner_pos(17.5f, 18.0f, 16.0f);
+        glm::vec3 corner_vel(8.0f, 0.0f, 0.0f);
+        // Build wall at x=18
+        for (int wy = 17; wy <= 22; ++wy) {
+            world.set_voxel(18, wy, 16, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        }
+
+        glm::vec3 pre_col_pos = corner_pos;
+        AberrantAI::resolve_voxel_collision(
+            corner_pos, corner_vel, 0.38f, 0.85f, StalkerSurfaceState::FLOOR, glm::vec3(0, 1, 0), world
+        );
+
+        // Entity must NOT be teleported vertically or to another room
+        CHECK(std::abs(corner_pos.y - pre_col_pos.y) < 0.20f,
+              "Wall collision must NOT eject/teleport entity vertically into ceiling or adjacent room");
+        CHECK(corner_pos.x <= 18.0f - 0.38f + 0.01f,
+              "Entity must be smoothly clamped at wall boundary face");
+
+        // Cleanup wall voxels
+        for (int wy = 18; wy <= 22; ++wy) {
+            world.set_voxel(18, wy, 16, Voxel{MAT_AIR, 0}, false);
+        }
+
+        std::cout << " -> Natural continuous movement, lunge deceleration & zero-teleportation invariants verified." << std::endl;
+    }
+
+    // Test 37: Locomotion Footsteps, Adaptive Proximity Volume & Zero Acoustic System Pollution
+    {
+        std::cout << "[Test 37] Testing Stalker Locomotion Footsteps & Acoustic Isolation..." << std::endl;
+        VoidStalkerManager manager;
+        glm::vec3 player_pos(16.0f, 18.0f, 12.0f);
+        glm::vec3 far_spawn(16.0f, 18.0f, 30.0f); // 18m away, inside test chamber (z <= 32)
+        manager.spawn_melee(far_spawn);
+
+        auto& stalkers = const_cast<std::vector<VoidStalker>&>(manager.stalkers());
+        VoidStalker& s = stalkers[0];
+
+        // 37a: Walking step cadence & low-speed flag
+        glm::vec3 hidden_player_pos(16.0f, 18.0f, 0.0f); // 30m away, outside detection range
+        s.assign_patrol_zone(far_spawn, 10.0f);
+        s.patrol_waypoints = { far_spawn + glm::vec3(0.0f, 0.0f, -8.0f) };
+        s.patrol_waypoint_idx = 0;
+        s.patrol_waypoint = s.patrol_waypoints[0];
+        s.patrol_pause_timer = 0.0f;
+        s.state = StalkerState::Idle;
+        bool heard_walk_step = false;
+        float far_walk_vol = 0.0f;
+
+        for (int frame = 0; frame < 30; ++frame) {
+            auto res = manager.update(0.033f, hidden_player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+            if (res.any_step) {
+                heard_walk_step = true;
+                far_walk_vol = s.step_volume;
+                CHECK(!s.step_is_run, "Slow walking speed must NOT be marked as running");
+                break;
+            }
+        }
+        CHECK(heard_walk_step, "Walking stalker must emit footstep at periodic cadence");
+
+        // 37b: Fast sprinting/stalking step cadence & run flag
+        s.velocity = glm::vec3(0.0f, 0.0f, -5.2f); // 5.2 m/s sprint
+        s.state = StalkerState::Stalking;
+        s.footstep_timer = 0.0f;
+        bool heard_run_step = false;
+        for (int frame = 0; frame < 15; ++frame) {
+            auto res = manager.update(0.033f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+            if (res.any_step) {
+                heard_run_step = true;
+                CHECK(s.step_is_run, "High speed stalker movement must be marked as running");
+                CHECK(res.any_run_step, "FrameResult must flag any_run_step = true");
+                break;
+            }
+        }
+        CHECK(heard_run_step, "Sprinting stalker must trigger run step");
+
+        // 37c: Adaptive Proximity Volume (closer stalker moving toward player must be significantly louder)
+        s.position = glm::vec3(16.0f, 18.0f, 15.5f); // 3.5m away, point-blank
+        s.velocity = glm::vec3(0.0f, 0.0f, -4.5f);   // moving directly towards player
+        s.footstep_timer = 1.0f;                      // force step on next frame
+        auto close_res = manager.update(0.016f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+        CHECK(close_res.any_step, "Step must fire when timer exceeds interval");
+        float close_vol = s.step_volume;
+        CHECK(close_vol > far_walk_vol * 1.35f,
+              "Point-blank approaching stalker must have significantly louder adaptive volume than distant walking stalker");
+
+        // 37d: Zero Acoustic Contamination: footsteps must NOT be injected into NoiseMeter or cause self-distraction
+        NoiseMeter noise_meter;
+        CHECK(noise_meter.noise() == 0.0f, "Initial noise meter must be 0");
+        // Advancing update loop with moving enemies:
+        for (int frame = 0; frame < 30; ++frame) {
+            manager.update(0.033f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, noise_meter.noise_percent(), false, world);
+        }
+        CHECK(noise_meter.noise() == 0.0f, "Enemy footsteps must NEVER pollute the NoiseMeter or generate tremor heat");
+        CHECK(!s.has_sound_target, "Enemy footsteps must NEVER trigger acoustic self-distraction or target updates");
+
+        std::cout << " -> Stalker locomotion step cadence, adaptive proximity volume & acoustic system isolation verified." << std::endl;
+    }
+
+    // Test 38: Crouching Stealth Concealment, Blind Spot Exploitation & Acoustic Suppression
+    {
+        std::cout << "[Test 38] Testing Crouching Stealth Concealment, Blind Spot Exploitation & Acoustic Suppression..." << std::endl;
+        World world;
+        // Carve out a wide 30x30 open room
+        for (int x = 5; x <= 35; ++x) {
+            for (int z = 5; z <= 35; ++z) {
+                world.set_voxel(x, 15, z, Voxel{MAT_FRACTURED_GRANITE, 0}, false);
+                for (int y = 16; y <= 25; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0}, false);
+                }
+            }
+        }
+
+        VoidStalkerManager manager;
+        // Spawn stalker in center facing North (-Z)
+        glm::vec3 stalker_pos(20.0f, 16.0f, 20.0f);
+        manager.spawn_melee(stalker_pos);
+        auto& s = const_cast<VoidStalker&>(manager.stalkers()[0]);
+        s.state = StalkerState::Idle;
+        s.yaw = glm::pi<float>(); // facing -Z (North)
+
+        // 38a: Player is far away (15m away) crouching in front of stalker (at Z = 5)
+        // Even with headlamp pointing at stalker and clear Line of Sight, stalker must NOT spot crouching player!
+        glm::vec3 player_far_front(20.0f, 16.0f, 5.0f); // 15m North
+        glm::vec3 look_at_stalker = glm::normalize(stalker_pos - player_far_front);
+        auto res_far = manager.update(0.1f, player_far_front, look_at_stalker, look_at_stalker, true /* headlamp on */, 0.0f, false, world, {}, true /* crouching */);
+        CHECK(s.state == StalkerState::Idle, "Far crouching player (15m) must NOT be spotted even with headlamp on!");
+        CHECK(!res_far.any_spotted, "FrameResult must not flag any_spotted for far crouching player");
+
+        // 38b: Player is behind stalker (8m South at Z = 28), out of vision of enemy's eyes
+        // Even with clear LOS and headlamp shining on stalker's back, stalker must NOT spot player!
+        glm::vec3 player_behind(20.0f, 16.0f, 28.0f); // 8m South
+        glm::vec3 look_at_back = glm::normalize(stalker_pos - player_behind);
+        auto res_behind = manager.update(0.1f, player_behind, look_at_back, look_at_back, true /* headlamp on */, 0.0f, false, world, {}, true /* crouching */);
+        CHECK(s.state == StalkerState::Idle, "Crouching player behind enemy's eyes must NOT be detected!");
+        CHECK(!res_behind.any_spotted, "FrameResult must not flag any_spotted when player is outside vision cone");
+
+        // 38c: Roosting stalker dormancy - sleeping stalker must NOT wake or spot crouching player at distance (12m)
+        s.state = StalkerState::Roosting;
+        s.surface_state = StalkerSurfaceState::CEILING_CRAWLING;
+        auto res_roost = manager.update(0.1f, player_far_front, look_at_stalker, look_at_stalker, true /* headlamp on */, 0.0f, false, world, {}, true /* crouching */);
+        CHECK(s.state == StalkerState::Roosting, "Roosting stalker must remain dormant when player is crouching at distance!");
+        CHECK(!res_roost.any_spotted, "Roosting stalker must not spot crouching player at distance");
+
+        // 38d: Elevated noise level (> 25%) must NOT trigger fallback acoustic homing on a crouching player
+        s.state = StalkerState::Idle;
+        s.has_sound_target = false;
+        auto res_noise = manager.update(0.1f, player_far_front, look_at_stalker, look_at_stalker, false, 50.0f /* elevated noise */, false /* not drilling */, world, {}, true /* crouching */);
+        CHECK(!s.has_sound_target, "Elevated noise must NOT trigger fallback acoustic detection on a crouching player");
+        CHECK(s.state == StalkerState::Idle, "Stalker must remain Idle instead of investigating crouching player");
+
+        // 38e: Point-blank crouching player directly in front of creature's eyes (< 4.0m)
+        // When sneaking right up in front of the creature's eyes within visual range, stalker will spot them!
+        glm::vec3 player_close_front(20.0f, 16.0f, 17.0f); // 3m in front of eyes
+        auto res_close = manager.update(0.1f, player_close_front, glm::vec3(0,0,1), glm::vec3(0,0,1), false, 0.0f, false, world, {}, true /* crouching */);
+        CHECK(s.state == StalkerState::Lunging || s.state == StalkerState::Stalking,
+              "Stalker must spot crouching player when directly in front of eyes within close range (< 4.5m)");
+        CHECK(res_close.any_spotted, "FrameResult must flag any_spotted for point-blank sighting");
+
+        std::cout << " -> Crouching stealth concealment, blind spot exploitation & acoustic suppression verified." << std::endl;
+    }
+
+    // -------------------------------------------------------------
+    // Test 39: Behind-Wall Obstruction Detection & Alternate Route Determination
+    // -------------------------------------------------------------
+    {
+        std::cout << "[Test 39] Testing Behind-Wall Obstruction Detection & Alternate Route Determination..." << std::endl;
+        World world;
+        // Build flat floor from Y = 14 to 15 (solid rock) in chunk 0,0,0
+        for (int x = 0; x < 32; ++x) {
+            for (int z = 0; z < 32; ++z) {
+                world.set_voxel(x, 15, z, Voxel{MAT_GRANITE, 0});
+                for (int y = 16; y < 28; ++y) {
+                    world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                }
+            }
+        }
+
+        // Place a partition wall at Z = 20 from X = 0 to X = 25, Y = 16 to 22 (6 blocks tall)
+        // Opening / corridor at X = 26..31 (Z = 20 is Air there)
+        for (int x = 0; x <= 25; ++x) {
+            for (int y = 16; y <= 22; ++y) {
+                world.set_voxel(x, y, 20, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        glm::vec3 enemy_pos(15.0f, 16.0f, 14.0f); // South of wall
+        glm::vec3 player_pos(15.0f, 16.0f, 25.0f); // North of wall directly behind partition
+
+        // 39a: Line of sight and direct obstruction checks
+        bool direct_los = AberrantAI::has_line_of_sight(enemy_pos + glm::vec3(0, 0.45f, 0), player_pos + glm::vec3(0, 0.5f, 0), world);
+        CHECK(!direct_los, "Direct line of sight through rock wall must be FALSE");
+
+        bool obstructed = AberrantAI::is_path_obstructed_by_wall(enemy_pos, player_pos, world);
+        CHECK(obstructed, "Path directly through rock wall must be detected as OBSTRUCTED");
+
+        // 39b: Alternate Route Determination (Ground Detour through opening at X >= 26)
+        AlternateRoute route = AberrantAI::find_alternate_route(enemy_pos, player_pos, world, 32.0f, false /* ground only */);
+        CHECK(route.is_valid, "Alternate route around wall must be found and marked valid");
+        CHECK(route.type == AlternateRouteType::GroundDetour, "Ground opening must yield GroundDetour route");
+        CHECK(!route.waypoints.empty(), "Route must contain navigation waypoints");
+
+        // Verify that waypoints bypass the wall (lead towards X >= 25 opening)
+        bool reaches_opening = false;
+        for (const auto& wp : route.waypoints) {
+            if (wp.x >= 24.5f) {
+                reaches_opening = true;
+                break;
+            }
+        }
+        CHECK(reaches_opening, "Alternate route waypoints must detour through wall opening at X >= 25");
+
+        // 39c: Vertical climbing route detection when no ground opening exists
+        // Fill the entire wall from X=0 to X=31 up to Y=18 (3 blocks tall: 16, 17, 18), open headroom above Y=18
+        for (int x = 0; x < 32; ++x) {
+            for (int y = 16; y <= 18; ++y) {
+                world.set_voxel(x, y, 20, Voxel{MAT_GRANITE, 0});
+            }
+            for (int y = 19; y <= 28; ++y) {
+                world.set_voxel(x, y, 20, Voxel{MAT_AIR, 0});
+            }
+        }
+        bool climb_viable = AberrantAI::is_vertical_climb_route_viable(enemy_pos, player_pos, world, 6.0f);
+        CHECK(climb_viable, "Low wall (3 blocks) with open headroom must be viable for vertical climbing route");
+
+        AlternateRoute climb_route = AberrantAI::find_alternate_route(enemy_pos, player_pos, world, 32.0f, true /* can climb */);
+        CHECK(climb_route.is_valid, "Climbing alternate route must be valid when ground route is blocked");
+        CHECK(climb_route.type == AlternateRouteType::VerticalClimb, "Route type must be VerticalClimb when wall has open top");
+
+        // 39d: In-Engine Manager Integration: Stalker follows alternate route around wall
+        // Reset world with opening at X = 26..30
+        for (int x = 26; x < 32; ++x) {
+            for (int y = 16; y <= 25; ++y) {
+                world.set_voxel(x, y, 20, Voxel{MAT_AIR, 0});
+            }
+        }
+        for (int x = 0; x <= 25; ++x) {
+            for (int y = 16; y <= 25; ++y) {
+                world.set_voxel(x, y, 20, Voxel{MAT_GRANITE, 0});
+            }
+        }
+
+        VoidStalkerManager manager;
+        manager.spawn_stalker(enemy_pos, 1.0f, StalkerRole::Melee);
+        auto& stalker = manager.stalkers_mut()[0];
+        stalker.state = StalkerState::Stalking;
+        stalker.last_seen_player_pos = player_pos;
+        stalker.target_pos = player_pos;
+        stalker.m_pathTimer = 0.10f; // Force immediate path calculation
+
+        // First update tick: stalker detects obstruction and plans alternate route
+        manager.update(0.1f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+        CHECK(stalker.is_wall_obstructed, "Stalker must detect wall obstruction when pursuing player behind wall");
+        CHECK(stalker.has_active_alternate_route(), "Stalker must determine and activate an alternate route around the wall");
+        CHECK(stalker.route_type == AlternateRouteType::GroundDetour, "Stalker must select GroundDetour route");
+
+        // Run simulation ticks: stalker moves along alternate route towards the doorway
+        glm::vec3 start_p = stalker.position;
+        for (int i = 0; i < 40; ++i) {
+            manager.update(0.1f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+            if (!stalker.is_wall_obstructed) break;
+        }
+
+        CHECK(stalker.position.x > start_p.x, "Stalker must actively traverse towards the doorway on the East (X > start_x)");
+        std::cout << " -> Wall obstruction detection, ground detour pathing & vertical climb routes verified." << std::endl;
+    }
+
+    // Test 40: Mutual Enemy Anti-Overlap & 1-Block Anti-Stuck Step-Clambering
+    {
+        std::cout << "[Test 40] Testing Mutual Enemy Anti-Overlap & 1-Block Anti-Stuck Step Clambering..." << std::endl;
+
+        // 1. Stalker-to-Stalker anti-overlap
+        VoidStalkerManager stalker_mgr;
+        stalker_mgr.spawn_stalker(glm::vec3(15.0f, 18.0f, 15.0f), 1.0f, StalkerRole::Melee, false);
+        stalker_mgr.spawn_stalker(glm::vec3(15.05f, 18.0f, 15.05f), 1.0f, StalkerRole::Melee, false);
+
+        glm::vec3 player_pos(15.0f, 18.0f, 30.0f);
+        stalker_mgr.update(0.1f, player_pos, glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+
+        float s_dist = glm::distance(stalker_mgr.stalkers()[0].position, stalker_mgr.stalkers()[1].position);
+        CHECK(s_dist >= 0.88f, "Overlapping stalkers must depenetrate and separate to >= 0.88m");
+
+        // 2. Stalker-to-Burrower anti-overlap
+        VoidStalkerManager stalker_mgr2;
+        stalker_mgr2.spawn_stalker(glm::vec3(15.0f, 18.0f, 15.0f), 1.0f, StalkerRole::Melee, false);
+
+        SeismicBurrowerManager burrower_mgr;
+        burrower_mgr.spawn_burrower(glm::vec3(15.1f, 18.0f, 15.1f), 1.0f, false);
+        stalker_mgr2.resolve_burrower_penetrations(burrower_mgr.burrowers_mut(), world);
+
+        float sb_dist = glm::distance(stalker_mgr2.stalkers()[0].position, burrower_mgr.burrowers()[0].position);
+        CHECK(sb_dist >= 1.35f, "Stalker and Burrower must depenetrate and separate to >= 1.35m");
+
+        // 3. Burrower-to-Burrower anti-overlap
+        SeismicBurrowerManager burrower_mgr2;
+        burrower_mgr2.spawn_burrower(glm::vec3(25.0f, 18.0f, 25.0f), 1.0f, false);
+        burrower_mgr2.spawn_burrower(glm::vec3(25.05f, 18.0f, 25.05f), 1.0f, false);
+        burrower_mgr2.update(0.1f, player_pos, world, {}, false);
+
+        float bb_dist = glm::distance(burrower_mgr2.burrowers()[0].position, burrower_mgr2.burrowers()[1].position);
+        CHECK(bb_dist >= 1.85f, "Overlapping burrowers must depenetrate and separate to >= 1.85m");
+
+        // 4. 1-Block Step Anti-Stuck Clambering Traversal
+        // Carve clean test corridor at x=18, z=14..22: floor at y=17 (surface at y=18.0), open air y=18..24
+        for (int z = 14; z <= 22; ++z) {
+            world.set_voxel(18, 17, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+            for (int y = 18; y <= 24; ++y) {
+                world.set_voxel(18, y, z, Voxel{MAT_AIR, 0}, false);
+            }
+        }
+        // Place a single 1-block obstacle at z=17 (top at y=19.0)
+        world.set_voxel(18, 18, 17, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        // Floor on the other side at z=18..22: place block at y=18 so it's a step up to a higher plateau
+        for (int z = 18; z <= 22; ++z) {
+            world.set_voxel(18, 18, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+        }
+
+        VoidStalkerManager clamber_mgr;
+        clamber_mgr.spawn_stalker(glm::vec3(18.0f, 18.0f, 15.5f), 1.0f, StalkerRole::Melee, false);
+        clamber_mgr.stalkers_mut()[0].state = StalkerState::Stalking;
+        clamber_mgr.stalkers_mut()[0].is_pursuing_attacker = true;
+        clamber_mgr.stalkers_mut()[0].target_pos = glm::vec3(18.0f, 19.0f, 21.0f);
+
+        // Advance 15 ticks moving directly forward into the 1-block step
+        for (int tick = 0; tick < 15; ++tick) {
+            clamber_mgr.update(0.1f, glm::vec3(18.0f, 19.0f, 21.0f), glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), false, 0.0f, false, world);
+        }
+
+        // Entity must have successfully clambered onto or past the 1-block step (y >= 19.0f and z > 16.5f)
+        const auto& clamberer = clamber_mgr.stalkers()[0];
+        CHECK(clamberer.position.y >= 19.0f, "Stalker must clamber up onto 1-block step (Y >= 19.0f)");
+        CHECK(clamberer.position.z >= 17.0f, "Stalker must advance forward over the 1-block step (Z >= 17.0f)");
+
+        std::cout << " -> Mutual enemy anti-overlap & 1-block anti-stuck step clambering verified." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 40 VOID STALKER TEST MODULES PASSED SUCCESSFULLY! <<<\n" << std::endl;
     return 0;
 }
 

@@ -67,6 +67,8 @@ struct HudLayoutRect {
 
 struct HudTopStackLayout {
     HudLayoutRect hazard_bar;
+    HudLayoutRect boss_bar;
+    bool has_boss_bar{false};
     HudLayoutRect seismic_banner;
     bool has_seismic_banner{false};
     HudLayoutRect evac_banner;
@@ -99,6 +101,14 @@ public:
     float toxic_gas_flash_timer() const { return m_toxic_gas_flash_timer; }
     void set_toxic_gas_exposure(float exposure, float dt);
     float toxic_gas_exposure() const { return m_toxic_gas_exposure; }
+    void trigger_acid_flash(float intensity = 0.5f) { m_acid_flash_timer = intensity; }
+    float acid_flash_timer() const { return m_acid_flash_timer; }
+    void set_acid_exposure(float exposure, float dt);
+    float acid_exposure() const { return m_acid_exposure; }
+    void trigger_frost_flash(float intensity = 0.5f) { m_frost_flash_timer = intensity; }
+    float frost_flash_timer() const { return m_frost_flash_timer; }
+    void set_frost_exposure(float exposure, float dt);
+    float frost_exposure() const { return m_frost_exposure; }
     void clear_target_info();
 
     void SetContractorBriefing(bool active = true, float duration = 8.0f);
@@ -138,13 +148,93 @@ public:
     bool is_hit_marker_critical() const { return m_hit_marker_is_crit; }
     float hit_marker_damage() const { return m_hit_marker_damage; }
 
+    static constexpr float BOSS_BAR_MAX_RANGE = 28.0f;
+    static constexpr float BOSS_BAR_MIN_VIEW_DOT = 0.25f; // Obvious sight forward cone (~75.5 deg half-angle)
+
     HudTopStackLayout compute_top_stack_layout(
         float ui_scale,
         float screen_w,
         bool is_tremoring,
         bool is_warning,
-        ExtractionPhase extraction_phase
+        ExtractionPhase extraction_phase,
+        const VoidStalker* boss = nullptr
     ) const;
+
+    HudTopStackLayout compute_top_stack_layout(
+        float ui_scale,
+        float screen_w,
+        bool is_tremoring,
+        bool is_warning,
+        ExtractionPhase extraction_phase,
+        const glm::vec3& cam_pos,
+        const glm::vec3& cam_forward,
+        const World& world,
+        const std::vector<VoidStalker>* stalkers = nullptr,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    HudTopStackLayout compute_top_stack_layout(
+        float ui_scale,
+        float screen_w,
+        bool is_tremoring,
+        bool is_warning,
+        ExtractionPhase extraction_phase,
+        const PlayerController& player,
+        const World& world,
+        const std::vector<VoidStalker>* stalkers = nullptr,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    /// Determines if a boss monster is in close range and in obvious sight of the player.
+    /// Returns true only if:
+    /// 1. boss is valid, alive, and not dying / underground.
+    /// 2. Distance from player eye to boss is within close range (<= max_range).
+    /// 3. In player's forward view / obvious sight (dot product with camera forward >= min_view_dot).
+    /// 4. Direct line of sight from player eye to boss (unoccluded by solid voxels).
+    bool is_boss_in_obvious_sight(
+        const glm::vec3& cam_pos,
+        const glm::vec3& cam_forward,
+        const World& world,
+        const VoidStalker& boss,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    bool is_boss_in_obvious_sight(
+        const PlayerController& player,
+        const World& world,
+        const VoidStalker& boss,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    /// Finds the closest active boss monster that is in close range and in obvious sight.
+    /// Returns nullptr if no boss meets the criteria.
+    const VoidStalker* find_visible_boss(
+        const glm::vec3& cam_pos,
+        const glm::vec3& cam_forward,
+        const World& world,
+        const std::vector<VoidStalker>* stalkers = nullptr,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    const VoidStalker* find_visible_boss(
+        const PlayerController& player,
+        const World& world,
+        const std::vector<VoidStalker>* stalkers = nullptr,
+        float max_range = BOSS_BAR_MAX_RANGE,
+        float min_view_dot = BOSS_BAR_MIN_VIEW_DOT
+    ) const;
+
+    void render_boss_health_bar(
+        float ui_scale,
+        float screen_w,
+        float start_y,
+        const VoidStalker& boss
+    );
 
     std::vector<EnemyAwarenessMarker> compute_awareness_markers(
         const glm::vec3& cam_pos,
@@ -160,6 +250,36 @@ public:
         const World& world,
         const class MissionSystem& mission
     ) const;
+
+    /// Objective hint waypoint (e.g., when the delver is having trouble finding rare materials like Astral Ore)
+    void set_objective_hint(const glm::vec3& pos, const std::string& label, const glm::vec4& color = glm::vec4(1.0f, 0.82f, 0.20f, 1.0f), float duration = 45.0f, uint8_t mat = 0) {
+        m_hint_waypoint_pos = pos;
+        m_hint_waypoint_label = label;
+        m_hint_waypoint_color = color;
+        m_hint_waypoint_timer = duration;
+        m_hint_waypoint_mat = mat;
+        m_hint_waypoint_active = true;
+    }
+    void clear_objective_hint() {
+        m_hint_waypoint_active = false;
+        m_hint_waypoint_timer = 0.0f;
+        m_hint_waypoint_mat = 0;
+    }
+    bool has_objective_hint() const { return m_hint_waypoint_active && m_hint_waypoint_timer > 0.0f; }
+    const glm::vec3& hint_waypoint_pos() const { return m_hint_waypoint_pos; }
+    const std::string& hint_waypoint_label() const { return m_hint_waypoint_label; }
+    uint8_t hint_waypoint_mat() const { return m_hint_waypoint_mat; }
+
+    /// Checks if the delver has reached the hint objective position, auto-dismissing if within threshold
+    bool check_and_clear_if_reached(const glm::vec3& player_pos, float threshold = 3.0f) {
+        if (!has_objective_hint()) return false;
+        glm::vec3 h_world = m_hint_waypoint_pos + glm::vec3(0.5f, 0.5f, 0.5f);
+        if (glm::distance(player_pos, h_world) <= threshold) {
+            clear_objective_hint();
+            return true;
+        }
+        return false;
+    }
 
     void render(
         const PlayerController& player,
@@ -248,9 +368,15 @@ private:
     std::deque<HudNotification> m_notifications;
     float m_damage_flash_timer{0.0f};
     float m_radiation_flash_timer{0.0f};
+    float m_last_radiation{0.0f};
     float m_toxic_gas_flash_timer{0.0f};
     float m_toxic_gas_exposure{0.0f};
     std::vector<OnScreenToxicDroplet> m_screen_toxic_particles;
+    float m_acid_flash_timer{0.0f};
+    float m_acid_exposure{0.0f};
+    std::vector<OnScreenToxicDroplet> m_screen_acid_droplets;
+    float m_frost_flash_timer{0.0f};
+    float m_frost_exposure{0.0f};
     std::vector<OnScreenBloodSplatter> m_blood_splatters;
     float m_total_time{0.0f};
     bool m_show_help_briefing{false};
@@ -286,6 +412,14 @@ private:
     // Spawn Fade-From-Black Overlay State
     float m_spawn_fade_timer{0.0f};
     float m_spawn_fade_duration{0.6f};
+
+    // Objective Hint Waypoint State (Acoustic Sonar Assistance for missing ores)
+    bool m_hint_waypoint_active{false};
+    glm::vec3 m_hint_waypoint_pos{0.0f};
+    std::string m_hint_waypoint_label{""};
+    glm::vec4 m_hint_waypoint_color{1.0f, 0.82f, 0.20f, 1.0f};
+    float m_hint_waypoint_timer{0.0f};
+    uint8_t m_hint_waypoint_mat{0};
 };
 
 } // namespace Voidfall

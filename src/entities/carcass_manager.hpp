@@ -9,6 +9,11 @@ namespace Voidfall {
 
 class World;
 
+enum class CarcassType : uint8_t {
+    VoidStalker,
+    SeismicBurrower
+};
+
 /// Tangible physical remains of a slain aberrant entity
 struct EnemyCarcass {
     uint32_t id{0};
@@ -26,10 +31,13 @@ struct EnemyCarcass {
     float lifetime{0.0f};
     float max_lifetime{45.0f}; // Persists on cavern floor for 45s before decaying into ash
     StalkerRole role{StalkerRole::Melee};
+    CarcassType type{CarcassType::VoidStalker};
     glm::vec3 lethal_hit_dir{0.0f};
     bool harvested{false};
 
     bool isSleeping() const { return is_sleeping; }
+    bool is_burrower() const { return type == CarcassType::SeismicBurrower; }
+    bool is_stalker() const { return type == CarcassType::VoidStalker; }
 };
 
 /// Manages persistent physical enemy carcasses, settling ragdoll physics,
@@ -49,7 +57,8 @@ public:
         const glm::quat& rotation,
         const glm::vec3& lethal_hit_dir = glm::vec3(0.0f, 0.0f, 0.0f),
         StalkerRole role = StalkerRole::Melee,
-        float scale = 1.3f
+        float scale = 1.3f,
+        CarcassType type = CarcassType::VoidStalker
     );
 
     /// Step carcass physics (gravity, collision with world voxels, settling, and dissolver fade)

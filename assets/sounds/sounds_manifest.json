@@ -94,12 +94,10 @@
     },
     "stalker_lunge": {
       "file": "stalker_lunge.wav",
-      "duration_seconds": 0.95,
-      "peak_dbfs": -3.5,
-      "lowpass_cutoff_hz": 7200.0,
-      "is_loop": false,
-      "source_url": "https://sfxmint.com/dl/horror-growl-04.wav",
-      "description": "Visceral predatory attack shriek with chitin scrape"
+      "duration_seconds": 0.848,
+      "peak_dbfs": -4.0,
+      "sample_rate": 44100,
+      "channels": 2
     },
     "stalker_hit": {
       "file": "stalker_hit.wav",
@@ -112,21 +110,17 @@
     },
     "stalker_die": {
       "file": "stalker_die.wav",
-      "duration_seconds": 1.4,
+      "duration_seconds": 1.818,
       "peak_dbfs": -4.5,
-      "lowpass_cutoff_hz": 7000.0,
-      "is_loop": false,
-      "source_url": "https://sfxmint.com/dl/retro-game-enemy-death-08.wav",
-      "description": "Dissolving void entity dissipation hum and energy collapse"
+      "sample_rate": 44100,
+      "channels": 2
     },
     "stalker_echo_screech": {
       "file": "stalker_echo_screech.wav",
-      "duration_seconds": 2.2,
+      "duration_seconds": 2.478,
       "peak_dbfs": -4.0,
-      "lowpass_cutoff_hz": 6800.0,
-      "is_loop": false,
-      "source_url": "https://sfxmint.com/dl/horror-stinger-30.wav",
-      "description": "Long-range alien hunting shriek echoing through cavern shafts with smooth 0.75s fade-out"
+      "sample_rate": 44100,
+      "channels": 2
     },
     "stalker_chitter": {
       "file": "stalker_chitter.wav",
@@ -529,27 +523,122 @@
     },
     "plasma_carbine_reload": {
       "file": "plasma_carbine_reload.wav",
-      "duration_seconds": 1.25,
-      "peak_dbfs": -4.2,
-      "lowpass_cutoff_hz": 8000.0,
-      "is_loop": false,
-      "description": "Vanguard: thermal plasma magazine ejection, cell latch, and plasma accumulator charge up"
+      "duration_seconds": 1.243,
+      "peak_dbfs": -4.0,
+      "sample_rate": 44100,
+      "channels": 2
     },
     "scattergun_reload": {
       "file": "scattergun_reload.wav",
-      "duration_seconds": 1.6,
-      "peak_dbfs": -4.0,
-      "lowpass_cutoff_hz": 7500.0,
-      "is_loop": false,
-      "description": "Demolitionist: breach unlatch, heavy shell feed chambering, and lock click"
+      "duration_seconds": 1.498,
+      "peak_dbfs": -3.5,
+      "sample_rate": 44100,
+      "channels": 2
     },
     "railgun_reload": {
       "file": "railgun_reload.wav",
-      "duration_seconds": 1.1,
-      "peak_dbfs": -4.2,
-      "lowpass_cutoff_hz": 8500.0,
-      "is_loop": false,
-      "description": "Scout: magnetic capacitor rack discharge, micro-needle cassette insertion, and rail lock"
+      "duration_seconds": 1.053,
+      "peak_dbfs": -3.8,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "burrower_step": {
+      "file": "burrower_step.wav",
+      "duration_seconds": 0.477,
+      "peak_dbfs": -11.0,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_step": {
+      "file": "stalker_step.wav",
+      "duration_seconds": 0.186,
+      "peak_dbfs": -12.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_run": {
+      "file": "stalker_run.wav",
+      "duration_seconds": 0.265,
+      "peak_dbfs": -8.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "goliath_step": {
+      "file": "goliath_step.wav",
+      "duration_seconds": 0.538,
+      "peak_dbfs": -4.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "burrower_step_01": {
+      "file": "burrower_step_01.wav",
+      "duration_seconds": 0.477,
+      "peak_dbfs": -11.0,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "burrower_step_02": {
+      "file": "burrower_step_02.wav",
+      "duration_seconds": 0.507,
+      "peak_dbfs": -11.04,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_step_01": {
+      "file": "stalker_step_01.wav",
+      "duration_seconds": 0.186,
+      "peak_dbfs": -12.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_step_02": {
+      "file": "stalker_step_02.wav",
+      "duration_seconds": 0.175,
+      "peak_dbfs": -12.53,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_step_03": {
+      "file": "stalker_step_03.wav",
+      "duration_seconds": 0.196,
+      "peak_dbfs": -12.52,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_run_01": {
+      "file": "stalker_run_01.wav",
+      "duration_seconds": 0.265,
+      "peak_dbfs": -8.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_run_02": {
+      "file": "stalker_run_02.wav",
+      "duration_seconds": 0.246,
+      "peak_dbfs": -8.57,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "stalker_run_03": {
+      "file": "stalker_run_03.wav",
+      "duration_seconds": 0.282,
+      "peak_dbfs": -8.77,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "goliath_step_01": {
+      "file": "goliath_step_01.wav",
+      "duration_seconds": 0.538,
+      "peak_dbfs": -4.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "goliath_step_02": {
+      "file": "goliath_step_02.wav",
+      "duration_seconds": 0.585,
+      "peak_dbfs": -4.5,
+      "sample_rate": 44100,
+      "channels": 2
     }
   }
 }

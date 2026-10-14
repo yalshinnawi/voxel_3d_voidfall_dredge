@@ -61,6 +61,25 @@ inline bool IsLiquid(uint8_t mat) {
            mat == MAT_LAVA;
 }
 
+inline bool IsLethalHazard(uint8_t mat) {
+    return mat == MAT_THERMITE_SLAG ||
+           mat == MAT_MOLTEN_MAGMA ||
+           mat == MAT_LAVA ||
+           mat == MAT_ACID ||
+           mat == MAT_OBSIDIAN_SPIKES;
+}
+
+inline bool IsHazard(uint8_t mat) {
+    return IsLethalHazard(mat) ||
+           mat == MAT_GAS ||
+           mat == MAT_TOXIC_GAS;
+}
+
+// Subterranean monsters are lore-wise radioactive creatures and completely immune to radiation
+inline bool IsMonsterHazard(uint8_t mat) {
+    return IsHazard(mat);
+}
+
 constexpr uint8_t VOXEL_FLAG_PLAYER_PLACED = 0x80;
 constexpr uint8_t VOXEL_SHAPE_MASK         = 0x78; // Bits 3, 4, 5, 6
 constexpr uint8_t VOXEL_FLAG_WATERLOGGED   = 0x04; // Set when liquid occupies a slab or ramp

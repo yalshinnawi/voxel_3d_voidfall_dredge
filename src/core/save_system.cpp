@@ -69,8 +69,11 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"micro_charges_tier\": " << profile.upgrades.microChargesTier << ",\n";
     out << "  \"thruster_tank_tier\": " << profile.upgrades.thrusterTankTier << ",\n";
     out << "  \"kinetic_dynamo_tier\": " << profile.upgrades.kineticDynamoTier << ",\n";
+    out << "  \"impact_dampeners_tier\": " << profile.upgrades.impactDampenersTier << ",\n";
     out << "  \"sonar_frequency_tier\": " << profile.upgrades.sonarFrequencyTier << ",\n";
     out << "  \"reinforced_plating_tier\": " << profile.upgrades.reinforcedPlatingTier << ",\n";
+    out << "  \"radiation_shielding_tier\": " << profile.upgrades.radiationShieldingTier << ",\n";
+    out << "  \"thermal_insulation_tier\": " << profile.upgrades.thermalInsulationTier << ",\n";
     out << "  \"kinetic_shielding_tier\": " << profile.upgrades.kineticShieldingTier << ",\n";
     out << "  \"defibrillator_tier\": " << profile.upgrades.defibrillatorTier << ",\n";
     out << "  \"acoustic_dampening_tier\": " << profile.upgrades.acousticDampeningTier << ",\n";
@@ -81,6 +84,7 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"berserker_overdrive_tier\": " << profile.upgrades.berserkerOverdriveTier << ",\n";
     out << "  \"hyper_velocity_slugs_tier\": " << profile.upgrades.hyperVelocitySlugsTier << ",\n";
     out << "  \"rapid_cycling_tier\": " << profile.upgrades.rapidCyclingTier << ",\n";
+    out << "  \"apex_boss_damage_tier\": " << profile.upgrades.apexBossDamageTier << ",\n";
     out << "  \"critical_weakpoint_tier\": " << profile.upgrades.criticalWeakpointTier << ",\n";
     out << "  \"highest_cleared_sector\": " << profile.highest_cleared_sector << ",\n";
     for (int s = 1; s < UserProfile::MAX_SECTOR_RECORDS; ++s) {
@@ -96,6 +100,7 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
         }
     }
     out << "  \"master_volume\": " << profile.settings.master_volume << ",\n";
+    out << "  \"music_volume\": " << profile.settings.music_volume << ",\n";
     out << "  \"sfx_volume\": " << profile.settings.sfx_volume << ",\n";
     out << "  \"enemy_volume\": " << profile.settings.enemy_volume << ",\n";
     out << "  \"ambient_volume\": " << profile.settings.ambient_volume << ",\n";
@@ -104,7 +109,8 @@ bool SaveSystem::save_profile(const UserProfile& profile, const std::string& fil
     out << "  \"mouse_sensitivity\": " << profile.settings.mouse_sensitivity << ",\n";
     out << "  \"fov\": " << profile.settings.fov << ",\n";
     out << "  \"brightness\": " << profile.settings.brightness << ",\n";
-    out << "  \"screen_shake\": " << profile.settings.screen_shake << "\n";
+    out << "  \"screen_shake\": " << profile.settings.screen_shake << ",\n";
+    out << "  \"auto_step\": " << (profile.settings.auto_step ? "true" : "false") << "\n";
     out << "}\n";
 
     out.close();
@@ -202,8 +208,11 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_int("micro_charges_tier", profile.upgrades.microChargesTier);
         parse_int("thruster_tank_tier", profile.upgrades.thrusterTankTier);
         parse_int("kinetic_dynamo_tier", profile.upgrades.kineticDynamoTier);
+        parse_int("impact_dampeners_tier", profile.upgrades.impactDampenersTier);
         parse_int("sonar_frequency_tier", profile.upgrades.sonarFrequencyTier);
         parse_int("reinforced_plating_tier", profile.upgrades.reinforcedPlatingTier);
+        parse_int("radiation_shielding_tier", profile.upgrades.radiationShieldingTier);
+        parse_int("thermal_insulation_tier", profile.upgrades.thermalInsulationTier);
         parse_int("kinetic_shielding_tier", profile.upgrades.kineticShieldingTier);
         parse_int("defibrillator_tier", profile.upgrades.defibrillatorTier);
         parse_int("acoustic_dampening_tier", profile.upgrades.acousticDampeningTier);
@@ -214,6 +223,7 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_int("berserker_overdrive_tier", profile.upgrades.berserkerOverdriveTier);
         parse_int("hyper_velocity_slugs_tier", profile.upgrades.hyperVelocitySlugsTier);
         parse_int("rapid_cycling_tier", profile.upgrades.rapidCyclingTier);
+        parse_int("apex_boss_damage_tier", profile.upgrades.apexBossDamageTier);
         parse_int("critical_weakpoint_tier", profile.upgrades.criticalWeakpointTier);
 
         parse_int("highest_cleared_sector", profile.highest_cleared_sector);
@@ -225,6 +235,7 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         }
 
         parse_float("master_volume", profile.settings.master_volume);
+        parse_float("music_volume", profile.settings.music_volume);
         parse_float("sfx_volume", profile.settings.sfx_volume);
         parse_float("enemy_volume", profile.settings.enemy_volume);
         parse_float("ambient_volume", profile.settings.ambient_volume);
@@ -234,6 +245,7 @@ bool SaveSystem::load_profile(UserProfile& profile, const std::string& filepath)
         parse_float("fov", profile.settings.fov);
         parse_float("brightness", profile.settings.brightness);
         parse_float("screen_shake", profile.settings.screen_shake);
+        parse_bool("auto_step", profile.settings.auto_step);
     }
 
     profile.settings.sanitize();

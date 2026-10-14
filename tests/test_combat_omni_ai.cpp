@@ -167,7 +167,24 @@ void test_carcass_system_leaves_carcass_on_death() {
     ASSERT_EQ(carapace, 0);
     ASSERT_EQ(biomass, 0);
 
-    std::cout << "  -> Passed: Slain stalker left sleeping physical carcass; monsters cannot be mined for chitin"
+    // Also verify Seismic Burrower leaves carcass on death
+    SeismicBurrowerManager burrower_mgr;
+    burrower_mgr.spawn_burrower(glm::vec3(16.0f, 21.0f, 16.0f));
+    ASSERT_EQ(burrower_mgr.active_count(), 1);
+    bool b_damaged = burrower_mgr.damage_nearest(glm::vec3(16.0f, 21.0f, 16.0f), 2.0f, 200.0f);
+    ASSERT_TRUE(b_damaged);
+    ASSERT_EQ(burrower_mgr.active_count(), 0); // Active AI count drops to 0 immediately upon fatal blow
+    burrower_mgr.update(1.0f, glm::vec3(16.0f, 21.0f, 25.0f), world);
+    ASSERT_EQ(CarcassManager::instance().GetActiveCount(), 2);
+    ASSERT_TRUE(carcasses[1].is_burrower());
+
+    // Step physics forward so burrower carcass settles
+    for (int i = 0; i < 60; ++i) {
+        CarcassManager::instance().update(0.033f, world);
+    }
+    ASSERT_TRUE(carcasses[1].is_sleeping);
+
+    std::cout << "  -> Passed: Slain stalker & burrower left sleeping physical carcasses; monsters cannot be mined for chitin"
               << std::endl;
 }
 
@@ -614,7 +631,37 @@ void test_viewmodel_melee_animations_all_weapons() {
         ASSERT_NEAR(player.melee_shove_progress(), 0.0f, 0.001f);
     }
 
-    std::cout << "  -> Passed: All 3 weapon classes (Gun, Demo, Drill) correctly execute melee animation lifecycle." << std::endl;
+    // Verify melee callback invocation & look vector
+    bool cb_invoked = false;
+    glm::vec3 test_pos(0.0f);
+    glm::vec3 test_dir(0.0f);
+    player.set_on_melee_shove([&](const glm::vec3& p, const glm::vec3& d) {
+        cb_invoked = true;
+        test_pos = p;
+        test_dir = d;
+    });
+    player.update(1.0f);
+    player.execute_melee_shove();
+    ASSERT_TRUE(cb_invoked);
+    ASSERT_NEAR(glm::length(test_dir), 1.0f, 0.01f);
+
+    // Verify weapon archetype mapping across all classes
+    player.set_character_class(CharacterClass::Demolitionist);
+    ASSERT_TRUE(player.weapon_archetype() == WeaponArchetype::MagmaScattergun);
+    player.set_character_class(CharacterClass::Scout);
+    ASSERT_TRUE(player.weapon_archetype() == WeaponArchetype::NeedlerRailgun);
+    player.set_character_class(CharacterClass::Vanguard);
+    ASSERT_TRUE(player.weapon_archetype() == WeaponArchetype::PlasmaCarbine);
+
+    // Verify melee damage scaling with PneumaticImpact upgrade tier
+    UpgradeTree upg;
+    upg.pneumaticImpactTier = 3;
+    upg.cleaveShockwaveTier = 2;
+    upg.berserkerOverdriveTier = 1;
+    player.set_upgrades(upg);
+    ASSERT_NEAR(player.melee_damage_multiplier(), 1.0f + 3 * 0.30f, 0.01f);
+
+    std::cout << "  -> Passed: All weapon classes correctly execute melee animation lifecycle, archetypes, and upgrades." << std::endl;
 }
 
 // ─── TEST 11: Acoustic Profile System & Enemy Hearing Detection ─────────────
@@ -717,7 +764,7 @@ void test_acoustic_profile_and_enemy_hearing_detection() {
     ASSERT_NEAR(mgr.stalkers()[0].target_pos.z, hidden_player.z, 0.01f);
     ASSERT_FALSE(res_drill.any_screech); // No screech on sub-70 dB investigation
 
-    // 4. If noise exceeds 70 dB OR player is spotted directly -> transition to AIState::PURSUIT with screech and swarm alert
+    // 4. Loud noise (> 70 dB) triggers AIState::INVESTIGATING toward noise source (curious sound investigation, no screech)
     // Reset stalkers back to roosting for satchel blast test
     mgr.stalkers_mut()[0].state = StalkerState::Roosting;
     mgr.stalkers_mut()[1].state = StalkerState::Roosting;
@@ -725,10 +772,10 @@ void test_acoustic_profile_and_enemy_hearing_detection() {
     stealth.EmitSatchelDetonation(hidden_player); // 8m away through stone, 100 dB detonation -> ~79.4 dB
 
     auto res_blast = mgr.update(0.05f, hidden_player, fwd, fwd, false, 0.0f, false, world);
-    // Both stalkers should be in PURSUIT (StalkerState::Stalking) due to > 70 dB and swarm alert
-    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::PURSUIT));
-    ASSERT_EQ(static_cast<int>(mgr.stalkers()[1].state), static_cast<int>(AIState::PURSUIT));
-    ASSERT_TRUE(res_blast.any_screech); // Screech emitted!
+    // Both stalkers should investigate the blast source without screech
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[0].state), static_cast<int>(AIState::INVESTIGATING));
+    ASSERT_EQ(static_cast<int>(mgr.stalkers()[1].state), static_cast<int>(AIState::INVESTIGATING));
+    ASSERT_FALSE(res_blast.any_screech); // No screech on sound investigation!
 
     // Also test direct visual spotting while roosting -> transition to AIState::PURSUIT
     mgr.stalkers_mut()[0].state = StalkerState::Roosting;
@@ -740,7 +787,7 @@ void test_acoustic_profile_and_enemy_hearing_detection() {
     ASSERT_TRUE(res_spotted.any_screech);
 
     stealth.reset();
-    std::cout << "  -> Passed: Acoustic Profile emissions, dormant roosting, >30 dB investigation, >70 dB/visual pursuit with screech verified." << std::endl;
+    std::cout << "  -> Passed: Acoustic Profile emissions, dormant roosting, curious sound investigation, visual pursuit with screech verified." << std::endl;
 }
 
 // ─── TEST 12: Anti-clipping penetration recovery, orientation sanitization & wall occlusion ───

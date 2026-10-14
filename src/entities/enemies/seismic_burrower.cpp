@@ -1,8 +1,11 @@
 #include "seismic_burrower.hpp"
+#include "../carcass_manager.hpp"
 #include "../../voxel/world.hpp"
+#include "../../voxel/level_shapes.hpp"
 #include "../../core/logger.hpp"
 #include "../../ai/aberrant_ai.hpp"
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -41,6 +44,9 @@ void SeismicBurrowerManager::spawn_emerging_burrower(const glm::vec3& pos, const
         else fwd = glm::normalize(fwd);
         b.yaw = std::atan2(fwd.x, fwd.z);
         b.pitch = -std::asin(std::clamp(fwd.y, -1.0f, 1.0f));
+        b.just_breached = true;
+        b.just_ground = true;
+        b.just_roared = true;
     }
 }
 
@@ -74,7 +80,8 @@ void SeismicBurrowerManager::spawn_hazard_wave(const glm::vec3& player_pos, cons
     float dist = 14.0f + static_cast<float>(rand() % 6);
     glm::vec3 spawn_pos = player_pos + glm::vec3(std::cos(angle) * dist, 1.0f + (rand() % 4), std::sin(angle) * dist);
 
-    spawn_burrower(spawn_pos);
+    glm::vec3 facing = glm::normalize(player_pos - spawn_pos);
+    spawn_emerging_burrower(spawn_pos, facing);
     m_spawn_cooldown = 45.0f; // Limit frequency of burrower spawns
 }
 
@@ -100,6 +107,7 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
     }
 
     for (auto& b : m_burrowers) {
+        glm::vec3 frame_start_pos = b.position;
         b.just_roared = false;
         b.just_ground = false;
         b.just_chattered = false;
@@ -108,6 +116,7 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         b.just_triggered_cavein = false;
         b.just_stunned = false;
         b.just_died = false;
+        b.just_stepped = false;
 
         if (b.is_dead()) continue;
 
@@ -186,16 +195,36 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         // Target selection: If pursuing player, locked on, or player is detected within seismic proximity,
         // lock authoritatively onto player_pos!
         glm::vec3 active_target = player_pos;
-        bool is_locked_on_player = b.is_pursuing_attacker ||
-                                   b.state == BurrowerState::Charging ||
-                                   b.state == BurrowerState::Breaching ||
-                                   b.state == BurrowerState::Enraged ||
-                                   (!player_is_crouching && dist_to_player < 18.0f);
+        bool is_locked_on_player = (b.state == BurrowerState::Charging ||
+                                    b.state == BurrowerState::Breaching ||
+                                    b.state == BurrowerState::Enraged ||
+                                    b.is_pursuing_attacker ||
+                                    (!player_is_crouching && dist_to_player < 18.0f) ||
+                                    (player_is_crouching && dist_to_player < 6.0f));
 
-        if (!is_locked_on_player && b.has_sound_target && b.state == BurrowerState::Burrowing) {
-            active_target = b.sound_target;
-            if (glm::distance(b.position, b.sound_target) < 3.0f) {
-                b.has_sound_target = false;
+        if (!is_locked_on_player) {
+            if (b.has_sound_target && b.state == BurrowerState::Burrowing) {
+                active_target = b.sound_target;
+                if (glm::distance(b.position, b.sound_target) < 3.0f) {
+                    b.has_sound_target = false;
+                }
+            } else if (b.state == BurrowerState::Burrowing) {
+                // Autonomous subterranean wandering within assigned territory zone
+                b.patrol_timer -= dt;
+                float dist_to_wp = glm::distance(b.position, b.patrol_waypoint);
+                if (dist_to_wp < 4.0f || b.patrol_timer <= 0.0f) {
+                    if (b.has_patrol_zone) {
+                        b.patrol_waypoint = AberrantAI::sample_wander_waypoint(b.patrol_zone, b.position, world, b.id * 31 + static_cast<uint32_t>(b.state_timer * 10.0f));
+                    } else {
+                        PatrolZone default_z;
+                        default_z.center = b.position;
+                        default_z.radius = 16.0f;
+                        default_z.has_bounds = false;
+                        b.patrol_waypoint = AberrantAI::sample_wander_waypoint(default_z, b.position, world, b.id * 31 + static_cast<uint32_t>(b.state_timer * 10.0f));
+                    }
+                    b.patrol_timer = 12.0f + static_cast<float>((b.id * 19) % 80) * 0.1f;
+                }
+                active_target = b.patrol_waypoint;
             }
         }
         b.target_pos = active_target;
@@ -237,8 +266,8 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
         // State Machine
         switch (b.state) {
             case BurrowerState::Dormant: {
-                // Dormant burrower deep in rock: only wake if loud sound occurs, damaged/pursued, or physical collision
-                float wake_dist = player_is_crouching ? 0.9f : 8.0f;
+                // Dormant burrower deep in rock: wake if sound occurs, damaged/pursued, or player approaches within 6m
+                float wake_dist = player_is_crouching ? 0.9f : 6.0f;
                 if (b.has_sound_target || b.is_pursuing_attacker || dist_to_player < wake_dist) {
                     b.state = BurrowerState::Burrowing;
                     b.state_timer = 0.0f;
@@ -281,6 +310,46 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                     }
                 }
 
+                // Subterranean hazard and impenetrable barrier avoidance (bedrock / bulkheads / hazards)
+                glm::vec3 probe_pos = b.position + facing * 2.5f;
+                glm::ivec3 pv(std::floor(probe_pos.x), std::floor(probe_pos.y), std::floor(probe_pos.z));
+                Voxel pv_vox = world.get_voxel(pv.x, pv.y, pv.z);
+                if (pv_vox.material_id == MAT_DREDGE_BEDROCK || pv_vox.material_id == MAT_INDUSTRIAL_BULKHEAD ||
+                    IsLethalHazard(pv_vox.material_id) || pv_vox.material_id == MAT_COOLANT) {
+                    b.yaw += 1.2f * dt * 4.0f;
+                    b.pitch = std::clamp(b.pitch + 0.5f * dt * 4.0f, -0.6f, 0.6f);
+                    facing = glm::vec3(
+                        std::sin(b.yaw) * std::cos(b.pitch),
+                        -std::sin(b.pitch),
+                        std::cos(b.yaw) * std::cos(b.pitch)
+                    );
+                }
+
+                // Anti-stuck displacement tracking
+                b.stuck_checkpoint_timer += dt;
+                if (b.stuck_checkpoint_timer >= 0.25f) {
+                    float net_disp = glm::distance(b.position, b.stuck_checkpoint_pos);
+                    if (net_disp < 0.10f) {
+                        b.stuck_timer += b.stuck_checkpoint_timer;
+                    } else {
+                        b.stuck_timer = std::max(0.0f, b.stuck_timer - b.stuck_checkpoint_timer * 1.5f);
+                    }
+                    b.stuck_checkpoint_pos = b.position;
+                    b.stuck_checkpoint_timer = 0.0f;
+                }
+
+                if (b.stuck_timer > 0.40f) {
+                    // Turn away from impenetrable obstruction
+                    b.yaw += 2.0f;
+                    b.pitch = -b.pitch;
+                    b.velocity = -b.velocity * 0.5f;
+                    if (b.has_patrol_zone) {
+                        b.patrol_waypoint = AberrantAI::sample_wander_waypoint(b.patrol_zone, b.position, world, b.id * 31 + static_cast<uint32_t>(b.state_timer * 10.0f));
+                    }
+                    b.patrol_timer = 12.0f;
+                    b.stuck_timer = 0.0f;
+                }
+
                 // Move forward through ground (surging speed when pursuing attacker)
                 float eff_burrow_speed = b.is_pursuing_attacker ? 4.5f : b.burrow_speed;
                 glm::vec3 old_pos = b.position;
@@ -289,6 +358,7 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 b.position += b.velocity * dt;
 
                 // Swept excavation along movement path from old_pos to new position
+                std::unordered_set<ChunkPos, ChunkPosHash> burrow_affected_chunks;
                 for (float step = 0.0f; step <= move_dist + 0.8f; step += 0.8f) {
                     glm::ivec3 center = glm::ivec3(glm::floor(old_pos + facing * (step + 1.0f)));
                     for (int dx = -1; dx <= 1; ++dx) {
@@ -297,18 +367,40 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                                 glm::ivec3 p = center + glm::ivec3(dx, dy, dz);
                                 Voxel v = world.get_voxel(p.x, p.y, p.z);
                                 if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
-                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, true);
+                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
                                     result.excavated_voxels.push_back({p, v.material_id});
+
+                                    int cx = p.x >> 5;
+                                    int cy = p.y >> 5;
+                                    int cz = p.z >> 5;
+                                    burrow_affected_chunks.insert(ChunkPos{cx, cy, cz});
+                                    int lx = p.x & 31;
+                                    int ly = p.y & 31;
+                                    int lz = p.z & 31;
+                                    if (lx == 0) burrow_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                                    if (lx == 31) burrow_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                                    if (ly == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                                    if (ly == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                                    if (lz == 0) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                                    if (lz == 31) burrow_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
                                 }
                             }
                         }
                     }
                 }
+                for (const auto& cpos : burrow_affected_chunks) {
+                    Chunk* c = world.get_chunk(cpos);
+                    if (c) {
+                        c->MarkDirty();
+                        world.queue_chunk_for_meshing(cpos);
+                    }
+                }
 
                 // If emerged into open cavern with line of sight to player, transition to Breaching!
                 bool can_breach = dist_to_player < 14.0f;
-                if (player_is_crouching && !b.is_pursuing_attacker && !b.has_sound_target) {
-                    // When player is sneaking and burrower is unalerted, only breach on close physical contact or direct line-of-sight in front
+                if (player_is_crouching && !b.is_pursuing_attacker) {
+                    // When player is sneaking and burrower is not actively pursuing an attacker,
+                    // only breach on close physical contact or direct line-of-sight in front within 4.5m
                     float fwd_dot = glm::dot(facing, dir_to_target);
                     can_breach = (dist_to_player < 0.9f) || (dist_to_player <= 4.5f && fwd_dot >= 0.5f);
                 }
@@ -391,18 +483,40 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                     // DESTROY THINGS IN ITS PATH:
                     // Obliterate any destructible voxels around the cutter head during kinetic charge!
                     glm::ivec3 charge_center = glm::ivec3(glm::floor(next_pos + facing * 1.0f));
+                    std::unordered_set<ChunkPos, ChunkPosHash> charge_affected_chunks;
                     for (int dx = -1; dx <= 1; ++dx) {
                         for (int dy = -1; dy <= 1; ++dy) {
                             for (int dz = -1; dz <= 1; ++dz) {
                                 glm::ivec3 p = charge_center + glm::ivec3(dx, dy, dz);
                                 Voxel v = world.get_voxel(p.x, p.y, p.z);
                                 if (v.is_solid() && v.material_id != MAT_DREDGE_BEDROCK && v.material_id != MAT_INDUSTRIAL_BULKHEAD) {
-                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, true);
+                                    world.set_voxel(p.x, p.y, p.z, Voxel{MAT_AIR, 0}, false);
                                     result.excavated_voxels.push_back({p, v.material_id});
                                     b.just_ground = true;
                                     result.any_grind = true;
+
+                                    int cx = p.x >> 5;
+                                    int cy = p.y >> 5;
+                                    int cz = p.z >> 5;
+                                    charge_affected_chunks.insert(ChunkPos{cx, cy, cz});
+                                    int lx = p.x & 31;
+                                    int ly = p.y & 31;
+                                    int lz = p.z & 31;
+                                    if (lx == 0) charge_affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                                    if (lx == 31) charge_affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                                    if (ly == 0) charge_affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                                    if (ly == 31) charge_affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                                    if (lz == 0) charge_affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                                    if (lz == 31) charge_affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
                                 }
                             }
+                        }
+                    }
+                    for (const auto& cpos : charge_affected_chunks) {
+                        Chunk* c = world.get_chunk(cpos);
+                        if (c) {
+                            c->MarkDirty();
+                            world.queue_chunk_for_meshing(cpos);
                         }
                     }
 
@@ -452,14 +566,262 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
                 break;
             }
 
+            case BurrowerState::Dying: {
+                b.death_timer += dt;
+                b.velocity.y -= 18.0f * dt;
+                b.velocity.x *= std::max(0.0f, 1.0f - 2.5f * dt);
+                b.velocity.z *= std::max(0.0f, 1.0f - 2.5f * dt);
+                b.position += b.velocity * dt;
+
+                float ground_y = 0.0f;
+                if (AberrantAI::find_ground_surface(world, b.position, 0.8f, 2.0f, &ground_y)) {
+                    if (b.position.y <= ground_y + 0.15f) {
+                        b.position.y = ground_y + 0.05f;
+                        b.velocity = glm::vec3(0.0f);
+                    }
+                }
+
+                float remain = std::max(0.0f, 1.0f - (b.death_timer / b.death_duration));
+                b.cutter_angle += dt * remain * 16.0f;
+                b.yaw += b.death_angular_velocity.y * dt;
+                b.pitch += b.death_angular_velocity.x * dt;
+
+                if (b.death_timer >= b.death_duration) {
+                    b.state = BurrowerState::Dead;
+                    result.burrowers_killed++;
+
+                    glm::mat4 m(1.0f);
+                    m = glm::rotate(m, b.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                    m = glm::rotate(m, -b.pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+                    m = glm::rotate(m, 0.25f, glm::vec3(0.0f, 0.0f, 1.0f));
+                    glm::quat death_rot = glm::quat_cast(m);
+
+                    CarcassManager::instance().spawn_carcass(
+                        b.position, death_rot, b.death_hit_dir,
+                        StalkerRole::Melee, b.scale, CarcassType::SeismicBurrower
+                    );
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " DIED -> Spawning physical carcass remains!");
+                }
+                break;
+            }
+
             case BurrowerState::Dead:
                 break;
+        }
+
+        // Environmental hazard perception and damage (Lava, Acid, Spikes)
+        b.spike_damage_timer = std::max(0.0f, b.spike_damage_timer - dt);
+
+        if (b.state != BurrowerState::Dead && b.state != BurrowerState::Dying) {
+            glm::vec3 head_pos = b.position;
+            glm::vec3 body_pos = b.position - b.forward() * 1.2f;
+            glm::vec3 under_pos = b.position - glm::vec3(0.0f, 0.6f, 0.0f);
+
+            Voxel v_head = world.get_voxel(static_cast<int>(std::floor(head_pos.x)),
+                                           static_cast<int>(std::floor(head_pos.y)),
+                                           static_cast<int>(std::floor(head_pos.z)));
+            Voxel v_body = world.get_voxel(static_cast<int>(std::floor(body_pos.x)),
+                                           static_cast<int>(std::floor(body_pos.y)),
+                                           static_cast<int>(std::floor(body_pos.z)));
+            Voxel v_under = world.get_voxel(static_cast<int>(std::floor(under_pos.x)),
+                                            static_cast<int>(std::floor(under_pos.y)),
+                                            static_cast<int>(std::floor(under_pos.z)));
+
+            bool b_in_lava = (v_head.material_id == MAT_THERMITE_SLAG || v_head.material_id == MAT_LAVA || v_head.material_id == MAT_MOLTEN_MAGMA ||
+                              v_body.material_id == MAT_THERMITE_SLAG || v_body.material_id == MAT_LAVA || v_body.material_id == MAT_MOLTEN_MAGMA ||
+                              v_under.material_id == MAT_THERMITE_SLAG || v_under.material_id == MAT_LAVA || v_under.material_id == MAT_MOLTEN_MAGMA);
+
+            bool b_in_acid = (v_head.material_id == MAT_ACID || v_body.material_id == MAT_ACID || v_under.material_id == MAT_ACID);
+
+            bool b_in_coolant = (v_head.material_id == MAT_COOLANT || v_body.material_id == MAT_COOLANT || v_under.material_id == MAT_COOLANT);
+
+            bool b_in_spikes = (v_head.material_id == MAT_OBSIDIAN_SPIKES || v_under.material_id == MAT_OBSIDIAN_SPIKES);
+
+            b.is_in_lava = b_in_lava;
+            b.is_in_acid = b_in_acid;
+            b.is_in_coolant = b_in_coolant;
+            b.is_in_hazard = b_in_lava || b_in_acid || b_in_coolant || b_in_spikes;
+
+            if (b_in_lava) {
+                float lava_dmg = 45.0f * dt;
+                b.hp -= lava_dmg;
+                if (m_global_roar_cooldown <= 0.0f) {
+                    b.just_roared = true;
+                    result.any_roar = true;
+                    m_global_roar_cooldown = 4.0f;
+                }
+                if (b.state == BurrowerState::Charging) {
+                    b.state = BurrowerState::Stunned;
+                    b.stun_timer = 2.0f;
+                    b.just_stunned = true;
+                    b.velocity = -b.forward() * 3.0f;
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " PLUNGED into lava during charge -> STUNNED & INCINERATING!");
+                }
+                if (b.hp <= 0.0f) {
+                    b.hp = 0.0f;
+                    if (b.state != BurrowerState::Dying && b.state != BurrowerState::Dead) {
+                        b.state = BurrowerState::Dying;
+                        b.death_timer = 0.0f;
+                        b.death_duration = 0.9f;
+                        b.just_died = true;
+                        b.death_hit_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+                        b.death_impulse = glm::vec3(0.0f, 2.0f, 0.0f);
+                        b.velocity = b.death_impulse;
+                        b.death_angular_velocity = glm::vec3(0.4f, 0.2f, 0.3f);
+                        VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " INCINERATED in molten lava -> ENTERING DEATH THROES!");
+                    }
+                }
+            } else if (b_in_acid) {
+                float acid_dmg = 30.0f * dt;
+                b.hp -= acid_dmg;
+                if (b.state == BurrowerState::Charging) {
+                    b.state = BurrowerState::Stunned;
+                    b.stun_timer = 1.5f;
+                    b.just_stunned = true;
+                }
+                if (b.hp <= 0.0f) {
+                    b.hp = 0.0f;
+                    if (b.state != BurrowerState::Dying && b.state != BurrowerState::Dead) {
+                        b.state = BurrowerState::Dying;
+                        b.death_timer = 0.0f;
+                        b.death_duration = 0.9f;
+                        b.just_died = true;
+                        b.death_hit_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+                        b.death_impulse = glm::vec3(0.0f, 1.5f, 0.0f);
+                        b.velocity = b.death_impulse;
+                        b.death_angular_velocity = glm::vec3(0.3f, 0.4f, 0.2f);
+                        VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " DISSOLVED in acid reservoir -> ENTERING DEATH THROES!");
+                    }
+                }
+            } else if (b_in_coolant) {
+                float coolant_dmg = 20.0f * dt;
+                b.hp -= coolant_dmg;
+                b.velocity *= 0.45f;
+                if (b.state == BurrowerState::Charging) {
+                    b.state = BurrowerState::Stunned;
+                    b.stun_timer = 2.0f;
+                    b.just_stunned = true;
+                    b.velocity = -b.forward() * 1.5f;
+                    VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " PLUNGED into cryogenic coolant pool -> CHARGE STALLED & HYDRAULICS FROZEN!");
+                }
+                if (b.hp <= 0.0f) {
+                    b.hp = 0.0f;
+                    if (b.state != BurrowerState::Dying && b.state != BurrowerState::Dead) {
+                        b.state = BurrowerState::Dying;
+                        b.death_timer = 0.0f;
+                        b.death_duration = 0.9f;
+                        b.just_died = true;
+                        b.death_hit_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+                        b.death_impulse = glm::vec3(0.0f, 1.0f, 0.0f);
+                        b.velocity = b.death_impulse;
+                        b.death_angular_velocity = glm::vec3(0.1f, 0.2f, 0.1f);
+                        VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " FROZEN SOLID in cryogenic coolant pool -> ENTERING DEATH THROES!");
+                    }
+                }
+            } else if (b_in_spikes) {
+                if (b.spike_damage_timer <= 0.0f) {
+                    b.spike_damage_timer = 1.0f;
+                    b.hp -= 25.0f;
+                    if (b.hp <= 0.0f) {
+                        b.hp = 0.0f;
+                        if (b.state != BurrowerState::Dying && b.state != BurrowerState::Dead) {
+                            b.state = BurrowerState::Dying;
+                            b.death_timer = 0.0f;
+                            b.death_duration = 0.9f;
+                            b.just_died = true;
+                            b.death_hit_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+                            b.death_impulse = glm::vec3(0.0f, 2.0f, 0.0f);
+                            b.velocity = b.death_impulse;
+                            b.death_angular_velocity = glm::vec3(0.5f, 0.1f, 0.3f);
+                            VF_LOG_INFO("SeismicBurrower", "Burrower " << b.id << " IMPALED on obsidian spikes -> ENTERING DEATH THROES!");
+                        }
+                    }
+                }
+            }
         }
 
         // Clamp inside cavern bounds
         b.position.x = std::clamp(b.position.x, 2.0f, 62.0f);
         b.position.y = std::clamp(b.position.y, 2.0f, 62.0f);
         b.position.z = std::clamp(b.position.z, 2.0f, 62.0f);
+
+        // Locomotion & Crawling Step Sound Generation (Segmented Crawler Tread Churn)
+        if (b.state != BurrowerState::Dead && b.state != BurrowerState::Dying &&
+            b.state != BurrowerState::Dormant && b.state != BurrowerState::Stunned) {
+            float physical_disp = glm::distance(b.position, frame_start_pos);
+            float physical_speed = physical_disp / std::max(0.0001f, dt);
+            float speed = glm::length(b.velocity);
+
+            // Check if entity is stuck against impenetrable rock or lacking physical progress
+            bool is_stuck = (b.stuck_timer > 0.15f);
+            if (is_stuck) {
+                b.footstep_timer = 0.0f;
+                b.just_stepped = false;
+            } else if (speed >= 0.25f) {
+                bool is_charging = (b.state == BurrowerState::Charging || b.state == BurrowerState::Enraged || speed >= 5.0f);
+                b.step_is_run = is_charging;
+                float interval = is_charging ? 0.30f : 0.48f;
+                interval = std::clamp(interval / std::max(0.5f, speed / (is_charging ? 6.5f : 2.5f)), 0.22f, 0.55f);
+
+                b.footstep_timer += dt;
+                if (b.footstep_timer >= interval) {
+                    b.footstep_timer = 0.0f;
+                    b.just_stepped = true;
+                    result.any_step = true;
+                    if (is_charging) {
+                        result.any_charge_step = true;
+                    }
+
+                    // Adaptive Proximity & Directional Gain (louder when closer and approaching)
+                    float dist = glm::distance(b.position, player_pos);
+                    float prox = std::clamp(1.0f - (dist - 3.0f) / 27.0f, 0.0f, 1.0f);
+                    float gain_prox = 0.45f + 0.85f * std::pow(prox, 1.15f);
+
+                    glm::vec3 to_player = player_pos - b.position;
+                    float to_player_len = glm::length(to_player);
+                    float approach = 0.0f;
+                    if (to_player_len > 0.01f && speed > 0.1f) {
+                        approach = std::max(0.0f, glm::dot(glm::normalize(b.velocity), to_player / to_player_len));
+                    }
+                    float gain_approach = 1.0f + 0.20f * approach;
+
+                    // Subterranean serpentine slither: scale friction across cavern grit, tuned quieter
+                    float base_vol = is_charging ? 0.45f : 0.26f;
+                    b.step_volume = std::clamp(base_vol * gain_prox * gain_approach, 0.10f, is_charging ? 0.65f : 0.42f);
+
+                    float pitch_base = is_charging ? 1.02f : 0.88f;
+                    float jitter = 0.94f + 0.12f * std::fmod(std::abs(b.position.x * 9.1f + b.position.z * 13.7f), 1.0f);
+                    b.step_pitch = pitch_base * jitter;
+                }
+            } else {
+                b.footstep_timer = std::max(0.0f, b.footstep_timer - dt * 2.0f);
+            }
+        } else {
+            b.footstep_timer = 0.0f;
+        }
+    }
+
+    // Pairwise burrower-to-burrower depenetration (hard anti-overlap)
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < m_burrowers.size(); ++i) {
+            auto& b1 = m_burrowers[i];
+            if (b1.is_dead() || b1.is_dying()) continue;
+            float r1 = 0.95f;
+            float w1 = 3.5f;
+
+            for (size_t j = i + 1; j < m_burrowers.size(); ++j) {
+                auto& b2 = m_burrowers[j];
+                if (b2.is_dead() || b2.is_dying()) continue;
+                float r2 = 0.95f;
+                float w2 = 3.5f;
+
+                AberrantAI::resolve_enemy_to_enemy_penetration(
+                    b1.position, b1.velocity, r1, w1,
+                    b2.position, b2.velocity, r2, w2,
+                    b1.id, b2.id
+                );
+            }
+        }
     }
 
     return result;
@@ -503,10 +865,27 @@ bool SeismicBurrowerManager::damage_nearest(const glm::vec3& origin, float radiu
 
     if (nearest->hp <= 0.0f) {
         nearest->hp = 0.0f;
-        nearest->state = BurrowerState::Dead;
-        nearest->just_died = true;
-        nearest->is_pursuing_attacker = false;
-        VF_LOG_INFO("SeismicBurrower", "Burrower " << nearest->id << " DESTROYED!");
+        if (nearest->state != BurrowerState::Dying && nearest->state != BurrowerState::Dead) {
+            nearest->state = BurrowerState::Dying;
+            nearest->death_timer = 0.0f;
+            nearest->death_duration = 0.9f;
+            nearest->just_died = true;
+            nearest->is_pursuing_attacker = false;
+            glm::vec3 hit_dir = (shot_direction != nullptr && glm::length(*shot_direction) > 0.001f)
+                ? glm::normalize(*shot_direction)
+                : ((attacker_pos != nullptr && glm::distance(nearest->position, *attacker_pos) > 0.001f)
+                   ? glm::normalize(nearest->position - *attacker_pos)
+                   : glm::vec3(0.0f, 0.0f, 1.0f));
+            nearest->death_hit_dir = hit_dir;
+            nearest->death_impulse = hit_dir * 3.5f + glm::vec3(0.0f, 2.0f, 0.0f);
+            nearest->velocity = nearest->death_impulse;
+            nearest->death_angular_velocity = glm::vec3(
+                ((rand() % 100) - 50) * 0.04f,
+                ((rand() % 100) - 50) * 0.06f,
+                ((rand() % 100) - 50) * 0.04f
+            );
+            VF_LOG_INFO("SeismicBurrower", "Burrower " << nearest->id << " FATAL HIT -> ENTERING DEATH THROES!");
+        }
     } else {
         // Resolve actual position of attacker
         glm::vec3 actual_attacker_pos = (attacker_pos != nullptr) ? *attacker_pos : origin;
@@ -571,7 +950,7 @@ void SeismicBurrowerManager::apply_stun(const glm::vec3& origin, float radius, f
 int SeismicBurrowerManager::active_count() const {
     int count = 0;
     for (const auto& b : m_burrowers) {
-        if (!b.is_dead()) count++;
+        if (!b.is_dead() && !b.is_dying()) count++;
     }
     return count;
 }
@@ -591,6 +970,33 @@ void SeismicBurrowerManager::reset() {
     m_global_roar_cooldown = 0.0f;
     m_global_grind_cooldown = 0.0f;
     m_global_chatter_cooldown = 0.0f;
+}
+
+void SeismicBurrowerManager::assign_patrol_zones_from_world(const World& world) {
+    if (!world.level_generator()) return;
+    for (auto& b : m_burrowers) {
+        const RoomPlacement* room = world.level_generator()->get_room_at_position(b.position);
+        if (room) {
+            PatrolZone zone;
+            zone.zone_id = room->grid_x * 10 + room->grid_z;
+            zone.center = glm::vec3(room->center);
+            zone.bounds_min = glm::vec3(
+                static_cast<float>(room->center.x - room->half_width + 1.0f),
+                static_cast<float>(room->floor_y - 2),
+                static_cast<float>(room->center.z - room->half_depth + 1.0f)
+            );
+            zone.bounds_max = glm::vec3(
+                static_cast<float>(room->center.x + room->half_width - 1.0f),
+                static_cast<float>(room->ceiling_y + 2),
+                static_cast<float>(room->center.z + room->half_depth - 1.0f)
+            );
+            zone.has_bounds = true;
+            zone.radius = static_cast<float>(std::max(room->half_width, room->half_depth)) + 4.0f;
+            zone.floor_y = room->floor_y;
+            zone.ceiling_y = room->ceiling_y;
+            b.set_patrol_zone(zone);
+        }
+    }
 }
 
 } // namespace Voidfall

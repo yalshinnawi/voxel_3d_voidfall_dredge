@@ -29,6 +29,12 @@ struct Voxel {
     inline bool is_liquid() const {
         return IsLiquid(material_id);
     }
+    inline bool is_hazard() const {
+        return IsHazard(material_id);
+    }
+    inline bool is_lethal_hazard() const {
+        return IsLethalHazard(material_id);
+    }
     inline void set_waterlogged(bool w) {
         if (w) flags_and_damage |= VOXEL_FLAG_WATERLOGGED;
         else   flags_and_damage &= ~VOXEL_FLAG_WATERLOGGED;

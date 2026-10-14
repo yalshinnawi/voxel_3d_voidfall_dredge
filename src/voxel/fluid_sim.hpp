@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_set>
+#include <unordered_map>
 #include "voxel_types.hpp"
 #include "packed_vertex.hpp"
 
@@ -72,6 +73,7 @@ public:
     std::deque<glm::ivec3> m_activeFluids;
     std::unordered_set<glm::ivec3, Ivec3Hash> m_activeFluidSet;
     std::deque<ScheduledFluidUpdate> m_scheduledSpreads;
+    std::unordered_map<glm::ivec3, size_t, Ivec3Hash> m_scheduledSpreadMap;
     float m_accumulator = 0.0f;
     int m_last_steps_processed = 0;
 };

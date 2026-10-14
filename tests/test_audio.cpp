@@ -277,20 +277,22 @@ int main(int argc, char** argv) {
         for (float s : tremor_samples) tremor_energy += s * s;
         CHECK(tremor_energy > 0.01f, "Seismic tremor must generate deep sub-bass vibration");
 
-        // 6.3 Hazard Geiger Clicks
+        // 6.3 Environmental Radiation Geiger Clicks (Environmental only - no synthetic ticking)
         audio.stop_all();
         audio.set_seismic_rumble(0.0f);
-        audio.set_hazard_phase(0); // Phase 0: Silent
+        audio.set_hazard_phase(3); // Hazard phase alone should NOT cause constant ticking
+        audio.set_radiation_proximity(0.0f); // Clean area: Silent
         auto p0 = audio.render_offline_samples(0.5f);
         float p0_e = 0.0f;
         for (float s : p0) p0_e += s * s;
-        CHECK(p0_e < 0.001f, "Phase 0 should have no geiger clicks");
+        CHECK(p0_e < 0.001f, "Zero radiation proximity should have no geiger clicks even at high hazard phase");
 
-        audio.set_hazard_phase(3); // Phase 3: Severe radiation
+        audio.set_radiation_proximity(0.65f); // Environmental radiation zone
         auto p3 = audio.render_offline_samples(0.5f);
         float p3_e = 0.0f;
         for (float s : p3) p3_e += s * s;
-        CHECK(p3_e > 0.001f, "Phase 3 hazard must generate frequent geiger clicks");
+        CHECK(p3_e > 0.001f, "Environmental radiation proximity must generate geiger clicks");
+        audio.set_radiation_proximity(0.0f);
 
         // 6.4 Procedural Micro-Ambience (Cavern Moisture Drip & Tectonic Groan)
         audio.stop_all();
@@ -421,12 +423,31 @@ int main(int argc, char** argv) {
         audio.set_ambient_volume(0.0f);
         audio.set_ambient_intensity(1.0f);
         audio.set_seismic_rumble(1.0f);
-        audio.play_sound_2d(SoundCue::AmbientCavern, 1.0f, 1.0f, true);
+        audio.play_sound_2d(SoundCue::VoidWind, 1.0f, 1.0f, true);
         audio.play_sound_2d(SoundCue::SeismicTremor, 1.0f, 1.0f, true);
         auto ambient_silent_mix = audio.render_offline_samples(0.1f);
         float ambient_silent_sum = 0.0f;
         for (float s : ambient_silent_mix) ambient_silent_sum += std::abs(s);
         CHECK(ambient_silent_sum == 0.0f, "Turning down Ambience volume to 0.0 must completely silence cavern wind and tremors");
+
+        // 8D.2. Turning down Music Volume to 0.0 specifically
+        audio.stop_all();
+        audio.set_music_volume(0.0f);
+        audio.set_ambient_volume(1.0f);
+        audio.play_sound_2d(SoundCue::AmbientCavern, 1.0f, 1.0f, true);
+        audio.play_sound_2d(SoundCue::AmbientSector1, 1.0f, 1.0f, true);
+        auto music_silent_mix = audio.render_offline_samples(0.1f);
+        float music_silent_sum = 0.0f;
+        for (float s : music_silent_mix) music_silent_sum += std::abs(s);
+        CHECK(music_silent_sum == 0.0f, "Turning down Music volume to 0.0 must completely silence soundtrack and sector themes");
+
+        // Isolation: Ambience remains audible when music volume is turned down to 0.0
+        audio.play_sound_2d(SoundCue::SeismicTremor, 1.0f, 1.0f, true);
+        auto ambient_while_music_zero = audio.render_offline_samples(0.1f);
+        float ambient_while_music_zero_sum = 0.0f;
+        for (float s : ambient_while_music_zero) ambient_while_music_zero_sum += std::abs(s);
+        CHECK(ambient_while_music_zero_sum > 0.01f, "Cavern hazards/ambience must remain audible when music volume is turned down");
+        audio.set_music_volume(1.0f);
 
         // 8E. Turning down UI Volume to 0.0
         audio.stop_all();
@@ -441,6 +462,7 @@ int main(int argc, char** argv) {
         // 8F. Proportional Stepped Attenuation (e.g. 30%, 60%, 100%)
         audio.stop_all();
         audio.set_sfx_volume(1.0f);
+        audio.set_music_volume(1.0f);
         audio.set_enemy_volume(1.0f);
         audio.set_ambient_volume(1.0f);
         audio.set_ui_volume(1.0f);
@@ -462,6 +484,7 @@ int main(int argc, char** argv) {
 
         // Reset to default
         audio.set_master_volume(1.0f);
+        audio.set_music_volume(1.0f);
         audio.set_sfx_volume(1.0f);
         audio.set_enemy_volume(1.0f);
         audio.set_ambient_volume(1.0f);
@@ -1427,6 +1450,129 @@ int main(int argc, char** argv) {
                   << (max_silent_run / 44.1f) << " ms)." << std::endl;
     }
 
+    // ── Test 26: Weapon-Specific Melee Sound Cue Synthesis, Dynamic Swings & Visceral Impact Ear Safety ──
+    {
+        std::cout << "[Test 26] Testing Weapon-Specific Melee Sound Synthesis & Impact Dynamics..." << std::endl;
+        audio.stop_all();
+
+        SoundCue melee_cues[] = {
+            SoundCue::MeleeSwingDrill,
+            SoundCue::MeleeSwingScattergun,
+            SoundCue::MeleeSwingCarbine,
+            SoundCue::MeleeSwingRailgun,
+            SoundCue::MeleeSwingDetonator,
+            SoundCue::MeleeHitFlesh
+        };
+
+        for (SoundCue cue : melee_cues) {
+            audio.stop_all();
+            audio.play_sound_2d(cue, 1.0f);
+
+            constexpr size_t FRAMES = 17640; // 0.40s
+            std::vector<float> mix(FRAMES * 2, 0.0f);
+            audio.render_mix(mix.data(), FRAMES);
+
+            float peak = 0.0f;
+            float energy = 0.0f;
+            for (float s : mix) {
+                CHECK(!std::isnan(s) && !std::isinf(s), "No NaNs or Infs permitted in melee sound synthesis");
+                float abs_s = std::abs(s);
+                if (abs_s > peak) peak = abs_s;
+                energy += s * s;
+            }
+
+            CHECK(peak > 0.05f, "Melee cue must produce audible non-silent waveform");
+            CHECK(peak <= 0.98f, "Melee cue peak must remain safely below saturation limit");
+            CHECK(energy > 1.0f, "Melee cue must contain substantial physical punch");
+        }
+
+        // Test helper dispatch across all tool/weapon slots
+        audio.stop_all();
+        audio.play_melee_swing(0, 0, glm::vec3(0.0f)); // Drill
+        audio.play_melee_swing(1, 0, glm::vec3(0.0f)); // Scattergun
+        audio.play_melee_swing(1, 1, glm::vec3(0.0f)); // Carbine
+        audio.play_melee_swing(1, 2, glm::vec3(0.0f)); // Railgun
+        audio.play_melee_swing(2, 0, glm::vec3(0.0f)); // Detonator
+        audio.trigger_melee_hit_flesh(glm::vec3(0.0f));
+
+        constexpr size_t MIX_FRAMES = 22050; // 0.50s
+        std::vector<float> combo_mix(MIX_FRAMES * 2, 0.0f);
+        audio.render_mix(combo_mix.data(), MIX_FRAMES);
+
+        float combo_peak = 0.0f;
+        for (float s : combo_mix) {
+            CHECK(!std::isnan(s) && !std::isinf(s), "No NaNs in combo mix");
+            if (std::abs(s) > combo_peak) combo_peak = std::abs(s);
+        }
+        CHECK(combo_peak <= 0.999f, "Combo melee voices must be softly limited without hard clipping");
+
+        std::cout << " -> All 6 melee weapon swing & impact cues verified with clean synthesis and ear safety." << std::endl;
+    }
+
+    // ── Test 27: Enemy Locomotion Footstep Cues, Proximity Scaling & Non-Looping Safety ──
+    {
+        std::cout << "[Test 27] Testing Enemy Locomotion Footstep Synthesis & Proximity Attenuation..." << std::endl;
+        audio.stop_all();
+
+        SoundCue step_cues[] = {
+            SoundCue::StalkerStep,
+            SoundCue::StalkerRun,
+            SoundCue::GoliathStep,
+            SoundCue::BurrowerStep
+        };
+
+        for (SoundCue cue : step_cues) {
+            audio.stop_all();
+            audio.play_sound_2d(cue, 1.0f);
+
+            constexpr size_t FRAMES = 11025; // 0.25s
+            std::vector<float> mix(FRAMES * 2, 0.0f);
+            audio.render_mix(mix.data(), FRAMES);
+
+            float peak = 0.0f;
+            float energy = 0.0f;
+            for (float s : mix) {
+                CHECK(!std::isnan(s) && !std::isinf(s), "No NaNs or Infs permitted in enemy step synthesis");
+                float abs_s = std::abs(s);
+                if (abs_s > peak) peak = abs_s;
+                energy += s * s;
+            }
+
+            CHECK(peak > 0.04f, "Enemy step cue must produce audible non-silent waveform");
+            CHECK(peak <= 0.98f, "Enemy step cue peak must remain safely below saturation limit");
+            CHECK(energy > 0.5f, "Enemy step cue must contain distinct tactile punch");
+        }
+
+        // Test 3D spatial pan & distance attenuation: closer enemies must sound louder than distant ones
+        audio.stop_all();
+        audio.set_listener(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        audio.play_sound_3d(SoundCue::StalkerStep, glm::vec3(0.0f, 0.0f, -3.0f), 1.0f);
+        auto close_samples = audio.render_offline_samples(0.18f);
+        float close_peak = 0.0f;
+        for (float s : close_samples) if (std::abs(s) > close_peak) close_peak = std::abs(s);
+
+        audio.stop_all();
+        audio.play_sound_3d(SoundCue::StalkerStep, glm::vec3(0.0f, 0.0f, -32.0f), 1.0f);
+        auto distant_samples = audio.render_offline_samples(0.18f);
+        float distant_peak = 0.0f;
+        for (float s : distant_samples) if (std::abs(s) > distant_peak) distant_peak = std::abs(s);
+
+        CHECK(close_peak > distant_peak * 2.5f,
+              "Stalker step at 3m must be significantly louder than stalker step at 32m");
+
+        // Test non-looping concise release: voices must deactivate automatically after duration
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::StalkerRun, 1.0f);
+        audio.play_sound_2d(SoundCue::GoliathStep, 1.0f);
+        audio.play_sound_2d(SoundCue::BurrowerStep, 1.0f);
+        audio.render_offline_samples(0.35f);
+        CHECK(audio.active_voice_count() == 0,
+              "All enemy footstep voices must automatically release within 0.35s without hanging");
+
+        std::cout << " -> All 4 enemy footstep cues verified with clean synthesis, proximity attenuation & zero voice leaks." << std::endl;
+    }
+
     if (export_wav) {
         std::cout << "[*] Exporting diagnostic audio sample WAV files to screenshots/audio_samples/..." << std::endl;
 
@@ -1518,11 +1664,11 @@ int main(int argc, char** argv) {
         write_wav_file("screenshots/audio_samples/seismic_tremor.wav", audio.render_offline_samples(2.0f));
         audio.set_seismic_rumble(0.0f);
 
-        // 10. Hazard Radiation Geiger Clicks (Phase 3)
+        // 10. Hazard Radiation Geiger Clicks (Environmental Proximity)
         audio.stop_all();
-        audio.set_hazard_phase(3);
+        audio.set_radiation_proximity(0.75f);
         write_wav_file("screenshots/audio_samples/hazard_geiger_clicks.wav", audio.render_offline_samples(1.5f));
-        audio.set_hazard_phase(0);
+        audio.set_radiation_proximity(0.0f);
 
         // 11. Full Gameplay Multitrack Master Mix
         audio.stop_all();
@@ -1532,11 +1678,28 @@ int main(int argc, char** argv) {
         audio.play_sound_2d(SoundCue::ExplosiveBlast, 1.0f);
         write_wav_file("screenshots/audio_samples/full_gameplay_mix.wav", audio.render_offline_samples(2.5f));
 
+        // 12. Enemy Locomotion Footsteps
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::StalkerStep, 1.0f);
+        write_wav_file("screenshots/audio_samples/stalker_step.wav", audio.render_offline_samples(0.25f));
+
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::StalkerRun, 1.0f);
+        write_wav_file("screenshots/audio_samples/stalker_run.wav", audio.render_offline_samples(0.25f));
+
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::GoliathStep, 1.0f);
+        write_wav_file("screenshots/audio_samples/goliath_step.wav", audio.render_offline_samples(0.30f));
+
+        audio.stop_all();
+        audio.play_sound_2d(SoundCue::BurrowerStep, 1.0f);
+        write_wav_file("screenshots/audio_samples/burrower_step.wav", audio.render_offline_samples(0.25f));
+
         std::cout << " -> Reference WAV files exported successfully." << std::endl;
     }
 
     std::cout << "========================================" << std::endl;
-    std::cout << "ALL 25 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
+    std::cout << "ALL 27 AUDIO & EAR-SAFETY TESTS PASSED!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     audio.shutdown();

@@ -71,6 +71,14 @@ int main(int argc, char* argv[]) {
             config.auto_screen_size = false;
             config.window_width = 1600;
             config.window_height = 900;
+        } else if (arg == "--test-enemy-load" || arg == "--test-load") {
+            config.test_enemy_load = true;
+            config.test_mode = true;
+            config.is_test_save = true;
+            config.fresh_save = true;
+            config.auto_screen_size = false;
+            config.window_width = 1600;
+            config.window_height = 900;
         } else if (arg == "--capture-models" || arg == "--test-models") {
             config.capture_models = true;
             config.test_mode = true;

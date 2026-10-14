@@ -221,6 +221,35 @@ void AudioSystem::init_sample_pools() {
     playerBreathing.bufferIds = { 1121 };
     playerBreathing.lastIndex = 0;
     m_pools.push_back(playerBreathing);
+
+    // 14. Void Stalker Step & Run Locomotion Cues
+    SamplePool stalkerStep;
+    stalkerStep.cue = SoundCue::StalkerStep;
+    stalkerStep.samplePaths = { "assets/sounds/stalker_step_01.wav", "assets/sounds/stalker_step_02.wav", "assets/sounds/stalker_step_03.wav" };
+    stalkerStep.bufferIds = { 1131, 1132, 1133 };
+    stalkerStep.lastIndex = 0;
+    m_pools.push_back(stalkerStep);
+
+    SamplePool stalkerRun;
+    stalkerRun.cue = SoundCue::StalkerRun;
+    stalkerRun.samplePaths = { "assets/sounds/stalker_run_01.wav", "assets/sounds/stalker_run_02.wav", "assets/sounds/stalker_run_03.wav" };
+    stalkerRun.bufferIds = { 1141, 1142, 1143 };
+    stalkerRun.lastIndex = 0;
+    m_pools.push_back(stalkerRun);
+
+    SamplePool goliathStep;
+    goliathStep.cue = SoundCue::GoliathStep;
+    goliathStep.samplePaths = { "assets/sounds/goliath_step_01.wav", "assets/sounds/goliath_step_02.wav" };
+    goliathStep.bufferIds = { 1151, 1152 };
+    goliathStep.lastIndex = 0;
+    m_pools.push_back(goliathStep);
+
+    SamplePool burrowerStep;
+    burrowerStep.cue = SoundCue::BurrowerStep;
+    burrowerStep.samplePaths = { "assets/sounds/burrower_step_01.wav", "assets/sounds/burrower_step_02.wav" };
+    burrowerStep.bufferIds = { 1161, 1162 };
+    burrowerStep.lastIndex = 0;
+    m_pools.push_back(burrowerStep);
 }
 
 void AudioSystem::PlayDeathSound() {
@@ -388,7 +417,9 @@ uint32_t AudioSystem::TriggerRandomizedCue(SoundCue cue, float volume, float* ou
     if (cue == SoundCue::VoidStalkerRoar || cue == SoundCue::StalkerEchoScreech ||
         cue == SoundCue::StalkerChitter || cue == SoundCue::StalkerHiss ||
         cue == SoundCue::BurrowerRoar || cue == SoundCue::BurrowerGrind ||
-        cue == SoundCue::MonsterDigging) {
+        cue == SoundCue::MonsterDigging || cue == SoundCue::StalkerStep ||
+        cue == SoundCue::StalkerRun || cue == SoundCue::GoliathStep ||
+        cue == SoundCue::BurrowerStep) {
         voiceIdx = VOICE_ENEMY;
     } else if (cue == SoundCue::CavernSettling || cue == SoundCue::CavernGroan ||
                cue == SoundCue::CavernDrip || cue == SoundCue::RockSlide) {

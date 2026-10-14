@@ -48,6 +48,7 @@ struct AppConfig {
     bool is_test_save{false};
     bool test_mode{false};
     bool test_enemy{false};
+    bool test_enemy_load{false};
     bool test_relic{false};
     bool capture_models{false};
     bool capture_level_shapes{false};
@@ -79,7 +80,7 @@ public:
     void TransitionState(GameState newState);
     GameState current_state() const { return m_state; }
     const std::string& active_save_file() const { return m_active_save_file; }
-    bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.test_relic || m_config.capture_level_shapes; }
+    bool is_test_mode() const { return m_config.test_mode || m_config.auto_play_test || m_config.is_test_save || m_config.test_enemy || m_config.test_enemy_load || m_config.test_relic || m_config.capture_level_shapes; }
     static Application* instance();
     void clear_save_and_reset();
     void LaunchSector(int sector_index);
@@ -90,6 +91,19 @@ public:
     MissionSystem& mission_mut() { return m_mission; }
     void grant_expedition_objectives();
     void complete_and_extract_instantly();
+
+    // Objective Exploration Assistance & Interaction Idle Tracking
+    static constexpr float OBJECTIVE_HINT_IDLE_THRESHOLD = 75.0f;
+    void register_objective_interaction(uint8_t mat);
+    float get_objective_idle_time(uint8_t mat) const;
+    void set_objective_idle_timer(uint8_t mat, float time);
+    void reset_all_objective_idle_timers();
+    bool objective_hint_given() const { return m_objective_hint_given; }
+    glm::vec3 objective_hint_pos() const { return m_objective_hint_pos; }
+    uint8_t objective_hint_mat() const { return m_objective_hint_mat; }
+    float astral_hint_idle_timer() const { return m_astral_hint_idle_timer; }
+    float voidite_hint_idle_timer() const { return m_voidite_hint_idle_timer; }
+    float vault_hint_idle_timer() const { return m_vault_hint_idle_timer; }
 
 private:
     void init_systems();
@@ -174,8 +188,7 @@ private:
     float m_tremor_spall_timer{0.0f};
     float m_aftershock_wave_timer{0.0f};
 
-    // Level 3 collapse timer
-    float m_level3_timer{180.0f};
+    // Environmental radiation & hazards tracker
     float m_proximity_radiation{0.0f};
     float m_effective_radiation{0.0f};
     float m_nearest_gas_distance{999.0f};
@@ -183,6 +196,16 @@ private:
     bool m_expedition_success{false};
     bool m_mouse_down_last{false};
     int m_auto_test_frame{0};
+
+    // Objective Assistance & Exploration Hint State
+    float m_objective_hint_timer{0.0f};
+    bool m_objective_hint_given{false};
+    glm::vec3 m_objective_hint_pos{0.0f};
+    uint8_t m_objective_hint_mat{0};
+    float m_astral_hint_idle_timer{0.0f};
+    float m_voidite_hint_idle_timer{0.0f};
+    float m_vault_hint_idle_timer{0.0f};
+    float m_darkness_warning_cooldown{0.0f};
     uint32_t m_current_level_seed{0};
     std::string m_active_save_file{SaveSystem::DEFAULT_SAVE_FILE};
 

@@ -13,7 +13,7 @@ This document catalogs all voxel types, hardness ratings, drop rates, and physic
 | **2** | `MAT_VOLCANIC_BASALT` | 4 Hits | Dense Clink | Basalt Slab | Raw Voidite (15%), heavy debris |
 | **3** | `MAT_VOIDITE_CRYSTAL` | 3 Hits | Glass Shatter | High-Yield Voidite | Emissive violet glow, volatile crystal fragments, primary objective quota |
 | **4** | `MAT_INDUSTRIAL_BULKHEAD` | 6 Hits | Heavy Metallic | Bulkhead Alloy | Player-placed support (`MAT_TITANIUM`), absorbs cave-in debris |
-| **5** | `MAT_REINFORCED_VAULT_DOOR` | Indestructible | Solid Resonant | Vault Core Relic | Indestructible structural anchor node |
+| **5** | `MAT_REINFORCED_VAULT_DOOR` | Indestructible | Solid Resonant | Vault Core Relic | Indestructible structural anchor node; strictly reserved for authentic Precursor Vault portals guarding treasure caches |
 | **6** | `MAT_THERMITE_SLAG` | 1 Hit | Sizzle/Crumble | Scrap Slag | Molten residue from shaped demolition charges (`MAT_LAVA`) |
 | **7** | `MAT_RADIOACTIVE_ORE` | 5 Hits | Toxic Hiss | Radioactive Isotope | Emissive toxic green glow, increases local radiation |
 | **8** | `MAT_DREDGE_BEDROCK` | Indestructible | Deep Thud | None | Planetary foundation, primary BFS structural anchor |

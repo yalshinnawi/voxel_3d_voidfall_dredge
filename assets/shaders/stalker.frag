@@ -4,6 +4,7 @@ in vec3 vFragPos;
 in vec3 vNormal;
 in vec4 vColor;
 in vec4 vMaterial; // x=metallic, y=roughness, z=emissive, w=ao
+in vec3 vModelPos;
 
 layout (location = 0) out vec4 FragColor;
 layout (location = 1) out vec4 BrightColor;
@@ -14,9 +15,10 @@ uniform vec3 uHeadlampDir;
 uniform vec3 uHeadlampColor;
 uniform float uHeadlampEnabled;
 uniform float uStateGlow;
-uniform int uState; // 0=Idle, 1=Stalking, 2=Circling, 3=Lunging, 4=Stunned, 5=Fleeing
+uniform int uState; // 0=Idle, 1=Stalking, 2=Circling, 3=Lunging, 4=Stunned, 5=Fleeing, 10=Delver
 uniform float uDissolveThreshold; // 0.0 = solid, 1.0 = fully dissolved
 uniform float u_dissolveThreshold;
+uniform float uDarknessFactor;
 
 // 3D procedural noise for dissolve burn-away cutouts
 float hash3D(vec3 p) {
@@ -36,6 +38,99 @@ float noise3D(vec3 x) {
 }
 
 void main() {
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(uCamPos - vFragPos);
+
+    float metallic = clamp(vMaterial.x, 0.0, 1.0);
+    float roughness = clamp(vMaterial.y, 0.04, 1.0);
+    float baseEmissive = vMaterial.z;
+    float ao = clamp(vMaterial.w, 0.15, 1.0);
+
+    // ── Dedicated Delver Contractor Character Mode (uState == 10) ──
+    if (uState == 10) {
+        // Multi-source studio and subterranean illumination
+        vec3 keyDir = normalize(vec3(0.45, 0.80, 0.40));
+        vec3 fillDir = normalize(vec3(-0.60, 0.25, -0.45));
+        vec3 bounceDir = normalize(vec3(0.0, -1.0, 0.20));
+        
+        float diffKey = max(dot(N, keyDir), 0.0);
+        float diffFill = max(dot(N, fillDir), 0.0) * 0.42;
+        float diffBounce = max(dot(N, bounceDir), 0.0) * 0.25;
+        
+        vec3 lightEnv = vec3(1.0, 0.97, 0.92) * diffKey + vec3(0.40, 0.62, 0.95) * diffFill + vec3(0.16, 0.14, 0.12) * diffBounce;
+        
+        // Headlamp directional spotlight
+        vec3 headlampTerm = vec3(0.0);
+        if (uHeadlampEnabled > 0.5) {
+            vec3 toL = uHeadlampPos - vFragPos;
+            float dist = length(toL);
+            vec3 L_h = normalize(toL);
+            float diff_h = max(dot(N, L_h), 0.0);
+            float spot = dot(normalize(-uHeadlampDir), L_h);
+            float spotCut = cos(radians(30.0));
+            if (spot > spotCut && dist < 25.0) {
+                float falloff = smoothstep(spotCut, spotCut + 0.08, spot);
+                float atten = 1.0 / (1.0 + 0.05 * dist + 0.01 * dist * dist);
+                headlampTerm = uHeadlampColor * diff_h * falloff * atten * 1.5;
+            }
+        }
+        
+        vec3 delverAlbedo = vColor.rgb;
+        bool isVisor = (baseEmissive > 0.6);
+        
+        if (isVisor) {
+            // Subtle internal HUD horizontal scanning reticle grid
+            float hudScan = sin(vModelPos.y * 380.0) * 0.5 + 0.5;
+            float hudGrid = sin(vModelPos.x * 280.0) * 0.5 + 0.5;
+            delverAlbedo = mix(delverAlbedo * 0.88, delverAlbedo * 1.15, hudScan * hudGrid * 0.20);
+        } else {
+            // Ballistic weave texture on suit fabric sleeves & legs
+            if (roughness > 0.55 && metallic < 0.25) {
+                float weave = sin(vModelPos.x * 220.0) * cos(vModelPos.y * 220.0) * 0.5 + 0.5;
+                delverAlbedo *= (0.90 + 0.16 * weave);
+            }
+            // Fine machined metallic grain on armor plates and mechanical joints
+            if (metallic > 0.35) {
+                float metalGrain = sin(vModelPos.x * 280.0 + vModelPos.z * 160.0) * 0.5 + 0.5;
+                delverAlbedo *= (0.92 + 0.15 * metalGrain);
+            }
+        }
+        
+        vec3 ambientDelver = vec3(0.07, 0.08, 0.10) * delverAlbedo * ao;
+        vec3 diffuseDelver = (lightEnv + headlampTerm) * delverAlbedo * (1.0 - metallic * 0.65) * ao;
+        
+        // Specular microfacet reflection
+        vec3 HKey = normalize(keyDir + V);
+        float specPower = mix(160.0, 8.0, roughness);
+        float specKey = pow(max(dot(N, HKey), 0.0), specPower);
+        vec3 F0 = mix(vec3(0.04), delverAlbedo, metallic);
+        vec3 specColor = F0 * specKey * mix(1.0, 2.8, metallic);
+        
+        // Crisp, refined class-tinted Fresnel rim highlight
+        float NdotV = max(dot(N, V), 0.0);
+        float fresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.4);
+        vec3 rimColor = mix(vec3(0.4, 0.5, 0.6), vColor.rgb, 0.45) * fresnel * 0.75;
+        
+        // Capped visor emissive to prevent blown-out pure white rectangles
+        float effEmissive = baseEmissive;
+        if (isVisor) {
+            effEmissive = min(baseEmissive, 1.6);
+        }
+        vec3 emissiveTerm = delverAlbedo * effEmissive;
+        
+        vec3 finalColor = ambientDelver + diffuseDelver + specColor + rimColor + emissiveTerm;
+        FragColor = vec4(finalColor, vColor.a);
+        
+        // Controlled bloom output
+        float delverLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
+        if (delverLum > 2.0 || effEmissive > 1.35) {
+            BrightColor = vec4(finalColor, 1.0);
+        } else {
+            BrightColor = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+        return;
+    }
+
     // Void Dissolution / Alpha Burn-Away cutoff
     float dissolve = max(max(uDissolveThreshold, u_dissolveThreshold), 1.0 - vColor.a);
     vec3 dissolveRim = vec3(0.0);
@@ -49,16 +144,11 @@ void main() {
             dissolveRim = vec3(0.0, 0.95, 1.0) * 3.0;
         }
     }
-    vec3 N = normalize(vNormal);
-    vec3 V = normalize(uCamPos - vFragPos);
 
-    float metallic = clamp(vMaterial.x, 0.0, 1.0);
-    float roughness = clamp(vMaterial.y, 0.04, 1.0);
-    float baseEmissive = vMaterial.z;
-    float ao = clamp(vMaterial.w, 0.15, 1.0);
 
     // Cavern subterranean ambient light (pitch-black shadow until lit by headlamp/flares)
-    vec3 ambient = vec3(0.014, 0.017, 0.024) * vColor.rgb * ao;
+    float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
+    vec3 ambient = vec3(0.014, 0.017, 0.024) * vColor.rgb * ao * darknessMult;
 
     // Headlamp spotlight calculation
     vec3 headlampLight = vec3(0.0);

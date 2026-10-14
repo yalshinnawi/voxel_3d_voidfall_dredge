@@ -90,12 +90,14 @@ void World::generate_world(int sector_index, uint32_t seed, int target_objective
         std::lock_guard<std::mutex> lock(m_queue_mutex);
         std::queue<ChunkPos> empty_queue;
         std::swap(m_mesh_queue, empty_queue);
+        m_mesh_queued_set.clear();
     }
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
         std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
         std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
+        m_pending_upload_map.clear();
     }
 
     std::vector<ChunkPos> to_mesh;
@@ -350,12 +352,14 @@ void World::set_level_generator(std::unique_ptr<LevelGenerator> gen) {
         std::lock_guard<std::mutex> lock(m_queue_mutex);
         std::queue<ChunkPos> empty_queue;
         std::swap(m_mesh_queue, empty_queue);
+        m_mesh_queued_set.clear();
     }
     {
         std::lock_guard<std::mutex> lock(m_upload_mutex);
         std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
         std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
+        m_pending_upload_map.clear();
     }
 
     std::vector<ChunkPos> to_mesh;
@@ -1457,8 +1461,10 @@ float World::calculate_spawn_yaw(const glm::vec3& spawn_pos) const {
 
 void World::queue_chunk_for_meshing(const ChunkPos& pos) {
     std::lock_guard<std::mutex> lock(m_queue_mutex);
-    m_mesh_queue.push(pos);
-    m_queue_cv.notify_one();
+    if (m_mesh_queued_set.insert(pos).second) {
+        m_mesh_queue.push(pos);
+        m_queue_cv.notify_one();
+    }
 }
 
 void World::worker_thread_loop() {
@@ -1476,6 +1482,7 @@ void World::worker_thread_loop() {
 
             target_pos = m_mesh_queue.front();
             m_mesh_queue.pop();
+            m_mesh_queued_set.erase(target_pos);
         }
 
         std::shared_ptr<Chunk> chunk;
@@ -1498,17 +1505,29 @@ void World::worker_thread_loop() {
             return nullptr;
         };
 
+        uint32_t start_ver = chunk->mesh_version();
         std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, get_neighbor);
         auto mesh_data = std::make_unique<ChunkMeshData>();
         mesh_data->pos = target_pos;
         mesh_data->chunk = chunk.get();
         mesh_data->chunk_ref = chunk;
         mesh_data->vertices = std::move(mesh);
+        mesh_data->version = start_ver;
 
         {
             std::lock_guard<std::mutex> lock(m_upload_mutex);
-            if (m_upload_queued_set.insert(target_pos).second) {
-                m_pendingUploads.push(std::move(mesh_data));
+            // Only queue upload if the chunk was not modified again during meshing
+            if (chunk->mesh_version() == start_ver) {
+                auto it = m_pending_upload_map.find(target_pos);
+                if (it != m_pending_upload_map.end() && it->second) {
+                    it->second->vertices = std::move(mesh_data->vertices);
+                    it->second->version = mesh_data->version;
+                } else {
+                    m_upload_queued_set.insert(target_pos);
+                    ChunkMeshData* raw = mesh_data.get();
+                    m_pending_upload_map[target_pos] = raw;
+                    m_pendingUploads.push(std::move(mesh_data));
+                }
             }
         }
     }
@@ -1517,7 +1536,14 @@ void World::worker_thread_loop() {
 void World::push_pending_upload(std::unique_ptr<ChunkMeshData> data) {
     if (!data) return;
     std::lock_guard<std::mutex> lock(m_upload_mutex);
-    if (m_upload_queued_set.insert(data->pos).second) {
+    auto it = m_pending_upload_map.find(data->pos);
+    if (it != m_pending_upload_map.end() && it->second) {
+        it->second->vertices = std::move(data->vertices);
+        it->second->version = data->version;
+    } else {
+        m_upload_queued_set.insert(data->pos);
+        ChunkMeshData* raw = data.get();
+        m_pending_upload_map[data->pos] = raw;
         m_pendingUploads.push(std::move(data));
     }
 }
@@ -1530,11 +1556,14 @@ void World::queue_chunk_for_upload(const ChunkPos& pos) {
         {
             std::lock_guard<std::mutex> wlock(m_world_mutex);
             auto it = m_chunks.find(pos);
-            if (it != m_chunks.end()) {
+            if (it != m_chunks.end() && it->second) {
                 data->chunk = it->second.get();
                 data->chunk_ref = it->second;
+                data->version = it->second->mesh_version();
             }
         }
+        ChunkMeshData* raw = data.get();
+        m_pending_upload_map[pos] = raw;
         m_pendingUploads.push(std::move(data));
     }
 }
@@ -1542,6 +1571,11 @@ void World::queue_chunk_for_upload(const ChunkPos& pos) {
 size_t World::upload_queue_size() const {
     std::lock_guard<std::mutex> lock(m_upload_mutex);
     return m_pendingUploads.size();
+}
+
+size_t World::mesh_queue_size() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(m_queue_mutex));
+    return m_mesh_queue.size();
 }
 
 size_t World::upload_mesh_queue(size_t max_uploads) {
@@ -1556,6 +1590,7 @@ size_t World::upload_mesh_queue(size_t max_uploads) {
             auto& front = m_pendingUploads.front();
             if (front) {
                 m_upload_queued_set.erase(front->pos);
+                m_pending_upload_map.erase(front->pos);
                 front->UploadToGPU();
             }
             m_pendingUploads.pop();
@@ -1591,6 +1626,7 @@ void World::update() {
             auto& front = m_pendingUploads.front();
             if (front) {
                 m_upload_queued_set.erase(front->pos);
+                m_pending_upload_map.erase(front->pos);
                 front->UploadToGPU();
             }
             m_pendingUploads.pop();
@@ -1609,6 +1645,7 @@ void World::update(const glm::vec3& viewer_pos, int render_distance) {
             auto& front = m_pendingUploads.front();
             if (front) {
                 m_upload_queued_set.erase(front->pos);
+                m_pending_upload_map.erase(front->pos);
                 front->UploadToGPU();
             }
             m_pendingUploads.pop();
@@ -1678,7 +1715,72 @@ void World::force_mesh_all_sync() {
         std::queue<std::unique_ptr<ChunkMeshData>> empty_queue;
         std::swap(m_pendingUploads, empty_queue);
         m_upload_queued_set.clear();
+        m_pending_upload_map.clear();
     }
+}
+
+void World::sync_remesh_chunks(const std::unordered_set<ChunkPos, ChunkPosHash>& chunk_positions) {
+    if (chunk_positions.empty()) return;
+
+    auto get_neighbor = [this](const ChunkPos& npos) -> const Chunk* {
+        std::lock_guard<std::mutex> lock(m_world_mutex);
+        auto it = m_chunks.find(npos);
+        if (it != m_chunks.end()) {
+            return it->second.get();
+        }
+        return nullptr;
+    };
+
+    std::vector<std::shared_ptr<Chunk>> chunks_to_mesh;
+    chunks_to_mesh.reserve(chunk_positions.size());
+
+    {
+        std::lock_guard<std::mutex> lock(m_world_mutex);
+        for (const auto& pos : chunk_positions) {
+            auto it = m_chunks.find(pos);
+            if (it != m_chunks.end() && it->second) {
+                it->second->increment_mesh_version();
+                it->second->clear_mesh_dirty();
+                chunks_to_mesh.push_back(it->second);
+            }
+        }
+    }
+
+    // Remesh each chunk synchronously and upload to GPU immediately
+    for (auto& chunk : chunks_to_mesh) {
+        std::vector<PackedVoxelVertex> mesh = GreedyMesher::generate_mesh(*chunk, get_neighbor);
+        chunk->stage_mesh(std::move(mesh));
+        chunk->upload_mesh();
+    }
+
+    // Erase these chunk positions from pending upload tracking
+    {
+        std::lock_guard<std::mutex> lock(m_upload_mutex);
+        for (const auto& pos : chunk_positions) {
+            m_upload_queued_set.erase(pos);
+            m_pending_upload_map.erase(pos);
+        }
+    }
+}
+
+void World::sync_remesh_box(const glm::ivec3& min_block, const glm::ivec3& max_block) {
+    std::unordered_set<ChunkPos, ChunkPosHash> affected_chunks;
+    int min_cx = floor_div(min_block.x - 1, CHUNK_SIZE);
+    int max_cx = floor_div(max_block.x + 1, CHUNK_SIZE);
+    int min_cy = floor_div(min_block.y - 1, CHUNK_SIZE);
+    int max_cy = floor_div(max_block.y + 1, CHUNK_SIZE);
+    int min_cz = floor_div(min_block.z - 1, CHUNK_SIZE);
+    int max_cz = floor_div(max_block.z + 1, CHUNK_SIZE);
+
+    for (int cz = min_cz; cz <= max_cz; ++cz) {
+        for (int cy = min_cy; cy <= max_cy; ++cy) {
+            for (int cx = min_cx; cx <= max_cx; ++cx) {
+                affected_chunks.insert(ChunkPos{cx, cy, cz});
+            }
+        }
+    }
+
+    sync_remesh_chunks(affected_chunks);
 }
 
 void World::set_frustum_planes(const std::array<glm::vec4, 6>& planes) {
@@ -2048,8 +2150,193 @@ void World::settle_fluids_offline(int max_ticks) {
     m_fluidSim.m_activeFluids.clear();
     m_fluidSim.m_activeFluidSet.clear();
     m_fluidSim.m_scheduledSpreads.clear();
+    m_fluidSim.m_scheduledSpreadMap.clear();
     m_fluidSim.m_accumulator = 0.0f;
     m_fluidDirtyChunks.clear();
+}
+
+int World::count_material(uint8_t mat_id) const {
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    int total = 0;
+    for (const auto& [cpos, chunk] : m_chunks) {
+        if (!chunk || chunk->is_empty()) continue;
+        const Voxel* voxels = chunk->raw_voxels();
+        for (size_t i = 0; i < CHUNK_VOLUME; ++i) {
+            if (voxels[i].material_id == mat_id) {
+                total++;
+            }
+        }
+    }
+    return total;
+}
+
+std::vector<glm::ivec3> World::query_material_positions(uint8_t mat_id, size_t max_results) const {
+    std::lock_guard<std::mutex> lock(m_world_mutex);
+    std::vector<glm::ivec3> results;
+    results.reserve(std::min(max_results, size_t(128)));
+
+    for (const auto& [cpos, chunk] : m_chunks) {
+        if (!chunk || chunk->is_empty()) continue;
+        const Voxel* voxels = chunk->raw_voxels();
+        int base_x = cpos.x * CHUNK_SIZE;
+        int base_y = cpos.y * CHUNK_SIZE;
+        int base_z = cpos.z * CHUNK_SIZE;
+
+        for (size_t i = 0; i < CHUNK_VOLUME; ++i) {
+            if (voxels[i].material_id == mat_id) {
+                int lx, ly, lz;
+                Chunk::from_index(i, lx, ly, lz);
+                results.push_back(glm::ivec3(base_x + lx, base_y + ly, base_z + lz));
+                if (results.size() >= max_results) {
+                    return results;
+                }
+            }
+        }
+    }
+    return results;
+}
+
+void World::verify_and_seed_objective_ores(int target_astral) {
+    if (target_astral <= 0) {
+        return;
+    }
+
+    int current_astral = count_material(MAT_ASTRAL_ORE);
+    int required_quota = target_astral + 2; // Guarantee objective completion + extra margin
+    if (current_astral >= required_quota) {
+        VF_LOG_INFO("World", "Objective ore verification passed: found " << current_astral
+                             << " Astral Ore blocks (quota=" << target_astral << ")");
+        return;
+    }
+
+    int needed = required_quota - current_astral;
+    VF_LOG_INFO("World", "Objective ore verification: spawning " << needed
+                         << " guaranteed Astral Ore deposits (current=" << current_astral
+                         << ", quota=" << target_astral << ")");
+
+    int placed = 0;
+    const glm::ivec3 dirs[6] = {
+        { 1, 0, 0 }, {-1, 0, 0 },
+        { 0, 1, 0 }, { 0,-1, 0 },
+        { 0, 0, 1 }, { 0, 0,-1 }
+    };
+
+    if (!m_level_gen || m_level_gen->rooms().empty()) {
+        // Fallback for custom or direct test worlds: scan existing chunks for solid blocks adjacent to air
+        for (const auto& [cpos, chunk] : m_chunks) {
+            if (!chunk) continue;
+            for (int ly = 1; ly < CHUNK_SIZE - 1 && placed < needed; ++ly) {
+                for (int lz = 1; lz < CHUNK_SIZE - 1 && placed < needed; ++lz) {
+                    for (int lx = 1; lx < CHUNK_SIZE - 1 && placed < needed; ++lx) {
+                        Voxel v = chunk->get_voxel(lx, ly, lz);
+                        if (v.material_id == MAT_AIR || v.material_id == MAT_DREDGE_BEDROCK ||
+                            v.material_id == MAT_ASTRAL_ORE) {
+                            continue;
+                        }
+                        // Check if adjacent to air
+                        bool near_air = false;
+                        for (int d = 0; d < 6; ++d) {
+                            Voxel n = chunk->get_voxel(lx + dirs[d].x, ly + dirs[d].y, lz + dirs[d].z);
+                            if (n.material_id == MAT_AIR) {
+                                near_air = true;
+                                break;
+                            }
+                        }
+                        if (near_air) {
+                            int wx = cpos.x * CHUNK_SIZE + lx;
+                            int wy = cpos.y * CHUNK_SIZE + ly;
+                            int wz = cpos.z * CHUNK_SIZE + lz;
+                            set_block(wx, wy, wz, MAT_ASTRAL_ORE, VOXEL_FLAG_EMISSIVE);
+                            placed++;
+                        }
+                    }
+                }
+            }
+        }
+        // If still needed (e.g. all-air test world), spawn guaranteed ore clusters directly
+        if (placed < needed) {
+            for (int i = placed; i < needed; ++i) {
+                int wx = 10 + (i % 5) * 2;
+                int wy = 10 + (i / 5) * 2;
+                int wz = 10;
+                set_block(wx, wy, wz, MAT_ASTRAL_ORE, VOXEL_FLAG_EMISSIVE);
+                placed++;
+            }
+        }
+        VF_LOG_INFO("World", "Objective ore verification complete (fallback): seeded " << placed
+                             << " Astral Ore blocks. Total now: " << count_material(MAT_ASTRAL_ORE));
+        return;
+    }
+
+    const auto& rooms = m_level_gen->rooms();
+    std::vector<size_t> distant_rooms;
+    for (size_t i = 0; i < rooms.size(); ++i) {
+        int dist = rooms[i].grid_x + rooms[i].grid_z;
+        if (dist >= 2 && rooms[i].type != RoomShapeType::ExtractionLandingBay) {
+            distant_rooms.push_back(i);
+        }
+    }
+    if (distant_rooms.empty()) {
+        for (size_t i = 1; i < rooms.size(); ++i) {
+            distant_rooms.push_back(i);
+        }
+    }
+
+    size_t room_idx_cursor = 0;
+
+    while (placed < needed && !distant_rooms.empty()) {
+        size_t r_idx = distant_rooms[room_idx_cursor % distant_rooms.size()];
+        room_idx_cursor++;
+        const auto& room = rooms[r_idx];
+
+        // Search for a solid, mineable rock face exposed to open air
+        bool placed_in_room = false;
+        int min_x = std::max(4, room.center.x - room.half_width);
+        int max_x = std::min(world_width() - 5, room.center.x + room.half_width);
+        int min_z = std::max(4, room.center.z - room.half_depth);
+        int max_z = std::min(world_depth() - 5, room.center.z + room.half_depth);
+        int min_y = std::max(4, room.floor_y + 1);
+        int max_y = std::min(world_height() - 5, room.ceiling_y - 1);
+
+        for (int y = min_y; y <= max_y && !placed_in_room; ++y) {
+            for (int z = min_z; z <= max_z && !placed_in_room; ++z) {
+                for (int x = min_x; x <= max_x && !placed_in_room; ++x) {
+                    Voxel current = get_voxel(x, y, z);
+                    if (!current.is_solid() || current.material_id == MAT_DREDGE_BEDROCK ||
+                        current.material_id == MAT_VOIDITE_CRYSTAL ||
+                        current.material_id == MAT_ASTRAL_ORE ||
+                        current.material_id == MAT_VAULT_DOOR ||
+                        current.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                        continue;
+                    }
+
+                    // Check if adjacent to air so it's visibly exposed and reachable
+                    bool near_air = false;
+                    for (int d = 0; d < 6; ++d) {
+                        Voxel n = get_voxel(x + dirs[d].x, y + dirs[d].y, z + dirs[d].z);
+                        if (n.material_id == MAT_AIR) {
+                            near_air = true;
+                            break;
+                        }
+                    }
+
+                    if (near_air) {
+                        set_block(x, y, z, MAT_ASTRAL_ORE, VOXEL_FLAG_EMISSIVE);
+                        placed++;
+                        placed_in_room = true;
+                    }
+                }
+            }
+        }
+
+        // Failsafe exit if entire scan yielded no room spot
+        if (room_idx_cursor > distant_rooms.size() * 3 && !placed_in_room) {
+            break;
+        }
+    }
+
+    VF_LOG_INFO("World", "Objective ore verification complete: seeded " << placed
+                         << " Astral Ore blocks. Total now: " << count_material(MAT_ASTRAL_ORE));
 }
 
 } // namespace Voidfall

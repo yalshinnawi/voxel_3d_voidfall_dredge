@@ -17,7 +17,8 @@ void SurveyingSystem::trigger_scan(
     const std::vector<VoidStalker>* stalkers,
     const std::vector<SeismicBurrower>* burrowers,
     const glm::vec3& extraction_pos,
-    bool extraction_active
+    bool extraction_active,
+    bool include_astral
 ) {
     m_active = true;
     m_rank = rank;
@@ -55,9 +56,10 @@ void SurveyingSystem::trigger_scan(
                 if (dyz2 + dx * dx > radius_sq) continue;
 
                 Voxel v = world.get_voxel(x, y, z);
-                // Highlight ONLY objectives (Voidite extraction quota and Precursor Vault doors), nothing else
+                // Highlight ONLY objectives (Voidite extraction quota, and Precursor Vault doors; Astral Ore included when objective active)
                 if (v.material_id == MAT_VOIDITE ||
                     v.material_id == MAT_VOIDITE_CRYSTAL ||
+                    (v.material_id == MAT_ASTRAL_ORE && include_astral) ||
                     v.material_id == MAT_VAULT_DOOR ||
                     v.material_id == MAT_REINFORCED_VAULT_DOOR) {
                     m_surveyed.push_back(SurveyedVoxel{glm::ivec3(x, y, z), v.material_id});

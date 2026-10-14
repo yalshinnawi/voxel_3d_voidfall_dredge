@@ -153,6 +153,9 @@ public:
     void MarkDirty() { mark_mesh_dirty(); }
     void clear_mesh_dirty() { m_dirty_mesh.store(false); }
 
+    uint32_t mesh_version() const { return m_mesh_version.load(std::memory_order_relaxed); }
+    void increment_mesh_version() { m_mesh_version.fetch_add(1, std::memory_order_relaxed); }
+
     bool is_structural_dirty() const { return m_dirty_structural.load(); }
     void mark_structural_dirty() { m_dirty_structural.store(true); }
     void clear_structural_dirty() { m_dirty_structural.store(false); }
@@ -203,6 +206,7 @@ private:
 
     std::atomic<bool> m_dirty_mesh{true};
     std::atomic<bool> m_dirty_structural{false};
+    std::atomic<uint32_t> m_mesh_version{0};
 
     // Staging mesh (populated by mesher worker threads)
     std::mutex m_stage_mutex;

@@ -29,6 +29,8 @@ public:
     void on_tool_switched();
 
     void set_character_class(CharacterClass cls);
+    void set_weapon_archetype(WeaponArchetype arch) { m_weapon_archetype = arch; }
+    WeaponArchetype weapon_archetype() const { return m_weapon_archetype; }
     void set_drill_speed_tier(int tier) { m_drill_speed_tier = tier; }
     void set_drill_durability_tier(int tier) { m_drill_durability_tier = tier; }
 
@@ -187,6 +189,7 @@ private:
     float m_muzzle_flash_timer{0.0f};
     ToolSlot m_last_tool{ToolSlot::MiningDrill};
     CharacterClass m_character_class{CharacterClass::Demolitionist};
+    WeaponArchetype m_weapon_archetype{WeaponArchetype::MagmaScattergun};
     int m_drill_speed_tier{0};
     int m_drill_durability_tier{0};
     float m_spark_timer{0.0f};

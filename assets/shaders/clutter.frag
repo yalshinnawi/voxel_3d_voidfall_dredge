@@ -14,6 +14,7 @@ uniform vec3 uHeadlampDir;
 uniform vec3 uHeadlampColor;
 uniform float uHeadlampEnabled;
 uniform float uTime;
+uniform float uDarknessFactor;
 
 void main() {
     vec3 N = normalize(vNormal);
@@ -26,8 +27,9 @@ void main() {
 
     vec3 albedo = vColor.rgb;
 
-    // Ambient cavern illumination
-    vec3 ambient = albedo * 0.04 * ao;
+    // Ambient cavern illumination (modulated by dark zone factor)
+    float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
+    vec3 ambient = albedo * 0.04 * ao * darknessMult;
 
     // Headlamp spotlight illumination
     vec3 Lo = vec3(0.0);

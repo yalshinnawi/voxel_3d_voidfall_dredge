@@ -16,7 +16,8 @@ uint32_t CarcassManager::spawn_carcass(
     const glm::quat& rotation,
     const glm::vec3& lethal_hit_dir,
     StalkerRole role,
-    float scale)
+    float scale,
+    CarcassType type)
 {
     // Capped circular pool: If max capacity reached, begin dissolving the oldest carcass
     if (m_carcasses.size() >= MAX_CARCASSES) {
@@ -38,8 +39,9 @@ uint32_t CarcassManager::spawn_carcass(
     carcass.rotation = rotation;
     carcass.scale = scale;
     carcass.role = role;
-    carcass.hp = 20.0f;
-    carcass.max_hp = 20.0f;
+    carcass.type = type;
+    carcass.hp = (type == CarcassType::SeismicBurrower) ? 60.0f : 20.0f;
+    carcass.max_hp = carcass.hp;
     carcass.alpha = 1.0f;
     carcass.is_dissolving = false;
     carcass.dissolve_timer = 0.0f;

@@ -198,10 +198,10 @@ void ExtractionSystem::update(float dt, const glm::vec3& player_pos) {
             m_steam_timer -= dt;
         }
 
-        // Player steps onto the pod ramp to trigger the EXPEDITION EXTRACTION SUCCESSFUL debrief transition
-        if (m_pod_anchored && m_ramp_extension >= 0.5f) {
+        // Player steps onto the pod ramp or reaches the landed pod to trigger extraction
+        if (m_pod_anchored) {
             float dist_to_pod = glm::distance(player_pos, m_beacon_pos);
-            if (dist_to_pod < 3.2f) {
+            if (dist_to_pod < 3.5f) {
                 m_phase = ExtractionPhase::Complete;
                 std::cout << "[Extraction] Squad extraction successful! Returning to Orbital Hub." << std::endl;
                 if (m_on_complete) {

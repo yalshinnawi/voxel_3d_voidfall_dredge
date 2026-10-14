@@ -314,6 +314,30 @@ void test_precursor_vault_rooms_and_level_obstacles() {
             TEST_CHECK(door_vox.is_solid() && door_vox.material_id == MAT_REINFORCED_VAULT_DOOR,
                        "Vault entry portal must be sealed with MAT_REINFORCED_VAULT_DOOR before breach");
 
+            // Strict Invariant: MAT_REINFORCED_VAULT_DOOR must NEVER be placed randomly in levels.
+            // Any vault door voxels in the world must strictly belong to the authentic vault entrance portal!
+            int total_vault_door_voxels = 0;
+            int rogue_vault_door_voxels = 0;
+            for (int x = 0; x < world.world_width(); ++x) {
+                for (int y = 0; y < world.world_height(); ++y) {
+                    for (int z = 0; z < world.world_depth(); ++z) {
+                        Voxel v = world.get_voxel(x, y, z);
+                        if (v.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                            total_vault_door_voxels++;
+                            bool is_authentic_portal = (x == vp.door_pos.x && z == vp.door_pos.z &&
+                                                        y >= vp.door_pos.y && y < vp.door_pos.y + vp.door_height);
+                            if (!is_authentic_portal) {
+                                rogue_vault_door_voxels++;
+                            }
+                        }
+                    }
+                }
+            }
+            TEST_CHECK(total_vault_door_voxels == vp.door_height,
+                       "World must strictly contain only the authentic vault entrance portal door voxels");
+            TEST_CHECK(rogue_vault_door_voxels == 0,
+                       "Random vault door materials must NEVER be placed outside authentic vault chambers");
+
             // Relic Hyper-Core must exist inside chamber at vp.relic_pos
             Voxel relic_vox = world.get_voxel(vp.relic_pos.x, vp.relic_pos.y, vp.relic_pos.z);
             TEST_CHECK(relic_vox.material_id == MAT_PRISMATIC_CRYSTAL && (relic_vox.flags_and_damage & VOXEL_FLAG_EMISSIVE) != 0,

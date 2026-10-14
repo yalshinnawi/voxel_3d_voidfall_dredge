@@ -37,6 +37,7 @@ FRESH_PROFILE_JSON = """{
   "reinforced_plating_tier": 0,
   "highest_cleared_sector": 1,
   "master_volume": 1.0,
+  "music_volume": 1.0,
   "sfx_volume": 1.0,
   "enemy_volume": 1.0,
   "ambient_volume": 1.0,

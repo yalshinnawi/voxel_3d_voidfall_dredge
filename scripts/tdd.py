@@ -83,7 +83,7 @@ TESTS = {
     "load_and_stress": {
         "target": "test_load_and_stress",
         "exe": f"test_load_and_stress{EXE_EXT}",
-        "name": "Load, Stress & Late-Round Pacing / Anti-Clipping (5 modules)"
+        "name": "Load, Stress, Swarm Vertex Capacity & Late-Round Anti-Clipping (7 modules)"
     },
     "voxel_geometry": {
         "target": "test_voxel_geometry",

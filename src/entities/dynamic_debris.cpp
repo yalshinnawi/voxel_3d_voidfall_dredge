@@ -226,6 +226,7 @@ void DynamicDebris::re_voxelize_blocks(World& world, CollisionResult& res) {
     int center_place_y = static_cast<int>(std::floor(m_position.y));
 
     if (m_blocks.size() > 1) {
+        std::unordered_set<ChunkPos, ChunkPosHash> dirty_chunks;
         for (const auto& b : m_blocks) {
             int px_b = bx + b.local_offset.x;
             int pz_b = bz + b.local_offset.z;
@@ -240,7 +241,28 @@ void DynamicDebris::re_voxelize_blocks(World& world, CollisionResult& res) {
 
             if (py_b >= 0 && py_b < 128) {
                 uint8_t bmat = (b.voxel.material_id != MAT_AIR) ? b.voxel.material_id : m_material_id;
-                world.SetBlock(px_b, py_b, pz_b, bmat, b.voxel.flags_and_damage);
+                world.set_voxel(px_b, py_b, pz_b, Voxel{bmat, b.voxel.flags_and_damage}, false);
+
+                int cx = px_b >> 5;
+                int cy = py_b >> 5;
+                int cz = pz_b >> 5;
+                dirty_chunks.insert(ChunkPos{cx, cy, cz});
+                int lx = px_b & 31;
+                int ly = py_b & 31;
+                int lz = pz_b & 31;
+                if (lx == 0) dirty_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                if (lx == 31) dirty_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                if (ly == 0) dirty_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                if (ly == 31) dirty_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                if (lz == 0) dirty_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                if (lz == 31) dirty_chunks.insert(ChunkPos{cx, cy, cz + 1});
+            }
+        }
+        for (const auto& cpos : dirty_chunks) {
+            Chunk* c = world.get_chunk(cpos);
+            if (c) {
+                c->MarkDirty();
+                world.queue_chunk_for_meshing(cpos);
             }
         }
         res.placed_on_ground = true;
@@ -354,7 +376,7 @@ DynamicDebris::CollisionResult DynamicDebris::update(
     glm::vec3 p_min = glm::vec3(player_pos.x - 0.35f, std::min(player_pos.y - 0.95f, player_pos.y - 1.6f), player_pos.z - 0.35f);
     glm::vec3 p_max = glm::vec3(player_pos.x + 0.35f, std::max(player_pos.y + 0.95f, player_pos.y + 0.2f), player_pos.z + 0.35f);
 
-    bool player_overlap = (p_min.x <= d_max.x && p_max.y >= d_min.y) &&
+    bool player_overlap = (p_min.x <= d_max.x && p_max.x >= d_min.x) &&
                           (p_min.y <= d_max.y && p_max.y >= d_min.y) &&
                           (p_min.z <= d_max.z && p_max.z >= d_min.z);
 

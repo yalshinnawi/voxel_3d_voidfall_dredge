@@ -57,30 +57,78 @@ Where:
 
 ---
 
-## 4. Progressive Skill Tree Matrix (6 Disciplines, 18 Specializations)
+## 4. Interactive 2D Neural Skill Web (22 Specializations, Food-Web Conduits)
 
-The skill system features a 6-discipline web structure radiating from the central core matrix, mirroring orbital engineering proficiencies. The tree contains **18 specialized nodes** organized into 6 disciplines with a total of **60 points** across the full matrix ($6 \times [5 + 3 + 2] = 60$).
+The skill system features a free-panning 2D interactive Neural Web radiating organically from the central **Core Nexus**, replacing legacy 1D column scrollbars with a map-like explorative canvas. The tree contains **22 specialized nodes** organized across 6 interconnected disciplines with a total of **72 points** across the full matrix.
 
-### 4.1 Disciplines & Node Hierarchy
+Nodes present minimal high-contrast badges: an iconography tag (`<drill>`, `<hazard>`, `<shield>`, `<flare>`, etc.), a concise 1-2 word title (`RAD SHIELD`, `LAVA MESH`, `BOSS SLAYER`, `FALL DAMPENER`, etc.), a clear buff badge, and compact tier pips `[■] [□] [□]`. Full numeric formulas, milestone perks, and lore reside in the right-hand Inspector Panel upon selecting any node.
 
-Each discipline follows a progressive prerequisite structure: **Foundation (Max 5)** $\rightarrow$ **Specialization (Max 3)** $\rightarrow$ **Capstone (Max 2)**. Specializations require at least Tier 1 in the Foundation node, and Capstones require at least Tier 1 in the Specialization node.
+```mermaid
+graph TD
+    Nexus(["CORE NEXUS (Delver Suit)"])
+    
+    %% Excavation Branch
+    Nexus --> Drill["DRILL SURGE (Drill Velocity)"]
+    Drill --> Heat["HEAT SINKS (Heat Dissipation)"]
+    Heat --> Micro["MICRO BLAST (Ore Yield)"]
+    
+    %% Traversal Branch
+    Nexus --> Fuel["FUEL TANK (Thruster Fuel)"]
+    Fuel --> Dynamo["DYNAMO COIL (Fuel Recovery)"]
+    Dynamo --> Sonar["SEISMIC EYE (Sonar Survey)"]
+    Fuel --> Fall["FALL DAMPENER (Impact Absorber)"]
+    
+    %% Defense & Hazards Branch
+    Nexus --> Armor["ARMOR PLATING (Suit HP & Integrity)"]
+    Armor --> Shield["KINETIC SHIELD (Shield Buffer)"]
+    Shield --> Defib["SECOND WIND (Defibrillator)"]
+    Armor --> Rad["RAD SHIELD (Radiation Resistance)"]
+    Armor --> Lava["LAVA MESH (Molten Lava Shield)"]
+    
+    %% Ballistics & Boss Branch
+    Nexus --> Slugs["HYPER SLUGS (Ballistic Damage)"]
+    Slugs --> Rapid["RAPID BOLT (Fire Rate & Reload)"]
+    Rapid --> Crit["CRIT PIERCER (Weakpoint DMG)"]
+    Slugs --> Boss["BOSS SLAYER (Apex Predator DMG)"]
+    
+    %% Melee Branch
+    Nexus --> Ram["PNEUMATIC RAM (Melee Shove)"]
+    Ram --> Cleave["CLEAVE WAVE (Shockwave Stun)"]
+    Cleave --> Berserk["SIPHON STRIKE (Berserker Overdrive)"]
+    
+    %% Stealth Branch
+    Nexus --> Stealth["SILENT TREAD (Acoustic Dampening)"]
+    Stealth --> Veil["SHADOW VEIL (Optical Camo)"]
+    Veil --> Ambush["AMBUSH PROTOCOL (Surprise DMG)"]
+    
+    %% Cross-Branch Food-Web Synergies
+    Heat <-->|"Thermal Dissipation"| Lava
+    Rad <-->|"Hazard Telemetry"| Sonar
+    Fall <-->|"Kinetic Grounding"| Armor
+    Boss <-->|"Apex Target Vulnerability"| Crit
+    Ram <-->|"Excavation Kinetic Punch"| Drill
+    Stealth <-->|"Infiltration Agility"| Fuel
+```
 
-| Discipline | Foundation (Max 5) | Specialization (Max 3) | Capstone (Max 2) |
+### 4.1 Disciplines & Specialized Hazard Adaptations
+
+Each discipline branches into specialized hazard mitigations directly tuned to asteroid challenges (radiation, lava, fall damage, Chitin Goliath boss battles):
+
+| Discipline | Foundation (Max 5) | Specialization (Max 3) | Capstone / Branch B (Max 2-3) |
 |---|---|---|---|
-| **Excavation** | `Drill Speed` (+12%/tier mining speed) | `Drill Durability` (-15% heat, +20% cooling) | `Micro-Charges` (+20%/tier high-grade mineral yield) |
-| **Traversal** | `Thruster Tank` (+20%/tier fuel capacity) | `Kinetic Dynamo` (+15%/tier sprint/fall recharge) | `Sonar Frequency` (+2m radius, -1s CD, T2 HUD labels) |
-| **Defense** | `Reinforced Plating` (+15 HP, -10% debris damage) | `Kinetic Shielding` (+12 Shield, -0.5s recharge delay) | `Defibrillator` (Second Wind survive lethal trauma) |
-| **Stealth** | `Acoustic Dampening` (-20%/tier noise radius) | `Shadow Veil` (-15%/tier optical sightline range) | `Ambush Protocol` (+35%/tier unalerted strike damage) |
-| **Melee** | `Pneumatic Impact` (+30%/tier shove damage & stagger)| `Cleave Shockwave` (90° cleave arc & shock stun) | `Berserker Overdrive` (+12 Shield siphon & speed burst) |
-| **Gun Damage** | `Hyper-Velocity Slugs` (+12%/tier weapon projectile dmg)| `Rapid Cycling` (+8% fire rate, +10% reload speed) | `Critical Weakpoint` (+35%/tier weakpoint headshot dmg) |
+| **Excavation** | `Drill Surge` (+12%/tier mining speed) | `Heat Sinks` (-15% heat, +20% cooling) | `Micro Blast` (+20%/tier high-grade ore yield) |
+| **Traversal** | `Fuel Tank` (+20%/tier thruster fuel) | `Dynamo Coil` (+15%/tier sprint/fall fuel recovery) | `Seismic Eye` (+2m sonar radius, HUD tags)<br>`Fall Dampener` (-25%/tier fall impact damage, up to 75% mitigation) |
+| **Defense & Hazards** | `Armor Plating` (+15 HP, -10% debris damage) | `Kinetic Shield` (+12 Shield, -0.5s recharge delay) | `Second Wind` (Survive lethal damage at 35 HP)<br>`Rad Shield` (-25%/tier radiation exposure & damage, up to 75% mitigation)<br>`Lava Mesh` (-25%/tier molten lava burn damage, up to 75% mitigation) |
+| **Ballistics & Apex** | `Hyper Slugs` (+12%/tier ballistic damage) | `Rapid Bolt` (+8% fire rate, +10% reload speed) | `Crit Piercer` (+35%/tier weakpoint headshot damage)<br>`Boss Slayer` (+25%/tier damage against Alpha predators & Chitin Goliath) |
+| **Melee** | `Pneumatic Ram` (+30%/tier shove damage & stagger)| `Cleave Wave` (90° cleave arc & shock stun) | `Siphon Strike` (+12 Shield siphon & speed burst) |
+| **Stealth** | `Silent Tread` (-20%/tier noise radius) | `Shadow Veil` (-15%/tier optical sightline range) | `Ambush Protocol` (+35%/tier unalerted strike damage) |
 
-### 4.2 Campaign Point Cap vs. Post-Game Grandmaster Matrix
+### 4.2 Campaign Point Cap (28 Pts) vs. Post-Game Grandmaster Matrix (72 Pts)
 
 To preserve tactical tension, build diversity, and specialization:
-- **Campaign Point Cap (24 Points Max)**: Prior to completing the entire game (clearing Sector 3: The Void Cradle), players can allocate a maximum of **24 points** (out of 60). Even if a player accumulates surplus EXP, additional nodes are locked with `CampaignCapReached` (`NodeWebState::CampaignCapped`).
-- **Respec Necessity**: Because the campaign cap is 24 points, players cannot acquire all skills simultaneously during the main game. To experience different paths (e.g., switching from a Gun Damage / Melee combat build to a pure Stealth / Defense infiltrator), players must **respec**.
-- **100% Full EXP Refund**: Respec at the Upgrade Terminal refunds **100% of all spent EXP**, instantly returning the full EXP pool to the player and resetting assigned points to 0 so they can immediately redistribute into alternative disciplines.
-- **Post-Game Grandmaster Matrix (60 Points)**: Upon clearing Sector 3 (completing the main story expedition), the point limit expands to **60 points**, allowing dedicated delvers to achieve 100% mastery across all 6 disciplines.
+- **Campaign Point Cap (28 Points Max)**: Prior to completing Sector 3 (The Void Cradle), players can allocate a maximum of **28 points** (out of 72). Even with surplus EXP, additional nodes are locked with `CampaignCapReached` (`NodeWebState::CampaignCapped`).
+- **Respec Freedom**: Respec at the Upgrade Terminal refunds **100% of all spent EXP**, resetting assigned points to 0 so players can freely experiment with different hazard adaptations (e.g. respecing into `Lava Mesh` for Sector 4 magma faults or `Boss Slayer` for Alpha Goliath encounters).
+- **Post-Game Grandmaster Matrix (72 Points)**: Clearing Sector 3 expands the cap to **72 points**, allowing complete 100% mastery across all 22 nodes.
 
 ### 4.3 Exponential EXP Cost Scaling Formula
 $$\text{Cost}(\text{tier}) = \left\lfloor 100 \times 1.6^{\text{tier}-1} \right\rfloor$$

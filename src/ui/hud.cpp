@@ -123,6 +123,16 @@ void HUD::update(float dt) {
     }
     m_toxic_gas_exposure = std::max(0.0f, m_toxic_gas_exposure - dt * 2.0f);
 
+    if (m_acid_flash_timer > 0.0f) {
+        m_acid_flash_timer = std::max(0.0f, m_acid_flash_timer - dt * 1.5f);
+    }
+    m_acid_exposure = std::max(0.0f, m_acid_exposure - dt * 2.0f);
+
+    if (m_frost_flash_timer > 0.0f) {
+        m_frost_flash_timer = std::max(0.0f, m_frost_flash_timer - dt * 1.2f);
+    }
+    m_frost_exposure = std::max(0.0f, m_frost_exposure - dt * 1.8f);
+
     if (m_hit_marker_timer > 0.0f) {
         m_hit_marker_timer = std::max(0.0f, m_hit_marker_timer - dt);
     }
@@ -132,6 +142,12 @@ void HUD::update(float dt) {
     if (m_spawn_fade_timer > 0.0f) {
         m_spawn_fade_timer = std::max(0.0f, m_spawn_fade_timer - dt);
     }
+    if (m_hint_waypoint_timer > 0.0f) {
+        m_hint_waypoint_timer = std::max(0.0f, m_hint_waypoint_timer - dt);
+        if (m_hint_waypoint_timer <= 0.0f) {
+            m_hint_waypoint_active = false;
+        }
+    }
 
     // Update screen-space visor toxic vapor particles
     for (auto it = m_screen_toxic_particles.begin(); it != m_screen_toxic_particles.end();) {
@@ -140,6 +156,18 @@ void HUD::update(float dt) {
         it->life -= dt;
         if (it->life <= 0.0f) {
             it = m_screen_toxic_particles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update screen-space corrosive acid drip droplets
+    for (auto it = m_screen_acid_droplets.begin(); it != m_screen_acid_droplets.end();) {
+        it->x += it->vx * dt;
+        it->y += it->vy * dt;
+        it->life -= dt;
+        if (it->life <= 0.0f) {
+            it = m_screen_acid_droplets.erase(it);
         } else {
             ++it;
         }
@@ -210,6 +238,31 @@ void HUD::set_toxic_gas_exposure(float exposure, float dt) {
             m_screen_toxic_particles.push_back(d);
         }
     }
+}
+
+void HUD::set_acid_exposure(float exposure, float dt) {
+    m_acid_exposure = std::clamp(exposure, 0.0f, 1.0f);
+    if (m_acid_exposure > 0.05f) {
+        // Continuously generate dripping corrosive neon-green droplets on the visor
+        if (m_screen_acid_droplets.size() < 28) {
+            float sw = static_cast<float>(m_width);
+            float sh = static_cast<float>(m_height);
+            OnScreenToxicDroplet d;
+            d.x = static_cast<float>(rand() % std::max(1, m_width));
+            d.y = static_cast<float>(rand() % std::max(1, static_cast<int>(sh * 0.45f))); // Upper visor splash
+            d.vx = (static_cast<float>(rand() % 100) / 100.0f - 0.5f) * 20.0f;
+            d.vy = 40.0f + static_cast<float>(rand() % 90); // Acid drips down
+            d.size = 8.0f + static_cast<float>(rand() % 100) / 8.0f;
+            d.max_life = 0.8f + static_cast<float>(rand() % 100) / 80.0f;
+            d.life = d.max_life;
+            d.alpha = 0.75f;
+            m_screen_acid_droplets.push_back(d);
+        }
+    }
+}
+
+void HUD::set_frost_exposure(float exposure, float dt) {
+    m_frost_exposure = std::clamp(exposure, 0.0f, 1.0f);
 }
 
 void HUD::trigger_enemy_blood_splatter(float intensity) {
@@ -374,7 +427,8 @@ HudTopStackLayout HUD::compute_top_stack_layout(
     float screen_w,
     bool is_tremoring,
     bool is_warning,
-    ExtractionPhase extraction_phase
+    ExtractionPhase extraction_phase,
+    const VoidStalker* boss
 ) const {
     HudTopStackLayout layout;
     float cx = screen_w * 0.5f;
@@ -386,7 +440,17 @@ HudTopStackLayout HUD::compute_top_stack_layout(
 
     float stack_y = top_bar_y + top_bar_h + 8.0f * ui_scale;
 
-    // 2. Active Seismic Tremor or Seismic Rupture Warning
+    // 2. Boss Health Bar (if active boss is present)
+    if (boss != nullptr && !boss->is_dead() && !boss->is_dying()) {
+        float boss_w = std::clamp(560.0f * ui_scale, 440.0f, 760.0f);
+        float boss_h = 36.0f * ui_scale;
+        float boss_x = cx - boss_w * 0.5f;
+        layout.boss_bar = { boss_x, stack_y, boss_w, boss_h };
+        layout.has_boss_bar = true;
+        stack_y += boss_h + 8.0f * ui_scale;
+    }
+
+    // 3. Active Seismic Tremor or Seismic Rupture Warning
     if (is_tremoring) {
         float alert_w = std::clamp(540.0f * ui_scale, 400.0f, 720.0f);
         float alert_h = 40.0f * ui_scale;
@@ -439,6 +503,38 @@ HudTopStackLayout HUD::compute_top_stack_layout(
     }
 
     return layout;
+}
+
+HudTopStackLayout HUD::compute_top_stack_layout(
+    float ui_scale,
+    float screen_w,
+    bool is_tremoring,
+    bool is_warning,
+    ExtractionPhase extraction_phase,
+    const glm::vec3& cam_pos,
+    const glm::vec3& cam_forward,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    float max_range,
+    float min_view_dot
+) const {
+    const VoidStalker* boss = find_visible_boss(cam_pos, cam_forward, world, stalkers, max_range, min_view_dot);
+    return compute_top_stack_layout(ui_scale, screen_w, is_tremoring, is_warning, extraction_phase, boss);
+}
+
+HudTopStackLayout HUD::compute_top_stack_layout(
+    float ui_scale,
+    float screen_w,
+    bool is_tremoring,
+    bool is_warning,
+    ExtractionPhase extraction_phase,
+    const PlayerController& player,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    float max_range,
+    float min_view_dot
+) const {
+    return compute_top_stack_layout(ui_scale, screen_w, is_tremoring, is_warning, extraction_phase, player.eye_position(), player.forward(), world, stalkers, max_range, min_view_dot);
 }
 
 void HUD::clear_target_info() {
@@ -1213,6 +1309,9 @@ void HUD::render(
     const std::vector<SeismicBurrower>* burrowers,
     const class MissionSystem* mission
 ) {
+    // Proximity auto-dismissal: if player reaches the hinted location, remove the hint immediately
+    check_and_clear_if_reached(player.position());
+
     if (m_headless) return;
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -1300,13 +1399,40 @@ void HUD::render(
             }
         }
 
+        // Objective Assistance / Delayed Hint Waypoint on Compass Ribbon (Points toward missing Astral Ore/Objectives)
+        if (m_hint_waypoint_active && m_hint_waypoint_timer > 0.0f) {
+            glm::vec3 to_hint = (m_hint_waypoint_pos + glm::vec3(0.5f, 0.5f, 0.5f)) - player.position();
+            float h_dist = glm::length(to_hint);
+            if (h_dist <= 3.0f) {
+                // Reached objective location: auto-dismiss so it doesn't linger on screen
+                m_hint_waypoint_active = false;
+                m_hint_waypoint_timer = 0.0f;
+            } else {
+                float h_angle = glm::degrees(std::atan2(to_hint.x, -to_hint.z));
+                float h_heading = std::fmod(h_angle + 360.0f, 360.0f);
+                float h_diff = h_heading - current_heading;
+                while (h_diff < -180.0f) h_diff += 360.0f;
+                while (h_diff > 180.0f) h_diff -= 360.0f;
+
+                float clamped_h_diff = std::clamp(h_diff, -fov_range, fov_range);
+                float h_x = cx + (clamped_h_diff / fov_range) * (comp_w * 0.46f);
+                draw_rect(h_x - 2.5f, comp_y + 1.0f, 5.0f, comp_h - 2.0f, m_hint_waypoint_color);
+
+                if (std::abs(h_diff) <= fov_range) {
+                    std::string h_dist_str = std::to_string(static_cast<int>(h_dist)) + "m";
+                    draw_text(h_dist_str, h_x - 6.0f * ui_scale, comp_y + comp_h + 1.0f, 0.70f * ui_scale, m_hint_waypoint_color);
+                }
+            }
+        }
+
         // Discovered Objectives and Hostile Monster signatures on Compass Ribbon
         if (surveying && surveying->is_active()) {
             int shown_anomalies = 0;
             // 1. Objectives: Voidite and Vault Bulkhead Doors
             for (const auto& cl : surveying->clusters()) {
                 if (shown_anomalies >= 8) break;
-                if (cl.material_id == MAT_VOIDITE_CRYSTAL || cl.material_id == MAT_REINFORCED_VAULT_DOOR) {
+                if (cl.material_id == MAT_VOIDITE_CRYSTAL || cl.material_id == MAT_VOIDITE ||
+                    cl.material_id == MAT_ASTRAL_ORE || cl.material_id == MAT_REINFORCED_VAULT_DOOR) {
                     glm::vec3 to_anom = cl.centroid - player.position();
                     float anom_angle = glm::degrees(std::atan2(to_anom.x, -to_anom.z));
                     float anom_heading = std::fmod(anom_angle + 360.0f, 360.0f);
@@ -1316,9 +1442,11 @@ void HUD::render(
 
                     if (std::abs(a_diff) <= fov_range) {
                         float a_x = cx + (a_diff / fov_range) * (comp_w * 0.46f);
-                        glm::vec4 a_col = (cl.material_id == MAT_VOIDITE_CRYSTAL)
-                            ? glm::vec4(0.85f, 0.25f, 1.0f, 0.95f) // Voidite purple
-                            : glm::vec4(1.0f, 0.0f, 0.85f, 0.95f); // Vault door magenta
+                        glm::vec4 a_col = (cl.material_id == MAT_ASTRAL_ORE)
+                            ? glm::vec4(1.0f, 0.82f, 0.20f, 0.95f) // Astral ore gold
+                            : ((cl.material_id == MAT_VOIDITE_CRYSTAL || cl.material_id == MAT_VOIDITE)
+                                ? glm::vec4(0.85f, 0.25f, 1.0f, 0.95f) // Voidite purple
+                                : glm::vec4(1.0f, 0.0f, 0.85f, 0.95f)); // Vault door magenta
                         draw_rect(a_x - 1.5f, comp_y + 2.0f, 3.0f, comp_h - 4.0f, a_col);
                         shown_anomalies++;
                     }
@@ -1663,16 +1791,25 @@ void HUD::render(
             float rad_x = s_x;
             float rad_y = s_y - rad_h - 8.0f * ui_scale;
 
-            bool is_danger = (cur_rad >= 50.0f);
-            bool is_caution = (cur_rad >= 25.0f && !is_danger);
+            bool is_damage = (cur_rad >= 75.0f);
+            bool is_danger = (cur_rad >= 50.0f && !is_damage);
+            bool is_caution = (cur_rad >= 25.0f && !is_danger && !is_damage);
+            bool is_venting = (cur_rad < m_last_radiation - 0.05f);
+            m_last_radiation = cur_rad;
 
-            float pulse = is_danger ? (0.75f + 0.25f * std::sin(m_total_time * 12.0f)) : 1.0f;
+            float pulse = (is_damage || is_danger) ? (0.75f + 0.25f * std::sin(m_total_time * 12.0f)) : 1.0f;
             glm::vec4 rad_col;
             std::string rad_status;
 
-            if (is_danger) {
+            if (is_damage) {
                 rad_col = Typography::COLOR_CRIMSON * pulse;
                 rad_status = "GEIGER: DANGER (" + std::to_string(static_cast<int>(cur_rad)) + "%) - TAKING DAMAGE!";
+            } else if (is_venting) {
+                rad_col = Typography::COLOR_CYAN;
+                rad_status = "GEIGER: VENTING (" + std::to_string(static_cast<int>(cur_rad)) + "%) - PURGING DOSE";
+            } else if (is_danger) {
+                rad_col = Typography::COLOR_CRIMSON * pulse;
+                rad_status = "GEIGER: HIGH FIELD (" + std::to_string(static_cast<int>(cur_rad)) + "%) - RETREAT!";
             } else if (is_caution) {
                 rad_col = Typography::COLOR_AMBER;
                 rad_status = "GEIGER: CAUTION (" + std::to_string(static_cast<int>(cur_rad)) + "%) - ELEVATED";
@@ -1788,7 +1925,7 @@ void HUD::render(
         float flare_y = ab_y - 20.0f * ui_scale;
         float flare_w = ab_w;
         float flare_h = 16.0f * ui_scale;
-        std::string fl_str = "<flare> [T] FLARE: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
+        std::string fl_str = "<flare> [T] FLARE / TORCH: " + std::to_string(player.flare_count()) + "/" + std::to_string(player.max_flares());
         if (player.flare_count() < player.max_flares()) {
             char fl_buf[32];
             std::snprintf(fl_buf, sizeof(fl_buf), " (%.0fs)", player.flare_recharge_timer());
@@ -1823,8 +1960,14 @@ void HUD::render(
         }
     }
 
-    // 7. COMPUTE UNIFIED TOP-STACK LAYOUT (Evac Banner Layout)
-    HudTopStackLayout top_stack = compute_top_stack_layout(ui_scale, sw, hazard.is_tremoring(), hazard.is_warning(), extraction.phase());
+    // 7. COMPUTE UNIFIED TOP-STACK LAYOUT (Boss Bar, Evac Banner, Notifications)
+    const VoidStalker* active_boss = find_visible_boss(player.eye_position(), player.forward(), world, stalkers);
+    HudTopStackLayout top_stack = compute_top_stack_layout(ui_scale, sw, hazard.is_tremoring(), hazard.is_warning(), extraction.phase(), active_boss);
+
+    // 7a. BOSS HEALTH BAR (Chitin Goliath Encounter)
+    if (top_stack.has_boss_bar && active_boss) {
+        render_boss_health_bar(ui_scale, sw, top_stack.boss_bar.y, *active_boss);
+    }
 
 
     // 7b. MISSION EXTRACTION BEACON / POD ARRIVAL BANNER
@@ -1973,7 +2116,63 @@ void HUD::render(
 
 
 
-    // 9b. SURVEYING SONAR TACTICAL OBJECTIVE & MONSTER LABELS (Unlocked at Rank 2+)
+    // 8d. 3D-to-2D OBJECTIVE ASSISTANCE / DELAYED HINT WAYPOINT (e.g. Astral Ore)
+    if (m_hint_waypoint_active && m_hint_waypoint_timer > 0.0f) {
+        glm::vec3 h_world = m_hint_waypoint_pos + glm::vec3(0.5f, 0.5f, 0.5f);
+        float dist = glm::distance(player.position(), h_world);
+        if (dist <= 3.0f) {
+            // Reached objective location: auto-dismiss so it doesn't linger on screen
+            m_hint_waypoint_active = false;
+            m_hint_waypoint_timer = 0.0f;
+        } else {
+            glm::vec4 clip = proj * view * glm::vec4(h_world, 1.0f);
+            if (clip.w > 0.1f) {
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                if (ndc.z >= -1.0f && ndc.z <= 1.0f &&
+                    ndc.x >= -1.05f && ndc.x <= 1.05f &&
+                    ndc.y >= -1.05f && ndc.y <= 1.05f) {
+                    float sx = (ndc.x * 0.5f + 0.5f) * static_cast<float>(m_width);
+                    float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(m_height);
+
+                    float pulse = 0.6f + 0.4f * std::sin(m_total_time * 6.0f);
+                    glm::vec4 marker_col = m_hint_waypoint_color * pulse;
+                    marker_col.a = 1.0f;
+
+                    float d_sz = (16.0f + 2.0f * std::sin(m_total_time * 6.0f)) * ui_scale;
+                    glm::mat4 ui_proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+
+                    glm::mat4 d_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                    d_model = glm::rotate(d_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                    d_model = glm::scale(d_model, glm::vec3(d_sz, d_sz, 1.0f));
+                    d_model = glm::translate(d_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+
+                    m_ui_shader.use();
+                    m_ui_shader.set_mat4("uProjection", ui_proj * d_model);
+                    m_ui_shader.set_vec4("uColor", marker_col);
+
+                    glBindVertexArray(m_rect_vao);
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+                    float in_sz = d_sz - 4.0f * ui_scale;
+                    glm::mat4 in_model = glm::translate(glm::mat4(1.0f), glm::vec3(sx, sy, 0.0f));
+                    in_model = glm::rotate(in_model, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                    in_model = glm::scale(in_model, glm::vec3(in_sz, in_sz, 1.0f));
+                    in_model = glm::translate(in_model, glm::vec3(-0.5f, -0.5f, 0.0f));
+                    m_ui_shader.set_mat4("uProjection", ui_proj * in_model);
+                    m_ui_shader.set_vec4("uColor", glm::vec4(0.04f, 0.06f, 0.08f, 0.85f));
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                    glBindVertexArray(0);
+
+                    std::string label = "[" + m_hint_waypoint_label + ": " + std::to_string(static_cast<int>(dist)) + "m]";
+                    float text_w = FontRenderer::get_rendered_width(label, 1.05f * ui_scale);
+                    float pill_w = text_w + 16.0f * ui_scale;
+                    float pill_h = 22.0f * ui_scale;
+                    draw_pill(sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, marker_col * 0.7f);
+                    draw_text_centered(label, sx - pill_w * 0.5f, sy + d_sz * 0.8f + 6.0f * ui_scale, pill_w, pill_h, 1.05f * ui_scale, marker_col);
+                }
+            }
+        }
+    }
     if (surveying && surveying->is_active()) {
         glm::mat4 vp = proj * view;
         float s_alpha = surveying->alpha();
@@ -1997,6 +2196,9 @@ void HUD::render(
                     if (cl.material_id == MAT_VOIDITE || cl.material_id == MAT_VOIDITE_CRYSTAL) {
                         label = "[OBJ VOIDITE: " + std::to_string(static_cast<int>(dist)) + "m]";
                         mat_col = glm::vec4(0.88f, 0.30f, 1.0f, 1.0f);
+                    } else if (cl.material_id == MAT_ASTRAL_ORE) {
+                        label = "[OBJ ASTRAL ORE: " + std::to_string(static_cast<int>(dist)) + "m]";
+                        mat_col = glm::vec4(1.0f, 0.82f, 0.20f, 1.0f);
                     } else if (cl.material_id == MAT_VAULT_DOOR || cl.material_id == MAT_REINFORCED_VAULT_DOOR) {
                         // Vault door text must not appear through walls; player navigates via map or line of sight
                         glm::vec3 eye = player.eye_position();
@@ -2175,7 +2377,55 @@ void HUD::render(
         }
     }
 
-    // 10e. INSERTION POD RECALL MATRIX SHIELD VIGNETTE
+    // 10e. CORROSIVE ACID VISOR ETCHING & NEON DRIP DROPLETS
+    float acid_vis = std::max(m_acid_flash_timer, m_acid_exposure);
+    if (acid_vis > 0.0f) {
+        float a_alpha = glm::clamp(acid_vis, 0.0f, 0.90f);
+        float b_thick = 38.0f * ui_scale;
+        glm::vec4 acid_edge(0.20f, 0.95f, 0.15f, a_alpha * 0.90f);
+        // Sizzling neon-green chemical wash
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.15f, 0.85f, 0.10f, a_alpha * 0.22f));
+        // Caustic perimeter border
+        draw_rect(0.0f, 0.0f, sw, b_thick, acid_edge);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, acid_edge);
+        draw_rect(0.0f, 0.0f, b_thick, sh, acid_edge);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, acid_edge);
+
+        // Dripping corrosive neon-green droplets on the visor
+        for (const auto& p : m_screen_acid_droplets) {
+            float p_life_frac = std::clamp(p.life / p.max_life, 0.0f, 1.0f);
+            float p_alpha = p.alpha * p_life_frac * a_alpha;
+            // Corrosive droplet pill with bright chartreuse core
+            draw_pill(p.x - p.size * 0.5f, p.y, p.size * ui_scale, p.size * 1.8f * ui_scale, glm::vec4(0.10f, 0.65f, 0.05f, p_alpha * 0.8f));
+            draw_pill(p.x - p.size * 0.25f, p.y + p.size * 0.4f, p.size * 0.5f * ui_scale, p.size * 0.9f * ui_scale, glm::vec4(0.45f, 1.0f, 0.25f, p_alpha));
+        }
+    }
+
+    // 10f. SUB-ZERO CRYOGENIC COOLANT FROST VIGNETTE
+    float frost_vis = std::max(m_frost_flash_timer, m_frost_exposure);
+    if (frost_vis > 0.0f) {
+        float f_alpha = glm::clamp(frost_vis, 0.0f, 0.85f);
+        float b_thick = 42.0f * ui_scale;
+        glm::vec4 frost_color(0.55f, 0.88f, 1.0f, f_alpha * 0.85f);
+        // Pale icy wash
+        draw_rect(0.0f, 0.0f, sw, sh, glm::vec4(0.30f, 0.70f, 0.95f, f_alpha * 0.16f));
+        // Sub-zero perimeter ice border
+        draw_rect(0.0f, 0.0f, sw, b_thick, frost_color);
+        draw_rect(0.0f, sh - b_thick, sw, b_thick, frost_color);
+        draw_rect(0.0f, 0.0f, b_thick, sh, frost_color);
+        draw_rect(sw - b_thick, 0.0f, b_thick, sh, frost_color);
+
+        // Jagged frost teeth along visor edge
+        int num_teeth = 14;
+        float tooth_w = sw / float(num_teeth);
+        for (int i = 0; i < num_teeth; ++i) {
+            float tooth_h = (15.0f + ((i * 7) % 25)) * ui_scale * f_alpha;
+            draw_rect(i * tooth_w, b_thick, tooth_w * 0.6f, tooth_h, glm::vec4(0.75f, 0.94f, 1.0f, f_alpha * 0.70f));
+            draw_rect(i * tooth_w, sh - b_thick - tooth_h, tooth_w * 0.6f, tooth_h, glm::vec4(0.75f, 0.94f, 1.0f, f_alpha * 0.70f));
+        }
+    }
+
+    // 10g. INSERTION POD RECALL MATRIX SHIELD VIGNETTE
     if (player.has_insertion_shield()) {
         // Smoothly fade shield alpha from 1.0 to 0.0 over final 1.0s of the timer to eliminate abrupt pop
         float s_alpha = std::clamp(player.insertion_shield_timer() / 1.0f, 0.0f, 1.0f);
@@ -2301,11 +2551,11 @@ void HUD::render(
             {"[L-CTRL]",       "Crouch (Acoustic Stealth)",   Typography::COLOR_GREEN},
             {"[1-3 / MWHEEL]", "Drill / Weapon / Satchel",    Typography::COLOR_CYAN},
             {"[LMB]",          "Mine Voxel / Attack Fire",    Typography::COLOR_AMBER},
-            {"[RMB]",          "Deploy Bulkhead Shelter",     Typography::COLOR_PRIMARY},
-            {"[F]",            "Grappling Hook Tether",       Typography::COLOR_CYAN},
+            {"[F]",            "Toggle Flashlight / Torch",   Typography::COLOR_CYAN},
+            {"[G]",            "Grappling Hook Tether",       Typography::COLOR_GREEN},
+            {"[T]",            "Deploy Flare / Torch",        Typography::COLOR_CYAN},
             {"[Q]",            "Seismic Sonar Pulse Scan",    Typography::COLOR_CYAN},
             {"[C]",            "Class Tactical Ability",      Typography::COLOR_AMBER},
-            {"[G]",            "Chemical Flare Illumination", Typography::COLOR_CYAN},
             {"[B]",            "Deploy Evac Beacon (At Quota)", Typography::COLOR_GREEN},
             {"[H / F1]",       "Toggle This Field Manual",    Typography::COLOR_PRIMARY}
         };
@@ -2544,6 +2794,121 @@ bool HUD::has_vault_objective_los(
     }
 }
 
+bool HUD::is_boss_in_obvious_sight(
+    const glm::vec3& cam_pos,
+    const glm::vec3& cam_forward,
+    const World& world,
+    const VoidStalker& boss,
+    float max_range,
+    float min_view_dot
+) const {
+    // 1. Must be an active boss entity and not dead/dying
+    if (!boss.is_boss() || boss.is_dead() || boss.is_dying() || boss.hp <= 0.0f) {
+        return false;
+    }
+
+    if (boss.state == StalkerState::Burrowing) {
+        return false;
+    }
+
+    // 2. Candidate target points on boss model:
+    // Chitin Goliath has scale ~2.2f (height ~3.5m - 4.5m)
+    float v_offset = boss.scale * 0.85f + 0.35f;
+    glm::vec3 head_pos = boss.position + glm::vec3(0.0f, v_offset, 0.0f);
+    glm::vec3 torso_pos = boss.position + glm::vec3(0.0f, v_offset * 0.5f, 0.0f);
+    glm::vec3 center_pos = boss.position + glm::vec3(0.0f, boss.scale * 0.70f, 0.0f);
+
+    // Close range check: distance from camera eye to closest candidate point
+    float d_center = glm::distance(cam_pos, center_pos);
+    float d_head = glm::distance(cam_pos, head_pos);
+    float d_torso = glm::distance(cam_pos, torso_pos);
+    float min_dist = std::min({ d_center, d_head, d_torso });
+
+    if (min_dist > max_range) {
+        return false;
+    }
+
+    // Check if enemy is completely encased inside solid rock
+    bool head_in_solid = world.is_solid(glm::ivec3(std::floor(head_pos.x), std::floor(head_pos.y), std::floor(head_pos.z)));
+    bool body_in_solid = world.is_solid(glm::ivec3(std::floor(boss.position.x), std::floor(boss.position.y), std::floor(boss.position.z)));
+    if (head_in_solid && body_in_solid) {
+        return false;
+    }
+
+    // 3. Obvious sight & raycast line of sight check
+    // Ensure camera forward vector is normalized
+    glm::vec3 fwd = glm::length(cam_forward) > 0.001f ? glm::normalize(cam_forward) : glm::vec3(0.0f, 0.0f, -1.0f);
+
+    const glm::vec3 candidate_pts[3] = { center_pos, head_pos, torso_pos };
+    for (const auto& pt : candidate_pts) {
+        glm::vec3 to_pt = pt - cam_pos;
+        float dist = glm::length(to_pt);
+        if (dist < 0.001f) {
+            return true; // Right on top of the boss
+        }
+
+        glm::vec3 dir = to_pt / dist;
+        float view_dot = glm::dot(fwd, dir);
+        if (view_dot < min_view_dot) {
+            continue; // Not within the player's obvious forward field of view
+        }
+
+        RaycastHit hit = world.raycast(cam_pos, dir, dist);
+        if (!hit.hit || hit.distance >= (dist - 0.35f)) {
+            return true; // Clear line of sight in obvious forward view!
+        }
+    }
+
+    return false;
+}
+
+bool HUD::is_boss_in_obvious_sight(
+    const PlayerController& player,
+    const World& world,
+    const VoidStalker& boss,
+    float max_range,
+    float min_view_dot
+) const {
+    return is_boss_in_obvious_sight(player.eye_position(), player.forward(), world, boss, max_range, min_view_dot);
+}
+
+const VoidStalker* HUD::find_visible_boss(
+    const glm::vec3& cam_pos,
+    const glm::vec3& cam_forward,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    float max_range,
+    float min_view_dot
+) const {
+    if (!stalkers) return nullptr;
+
+    const VoidStalker* closest_boss = nullptr;
+    float closest_dist = std::numeric_limits<float>::max();
+
+    for (const auto& s : *stalkers) {
+        if (!s.is_boss() || s.is_dead() || s.is_dying() || s.hp <= 0.0f) continue;
+        if (is_boss_in_obvious_sight(cam_pos, cam_forward, world, s, max_range, min_view_dot)) {
+            float d = glm::distance(cam_pos, s.position);
+            if (d < closest_dist) {
+                closest_dist = d;
+                closest_boss = &s;
+            }
+        }
+    }
+
+    return closest_boss;
+}
+
+const VoidStalker* HUD::find_visible_boss(
+    const PlayerController& player,
+    const World& world,
+    const std::vector<VoidStalker>* stalkers,
+    float max_range,
+    float min_view_dot
+) const {
+    return find_visible_boss(player.eye_position(), player.forward(), world, stalkers, max_range, min_view_dot);
+}
+
 void HUD::render_enemy_awareness_markers(
     const glm::mat4& view,
     const glm::mat4& proj,
@@ -2679,6 +3044,62 @@ void HUD::dismiss_help_briefing() {
     m_show_help_briefing = false;
     m_briefingTimer = 0.0f;
     m_briefing_auto_timer = 0.0f;
+}
+
+void HUD::render_boss_health_bar(float ui_scale, float screen_w, float start_y, const VoidStalker& boss) {
+    float cx = screen_w * 0.5f;
+    float bar_w = std::clamp(560.0f * ui_scale, 440.0f, 760.0f);
+    float bar_h = 36.0f * ui_scale;
+    float bar_x = cx - bar_w * 0.5f;
+    float bar_y = start_y;
+
+    float hp_frac = std::clamp(boss.hp / std::max(1.0f, boss.max_hp), 0.0f, 1.0f);
+
+    // Glowing border & header colors shift if Enraged or Stunned
+    glm::vec4 border_col(0.85f, 0.20f, 0.15f, 0.95f); // Crimson
+    glm::vec4 fill_col(0.95f, 0.25f, 0.12f, 1.0f);   // Magma red-orange
+    std::string title = "// APEX VAULT GUARDIAN: CHITIN GOLIATH //";
+
+    if (boss.is_enraged) {
+        float pulse = 0.75f + 0.25f * std::sin(m_total_time * 12.0f);
+        border_col = glm::vec4(1.0f, 0.08f, 0.08f, 1.0f) * pulse;
+        fill_col = glm::vec4(1.0f, 0.15f, 0.05f, 1.0f);
+        title = ">> APEX FRENZY ENRAGED: CHITIN GOLIATH <<";
+    }
+    if (boss.state == StalkerState::Stunned) {
+        border_col = glm::vec4(0.2f, 0.85f, 1.0f, 0.95f); // Vulnerable cyan
+        fill_col = glm::vec4(0.3f, 0.9f, 1.0f, 1.0f);
+        title = "!! BULKHEAD CRASH: FRONT ARMOR BREACHED !!";
+    } else if (boss.state == StalkerState::GroundSlam) {
+        title = "<!> WARNING: TITAN GROUND SLAM <!>";
+    } else if (boss.state == StalkerState::Charging) {
+        title = "<!> DANGER: JUGGERNAUT BULL CHARGE <!>";
+    }
+
+    // Outer backing pill
+    draw_pill(bar_x, bar_y, bar_w, bar_h, glm::vec4(0.04f, 0.06f, 0.09f, 0.92f));
+    draw_rect(bar_x, bar_y, bar_w, 1.5f * ui_scale, border_col);
+    draw_rect(bar_x, bar_y + bar_h - 1.5f * ui_scale, bar_w, 1.5f * ui_scale, border_col);
+    draw_rect(bar_x, bar_y, 2.0f * ui_scale, bar_h, border_col);
+    draw_rect(bar_x + bar_w - 2.0f * ui_scale, bar_y, 2.0f * ui_scale, bar_h, border_col);
+
+    // Inner health bar meter
+    float meter_pad_x = 10.0f * ui_scale;
+    float meter_h = 6.0f * ui_scale;
+    float meter_y = bar_y + bar_h - meter_h - 6.0f * ui_scale;
+    float meter_w = bar_w - meter_pad_x * 2.0f;
+
+    draw_rect(bar_x + meter_pad_x, meter_y, meter_w, meter_h, glm::vec4(0.12f, 0.16f, 0.22f, 0.85f));
+    draw_rect(bar_x + meter_pad_x, meter_y, meter_w * hp_frac, meter_h, fill_col);
+
+    // Header label: Title on left, HP value on right
+    float text_y = bar_y + 4.0f * ui_scale;
+    std::string hp_str = std::to_string(static_cast<int>(std::ceil(boss.hp))) + " / " + std::to_string(static_cast<int>(boss.max_hp)) + " HP";
+    float hp_val_w = FontRenderer::get_rendered_width(hp_str, 0.88f * ui_scale, FontType::Tech);
+    float avail_title_w = std::max(60.0f, meter_w - hp_val_w - 12.0f * ui_scale);
+
+    draw_text_fitted(title, bar_x + meter_pad_x, text_y, avail_title_w, 0.92f * ui_scale, border_col, 0.65f * ui_scale, FontType::Display);
+    draw_text(hp_str, bar_x + bar_w - meter_pad_x - hp_val_w, text_y, 0.88f * ui_scale, Typography::COLOR_PRIMARY, FontType::Tech);
 }
 
 } // namespace Voidfall

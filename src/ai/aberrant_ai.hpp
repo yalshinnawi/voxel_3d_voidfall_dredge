@@ -24,6 +24,8 @@ enum class StalkerState : uint8_t {
     Dead,               // Marked for removal
     Roosting,           // Initial dormant state, clamped to surfaces with closed eyes/retracted limbs
     Emerging,           // Physical burrowing emergence animation from rock/floor/ceiling (spawning in)
+    GroundSlam,         // Boss monster rearing up and executing titanic seismic ground slam
+    Charging,           // Boss monster unstoppable kinetic ram charge toward player
 
     // Uppercase aliases for compatibility with AIState enum conventions
     IDLE = Idle,
@@ -36,6 +38,8 @@ enum class StalkerState : uint8_t {
     Pursuit = Stalking,
     CIRCLING = Circling,
     LUNGING = Lunging,
+    GROUND_SLAM = GroundSlam,
+    CHARGING = Charging,
     STUNNED = Stunned,
     FLEEING = Fleeing,
     BURROWING = Burrowing,
@@ -70,6 +74,63 @@ struct PerceptionEvaluation {
     float received_noise_db{0.0f};
     bool triggered_screech{false};
     bool triggered_swarm_alert{false};
+};
+
+/// Route type determined by enemy when finding alternative ways to reach a target
+enum class AlternateRouteType : uint8_t {
+    None = 0,
+    GroundDetour,   // Pathfinding around walls, corridors, openings, or corners
+    VerticalClimb   // Scaling over/around the wall via wall-climbing or ceiling traversal
+};
+
+/// Defined route containing waypoints determined to bypass wall obstructions
+struct AlternateRoute {
+    AlternateRouteType type{AlternateRouteType::None};
+    std::vector<glm::vec3> waypoints;
+    bool is_valid{false};
+    float total_distance{0.0f};
+};
+
+/// Defined spatial territory / cavern chamber in which enemies wander and patrol.
+/// Constrains autonomous roaming to specific cavern chambers or sector zones,
+/// creating believable territorial behaviors and predictable stealth patrol routes.
+struct PatrolZone {
+    int zone_id{-1};                    // Unique room index or zone identifier
+    glm::vec3 center{0.0f};             // Territorial hub / center coordinates
+    glm::vec3 bounds_min{0.0f};         // Spatial bounding box minimum (cavern walls inset)
+    glm::vec3 bounds_max{0.0f};         // Spatial bounding box maximum
+    float radius{12.0f};                // Ambient patrol radius if bounds not explicitly boxed
+    int floor_y{4};                     // Cavern floor reference
+    int ceiling_y{20};                  // Cavern ceiling reference
+    bool has_bounds{false};             // Whether bounding box is enforced
+    std::vector<glm::vec3> waypoints;   // Designated waypoints forming a patrol loop
+
+    bool contains(const glm::vec3& pos) const {
+        if (!has_bounds) {
+            float dx = pos.x - center.x;
+            float dz = pos.z - center.z;
+            return (dx * dx + dz * dz) <= (radius * radius);
+        }
+        return pos.x >= bounds_min.x && pos.x <= bounds_max.x &&
+               pos.z >= bounds_min.z && pos.z <= bounds_max.z;
+    }
+
+    glm::vec3 clamp_to_zone(const glm::vec3& pos) const {
+        if (has_bounds) {
+            return glm::vec3(
+                std::clamp(pos.x, bounds_min.x, bounds_max.x),
+                pos.y,
+                std::clamp(pos.z, bounds_min.z, bounds_max.z)
+            );
+        }
+        glm::vec2 diff(pos.x - center.x, pos.z - center.z);
+        float len = glm::length(diff);
+        if (len > radius && len > 0.001f) {
+            diff = (diff / len) * radius;
+            return glm::vec3(center.x + diff.x, pos.y, center.z + diff.y);
+        }
+        return pos;
+    }
 };
 
 /// Entry for fast spatial hashing of swarm entities
@@ -224,6 +285,22 @@ public:
         float player_radius = 0.35f
     );
 
+    /// Hard capsule-capsule mutual penetration resolution between two hostile entities.
+    /// Pushes overlapping enemies apart along the horizontal separation plane and damps relative closing velocity.
+    /// Ensures enemies can NEVER be stuck inside each other.
+    static bool resolve_enemy_to_enemy_penetration(
+        glm::vec3& pos_a,
+        glm::vec3& vel_a,
+        float radius_a,
+        float weight_a,
+        glm::vec3& pos_b,
+        glm::vec3& vel_b,
+        float radius_b,
+        float weight_b,
+        uint32_t id_a = 1,
+        uint32_t id_b = 2
+    );
+
     /// Compute lunge target offset maintaining stand-off distance
     static glm::vec3 calculate_lunge_target(
         const glm::vec3& enemy_pos,
@@ -291,6 +368,21 @@ public:
         float probe_dist = 1.6f
     );
 
+    /// Checks if a 3D point or the surface immediately beneath it is a lethal hazard (lava, acid, spikes)
+    static bool is_point_lethal_hazard(
+        const World& world,
+        const glm::vec3& pos,
+        float ground_probe_depth = 1.5f
+    );
+
+    /// Checks whether a ray/path between two points directly crosses a lethal hazard (lava, acid, spikes)
+    static bool has_hazard_between(
+        const glm::vec3& from,
+        const glm::vec3& to,
+        const World& world,
+        float step_size = 0.5f
+    );
+
     /// Checks if a 3D point in world space is inside solid voxel geometry,
     /// correctly evaluating sub-block shapes (slabs, ramps, corner wedges).
     static bool is_point_solid(const World& world, const glm::vec3& p);
@@ -323,6 +415,65 @@ public:
         StalkerSurfaceState surface_state,
         const glm::vec3& contact_normal,
         const World& world
+    );
+
+    /// Generates a set of walkable, hazard-free patrol waypoints within a designated patrol zone
+    static std::vector<glm::vec3> generate_zone_waypoints(
+        const PatrolZone& zone,
+        const World& world,
+        int count = 4
+    );
+
+    /// Samples a single valid random wander waypoint within the zone
+    static glm::vec3 sample_wander_waypoint(
+        const PatrolZone& zone,
+        const glm::vec3& current_pos,
+        const World& world,
+        uint32_t seed_salt = 0
+    );
+
+    /// Evaluates if direct ray between two points is unobstructed by solid voxels
+    static bool has_line_of_sight(
+        const glm::vec3& from,
+        const glm::vec3& to,
+        const World& world,
+        float step_size = 0.5f,
+        int max_steps = 60
+    );
+
+    /// Checks if a direct path between two points is obstructed by a solid wall
+    static bool is_path_obstructed_by_wall(
+        const glm::vec3& from,
+        const glm::vec3& to,
+        const World& world
+    );
+
+    /// Finds a walkable ground route (sequence of waypoints) around solid walls and obstacles
+    /// connecting start_pos to target_pos (or to a vantage point with clear line-of-sight).
+    static std::vector<glm::vec3> find_ground_route_around_wall(
+        const glm::vec3& start_pos,
+        const glm::vec3& target_pos,
+        const World& world,
+        float max_range = 32.0f
+    );
+
+    /// Checks if a vertical climbing route over/around the wall to the target is viable
+    static bool is_vertical_climb_route_viable(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& target_pos,
+        const World& world,
+        float max_wall_height = 8.0f
+    );
+
+    /// Evaluates whether an entity is behind a wall and obstructed from reaching the target,
+    /// and determines an alternate route (e.g. ground detour around the wall or vertical climbing route)
+    /// to reach the player if attacking.
+    static AlternateRoute find_alternate_route(
+        const glm::vec3& enemy_pos,
+        const glm::vec3& target_pos,
+        const World& world,
+        float max_search_range = 32.0f,
+        bool can_climb_walls = true
     );
 };
 

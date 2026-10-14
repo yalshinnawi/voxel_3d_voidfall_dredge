@@ -127,16 +127,21 @@ void FluidSim::TrySpreadToNeighbor(World& world, const glm::ivec3& targetPos,
     } else {
         // Lateral / timed propagation: queue into scheduled spreads with material delay
         int delay = GetSpreadDelayTicks(liquidMat);
-        for (auto& upd : m_scheduledSpreads) {
-            if (upd.pos == targetPos) {
-                if (newLevel > upd.level) {
-                    upd.level = newLevel;
-                    upd.material = liquidMat;
+        auto it = m_scheduledSpreadMap.find(targetPos);
+        if (it != m_scheduledSpreadMap.end()) {
+            size_t idx = it->second;
+            if (idx < m_scheduledSpreads.size() && m_scheduledSpreads[idx].pos == targetPos) {
+                if (newLevel > m_scheduledSpreads[idx].level) {
+                    m_scheduledSpreads[idx].level = newLevel;
+                    m_scheduledSpreads[idx].material = liquidMat;
                 }
                 return;
             }
         }
-        m_scheduledSpreads.push_back(ScheduledFluidUpdate{targetPos, liquidMat, newLevel, delay});
+        if (m_scheduledSpreads.size() < 1024) {
+            m_scheduledSpreadMap[targetPos] = m_scheduledSpreads.size();
+            m_scheduledSpreads.push_back(ScheduledFluidUpdate{targetPos, liquidMat, newLevel, delay});
+        }
     }
 }
 
@@ -378,9 +383,11 @@ void FluidSim::Update(float dt, World& world) {
 
         // 2. Process scheduled delayed fluid spreads (place blocks and wake for subsequent tick)
         std::deque<ScheduledFluidUpdate> remaining;
+        int spreadsProcessed = 0;
+        constexpr int MAX_SPREADS_PER_TICK = 96;
         for (auto& upd : m_scheduledSpreads) {
             upd.delayTicks--;
-            if (upd.delayTicks <= 0) {
+            if (upd.delayTicks <= 0 && spreadsProcessed < MAX_SPREADS_PER_TICK) {
                 // Execute block placement
                 TrySpreadToNeighbor(world, upd.pos, upd.material, upd.level, dirtyChunks, true);
                 WakeFluid(upd.pos);
@@ -389,11 +396,16 @@ void FluidSim::Update(float dt, World& world) {
                 }
                 WakeFluid(upd.pos + glm::ivec3(0, -1, 0));
                 WakeFluid(upd.pos + glm::ivec3(0, 1, 0));
+                spreadsProcessed++;
             } else {
                 remaining.push_back(upd);
             }
         }
         m_scheduledSpreads = std::move(remaining);
+        m_scheduledSpreadMap.clear();
+        for (size_t i = 0; i < m_scheduledSpreads.size(); ++i) {
+            m_scheduledSpreadMap[m_scheduledSpreads[i].pos] = i;
+        }
 
         // Mark affected chunks dirty in a single batch at the end of the tick
         for (Chunk* chunk : dirtyChunks) {

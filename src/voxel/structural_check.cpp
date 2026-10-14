@@ -101,7 +101,8 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
             }
             island.center_of_mass = sum / static_cast<float>(island_blocks.size());
 
-            // Build relative block list and detach from world grid
+            // Build relative block list and detach from world grid with batched chunk dirtying
+            std::unordered_set<ChunkPos, ChunkPosHash> affected_chunks;
             for (const auto& b : island_blocks) {
                 Voxel v = world.get_voxel(b.x, b.y, b.z);
                 island.blocks.push_back(DebrisBlock{
@@ -111,8 +112,30 @@ std::vector<UnanchoredIsland> StructuralCheck::solve_cavein(
                     v
                 });
                 island.primary_material = v.material_id;
-                // Remove from static terrain
-                world.set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, true);
+                // Remove from static terrain without recursive neighbor queueing
+                world.set_voxel(b.x, b.y, b.z, Voxel{MAT_AIR, 0}, false);
+
+                int cx = b.x >> 5;
+                int cy = b.y >> 5;
+                int cz = b.z >> 5;
+                affected_chunks.insert(ChunkPos{cx, cy, cz});
+                int lx = b.x & 31;
+                int ly = b.y & 31;
+                int lz = b.z & 31;
+                if (lx == 0) affected_chunks.insert(ChunkPos{cx - 1, cy, cz});
+                if (lx == 31) affected_chunks.insert(ChunkPos{cx + 1, cy, cz});
+                if (ly == 0) affected_chunks.insert(ChunkPos{cx, cy - 1, cz});
+                if (ly == 31) affected_chunks.insert(ChunkPos{cx, cy + 1, cz});
+                if (lz == 0) affected_chunks.insert(ChunkPos{cx, cy, cz - 1});
+                if (lz == 31) affected_chunks.insert(ChunkPos{cx, cy, cz + 1});
+            }
+
+            for (const auto& cpos : affected_chunks) {
+                Chunk* c = world.get_chunk(cpos);
+                if (c) {
+                    c->MarkDirty();
+                    world.queue_chunk_for_meshing(cpos);
+                }
             }
 
             unanchored_islands.push_back(std::move(island));

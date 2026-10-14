@@ -113,3 +113,19 @@ The 2D map formats subterranean geometry into high-clarity floor plans inspired 
    - **`[MOUSE DRAG]`**: Pan the cavern viewport to scout ahead.
    - Defaults to auto-centering directly over the delver's current position.
 
+---
+
+## 4. Delayed Exploration Objective Hint System & Interaction Idle Requirement
+When delvers struggle to locate scarce objective resources (Astral Ore, Voidite Crystal, or Precursor Vault), the acoustic scan array provides an automated orientation waypoint:
+- **Interaction Idle Requirement ($\ge 75\,\text{s}$)**:
+  - An objective is **only hinted if the delver has not interacted with that given objective in a long time ($\ge 75\,\text{s}$)**.
+  - Active interactions immediately reset that objective's idle timer to $0\,\text{s}$:
+    - Mining / fracturing the objective material (`MAT_ASTRAL_ORE`, `MAT_VOIDITE_CRYSTAL`, `MAT_REINFORCED_VAULT_DOOR`, `MAT_PRISMATIC_CRYSTAL`).
+    - Drilling or dealing damage to the objective block (continuous reset during drill contact).
+    - Physical proximity / reaching the objective ($\le 3.5\,\text{m}$ distance or line-of-sight within $\le 5.0\,\text{m}$).
+    - Collecting / retrieving the objective item into inventory.
+  - If a player has recently interacted with an objective (e.g., mined Voidite 30s ago), that objective does **not** qualify for a hint, even if its quota is unfulfilled.
+- **Auto-Removal on Resolution**:
+  - Waypoint markers auto-dismiss immediately once the player reaches within $3.0\,\text{m}$ / $3.5\,\text{m}$, mines the block, or completes the objective quota.
+
+

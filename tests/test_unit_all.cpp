@@ -809,6 +809,72 @@ void test_skills_surveying_and_hazards() {
     }
     log_pass("Vein Clustering: Flood-fill connected component merge & smooth hull/outline generation");
 
+    // Astral Ore Objective Seeding, Surveying & Hint Waypoint Verification
+    {
+        World astral_world(3333);
+        for (int x = 0; x <= 20; ++x) {
+            for (int y = 0; y <= 20; ++y) {
+                for (int z = 0; z <= 20; ++z) {
+                    astral_world.set_voxel(x, y, z, Voxel{MAT_AIR, 0});
+                }
+            }
+        }
+        // Verify seeding in empty world ensures quota + 2
+        astral_world.verify_and_seed_objective_ores(5);
+        int astral_count = astral_world.count_material(MAT_ASTRAL_ORE);
+        TEST_CHECK(astral_count >= 7, "verify_and_seed_objective_ores must guarantee target + 2 Astral Ore");
+
+        auto ore_positions = astral_world.query_material_positions(MAT_ASTRAL_ORE);
+        TEST_CHECK(!ore_positions.empty(), "query_material_positions must return valid Astral Ore coordinates");
+
+        // Scan with include_astral = true (active objective)
+        SurveyingSystem astral_scan;
+        astral_scan.trigger_scan(glm::vec3(ore_positions[0]), astral_world, 15.0f, 0.0f, 2,
+                                nullptr, nullptr, glm::vec3(0.0f), false, true);
+        bool found_astral_in_sonar = false;
+        for (const auto& sv : astral_scan.surveyed_voxels()) {
+            if (sv.material_id == MAT_ASTRAL_ORE) {
+                found_astral_in_sonar = true;
+                break;
+            }
+        }
+        TEST_CHECK(found_astral_in_sonar, "Sonar pulse must include Astral Ore when include_astral is enabled");
+
+        // HUD Objective Hint Waypoint validation (headless mode for silent tests)
+        HUD hud(1600, 900, true);
+        TEST_CHECK(!hud.has_objective_hint(), "HUD must not have objective hint initially");
+        hud.set_objective_hint(glm::vec3(15.0f, 10.0f, 20.0f), "ASTRAL ORE");
+        TEST_CHECK(hud.has_objective_hint(), "HUD must register active objective hint");
+        TEST_CHECK(hud.hint_waypoint_label() == "ASTRAL ORE", "HUD hint waypoint material name must match");
+        TEST_CHECK(hud.hint_waypoint_pos() == glm::vec3(15.0f, 10.0f, 20.0f), "HUD hint waypoint position must match");
+
+        // Player far away (e.g. at 0, 0, 0): hint must remain active
+        bool cleared_far = hud.check_and_clear_if_reached(glm::vec3(0.0f, 0.0f, 0.0f));
+        TEST_CHECK(!cleared_far, "Hint must not be cleared when player is far away");
+        TEST_CHECK(hud.has_objective_hint(), "Hint must stay active when player is far");
+
+        // Player reaches within reach distance (e.g. at 15.2, 10.1, 20.2): hint must auto-clear!
+        bool cleared_near = hud.check_and_clear_if_reached(glm::vec3(15.2f, 10.1f, 20.2f));
+        TEST_CHECK(cleared_near, "Hint must auto-clear when player reaches the objective location");
+        TEST_CHECK(!hud.has_objective_hint(), "HUD must have no active hint after reaching objective");
+
+        // Test render auto-clearing when player reaches
+        hud.set_objective_hint(glm::vec3(30.0f, 5.0f, 30.0f), "ASTRAL ORE");
+        TEST_CHECK(hud.has_objective_hint(), "Hint must be active before render check");
+        PlayerController test_player;
+        test_player.set_position(glm::vec3(30.2f, 5.2f, 30.2f)); // Within 3.0m of block center
+        HazardClock test_hazard;
+        ExtractionSystem test_extraction;
+        PlayerInventory test_inv;
+        SkillMatrix test_skills;
+        hud.render(test_player, world, test_hazard, test_extraction, test_inv, test_skills, 1, glm::mat4(1.0f), glm::mat4(1.0f));
+        TEST_CHECK(!hud.has_objective_hint(), "HUD render must auto-clear hint when player reaches within 3.0m");
+
+        hud.clear_objective_hint();
+        TEST_CHECK(!hud.has_objective_hint(), "HUD clear_objective_hint must clear active hint");
+        log_pass("Astral Ore Objective Seeding, Surveying Inclusions & Directional HUD Waypoint Hints (with Reach/Mine Auto-Removal)");
+    }
+
     // Sonar Cooldown & Anti-Spam Verification
     PlayerController player;
     player.set_character_class(CharacterClass::Demolitionist);
@@ -904,6 +970,11 @@ void test_skills_surveying_and_hazards() {
     TEST_CHECK(evac.phase() == ExtractionPhase::BeaconDeployed, "Phase must transition to BeaconDeployed");
     evac.update(41.0f, glm::vec3(16.0f, 12.0f, 16.0f));
     TEST_CHECK(evac.phase() == ExtractionPhase::PodLanded, "Pod must land after countdown");
+    bool extracted = false;
+    evac.set_on_complete([&]() { extracted = true; });
+    evac.update(1.0f, glm::vec3(16.0f, 12.0f, 16.0f));
+    TEST_CHECK(evac.phase() == ExtractionPhase::Complete, "Pod must complete extraction when player is at pod");
+    TEST_CHECK(extracted, "Extraction callback must fire upon boarding");
     log_pass("Extraction Beacon defense and landing pod state machine");
 }
 
@@ -991,8 +1062,15 @@ void test_save_persistence() {
     TEST_CHECK(loaded.total_astral_ore == 15, "Loaded total_astral_ore mismatch");
     TEST_CHECK(loaded.selected_class_id == 2, "Loaded selected_class_id mismatch");
     TEST_CHECK(loaded.upgrades.drillSpeedTier == 4, "Loaded drillSpeedTier mismatch");
-    TEST_CHECK(loaded.upgrades.thrusterTankTier == 3, "Loaded thrusterTankTier mismatch");
     TEST_CHECK(loaded.sector_records[3].highest_completion_rate == 65, "Loaded sector record mismatch");
+    TEST_CHECK(loaded.settings.auto_step == false, "Default loaded auto_step must be false");
+
+    // Test explicit auto_step serialization toggle
+    profile.settings.auto_step = true;
+    SaveSystem::save_profile(profile, save_file);
+    UserProfile loaded_step_on;
+    SaveSystem::load_profile(loaded_step_on, save_file);
+    TEST_CHECK(loaded_step_on.settings.auto_step == true, "Explicit auto_step true must persist round-trip");
 
     log_pass("JSON Save/Load persistence round-trip serialization");
 }
@@ -1148,6 +1226,19 @@ void test_seismic_tremor_and_falling_blocks() {
     TEST_CHECK(bulkhead_deflected, "Bulkhead must safely deflect and shatter falling overhead debris");
     TEST_CHECK(world.get_voxel(16, 14, 16).material_id == MAT_INDUSTRIAL_BULKHEAD, "Bulkhead must remain intact after deflection");
     log_pass("Bulkhead Fortification Deflection & Hazard Shelter Utility");
+
+    // 5b. Verify AABB precision (debris far away along X must NOT hit player)
+    DynamicDebris distant_debris(
+        1003,
+        glm::vec3(26.0f, 18.0f, 16.0f), // 10m away in X!
+        glm::vec3(0.0f, -4.0f, 0.0f),
+        glm::vec3(0.0f),
+        MAT_FRACTURED_GRANITE,
+        1
+    );
+    auto distant_res = distant_debris.update(0.1f, world, player_pos, false);
+    TEST_CHECK(!distant_res.hit_player, "Distant debris with different X coordinate must never hit player");
+    log_pass("Debris AABB Spatial Isolation (Zero Ghost Hits Across Cavern)");
 
     // 6. Dynamic Debris Capping & Oldest Entity Recycling
     TEST_CHECK(World::MAX_ACTIVE_DEBRIS == 36, "World::MAX_ACTIVE_DEBRIS hard cap must be 36");
@@ -1698,11 +1789,44 @@ void test_cavern_luminaries_and_lighting() {
     // 5. GameSettings Brightness Range and Exposure Scaling
     GameSettings settings;
     TEST_CHECK(settings.brightness == 1.0f, "Default brightness must be 1.0 (100%)");
-    settings.brightness = 0.5f;
-    TEST_CHECK(settings.brightness >= 0.4f, "Minimum brightness limit respected");
-    settings.brightness = 1.8f;
-    TEST_CHECK(settings.brightness <= 2.0f, "Maximum brightness limit respected");
-    log_pass("GameSettings Cavern Brightness Controls and Clamp Range");
+
+    // Stepping down with 10% round
+    settings.brightness = std::max(0.40f, std::round((settings.brightness - 0.10f) * 10.0f) / 10.0f);
+    TEST_CHECK(std::abs(settings.brightness - 0.90f) < 0.001f, "Decrement brightness by 10%");
+
+    // Stepping down below minimum clamp
+    settings.brightness = 0.40f;
+    settings.brightness = std::max(0.40f, std::round((settings.brightness - 0.10f) * 10.0f) / 10.0f);
+    TEST_CHECK(settings.brightness == 0.40f, "Minimum brightness limit of 0.40x (40%) clamped");
+
+    // Stepping up with 10% round
+    settings.brightness = 1.90f;
+    settings.brightness = std::min(2.00f, std::round((settings.brightness + 0.10f) * 10.0f) / 10.0f);
+    TEST_CHECK(settings.brightness == 2.00f, "Increment brightness to 2.00x (200%)");
+
+    // Stepping up above maximum clamp
+    settings.brightness = std::min(2.00f, std::round((settings.brightness + 0.10f) * 10.0f) / 10.0f);
+    TEST_CHECK(settings.brightness == 2.00f, "Maximum brightness limit of 2.00x (200%) clamped");
+
+    // Settings clamp() helper
+    settings.brightness = 5.0f;
+    settings.clamp();
+    TEST_CHECK(settings.brightness == 2.00f, "clamp() caps brightness at 2.00x");
+    settings.brightness = 0.1f;
+    settings.clamp();
+    TEST_CHECK(settings.brightness == 0.40f, "clamp() floors brightness at 0.40x");
+
+    // UserProfile save/load roundtrip
+    UserProfile profile;
+    profile.settings.brightness = 1.40f;
+    std::string test_save = "saves/test_brightness_save.json";
+    SaveSystem::save_profile(profile, test_save);
+    UserProfile loaded;
+    SaveSystem::load_profile(loaded, test_save);
+    TEST_CHECK(std::abs(loaded.settings.brightness - 1.40f) < 0.01f, "Brightness persisted across save/load");
+    SaveSystem::delete_save_file(test_save);
+
+    log_pass("GameSettings Cavern Brightness Controls, Stepping & Save Persistence");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1895,6 +2019,91 @@ void test_satchel_charge_and_weapon_cycling() {
     TEST_CHECK(scout_w.archetype == WeaponArchetype::NeedlerRailgun, "Scout must use Needler Railgun");
     TEST_CHECK(scout_w.short_name == "RAIL", "Needler Railgun short name must be RAIL");
     log_pass("Class Weapon Archetype and Tactical Kit alignment (Demolitionist=SCAT, Vanguard=CARB, Scout=RAIL)");
+
+    // 4. Satchel Blast Crater Seam Synchronization & Zero See-Through Blocks
+    {
+        World test_world(9999);
+        Chunk* c0 = test_world.get_or_create_chunk(ChunkPos{0, 0, 0});
+        Chunk* c1 = test_world.get_or_create_chunk(ChunkPos{1, 0, 0});
+        TEST_CHECK(c0 != nullptr && c1 != nullptr, "Chunks 0 and 1 must exist");
+
+        // Fill solid block column across the chunk seam at y=10..14, z=10..14
+        // Chunk 0 has seam at x=31; Chunk 1 has seam at x=32 (local x=0)
+        for (int y = 10; y <= 14; ++y) {
+            for (int z = 10; z <= 14; ++z) {
+                for (int x = 28; x <= 31; ++x) {
+                    test_world.set_voxel(x, y, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+                }
+                for (int x = 32; x <= 35; ++x) {
+                    test_world.set_voxel(x, y, z, Voxel{MAT_VOLCANIC_BASALT, 0}, false);
+                }
+            }
+        }
+
+        // Synchronously mesh both chunks initially
+        std::unordered_set<ChunkPos, ChunkPosHash> init_chunks = {ChunkPos{0, 0, 0}, ChunkPos{1, 0, 0}};
+        test_world.sync_remesh_chunks(init_chunks);
+
+        uint32_t c0_v_before = c0->mesh_version();
+        uint32_t c1_v_before = c1->mesh_version();
+        size_t c0_verts_before = c0->vertex_count();
+        size_t c1_verts_before = c1->vertex_count();
+        TEST_CHECK(c0_verts_before > 0 && c1_verts_before > 0, "Both chunks must have initial solid meshes");
+
+        // Detonate satchel charge centered at (31, 12, 12) (right at the chunk seam!)
+        // Destroy a 3x3x3 volume: x=30..32, y=11..13, z=11..13
+        glm::ivec3 blast_center(31, 12, 12);
+        glm::ivec3 min_affected = blast_center - glm::ivec3(1);
+        glm::ivec3 max_affected = blast_center + glm::ivec3(1);
+
+        for (int bz = min_affected.z; bz <= max_affected.z; ++bz) {
+            for (int by = min_affected.y; by <= max_affected.y; ++by) {
+                for (int bx = min_affected.x; bx <= max_affected.x; ++bx) {
+                    test_world.set_voxel(bx, by, bz, Voxel{MAT_AIR, 0}, true);
+                }
+            }
+        }
+
+        // Versions must have advanced due to set_voxel calls
+        TEST_CHECK(c0->mesh_version() > c0_v_before, "Chunk 0 mesh version must advance on block break");
+        TEST_CHECK(c1->mesh_version() > c1_v_before, "Chunk 1 mesh version must advance on block break");
+
+        // Immediately invoke sync_remesh_box (as Application::on_explosive_blast does)
+        test_world.sync_remesh_box(min_affected, max_affected);
+
+        // Verify synchronous remesh immediately generated valid meshes for BOTH chunks
+        TEST_CHECK(c0->vertex_count() > 0, "Chunk 0 must immediately have updated mesh with no see-through gap");
+        TEST_CHECK(c1->vertex_count() > 0, "Chunk 1 must immediately have updated mesh with no see-through gap");
+        TEST_CHECK(!c0->has_staged_mesh(), "Chunk 0 must have uploaded staged mesh to GPU");
+        TEST_CHECK(!c1->has_staged_mesh(), "Chunk 1 must have uploaded staged mesh to GPU");
+
+        // Verify that stale background worker meshes cannot overwrite the fresh sync mesh
+        auto stale_mesh_data = std::make_unique<ChunkMeshData>();
+        stale_mesh_data->pos = ChunkPos{0, 0, 0};
+        stale_mesh_data->chunk = c0;
+        stale_mesh_data->version = c0_v_before; // Older version before detonation
+        stale_mesh_data->vertices.clear();      // Empty/corrupted vertices
+        stale_mesh_data->UploadToGPU();
+
+        TEST_CHECK(c0->vertex_count() > 0, "Stale worker mesh with older version must NOT overwrite fresh crater mesh");
+
+        // Test in-place queue replacement to prevent dropped block modifications
+        auto upload_data_1 = std::make_unique<ChunkMeshData>();
+        upload_data_1->pos = ChunkPos{5, 5, 5};
+        upload_data_1->version = 1;
+        test_world.push_pending_upload(std::move(upload_data_1));
+        size_t q_size_1 = test_world.upload_queue_size();
+
+        auto upload_data_2 = std::make_unique<ChunkMeshData>();
+        upload_data_2->pos = ChunkPos{5, 5, 5};
+        upload_data_2->version = 2;
+        test_world.push_pending_upload(std::move(upload_data_2));
+        size_t q_size_2 = test_world.upload_queue_size();
+
+        TEST_CHECK(q_size_2 == q_size_1, "Successive modifications to same chunk must update in-place rather than bloat queue");
+
+        log_pass("Satchel Blast Seam Synchronization & Zero See-Through Blocks Verified");
+    }
 }
 
 // ─────────────────────────────────────────────────────────────

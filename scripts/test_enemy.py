@@ -156,11 +156,71 @@ def audit_runtime_log():
         print("[+] Log Audit CLEAN: Zero OpenGL errors or crashes detected.")
         return True
 
+LOAD_REPORT_JSON = "screenshots/enemy_load_report.json"
+LOAD_SCREENSHOT_PNG = "screenshots/enemy_load_test.png"
+
+def run_load_test():
+    print("\n" + "=" * 65)
+    print("  MULTI-MONSTER HORDE & VERTEX LOAD TEST (--test-enemy-load)")
+    print("=" * 65)
+    if not os.path.exists(ENGINE_EXE):
+        print(f"[!] Engine executable not found: {ENGINE_EXE}")
+        return False
+
+    print(f"[*] Launching {ENGINE_EXE} --test-enemy-load --mute...")
+    t0 = time.time()
+    try:
+        code, out, err = run_cmd([ENGINE_EXE, "--test-enemy-load", "--mute"], timeout=20)
+    except subprocess.TimeoutExpired:
+        print("[!] Multi-monster load test timed out after 20s!")
+        return False
+
+    dt = time.time() - t0
+    print(f"[*] Load test completed in {dt:.2f}s (Exit code: {code}).")
+
+    if not os.path.exists(LOAD_SCREENSHOT_PNG):
+        print(f"[!] Load test screenshot not generated: {LOAD_SCREENSHOT_PNG}")
+        return False
+
+    if not os.path.exists(LOAD_REPORT_JSON):
+        print(f"[!] Load test report not generated: {LOAD_REPORT_JSON}")
+        return False
+
+    with open(LOAD_REPORT_JSON, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    stalkers = data.get("stalker_count", 0)
+    burrowers = data.get("burrower_count", 0)
+    projectiles = data.get("projectile_count", 0)
+    carcasses = data.get("carcass_count", 0)
+    total_verts = data.get("total_monster_vertices", 0)
+    vbo_cap = data.get("vbo_capacity", 0)
+    status = data.get("status", "FAIL")
+
+    png_kb = os.path.getsize(LOAD_SCREENSHOT_PNG) / 1024.0
+
+    print(f"  Stalkers Staged:         {stalkers} (Melee, Shooter, Chitin Goliath)")
+    print(f"  Burrowers Staged:        {burrowers}")
+    print(f"  Void Spikes Active:      {projectiles}")
+    print(f"  Enemy Carcasses:         {carcasses}")
+    print(f"  Total Monster Vertices:  {total_verts:,} (exceeds legacy 16,384 cap)")
+    print(f"  Dynamic VBO Capacity:    {vbo_cap:,} vertices")
+    print(f"  Screenshot Generated:    {LOAD_SCREENSHOT_PNG} ({png_kb:.1f} KB)")
+    print(f"  Load Test Status:        {status}")
+
+    if status == "PASS" and total_verts > 16384 and vbo_cap >= total_verts:
+        print("[+] Anti-Invisibility Load Test PASSED: All monster meshes dynamically accommodated!")
+        return True
+    else:
+        print("[!] Load Test WARNING: Vertex capacity or status check failed.")
+        return False
+
 def main():
     parser = argparse.ArgumentParser(description="Voidfall Dredge Enemy Test Runner")
     parser.add_argument("--no-build", action="store_true", help="Skip CMake compilation")
     parser.add_argument("--unit-only", action="store_true", help="Run only C++ unit tests")
     parser.add_argument("--visual-only", action="store_true", help="Run only visual staging harness")
+    parser.add_argument("--load", action="store_true", help="Run multi-monster load test")
     args = parser.parse_args()
 
     t_start = time.time()
@@ -168,6 +228,15 @@ def main():
     if not args.no_build:
         if not build_enemy_targets():
             sys.exit(1)
+
+    if args.load:
+        ok = run_load_test()
+        audit_runtime_log()
+        total_time = time.time() - t_start
+        print("\n" + "=" * 65)
+        print(f"  ENEMY LOAD TEST COMPLETED IN {total_time:.2f}s (SUCCESS: {ok})")
+        print("=" * 65)
+        sys.exit(0 if ok else 1)
 
     unit_ok = True
     if not args.visual_only:

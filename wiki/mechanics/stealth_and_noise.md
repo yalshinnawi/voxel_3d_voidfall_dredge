@@ -118,8 +118,12 @@ Holding `Left Ctrl` engages Delver Stealth Stance, drastically altering subterra
   - Physical audible radius in cavern strata is reduced by **$-55\%$** (`STEALTH_SOUND_RADIUS_MUL = 0.45f`).
   - Footstep sounds during crouch walking become virtually imperceptible beyond $2.5\,\text{m}$.
   - The HUD Acoustic Meter displays `ACOUSTIC PROFILE // STEALTH (SUPPRESSED -65%)` in cyan/amber.
-- **Visual Concealment**:
-  - Delver optical detection radius in dark shadows drops from $10.0\,\text{m}$ to $5.2\,\text{m}$.
+- **Visual Concealment & Field-of-View Gating**:
+  - Delver optical detection radius drops to **$4.5\,\text{m}$** in darkness (**$6.0\,\text{m}$** if illuminated by headlamp beams, down from $22.0\,\text{m}$).
+  - Forward vision cone against crouching delvers is narrowed to $90^\circ$ ($45^\circ$ half-angle), allowing delvers to reliably exploit blind spots behind and beside enemies.
+  - Enemies cannot detect crouching delvers outside their forward vision cone, preventing detection through the back of an enemy's head regardless of cavern lighting.
+  - Roosting (dormant) fauna remain asleep when delvers sneak nearby, only awakening if physically bumped ($< 0.85\,\text{m}$) or directly illuminated within close visual range ($\le 6.0\,\text{m}$).
+  - Elevated ambient noise ($> 25\%$) is acoustically decoupled from crouching players, preventing artificial acoustic homing while sneaking.
 
 ### 7.2 Enemy Alertness Dissipation
 Subterranean fauna investigate acoustic disturbances, but delver stealth directly dissipates suspicion:
@@ -137,5 +141,13 @@ Striking an unalerted enemy (`is_unalerted() == true` — Idle, with no active p
   - Procedurally synthesized punch combining a downward frequency transient snap ($2800\,\text{Hz} \to 900\,\text{Hz}$), a deep $90\,\text{Hz}$ kinetic sub-punch, dual harmonic crystal chimes ($1480\,\text{Hz}$ / $2220\,\text{Hz}$), and a vital structural fracture crunch.
 - **HUD Feedback**:
   - Displays tactical notification: `<< SNEAK ATTACK CRITICAL HIT (3.0x DAMAGE) >>`.
-- **Alert Transition**:
-  - Surviving targets are immediately provoked into pursuit, preventing repeated sneak attacks on engaged targets.
+### 7.4 Dynamic Sneaking Challenge & Territory Patrol Zones
+The sneaking mechanism is significantly deepened by autonomous fauna roaming:
+- **Territory Bounded Patrols**:
+  - Rather than remaining frozen at static spawn nodes, enemies prowl through room-sized `PatrolZone` territories.
+  - Predators dynamically pathfind between ground-level waypoints, periodically stopping for vigilant inspection pauses.
+- **Sweeping Vision Cones**:
+  - While paused at waypoints, creatures actively rotate their gaze ($\pm 55^\circ$, `patrol_scan_yaw`), sweeping their $120^\circ$ forward vision cone across cavern corridors.
+  - Sneaking players cannot rely on enemies permanently facing away; they must anticipate sweeping scanning cycles and shadow their patrol paths.
+- **Roosting Slumber Awakening**:
+  - Roosting cave creatures possess slumber timers ($30\dots90\,\text{s}$). Once their slumber elapses, they drop to the floor to begin prowling, making long expeditions feel alive and ever-shifting.

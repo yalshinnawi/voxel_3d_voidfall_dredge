@@ -71,7 +71,8 @@ public:
         const glm::vec3& headlamp_dir,
         const glm::vec3& headlamp_color,
         bool headlamp_enabled,
-        float time = 0.0f
+        float time = 0.0f,
+        float darkness_factor = 0.0f
     );
 
     bool is_gpu_initialized() const { return m_gpu_initialized; }

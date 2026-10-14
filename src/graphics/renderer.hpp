@@ -100,6 +100,10 @@ public:
     void render_burrowers(const std::vector<SeismicBurrower>& burrowers);
     void render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts);
     void render_delver(const glm::vec3& pos, float yaw, CharacterClass cls, float anim_time = 0.0f);
+    void ensure_stalker_vbo_capacity(size_t required_verts);
+    void ensure_cable_vbo_capacity(size_t required_floats);
+    size_t stalker_vbo_capacity() const { return m_stalker_vbo_capacity; }
+    size_t cable_vbo_capacity() const { return m_cable_vbo_capacity; }
     void end_frame(float delta_time, float radiation_level = 0.0f, float shield_timer = 0.0f,
                    const glm::vec3& hazard_haze_color = glm::vec3(0.0f), float hazard_haze_factor = -1.0f);
 
@@ -168,6 +172,9 @@ public:
 
     void set_brightness(float b) { m_brightness = std::clamp(b, 0.4f, 2.5f); }
     float brightness() const { return m_brightness; }
+
+    void set_area_darkness(float darkness) { m_target_area_darkness = std::clamp(darkness, 0.0f, 1.0f); }
+    float area_darkness() const { return m_area_darkness; }
 
     void set_headlamp_flicker(float f) { m_headlamp_flicker = std::clamp(f, 0.0f, 1.0f); }
     float headlamp_flicker() const { return m_headlamp_flicker; }
@@ -252,10 +259,12 @@ private:
     // Grapple cable line
     unsigned int m_cable_vao{0};
     unsigned int m_cable_vbo{0};
+    size_t m_cable_vbo_capacity{16384};
 
     // Void Stalker 3D predator model buffers
     unsigned int m_stalker_vao{0};
     unsigned int m_stalker_vbo{0};
+    size_t m_stalker_vbo_capacity{65536};
     std::vector<float> m_stalker_staging_lines;
 
     // Break particles
@@ -268,6 +277,8 @@ private:
     int m_sector{1};
     float m_brightness{1.0f};
     float m_headlamp_flicker{0.0f};
+    float m_area_darkness{0.0f};
+    float m_target_area_darkness{0.0f};
 
     // Camera frustum culling
     std::array<glm::vec4, 6> m_frustum_planes{};

@@ -30,7 +30,7 @@ Voidfall Dredge features 30 meticulously handcrafted room archetypes categorized
 | **Mining Pillar Hall** | Sector 1+ | $24\times 12\times 24$ | 4 massive structural support columns with embedded vertical veins of `MAT_VOIDITE_CRYSTAL` and `MAT_TITANIUM`. | Arched stone balance bridge connecting columns at $y=room.floor\_y+4$. |
 | **Crystalline Geode** | Sector 1+ | $20\times 16\times 20$ | Hollow ellipsoidal geode grotto. Concave shell lined with emissive violet `MAT_VOIDITE_CRYSTAL`. Central towering crystal spire. | Perimeter stepping-stone ring suspended along the concave walls at $y=8$. |
 | **Terraced Quarry** | Sector 1+ | $22\times 14\times 22$ | 4-tiered stepped amphitheater excavation pit ($y=4, 6, 8$) with embedded titanium scrap seams. | Stepped terraces and diagonal ramps allowing fast sprint-climbing. |
-| **Industrial Vault Bunker** | Sector 2+ | $20\times 10\times 20$ | Pre-collapse research bunker with titanium wall panels. Sealed by reinforced vault blast door frames (`MAT_REINFORCED_VAULT_DOOR`). | Elevated perimeter catwalk mezzanine ($y=9$) accessible via corner ladder columns. |
+| **Industrial Vault Bunker** | Sector 2+ | $20\times 10\times 20$ | Pre-collapse research bunker with titanium wall panels. Sealed by reinforced blast door frames (`MAT_VOLCANIC_BASALT`, anchored). Authentic `MAT_REINFORCED_VAULT_DOOR` blocks are strictly reserved for genuine procedural Precursor Vaults containing treasure caches. | Elevated perimeter catwalk mezzanine ($y=9$) accessible via corner ladder columns. |
 | **Fault-Line Crevasse** | Sector 2+ | $22\times 12\times 22$ | Tectonic rift bisecting chamber down to bedrock ($y=1$). Toxic gas pockets (`MAT_GAS`) with green luminescence. | Narrow eroded natural stone bridge and overhead grapple anchor points. |
 | **Abyssal Vertical Chasm** | Sector 3 Exclusive | $22\times 24\times 22$ | 24-meter deep abyss with unstable hanging ceiling stalactites. Lethal drop hazard. | Spiral rock ledges ascending at $y=9, 14, 19$, requiring thruster hover and grapple tension climbing. |
 | **Radioactive Core Sanctuary** | Sector 3 Exclusive | $20\times 14\times 20$ | Dangerous chamber encircled by a moat of `MAT_RADIOACTIVE_ORE` (+24 Rad/s). Central dais with pure Voidite monolith. | Island hopping stepping stones over the irradiated mineral moat. |
@@ -449,5 +449,35 @@ To eliminate unnatural floating geometry, suspended specks, and disconnected clu
    - Larger ungrounded architectural features (bridges, ledges, platforms) are automatically connected to the nearest solid floor below via material-matched structural columns (`MAT_INDUSTRIAL_BULKHEAD` for man-made facilities, `MAT_VOLCANIC_BASALT` or `MAT_FRACTURED_GRANITE` for natural caverns, `MAT_PRECURSOR_STONE` for ancient ruins). If suspended over a bottomless void, they are suspended from solid cavern ceilings above.
 6. **Clutter Prop Surface Pruning**:
    - Decoration clutter meshes (`World::cleanup_all_disconnected_clutter`) verify their underlying support voxel; any prop whose host block is air or destroyed is automatically pruned.
+
+---
+
+## 13. Dark Zones & Blackout Caverns (Torch & Flare Illumination Mechanics)
+
+In deeper sectors and high-difficulty subterranean pockets, geological power grids fail, crystal luminescence is absent, and caverns plunge into **Pitch-Black Dark Zones** where player illumination tools (Exosuit Flashlight `[F]` and Throwable Chemical Flares `[T]`) are essential for survival:
+
+### 13.1 Progressive Sector Darkness Scaling
+The prevalence of blackout chambers scales dynamically with sector tier:
+- **Sector 1 (Perimeter Drift)**: Gentle introductory curve. ~15% chance for an isolated unpowered deep pocket; the majority of caverns feature radiant luminaries, crystal beds, and functional bulkhead lighting.
+- **Sector 2 (Volatile Fault)**: Moderate challenge. ~35%–45% of chambers are pitch-black dark zones. Bulkhead lights along corridors fail, and natural crystal luminescence fades.
+- **Sector 3+ (Void Cradle & Deep Sectors)**: Severe blackout caverns. ~65%–75% of all chambers are completely unlit, creating terrifying voids where flashlights and throwable chemical flares are mandatory.
+- **Immutable Safe Zones**: The **Spawn Staging Cavern** $(0, 0)$ and **Extraction Landing Bay** $(W-1, D-1)$ are unconditionally exempt from darkness scaling ($0.0$ darkness factor, 100% lit) across all seeds and sectors to guarantee safe staging and evacuation defense.
+
+### 13.2 Environmental & Shader Darkness Architecture
+1. **Complete Luminary Omission**:
+   - Dark zone chambers omit all decorative point lights (`CavernLuminary`), crystal geodes, glowing waterfalls, and ceiling starlight arrays.
+   - Corridors passing through dark zones omit electrical bulkhead clearance lights.
+   - Only high-hazard molten magma/lava pools retain thermal glow.
+2. **Zero Ambient Floor (`uDarknessFactor`)**:
+   - Standard subterranean voxels maintain a baseline ambient bounce. When delvers enter a dark zone, the renderer interpolates `uDarknessFactor` from $0.0 \to 1.0$, completely extinguishing subterranean ambient floor light in `voxel_pbr.frag`, `clutter.frag`, and `stalker.frag`.
+   - Distant volumetric fog and depth haze (`postprocess.frag`) fade from subtle blue/violet mist into an inky black abyss.
+
+### 13.3 Gameplay & Tactical Impact
+- **Predator Camouflage & Flare Revelation**:
+  - Hostile predators like the **Void Stalker** blend seamlessly into the shadows in dark zones.
+  - In addition to the exosuit headlamp cone, the AI perception system actively tracks all deployed **Chemical Flares** (`FlareManager::flares()`). Throwing a flare (`[T]`) illuminates monsters within its 22m radius, instantly exposing stalkers and triggering light evasion or combat reactions.
+- **HUD Telemetry & Caution Advisories**:
+  - Entering a pitch-black zone (`darkness >= 0.75`) without headlamp illumination or active flares triggers an automated suit warning toast:
+    `[DARK ZONE: ZERO LUMENS - DEPLOY FLARES [T] / HEADLAMP [F]]`.
 
 

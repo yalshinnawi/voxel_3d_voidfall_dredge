@@ -83,6 +83,7 @@ uniform PointLight uPointLights[MAX_POINT_LIGHTS];
 // Sector biomes & animation
 uniform float uTime;
 uniform int uSector;
+uniform float uDarknessFactor;
 
 // Standard Material Tiers
 const uint MAT_AIR                 = 0u;
@@ -704,10 +705,11 @@ void main() {
         baseSubterraneanAmbient = vec3(0.007, 0.020, 0.011); // Toxic Vault
     }
 
-    // Unpack Baked Vertex AO
+    // Unpack Baked Vertex AO & apply area darkness factor (in dark zones, ambient drops to zero)
     const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
     uint aoIndex = clamp(vAOIndex, 0u, 3u);
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * aoTable[aoIndex];
+    float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * aoTable[aoIndex] * darknessMult;
 
     vec3 finalColor = ambient + Lo + emissive;
 

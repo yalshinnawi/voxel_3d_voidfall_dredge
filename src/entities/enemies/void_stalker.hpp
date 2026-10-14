@@ -10,6 +10,7 @@
 namespace Voidfall {
 
 class World;
+struct SeismicBurrower;
 
 // StalkerState and AIState behavioral enums are defined in aberrant_ai.hpp
 
@@ -60,6 +61,25 @@ struct VoidStalker {
     float stun_timer{0.0f};
     float projectile_cooldown{1.2f};// Cooldown for ranged void spine attacks (Shooter only)
     float slash_fx_timer{0.0f};     // Visual claw swipe arc duration
+    float spike_damage_timer{0.0f}; // Internal debounce timer for puncture spikes
+    bool is_in_lava{false};         // True when touching or submerged in molten thermite slag / lava
+    bool is_in_hazard{false};       // True when in any damaging environmental hazard (lava, acid, spikes)
+
+    // Boss Combat System (Chitin Goliath Apex Vault Guardian)
+    float boss_slam_cooldown{2.0f};   // Cooldown for titanic seismic ground slam
+    float boss_charge_cooldown{4.5f}; // Cooldown for juggernaut kinetic ram charge
+    float boss_quill_cooldown{3.5f};  // Cooldown for anti-perch / anti-kiting carapace quill volley
+    float boss_charge_timer{0.0f};    // Active duration of ongoing kinetic ram charge
+    glm::vec3 boss_charge_dir{0.0f};  // Direction vector of ongoing kinetic ram charge
+    float boss_attack_windup{0.0f};   // Telegraph windup duration for slam / charge
+    bool is_enraged{false};           // Triggered at <= 50% HP (Apex Frenzy Phase 2)
+    bool just_enraged{false};         // One-shot frame trigger for entering frenzy
+    bool just_slammed{false};         // One-shot frame trigger for seismic slam impact
+    bool just_charged{false};         // One-shot frame trigger for kinetic ram charge initiation
+    bool just_boss_roared{false};     // One-shot frame trigger for terrifying battle roar
+    float cleave_damage{36.0f};       // Heavy scythe claw melee swipe damage
+    float slam_damage{30.0f};         // Seismic ground slam AOE shockwave damage
+    float charge_damage{45.0f};       // Unstoppable kinetic ram charge impact damage
 
     // Acoustic Sound & Investigation
     glm::vec3 investigation_target{0.0f}; // 3D position of heard noise disturbance
@@ -69,10 +89,50 @@ struct VoidStalker {
     float lost_los_timer{0.0f};           // Seconds elapsed since player broke line-of-sight
     glm::vec3 last_seen_player_pos{0.0f}; // Last known player coordinates
 
-    // Ambient Patrol & Roaming
+    // Ambient Patrol, Roaming & Territory Zones
     glm::vec3 patrol_anchor{0.0f};  // Home cavern chamber anchor point
     glm::vec3 patrol_waypoint{0.0f};// Current roaming destination
     float patrol_timer{0.0f};       // Timer to pick next prowl waypoint
+    PatrolZone patrol_zone;         // Assigned chamber / sector patrol territory
+    bool has_patrol_zone{false};    // Whether creature is bound to a specific territory zone
+    std::vector<glm::vec3> patrol_waypoints; // Circuit waypoints inside territory
+    size_t patrol_waypoint_idx{0};  // Index of active patrol destination
+    float patrol_pause_timer{0.0f}; // Vigilant scan pause at waypoint
+    float patrol_scan_yaw{0.0f};    // Visual sweep angle during waypoint pause
+    float patrol_scan_interval{0.0f}; // Glance cadence between angle sweeps
+    float slumber_timer{25.0f};     // Autonomous waking countdown for roosting fauna
+
+    void set_patrol_zone(const PatrolZone& zone) {
+        patrol_zone = zone;
+        has_patrol_zone = true;
+        patrol_anchor = zone.center;
+        patrol_waypoints = zone.waypoints;
+        patrol_waypoint_idx = 0;
+        if (!patrol_waypoints.empty()) {
+            patrol_waypoint = patrol_waypoints[0];
+        } else {
+            patrol_waypoint = zone.center;
+        }
+    }
+
+    void assign_patrol_zone(const glm::vec3& center, float radius) {
+        PatrolZone z;
+        z.center = center;
+        z.radius = radius;
+        z.has_bounds = false;
+        set_patrol_zone(z);
+    }
+
+    void assign_patrol_zone(const glm::vec3& center, const glm::vec3& bmin, const glm::vec3& bmax, int zone_id = -1) {
+        PatrolZone z;
+        z.zone_id = zone_id;
+        z.center = center;
+        z.bounds_min = bmin;
+        z.bounds_max = bmax;
+        z.has_bounds = true;
+        z.radius = std::max(bmax.x - bmin.x, bmax.z - bmin.z) * 0.5f;
+        set_patrol_zone(z);
+    }
 
     // Perception & Retaliation Pursuit
     float detection_range{18.0f};   // Range at which stalker notices player
@@ -117,6 +177,34 @@ struct VoidStalker {
     float spawn_grace_timer{0.0f};          // Initial spawn dormancy grace window (set by spawn_roosting)
     StalkerAnimationController anim_controller;
 
+    // Alternate Route Navigation (When behind a wall / obstructed during attack)
+    bool is_wall_obstructed{false};           // Determined that a wall is blocking direct path to target
+    AlternateRouteType route_type{AlternateRouteType::None};
+    std::vector<glm::vec3> alternate_route;   // Waypoints for detour around wall
+    size_t current_route_index{0};            // Active waypoint index along route
+    float route_repath_timer{0.0f};           // Cooldown before re-evaluating alternate routes (0.5s - 1.0s)
+    glm::vec3 route_target_pos{0.0f};         // Player/target position when route was calculated
+    float wall_stuck_timer{0.0f};             // Timer tracking lack of progress into wall
+
+    bool has_active_alternate_route() const {
+        return !alternate_route.empty() && current_route_index < alternate_route.size();
+    }
+
+    void clear_alternate_route() {
+        alternate_route.clear();
+        current_route_index = 0;
+        route_type = AlternateRouteType::None;
+        is_wall_obstructed = false;
+        wall_stuck_timer = 0.0f;
+    }
+
+    glm::vec3 get_active_route_target() const {
+        if (has_active_alternate_route()) {
+            return alternate_route[current_route_index];
+        }
+        return target_pos;
+    }
+
     // Helper references & accessors
     const glm::quat& current_rotation() const { return m_currentRotation; }
     const glm::vec3& target_up_vector() const { return m_targetUpVector; }
@@ -142,6 +230,11 @@ struct VoidStalker {
     bool just_fired_spine{false};
     bool just_died{false};
     bool just_emerged{false};       // Successfully finished physical emergence animation into cavern
+    bool just_stepped{false};       // Triggered footstep locomotion audio this frame
+    bool step_is_run{false};        // Whether the step is running/sprinting vs walking
+    float footstep_timer{0.0f};     // Cadence accumulator for walking/running
+    float step_volume{1.0f};        // Proximity-adaptive footstep volume
+    float step_pitch{1.0f};         // Dynamic organic footstep pitch
 
     // Death Animation Collapse & Ragdoll Settling
     float death_timer{0.0f};
@@ -167,6 +260,7 @@ struct VoidStalker {
     bool is_melee() const { return role == StalkerRole::Melee; }
     bool is_shooter() const { return role == StalkerRole::Shooter; }
     bool is_goliath() const { return role == StalkerRole::ChitinGoliath; }
+    bool is_boss() const { return role == StalkerRole::ChitinGoliath; }
 
     /// Visual awareness classification for overhead indicators
     bool is_investigating_state() const {
@@ -177,7 +271,9 @@ struct VoidStalker {
         return !is_dead() && !is_dying() && (state == StalkerState::Stalking ||
                                              state == StalkerState::Circling ||
                                              state == StalkerState::Lunging ||
-                                             (role == StalkerRole::Shooter && has_player_los));
+                                             state == StalkerState::GroundSlam ||
+                                             state == StalkerState::Charging ||
+                                             (role == StalkerRole::Shooter && has_player_los && state != StalkerState::Roosting));
     }
 
     /// Forward facing direction in 3D world space (aligned with surface normal and yaw)
@@ -212,6 +308,12 @@ struct VoidStalker {
         }
 
         if (role == StalkerRole::ChitinGoliath) {
+            if (is_enraged) {
+                return glm::vec4(1.0f, 0.12f, 0.05f, 1.0f); // Infernal blazing crimson enrage
+            }
+            if (state == StalkerState::GroundSlam || state == StalkerState::Charging) {
+                return glm::vec4(1.0f, 0.35f, 0.05f, 1.0f); // Blazing magma charge/slam core
+            }
             return glm::vec4(1.0f, 0.65f, 0.05f, 1.0f); // Molten amber-gold heavy core
         } else if (role == StalkerRole::Shooter) {
             // Dedicated Toxic Emerald Green for Shooter Archetype
@@ -252,7 +354,6 @@ enum class EnemyAwarenessMarkerType : uint8_t {
 inline EnemyAwarenessMarkerType get_awareness_marker_type(const VoidStalker& s) {
     if (s.is_engaged_state()) return EnemyAwarenessMarkerType::RedTriangle;
     if (s.is_investigating_state()) return EnemyAwarenessMarkerType::YellowExclamation;
-    if (s.is_emerging()) return EnemyAwarenessMarkerType::YellowExclamation;
     return EnemyAwarenessMarkerType::None;
 }
 
@@ -273,6 +374,9 @@ public:
     /// Spawn an ambient prowling stalker inhabiting a distant cavern chamber
     void spawn_ambient_stalker(const glm::vec3& room_center, const World& world);
 
+    /// Assign territory patrol zones to all active stalkers using world room geometry
+    void assign_patrol_zones_from_world(const World& world);
+
     /// Spawn a wave of stalkers around the player (called by NoiseMeter)
     void spawn_wave(const glm::vec3& player_pos, int count, const World& world, bool emerging = true);
 
@@ -290,6 +394,13 @@ public:
         bool any_screech{false};         // True if any stalker emitted an echoing screech
         bool any_chitter{false};         // True if any stalker clicked/chittered in the dark
         bool any_digging{false};         // True if any stalker made drilling/digging noises into walls
+        bool any_boss_slam{false};       // True if boss monster executed a seismic ground slam
+        bool any_boss_charge{false};     // True if boss monster executed a kinetic ram charge
+        bool any_boss_roar{false};       // True if boss monster emitted an apex battle roar
+        bool any_step{false};            // True if any stalker stepped this frame
+        bool any_run_step{false};        // True if any stalker ran/sprinted this frame
+        bool any_goliath_step{false};    // True if boss goliath executed an armored stomp
+        glm::vec3 boss_slam_pos{0.0f};   // Epicenter coordinates of ground slam
         std::vector<glm::vec3> digging_positions;
     };
 
@@ -315,7 +426,8 @@ public:
                          bool allow_crit = false, bool* out_is_crit = nullptr,
                          float* out_damage_dealt = nullptr,
                          const glm::vec3* attacker_pos = nullptr,
-                         const glm::vec3* shot_direction = nullptr);
+                         const glm::vec3* shot_direction = nullptr,
+                         float boss_damage_multiplier = 1.0f);
 
     /// Get all active stalkers (for rendering)
     const std::vector<VoidStalker>& stalkers() const { return m_stalkers; }
@@ -358,6 +470,9 @@ public:
 
     /// Get active spatial hash grid for swarm entities
     const AISpatialHash& spatial_hash() const { return m_spatial_hash; }
+
+    /// Mutual hard depenetration solver between Void Stalkers and Seismic Burrowers
+    void resolve_burrower_penetrations(std::vector<SeismicBurrower>& burrowers, const World& world);
 
 private:
     /// Find a valid spawn position near target (on a wall/ceiling) with minimum separation

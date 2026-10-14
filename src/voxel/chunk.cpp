@@ -39,6 +39,7 @@ void Chunk::set_voxel(int x, int y, int z, Voxel v) {
     m_voxels[idx] = v;
     mark_mesh_dirty();
     mark_structural_dirty();
+    m_mesh_version.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Chunk::set_voxel_idx(size_t idx, Voxel v) {
@@ -55,6 +56,7 @@ void Chunk::set_voxel_idx(size_t idx, Voxel v) {
     m_voxels[idx] = v;
     mark_mesh_dirty();
     mark_structural_dirty();
+    m_mesh_version.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Chunk::stage_mesh(std::vector<PackedVoxelVertex>&& vertices) {

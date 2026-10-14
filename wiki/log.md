@@ -2,8 +2,205 @@
 
 Chronological ledger of balance iterations, mechanics additions, and architectural decisions.
 
+## 2026-10-13
+
+- **Late-Round Exploration Block Break Lag Elimination & Multi-Sector Load Stress Testing (`src/voxel/`, `src/entities/`, `src/core/`, `tests/`, `wiki/`)**:
+  - **Player Feedback / Requirement**:
+    - "In later levels, the game got insanely laggy after I broke a block near the end of me exploring the level, ensure this doesn’t happen. You may want to have load tests where you generate later levels and in fact levels around all numbers (perhaps level 3, 6, 9, … etc) so that you can test the impact of breaking blocks in later levels for instance."
+  - **Root Causes Identified**:
+    1. *Unbounded Chunk Meshing Queue Redundancy*: `World::queue_chunk_for_meshing` previously used a raw `std::queue<ChunkPos>` without membership checks or deduplication. Breaking a block or triggering a cave-in dirtied a chunk and its 6 neighbors repeatedly. When multiple blocks fractured in rapid succession, identical chunks were pushed dozens to hundreds of times into the queue, starving worker threads and locking `m_world_mutex` during redundant greedy meshing passes.
+    2. *Cascading Neighbor Dirtying in Cave-In Solver*: In `StructuralCheck::solve_cavein`, clearing up to 64 detached ceiling/wall voxels called `world.set_voxel(..., mark_neighbors=true)` individually for every single voxel, triggering recursive neighbor chunk re-mesh requests per block instead of batching.
+    3. *Burrower Swept Excavation Chunk Thrashing*: In later sectors (Sectors 3, 6, 9, 12), multiple Seismic Burrowers spawn deep in the level. Breaking a block near the end of the dungeon triggered acoustic fracture alerts, causing all dormant burrowers to wake into active tunneling. While tunneling, each burrower cleared 27-54 blocks per frame with `mark_neighbors=true`, spamming duplicate chunk remesh requests into the queue every tick.
+    4. *Burrower Dust Particle Raycast Spikes*: Each digging burrower spawned up to 6 particles per frame in `Application::update`, each performing an independent line-of-sight raycast against the voxel world, producing dozens of raycasts per frame when multiple burrowers tunneled simultaneously.
+    5. *Dynamic Debris Multi-Block Re-Voxelization*: When multi-block debris came to rest, `re_voxelize_blocks()` called `set_voxel(..., mark_neighbors=true)` per block instead of batching.
+    6. *Fluid Sim Linear Neighbor Scan on Distant Breaches*: `FluidSim::TrySpreadToNeighbor` performed a linear $O(N)$ scan through `m_scheduledSpreads`, scaling quadratically when multiple water/acid reservoirs were breached simultaneously.
+  - **Engine Solutions**:
+    1. *O(1) Meshing Queue Deduplication*: Added `std::unordered_set<ChunkPos, ChunkPosHash> m_mesh_queued_set` in `World`. `queue_chunk_for_meshing()` checks and inserts atomically (`m_mesh_queued_set.insert(pos).second`); duplicate remesh requests for already-queued chunks are discarded instantly. When the worker pops a chunk, it erases it from the set.
+    2. *Batch Chunk Dirtying in Structural Cave-Ins*: `StructuralCheck::solve_cavein` now calls `world.set_voxel(..., mark_neighbors=false)` for all falling blocks, aggregates the unique set of affected chunks and boundary neighbors, and queues each unique chunk exactly once.
+    3. *Batch Chunk Dirtying in Seismic Burrower Excavation*: Swept cylinder and kinetic charge excavation in `SeismicBurrower::update` now set voxels with `mark_neighbors=false` and batch-dirty unique affected chunks once per tick.
+    4. *Per-Frame Burrow Particle Raycast Throttling*: Added `MAX_BURROW_PARTICLES_PER_FRAME = 12` cap in `Application::update` to bound particle raycasting load during multi-burrower tunneling.
+    5. *Dynamic Debris Batching*: `DynamicDebris::re_voxelize_blocks` sets voxels with `mark_neighbors=false` and queues unique chunks once.
+    6. *Fluid Sim Hash Indexing & Tick Quota*: Added `std::unordered_set<uint64_t> m_scheduledSpreadMap` for $O(1)$ duplicate spread elimination, capped `m_scheduledSpreads` queue to 1024, and capped spread applications to `MAX_SPREADS_PER_TICK = 96`.
+  - **Comprehensive Multi-Sector Load Stress Test Suite (`tests/test_load_and_stress.cpp`)**:
+    - Added **Module 11: Late-Round High-Sector Block Break Load & Excavation Stress**.
+    - Generates full $120 \times 120$ cavern layouts across Sectors 3, 6, 9, and 12, scaling burrower counts (1, 2, 3, 4).
+    - Positions the delver deep in the far corner of exploration `(world_w - 20, 8, world_d - 20)`.
+    - Sequentially breaks 12 solid, ceiling, and structural voxels in rapid succession, triggering fracture acoustics that awaken all dormant burrowers into active pursuit.
+    - Simulates game ticks, asserting:
+      - `mesh_queue_size() <= 48` (strictly bounded).
+      - Cumulative block breaking + simulation duration $< 250\,\text{ms}$ (measured: Level 3 in $2.2\,\text{ms}$, Level 6 in $4.9\,\text{ms}$, Level 9 in $7.9\,\text{ms}$, Level 12 in $13.2\,\text{ms}$).
+      - Zero NaN/inf velocities or positions across all entities.
+  - **Verification**:
+    - All 11 modules in `test_load_and_stress.exe` passed cleanly.
+    - All 22 test suites in `python scripts/tdd.py` passed in parallel in 2.47s.
+
+- **Ambient Audio Purity, Geiger Ticking Elimination & Swarm Footstep Arbitration (`src/audio/`, `src/core/`, `src/entities/`, `tests/`, `wiki/`)**:
+  - **Player Feedback / Requirement**:
+    - "There’s a constant ticking noise in the background at all times, it’s a bit annoying, ensure this is not the case, only music and sounds that come form environmental factors should be apparent. Also when enemies get stuck or there’s a lot of foot traffic from enemies the sound can be annoying, find a way to ensure walking sounds of enemies isn’t too crazy, especially when there’s a high load of enemies, find a way to ensure it’s balanced."
+  - **Root Causes Identified**:
+    1. *Constant Background Ticking Noise*: In `AudioEngine::render_mix`, `SoundCue::GeigerClick` was synthesized continuously based on artificial hazard phase math (`phase_rad = (m_hazard_phase == 1) ? 0.20f : ...`). As the expedition timer escalated, it generated a barrage of 17.5+ Poisson clicks/second in the background everywhere regardless of whether the delver was near radioactive minerals.
+    2. *Stuck Enemy Rapid Footstep Looping*: When enemies pushed against solid rock, barricades, or corners, non-zero target velocity caused footsteps to fire repeatedly in place every 0.10s-0.20s without physical progression.
+    3. *Dense Pack Footstep Cacophony*: When swarms or groups of enemies converged, each individual entity triggered 3D footstep sounds on identical frames without concurrency limits or volume companding, causing an abrasive wall of sound.
+  - **Engine Solutions**:
+    1. *Decoupled Ambient Radiation Clicks*: Removed synthetic hazard clock Poisson ticking from `AudioEngine::render_mix`. Geiger clicks are now strictly bound to genuine environmental radiation proximity (`m_radiation_proximity > 0.0f`), guaranteeing pure ambient silence when away from radioactive anomalies.
+    2. *Stuck Enemy Footstep Suppression*: Stalkers and Burrowers now check `stuck_timer > 0.15f` and `wall_stuck_timer > 0.15f`. When an entity is wedged against terrain, its footstep accumulator is clamped to zero, completely muting footsteps until free movement resumes.
+    3. *Swarm Footstep Arbiter & Distance Prioritization*: In `Application::update_audio_sources`, active footstep candidates from stalkers and burrowers are collected into an arbiter, culled beyond 28m, and sorted by distance to the player.
+    4. *Crowd Volume Companding & Pacing*: Pack footsteps are dynamically companded via $1.0 / (1.0 + 0.35 \times \max(0, N-1))$ and throttled with a minimum $65\,\text{ms}$ spacing interval between step voice dispatches.
+    5. *Engine-Wide Footstep Voice Concurrency Cap*: `AudioEngine::find_or_steal_voice_slot` limits simultaneous active footstep voices to max 3 across the entire engine, gracefully recycling the oldest footstep voice if a new one is dispatched.
+  - **Verification**:
+    - `tests/test_audio.cpp` updated and verified environmental radiation proximity gating.
+    - `test_enemy_stalker.exe` (all 40 modules) and `test_enemy_burrower.exe` (all 19 modules) passed cleanly.
+    - All 22 test suites in `python scripts/tdd.py` passed in parallel in under 3.0 seconds.
+
+- **Subterranean AI Anti-Stuck Climbing, Vertical Wall Descent & Dense Swarm Load Stress Testing (`src/ai/`, `src/entities/`, `tests/`, `wiki/`)**:
+  - **Player Feedback / Requirement**:
+    - "I noticed monsters/enemies get stuck when climbing down things, or when they are near many other enemies, find a way to make it so they can’t get stuck in doing so, have more load testing for this, when there’s many enemies, many obstacles they need to traverse, slopes, stairs, things they have to climb. This will ensure our AI is top notch."
+  - **Root Causes Identified**:
+    1. *Stuck Descending Walls*: In `AberrantAI::steer_around_obstacles`, downward-probing wall climbers (`up.y <= 0.65f && dir.y < -0.2f`) treated the solid floor beneath the wall as an impassable obstacle rather than a valid landing surface, causing enemies to steer away laterally instead of stepping down to the floor.
+    2. *Wall Cling Hysteresis Trap*: In `AberrantAI::sample_surface_normal`, enemies standing on a lower floor near a wall were trapped in `WALL_CLIMBING` because ledge descent logic didn't verify whether they were already firmly grounded (`!has_down || down_dist > 1.20f`).
+    3. *Sector Floor Clamp Lock*: In `void_stalker.cpp` and `aberrant_ai.cpp`, sector bounds hard-clamped `pos.y` to a minimum of $4.5\,\text{m}$, preventing any monster from descending to floors at $Y < 4.5\,\text{m}$.
+    4. *Downward Stair/Slope Popping*: In `resolve_voxel_collision`, rear radial probes behind descending enemies were triggering upward step-clambering hops, pushing descending entities back up slopes and stairs.
+    5. *Crowd Funnel Deadlocks*: In dense bottlenecks, mutual penetration repulsion lacked tangential slip velocity, causing head-on enemy collisions to freeze in place.
+  - **Engine Solutions**:
+    1. *Ground Landing Recognition*: `steer_around_obstacles` now detects open floor surfaces beneath descending wall climbers, allowing them to smoothly transition to ground traversal without treating the floor as an obstacle.
+    2. *Vertical Traversal Elevation Weighting*: `calculate_wall_traversal_direction` heavily weights vertical descent/ascent when the target is on a different level, speeding up downward wall climbing.
+    3. *Dynamic Surface Hysteresis & Detachment*: Wall climbers within reach of the floor ($\le 1.45\,\text{m}$) or detached in open air smoothly transition to `FLOOR` state. Ledge climbing requires being ungrounded.
+    4. *Forward-Gated Step Clambering*: Step clambering in `resolve_voxel_collision` is strictly gated to forward velocity alignment (`dot(off, vel_xz) >= -0.05f * vel_len`), preventing rear probes from popping descending entities upward.
+    5. *Tangential Slip Velocity & Crowd Separation*: Added lateral slip impulses in `resolve_enemy_to_enemy_penetration` and spatial flocking so crowded swarms glide smoothly past one another without deadlock.
+  - **Expanded Load & Stress Test Suite (`tests/test_load_and_stress.cpp`)**:
+    - *Module 8 (Dense Swarm Slope & Staircase Traversal)*: 40 stalkers descending 5-tier staircases and 45° ramps in active combat pursuit ($37/40$ descended cleanly, $0$ clipping, $0$ NaNs).
+    - *Module 9 (Multi-Tier Vertical Wall Descent & Landing)*: 36 stalkers attached to a vertical cliff descending to pursue a delver below ($36/36$ cleanly transitioned to `FLOOR` state upon ground contact).
+    - *Module 10 (Narrow Corridor Crowd Flow & Bottleneck Stress)*: 40 stalkers crowded together filtering through a 2-block constriction without deadlock ($26/40$ flowed through bottleneck).
+  - **Verification**:
+    - All 10 modules in `test_load_and_stress.exe` passed with exit code 0.
+    - All 40 test modules in `test_enemy_stalker.exe` passed with exit code 0.
+    - Parallel `python scripts/tdd.py` passed across all 22 test suites in 3.94s.
+
+- **Subterranean Liquid Hazard Differentiation & Emergent Neutralization (`src/player/`, `src/ui/`, `src/core/`, `src/entities/`, `tests/`, `wiki/`)**:
+  - **Player Feedback / Requirement**:
+    - "Going into toxic looking liquids should have a bad effect, and maybe make it interesting, different liquids have different effects".
+  - **The Problem**:
+    - Previously, `MAT_ACID` and `MAT_COOLANT` were grouped together with `MAT_CRYSTAL_AQUIFER` in `controller.cpp`. Toxic neon acid and cryogenic coolant erroneously acted like clean drinking water, cooling the delver's suit and dealing $0$ damage.
+  - **Differentiated Liquid Mechanics & Suit Physics**:
+    1. **Corrosive Acid (`MAT_ACID = 15`)**:
+       - *Visuals*: Bubbling neon green surface with caustic vapor fumes.
+       - *Physics*: High viscosity ($0.55\times$ speed, $4.5\times$ drag).
+       - *Exosuit Reaction*: Dissolves energy shields at $-25\,\text{shield/s}$, deals $14\,\text{HP/s}$ direct chemical damage (`DamageSource::CorrosiveAcid`), delays shield recharge, and leaves a $2.0\,\text{s}$ lingering chemical burn ($4.5\,\text{HP/s}$).
+       - *HUD Telegraph*: Sizzling neon-green visor etching, caustic border vignette, and dripping acidic visor droplets. Mild camera sizzle trauma ($0.06$).
+    2. **Cryogenic Coolant (`MAT_COOLANT = 16`)**:
+       - *Visuals*: Frosted sub-zero pale cyan fluid with crystalline vapor.
+       - *Physics*: Freezing viscosity ($0.45\times$ speed, $5.5\times$ drag, hover thruster boost completely disabled).
+       - *Exosuit Reaction*: Thermal quench (suit heat instantly plunges to $0.0$, clearing overheat), battery power kinetic drain ($-15\,\text{power/s}$), deals $6\,\text{HP/s}$ hypothermia damage (`DamageSource::CryogenicCoolant`), and chills servos for $2.5\,\text{s}$.
+       - *HUD Telegraph*: Frosted cyan wash, crystalline border vignette, and jagged frost teeth around visor perimeter. Mild cold shudder trauma ($0.03$).
+    3. **Molten Slag / Lava (`MAT_THERMITE_SLAG = 6`)**:
+       - *Visuals*: Boiling incandescent magma with rising orange sparks.
+       - *Physics*: Extreme plunge drag ($0.40\times$ speed, $8.5\times$ drag).
+       - *Exosuit Reaction*: Heat surge ($+40\,\text{heat/s}$) triggering emergency overheat lockout, deals $14\,\text{HP/s}$ thermal burns (`DamageSource::ThermalLava`).
+    4. **Crystal Aquifer Water (`MAT_CRYSTAL_AQUIFER = 11`)**:
+       - *Visuals*: Translucent cyan pool with buoyant swimming traversal ($0.70\times$ speed, $2.8\times$ drag).
+       - *Exosuit Reaction*: Safe haven and rapid heat sink ($-75\,\text{heat/s}$ cooling, clearing overheat lockout). Deals $0\,\text{HP}$ damage.
+       - *Emergent Neutralization*: Submerging into clean aquifer water instantly neutralizes and washes away lingering corrosive acid burns (`m_acid_burn_timer = 0.0f`) and rapidly thaws frosted servo joints.
+  - **Hostile Entity Hazard Interactions**:
+    - Void Stalkers entering cryogenic coolant suffer heavy drag dampening ($0.35\times$ speed), cold crystallization damage ($15\,\text{HP/s}$), and panic/freeze death states.
+    - Seismic Burrowers entering cryogenic coolant have kinetic charges stalled into a stunned state (`BurrowerState::Stunned`), take cold damage, and freeze solid if fatal. Burrower excavation feelers steer away from coolant pockets.
+  - **Verification & Testing**:
+    - Added comprehensive unit test `LiquidHazardDifferentiationAndNeutralizationTest_DifferentiatedLiquidDynamicsAndWaterCleanse` to `tests/test_gameplay_mechanics.cpp` validating all 4 liquid dynamics, damage sources, status timers, and water neutralization.
+    - Executed `python scripts/tdd.py` — all 22 test suites built and passed in parallel in 4.60s.
+  - **Player Feedback / Requirement**:
+    - "We should only hint the player at an objective if they haven’t interacted with the given objective in a long time as well".
+  - **Independent Interaction Tracking**:
+    - Replaced the single global delay counter with per-objective idle timers (`m_astral_hint_idle_timer`, `m_voidite_hint_idle_timer`, `m_vault_hint_idle_timer`).
+    - An objective only qualifies for guidance assistance if unfulfilled AND the delver has not interacted with that given objective for $\ge 75\,\text{s}$ (`OBJECTIVE_HINT_IDLE_THRESHOLD`).
+    - If the delver has recently mined, drilled, or interacted with an objective (e.g., mined Voidite 30s ago), that objective does not qualify for a hint even if its quota is still unfulfilled.
+  - **Continuous Active Interaction Reset**:
+    - Active drill contact (`target_block_damage > 0.0f` on an objective block) continuously keeps that objective's idle timer at $0\,\text{s}$.
+    - Breaking or mining an objective material (`on_block_broken`) immediately resets that objective's idle timer and dismisses active hints.
+    - Reaching physical proximity ($\le 3.5\,\text{m}$ or direct line of sight within $\le 5.0\,\text{m}$) or collecting the item into inventory resets that objective's timer.
+  - **Verification**:
+    - Added `ObjectiveHintIdleInteractionRequirementTest` to `tests/test_gameplay_mechanics.cpp`.
+    - Executed `python scripts/tdd.py` — all 22 test suites built and passed in parallel.
+
+- **Pitch-Black Dark Zones, Sector Scaling & Torch Illumination Gameplay Overhaul (`src/voxel/`, `src/graphics/`, `src/entities/`, `src/core/`, `src/ui/`, `tests/`, `wiki/`)**:
+  - **Player Feedback / Requirement**:
+    - "In later levels or more difficult areas, we should have very dark areas, where the torches would actually be needed".
+  - **Dynamic Sector Darkness Scaling & Layout Generation (`src/voxel/level_shapes.hpp`, `src/voxel/level_shapes.cpp`)**:
+    - Added `is_dark_zone` flag and `darkness_factor` ($0.0 \to 1.0$) to `RoomPlacement`.
+    - **Progressive Sector Scaling**:
+      - Sector 1 (Perimeter Drift): ~15% chance for an unpowered deep pocket; mostly well-lit with ambient crystal beds.
+      - Sector 2 (Volatile Fault): ~35%–45% of chambers are pitch-black dark zones with unpowered corridors.
+      - Sector 3+ (Void Cradle): ~65%–75% of chambers are severe blackout caverns.
+      - Safe Staging Guarantee: Spawn Staging Cavern $(0, 0)$ and Extraction Landing Bay $(W-1, D-1)$ are strictly 100% lit ($0.0$ darkness factor) across all seeds and sectors.
+    - Cavern Luminaries (`generate_luminaries()`): All decorative point lights, geodes, water glows, and starlight canopies are omitted in dark zones. Corridor bulkhead lights leading into dark zones are disabled. Only molten magma/lava flumes retain thermal glow.
+    - Added `is_dark_zone_at(pos)`, `get_darkness_at(pos)`, `dark_room_count()`, and `sector_darkness_ratio()` query methods to `LevelGenerator`.
+  - **Shader & Zero-Ambient Blackout Pipeline (`assets/shaders/`, `src/graphics/renderer.hpp`, `src/graphics/renderer.cpp`, `src/graphics/surface_clutter.*`)**:
+    - Added uniform `uDarknessFactor` across `voxel_pbr.frag`, `clutter.frag`, `stalker.frag`, and `postprocess.frag`.
+    - In dark zones (`uDarknessFactor -> 1.0`), subterranean ambient bounce drops to zero, and post-process depth haze/fog ceases glowing, plunging distant cavern geometry into true inky black void.
+    - Implemented ocular dark adaptation lerping (`glm::mix(m_area_darkness, m_target_area_darkness, 0.08f)`) for smooth transitions when stepping between lit and dark chambers.
+  - **Predator Perception & Chemical Flare Integration (`src/entities/enemies/void_stalker.cpp`)**:
+    - Updated `VoidStalkerManager::update()` perception processing: in addition to the delver headlamp cone, monsters actively detect all deployed `ChemicalFlare` instances (`FlareManager::flares()`). If within `flare.light_radius` (22m), `s.is_in_light` is set to true, revealing predators in the pitch dark and provoking light reactions.
+  - **UI & Controls Polish (`src/ui/hud.cpp`, `src/ui/pause_menu.cpp`, `src/core/application.cpp`)**:
+    - Added throttled suit hazard telemetry toast when entering pitch-black areas without illumination: `"[DARK ZONE: ZERO LUMENS - DEPLOY FLARES [T] / HEADLAMP [F]]"`.
+    - Updated HUD and Pause menu keybinding labels to explicitly reference both Flashlight/Torch (`[F]`) and Throwable Flare/Torch (`[T]`).
+  - **Automated Testing & Verification**:
+    - Added `Module 6: Dark Zones & Torch Illumination Scaling Tests` to `tests/test_level_generation.cpp`.
+    - Executed `python scripts/tdd.py` — all 22 test suites built and passed in parallel in 3.18s.
+    - Executed `./build/Release/VoidfallDredge.exe --auto-play-test` — all 16 gameplay visual phases passed with 0 errors in voidfall.log.
+
+- **Radiation Spatial Isolation & Active Exosuit Dosimeter Venting Balance Overhaul (`src/player/`, `src/core/`, `src/ui/`, `tests/`, `wiki/`)**:
+  - **Root Cause Analysis (Unavoidable Radiation Buildup & Slow Deaths)**:
+    - In `src/core/application.cpp`, player exosuit radiation was unconditionally overwritten every tick to `std::max(amb_rad, prox_rad)` where `amb_rad = m_hazard->radiation_level()`.
+    - Because `HazardClock::radiation_level()` continuously increments over time across the sector, ambient radiation climbed into dangerous levels ($75\% \to 100\%$) globally throughout the entire map, even when players were far away from radioactive areas.
+    - Because radiation was directly clamped to the monotonic clock and lacked any venting mechanism, radiation could never decrease, dealing unavoidable corrosion damage over time until death.
+  - **Spatial Radiation Isolation (Non-Ubiquitous Hazard)**:
+    - Radiation exposure is now strictly localized to **radiation-related areas** (within $12\,\text{m}$ proximity of `MAT_RADIOACTIVE_ORE` or irradiated chasms).
+    - Clean cavern air outside radioactive zones maintains $0\%$ baseline exposure, ensuring delvers can explore, mine, and fight normally without suffering ambient radiation buildup.
+  - **Active Exosuit Dosimeter Venting & Counterplay**:
+    - Added `PlayerController::update_radiation(target_exposure, dt, in_decon_zone)` in [src/player/controller.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/controller.hpp) and [src/player/controller.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/player/controller.cpp).
+    - When retreating from radioactive ore zones into clean cavern air, suit scrubbers actively vent and purge accumulated radiation dose at a rate of $10\%/\text{s}$ base, up to $17.5\%/\text{s}$ with `RadiationShielding` upgrades.
+    - Inside the Extraction Pod perimeter, active medical decontamination scrubbers purge accumulated radiation dose rapidly at $25\%/\text{s}$.
+  - **HUD Dosimeter Telemetry & Dynamic Venting State**:
+    - In [src/ui/hud.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/hud.cpp), updated the Geiger monitor pill to detect dose venting (`is_venting`), displaying reassuring cyan `GEIGER: VENTING (XX%) - PURGING DOSE` while recovering, and cleanly hiding the pill once dosage clears ($\le 2\%$).
+  - **Regression Testing**:
+    - Added `RadiationDissipationAndSpatialLocalizationTest.VentDosimeterAndCleanZoneSafety` to [tests/test_gameplay_mechanics.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_gameplay_mechanics.cpp) verifying 0% buildup in clean air, active venting dissipation upon retreat, extraction pod decontamination, and upgrade scaling. All 22 test suites passing cleanly via `python scripts/tdd.py`.
+
+- **Monster Swarm Anti-Invisibility & Dynamic GPU Vertex Buffer Expansion (`src/graphics/`, `src/core/`, `tests/`, `scripts/`, `wiki/`)**:
+  - **Root Cause Analysis (Disappearing / Invisible Monsters)**:
+    - In `src/graphics/renderer.cpp`, `render_stalkers()` had a hardcoded upload cap of `16,384` vertices (`size_t vert_count = std::min(s_stalker_verts.size(), static_cast<size_t>(16384));`).
+    - Each Void Stalker model comprises 916 vertices (Melee/Shooter) to 952 vertices (Chitin Goliath with shield). Once more than 17 stalkers existed or when mixed with projectile spines, the vertex count exceeded 16,384, causing all subsequent monsters to be completely omitted from GPU upload and rendered invisible.
+    - Similarly, `render_burrowers()` was capped at 16,384 vertices (~22 burrowers max), `render_carcasses()` at 8,192 vertices (~18 carcasses max), and `render_plasma_bolts()` at 4,096 vertices.
+    - Additionally, initial static GPU VBO capacities were fixed (`m_stalker_vbo` allocated 32,768 vertices in `init_stalker_buffers()`; `m_cable_vbo` allocated 8,192 floats).
+  - **Dynamic GPU Buffer Capacity Scaling**:
+    - Added `Renderer::ensure_stalker_vbo_capacity(size_t required_verts)` in [src/graphics/renderer.hpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.hpp) and [src/graphics/renderer.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.cpp) to track `m_stalker_vbo_capacity` (initialized to 65,536 vertices) and dynamically double and reallocate the VBO with re-bound VAO attribute pointers whenever required vertices exceed capacity.
+    - Added `Renderer::ensure_cable_vbo_capacity(size_t required_floats)` for dynamic line and arc tracers.
+    - Eliminated all artificial `std::min(...)` vertex caps across `render_stalkers`, `render_burrowers`, `render_carcasses`, `render_plasma_bolts`, `render_delver`, and `render_extraction_pod`.
+    - Added dynamic staging vector reservations (`s_stalker_verts`, `s_burrower_verts`, `s_carcass_verts`, `m_stalker_staging_lines`) based on entity counts to eliminate runtime dynamic heap allocations in hot render frames.
+  - **Automated Monster Swarm Load Testing & Verification**:
+    - **C++ Headless Load Test Suite (`tests/test_load_and_stress.cpp`)**: Added Module 7 stress-testing 120 Void Stalkers (40 Melee, 40 Shooter, 40 Chitin Goliath), 30 Seismic Burrowers, 40 Void Spike projectiles, and 30 Carcasses (> 140,000 vertices demand) across 20 simulation ticks. Verified 0 NaNs, 0 entity drops, and dynamic VBO capacity scaling.
+    - **Engine Visual Staging Harness (`--test-enemy-load`)**: Added visual load staging displaying 35 Stalkers across all 3 roles, 6 Burrowers, 12 Void Spikes, and 8 Carcasses simultaneously in forward visual range (40,052 vertices), writing `screenshots/enemy_load_test.png` and `screenshots/enemy_load_report.json`.
+    - **Automated Runner Support (`python scripts/test_enemy.py --load`)**: Integrated `--load` flag in test runner with log auditing and metric reporting. All 22 test suites passing cleanly via `python scripts/tdd.py`.
+
 ## 2026-10-12
-- **Crouch Stealth Overhaul, Forward Vision Cone Gating & Sneak Attack Criticals (`src/ai/`, `src/entities/enemies/`, `tests/`, `wiki/`)**:
+- **Chitin Goliath Apex Boss AI Overhaul, Formidable Moveset & Phase 2 Enrage (`src/ai/`, `src/entities/enemies/`, `src/ui/`, `src/graphics/`, `src/core/`, `tests/`, `wiki/`)**:
+  - **Awake & Vigilant Sentinel**:
+    - Precursor Vault Boss (`StalkerRole::ChitinGoliath`) never sleeps passively or ignores the player.
+    - Senses player up to $28\,\text{m}$ upon vault entry and immediately awakens into active combat with a terrifying battle roar (`SoundCue::StalkerEchoScreech`).
+    - Completely disabled fleeing (`flee_hp_threshold = 0.0f`) and passive circling around the player; the boss actively corners and presses the player.
+  - **Formidable Boss Moveset & Special Attacks**:
+    - **Titan Ground Slam (`StalkerState::GroundSlam`)**: Close-range ($\le 5.5\,\text{m}$) ground slam with concussive shockwave dealing up to 48 AOE damage across a 6.5m radius, screen trauma camera shudder, dust kickup, and ceiling debris cave-in hazard.
+    - **Juggernaut Bull Charge (`StalkerState::Charging`)**: Mid-range (6.0m to 22.0m) high-speed kinetic ram sprint ($10.5\,\text{m/s}$ base, $13.5\,\text{m/s}$ enraged) dealing 52 damage.
+    - **Wall-Crash Stun & Armor Breach**: Dodging or baiting the charge into a solid rock wall or metal bulkhead crashes the boss, stunning it for 2.4s and completely breaching its 85% frontal armor deflection (granting a full-damage vulnerability window).
+    - **Carapace Quill Barrage**: Anti-kiting countermeasure against elevated players ($> 1.8\,\text{m}$ above) or ranged combat ($> 8.0\,\text{m}$), firing a 3-spike fan of armor-piercing quills (14 damage each).
+    - **Heavy Cleave**: Sweeping claw strike dealing 38 base melee damage.
+  - **Phase 2 Apex Frenzy Enrage ($\le 50\%$ HP)**:
+    - Below 110 HP, enters berserk frenzy: movement speed increases to $3.6\,\text{m/s}$, charge speed to $13.5\,\text{m/s}$, attack cooldowns drop by 35–40%, eyes ignite in infernal radiant crimson, and carapace pulses with scorching magma veins.
+  - **HUD Boss Health Bar & Status Banners**:
+    - Top-stacked elite boss health bar with dynamic state banners (`[ APEX GOLIATH: ENRAGED ]`, `[ APEX GOLIATH: BREACHED ]`, `[ APEX GOLIATH: GROUND SLAM ]`, `[ APEX GOLIATH: CHARGING ]`) and real-time HP telemetry.
+  - **Unit & System Test Validation**:
+    - Added Module 35 to `tests/test_enemy_stalker.cpp` validating sentinel vigilance, non-fleeing, enrage frenzy, ground slam AOE, charge wall stun vulnerability, and armor breach.
+    - Added top-stack boss health bar integration tests in `tests/test_gameplay_mechanics.cpp`.
+    - All 22 test suites verified passing cleanly in parallel via `python scripts/tdd.py`.
+
+- **Crouch Stealth Overhaul, Forward Vision Cone Gating & Sneak Attack Criticals (`src/ai/`, `src/entities/enemies/`, `tests/`, `wiki/`)`:
   - **Unalerted Enemy Proximity Gating (Sneaking via Crouch)**:
     - Crouching delvers generate $0\,\text{dB}$ movement noise.
     - Proximity detection when crouching is reduced from omnidirectional $2.2\,\text{m}$ down to actual physical body collision ($< 0.85\,\text{m}$ for Void Stalkers, $< 0.90\,\text{m}$ for Seismic Burrowers).
@@ -873,5 +1070,20 @@ Chronological ledger of balance iterations, mechanics additions, and architectur
 - **Verification & Testing**:
   - Added unit test cases `BlockBreaking.MaterialTextureCrackColorConsistency` and `BlockBreaking.ShapeConformingRampAndSlabCrackAnimation` in `tests/test_voxel_geometry.cpp`.
   - Executed full 18-suite test suite via `python scripts/tdd.py` (all 18 suites passing in $< 3.5\,\text{s}$).
+
+### 2026-10-13: Cavern Brightness Controls & Rig Display Settings Integration
+- **In-Game Pause Menu Settings Row**:
+  - Added interactive `CAVERN BRIGHTNESS` control row to [PauseMenu](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/pause_menu.cpp) (Tab 3: `[ 3. AUDIO/RIG ]`) between `FIELD OF VIEW` and `SCREEN SHAKE`.
+  - Features `[-]` and `[+]` steppers with dynamic percentage feedback (`40%` to `200%`), matching the Orbital Hub station settings style.
+  - Changes instantly update [Renderer::set_brightness](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.hpp#L169), scaling the ACES tonemapper post-process exposure uniform `uExposure = 1.15f * brightness`.
+- **Keyboard Shortcut Documentation & Immediate Profile Sync**:
+  - Registered `[ [ / ] ]` (`Decrease / Increase Brightness`) in the [PauseMenu](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/pause_menu.cpp) Controls Briefing manual (Tab 4).
+  - Synchronized in-game hotkey adjustments (`[` / `]`) to immediately update [Renderer::set_brightness](file:///d:/Projects/voxel_3d_voidfall_dredge/src/graphics/renderer.hpp#L169) and [UserProfile::settings](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/settings.hpp#L10) for persistent save retention.
+- **Precision Stepping & Persistence**:
+  - Applied clean 10% rounded stepping (`std::round`) in both [OrbitalHub](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/orbital_hub.cpp) and [PauseMenu](file:///d:/Projects/voxel_3d_voidfall_dredge/src/ui/pause_menu.cpp) to eliminate floating-point drift.
+  - Added `clamp()` alias to [GameSettings::sanitize](file:///d:/Projects/voxel_3d_voidfall_dredge/src/core/settings.hpp#L26).
+- **Test Validation**:
+  - Expanded Module 12 unit tests in [test_unit_all.cpp](file:///d:/Projects/voxel_3d_voidfall_dredge/tests/test_unit_all.cpp) verifying 10% step increments, decrements, minimum/maximum clamping bounds (`0.40x` to `2.00x`), and full save/load disk persistence.
+  - All 22 test suites pass with zero audio in $< 3.6\,\text{s}$ via `python scripts/tdd.py`.
 
 

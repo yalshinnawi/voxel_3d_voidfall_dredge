@@ -323,13 +323,13 @@ void LevelGenerator::sample_vault_bunker(const RoomPlacement &room, int x,
       out = Voxel{MAT_AIR, 0};
       return;
     }
-    // Reinforced vault portal frames around doorway edges
+    // Reinforced portal frames around doorway edges
     bool is_portal_frame = (abs_x == room.half_width && abs_z <= 3) ||
                            (abs_z == room.half_depth && abs_x <= 3);
     if (is_portal_frame && y <= room.floor_y + 5) {
-      out = Voxel{MAT_REINFORCED_VAULT_DOOR, VOXEL_FLAG_ANCHORED};
+      out = Voxel{MAT_VOLCANIC_BASALT, VOXEL_FLAG_ANCHORED};
     } else {
-      out = Voxel{MAT_INDUSTRIAL_BULKHEAD, VOXEL_FLAG_ANCHORED};
+      out = Voxel{MAT_VOLCANIC_BASALT, VOXEL_FLAG_ANCHORED};
     }
     return;
   }
@@ -1928,7 +1928,7 @@ void LevelGenerator::sample_precursor_coolant_reservoir(
       room, static_cast<float>(dx), static_cast<float>(dz), angle,
       (pseudo_rand(x, y, z, 208) - 0.5f) * 0.35f);
   if (r_horiz > r_wall) {
-    check_doorway_or_solid(room, dx, dz, y, MAT_INDUSTRIAL_BULKHEAD, out);
+    check_doorway_or_solid(room, dx, dz, y, MAT_VOLCANIC_BASALT, out);
     return;
   }
 
@@ -1960,8 +1960,7 @@ void LevelGenerator::sample_precursor_coolant_reservoir(
     }
   }
 
-  // Raised industrial bulkhead coaming where bounding walls exceed coolant
-  // height
+  // Raised basalt coaming where bounding walls exceed coolant height
   bool is_curb = ((d_pool1 > 2.2f && d_pool1 <= 3.2f) ||
                   (d_pool2 > 2.2f && d_pool2 <= 3.2f)) &&
                  !is_entry;
@@ -1971,7 +1970,7 @@ void LevelGenerator::sample_precursor_coolant_reservoir(
       return;
     }
     if (y == room.floor_y + 1) {
-      out = Voxel{MAT_INDUSTRIAL_BULKHEAD,
+      out = Voxel{MAT_VOLCANIC_BASALT,
                   0}; // Raised safety coaming exceeding liquid surface
       return;
     }
@@ -1991,15 +1990,15 @@ void LevelGenerator::sample_precursor_coolant_reservoir(
     return;
   }
 
-  // Control consoles and reinforced blast catwalks
+  // Control consoles and reinforced catwalks
   if (std::abs(dz) >= room.half_depth - 2 &&
       (y == room.floor_y + 1 || y == room.floor_y + 2)) {
-    out = Voxel{MAT_REINFORCED_VAULT_DOOR, 0};
+    out = Voxel{MAT_VOLCANIC_BASALT, 0};
     return;
   }
 
   if (y >= room.ceiling_y - 2) {
-    out = Voxel{MAT_INDUSTRIAL_BULKHEAD, 0};
+    out = Voxel{MAT_VOLCANIC_BASALT, 0};
     return;
   }
 

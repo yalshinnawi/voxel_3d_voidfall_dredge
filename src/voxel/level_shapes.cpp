@@ -1862,6 +1862,58 @@ void LevelGenerator::generate_layout() {
           room.half_depth,
           std::min(room.center.z - 4, world_depth() - 5 - room.center.z));
 
+      // Determine Dark Zone status based on Sector & Room Type:
+      // Spawn and Extraction are always illuminated
+      if ((gx == 0 && gz == 0) || (gx == m_grid_w - 1 && gz == m_grid_d - 1)) {
+        room.is_dark_zone = false;
+        room.darkness_factor = 0.0f;
+      } else {
+        uint32_t dark_hash = hash_coord(gx, gz, m_seed, 941);
+        int dark_roll = static_cast<int>(dark_hash % 100);
+
+        if (m_sector_index <= 1) {
+          // Sector 1 (Perimeter Drift): Mostly operational lighting
+          // ~15% chance for an unpowered deep corner pocket
+          if (dark_roll < 15) {
+            room.is_dark_zone = true;
+            room.darkness_factor = 0.65f;
+          } else {
+            room.is_dark_zone = false;
+            room.darkness_factor = 0.0f;
+          }
+        } else if (m_sector_index == 2) {
+          // Sector 2 (Volatile Fault): Moderate infrastructure degradation (~35-45% dark zones)
+          bool is_hazard_room = is_harsh_hazard_room(room.type) ||
+                                room.type == RoomShapeType::FaultLineCrevasse ||
+                                room.type == RoomShapeType::CrumblingArchCanyon ||
+                                room.type == RoomShapeType::SpikeTrenchArena;
+          int threshold = is_hazard_room ? 55 : 35;
+          if (dark_roll < threshold) {
+            room.is_dark_zone = true;
+            room.darkness_factor = 0.85f + 0.10f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+          } else {
+            room.is_dark_zone = false;
+            room.darkness_factor = 0.0f;
+          }
+        } else {
+          // Sector 3+ (Void Cradle & deep late sectors): Deep abyssal blackouts (~65-75% pitch black)
+          bool is_abyss_or_hazard = room.type == RoomShapeType::AbyssalVerticalChasm ||
+                                    room.type == RoomShapeType::ColossalAbyssalChasm ||
+                                    room.type == RoomShapeType::TectonicAbyssalSinkhole ||
+                                    room.type == RoomShapeType::VoidSingularityRift ||
+                                    room.type == RoomShapeType::AncientTitanNecropolis ||
+                                    is_harsh_hazard_room(room.type);
+          int threshold = is_abyss_or_hazard ? 80 : 60;
+          if (dark_roll < threshold) {
+            room.is_dark_zone = true;
+            room.darkness_factor = 0.95f + 0.05f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+          } else {
+            room.is_dark_zone = false;
+            room.darkness_factor = 0.0f;
+          }
+        }
+      }
+
       int room_idx = static_cast<int>(m_rooms.size());
       m_grid_room_indices[gx][gz] = room_idx;
       m_rooms.push_back(room);
@@ -2244,7 +2296,7 @@ void LevelGenerator::generate_layout() {
           room.random_fluid_rim_material = (mat_roll % 2 == 0) ? MAT_BIOLUMINESCENT_FLORA : MAT_VOLCANIC_BASALT;
         } else {
           room.random_fluid_material = MAT_COOLANT;
-          room.random_fluid_rim_material = MAT_INDUSTRIAL_BULKHEAD;
+          room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
         }
       } else if (m_sector_index == 2) {
         if (mat_roll < 45) {
@@ -2252,7 +2304,7 @@ void LevelGenerator::generate_layout() {
           room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
         } else if (mat_roll < 75) {
           room.random_fluid_material = MAT_COOLANT;
-          room.random_fluid_rim_material = MAT_INDUSTRIAL_BULKHEAD;
+          room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
         } else {
           room.random_fluid_material = MAT_CRYSTAL_AQUIFER;
           room.random_fluid_rim_material = MAT_BIOLUMINESCENT_FLORA;
@@ -2266,7 +2318,7 @@ void LevelGenerator::generate_layout() {
           room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
         } else if (mat_roll < 85) {
           room.random_fluid_material = MAT_COOLANT;
-          room.random_fluid_rim_material = MAT_INDUSTRIAL_BULKHEAD;
+          room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
         } else {
           room.random_fluid_material = MAT_CRYSTAL_AQUIFER;
           room.random_fluid_rim_material = MAT_BIOLUMINESCENT_FLORA;
@@ -2282,7 +2334,7 @@ void LevelGenerator::generate_layout() {
         room.random_fluid_rim_material = MAT_RADIOACTIVE_ORE;
       } else if (room.type == RoomShapeType::IndustrialVaultBunker || room.type == RoomShapeType::LaserDefenseFoundry) {
         room.random_fluid_material = (mat_roll < 50) ? MAT_COOLANT : MAT_THERMITE_SLAG;
-        room.random_fluid_rim_material = MAT_INDUSTRIAL_BULKHEAD;
+        room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
       }
 
       placed_fluid_count++;
@@ -2344,7 +2396,7 @@ void LevelGenerator::generate_layout() {
         room.random_fluid_rim_material = MAT_BIOLUMINESCENT_FLORA;
       } else if (m_sector_index == 2) {
         room.random_fluid_material = (r_idx % 2 == 0) ? MAT_THERMITE_SLAG : MAT_COOLANT;
-        room.random_fluid_rim_material = (room.random_fluid_material == MAT_COOLANT) ? MAT_INDUSTRIAL_BULKHEAD : MAT_VOLCANIC_BASALT;
+        room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
       } else {
         room.random_fluid_material = (r_idx % 2 == 0) ? MAT_ACID : MAT_THERMITE_SLAG;
         room.random_fluid_rim_material = MAT_VOLCANIC_BASALT;
@@ -2365,6 +2417,12 @@ void LevelGenerator::generate_luminaries() {
   m_luminaries.reserve(64);
 
   for (const auto &room : m_rooms) {
+    if (room.is_dark_zone) {
+      // In dark zones, standard bright cavern luminaries are omitted completely,
+      // leaving the subterranean chamber in pitch-black void darkness where torches are required!
+      continue;
+    }
+
     switch (room.type) {
     case RoomShapeType::CrystallineGeode: {
       CavernLuminary core;
@@ -3063,8 +3121,11 @@ void LevelGenerator::generate_luminaries() {
   // Corridor lights
   for (const auto &c : m_corridors) {
     if (c.has_bulkhead_door) {
-      CavernLuminary blk_light;
       glm::vec3 mid = (glm::vec3(c.start_pos) + glm::vec3(c.end_pos)) * 0.5f;
+      if (is_dark_zone_at(mid)) {
+        continue; // Unpowered / broken lighting leading into or through dark zone
+      }
+      CavernLuminary blk_light;
       blk_light.position =
           glm::vec3(mid.x, static_cast<float>(c.floor_y + 2.5f), mid.z);
       blk_light.base_color = glm::vec3(0.95f, 0.60f, 0.18f);
@@ -3080,7 +3141,7 @@ void LevelGenerator::generate_luminaries() {
 
   // Fluid structure luminaries for procedural water, coolant, magma, and acid structures
   for (const auto &room : m_rooms) {
-    if (room.has_random_fluid) {
+    if (room.has_random_fluid && (!room.is_dark_zone || room.random_fluid_material == MAT_THERMITE_SLAG || room.random_fluid_material == MAT_LAVA)) {
       CavernLuminary pool_lum;
       if (room.fluid_structure_type == FluidStructureType::DropChasmSump) {
         pool_lum.position = glm::vec3(
@@ -3402,8 +3463,9 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
           }
           if (y == ceil_y || (c.type == CorridorType::SlopingRamp && y == ceil_y + 1)) {
             if (!is_in_any_room_interior(x, z)) {
-              voxel = Voxel{
-                  c.is_ravine ? MAT_FRACTURED_GRANITE : MAT_INDUSTRIAL_BULKHEAD, 0};
+              uint8_t ceil_mat = c.is_ravine ? MAT_FRACTURED_GRANITE
+                                             : ((m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE);
+              voxel = Voxel{ceil_mat, 0};
               return voxel;
             }
           }
@@ -3455,7 +3517,7 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
               int mid_x = (c.start_pos.x + c.end_pos.x) / 2;
               if (c.has_bulkhead_door && x == mid_x) {
                 if (lat_dist >= 1.8f || y >= ceil_y - 2) {
-                  voxel = Voxel{MAT_REINFORCED_VAULT_DOOR, VOXEL_FLAG_ANCHORED};
+                  voxel = Voxel{MAT_VOLCANIC_BASALT, VOXEL_FLAG_ANCHORED};
                   return voxel;
                 }
               }
@@ -3471,9 +3533,9 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
                   (lat_dist >= eff_width - 0.5f ||
                    y == ceil_y - 1)) {
                 if (!is_in_any_room_interior(x, z)) {
-                  voxel = Voxel{c.is_ravine ? MAT_FRACTURED_GRANITE
-                                            : MAT_INDUSTRIAL_BULKHEAD,
-                                0};
+                  uint8_t arch_mat = c.is_ravine ? MAT_FRACTURED_GRANITE
+                                                 : ((m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE);
+                  voxel = Voxel{arch_mat, 0};
                   return voxel;
                 }
               }
@@ -3483,9 +3545,9 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
             }
             if (y == ceil_y || (c.type == CorridorType::SlopingRamp && y == ceil_y + 1)) {
               if (!is_in_any_room_interior(x, z)) {
-                voxel = Voxel{c.is_ravine ? MAT_FRACTURED_GRANITE
-                                          : MAT_INDUSTRIAL_BULKHEAD,
-                              0};
+                uint8_t ceil_mat = c.is_ravine ? MAT_FRACTURED_GRANITE
+                                               : ((m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE);
+                voxel = Voxel{ceil_mat, 0};
                 return voxel;
               }
             }
@@ -3538,7 +3600,7 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
               int mid_z = (c.start_pos.z + c.end_pos.z) / 2;
               if (c.has_bulkhead_door && z == mid_z) {
                 if (lat_dist >= 1.8f || y >= ceil_y - 2) {
-                  voxel = Voxel{MAT_REINFORCED_VAULT_DOOR, VOXEL_FLAG_ANCHORED};
+                  voxel = Voxel{MAT_VOLCANIC_BASALT, VOXEL_FLAG_ANCHORED};
                   return voxel;
                 }
               }
@@ -3554,9 +3616,9 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
                   (lat_dist >= eff_width - 0.5f ||
                    y == ceil_y - 1)) {
                 if (!is_in_any_room_interior(x, z)) {
-                  voxel = Voxel{c.is_ravine ? MAT_FRACTURED_GRANITE
-                                            : MAT_INDUSTRIAL_BULKHEAD,
-                                0};
+                  uint8_t arch_mat = c.is_ravine ? MAT_FRACTURED_GRANITE
+                                                 : ((m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE);
+                  voxel = Voxel{arch_mat, 0};
                   return voxel;
                 }
               }
@@ -3566,9 +3628,9 @@ Voxel LevelGenerator::sample_base_voxel(int x, int y, int z, bool* out_is_vein) 
             }
             if (y == ceil_y || (c.type == CorridorType::SlopingRamp && y == ceil_y + 1)) {
               if (!is_in_any_room_interior(x, z)) {
-                voxel = Voxel{c.is_ravine ? MAT_FRACTURED_GRANITE
-                                          : MAT_INDUSTRIAL_BULKHEAD,
-                              0};
+                uint8_t ceil_mat = c.is_ravine ? MAT_FRACTURED_GRANITE
+                                               : ((m_sector_index >= 2) ? MAT_VOLCANIC_BASALT : MAT_FRACTURED_GRANITE);
+                voxel = Voxel{ceil_mat, 0};
                 return voxel;
               }
             }
@@ -3982,10 +4044,7 @@ bool LevelGenerator::sample_fluid_wall_cascade(const RoomPlacement &room, int x,
 
   if (in_wall_flume && y >= room.floor_y + 1 && y <= cascade_top_y) {
     if (in_source_spout && y == cascade_top_y) {
-      uint8_t spout_mat = (room.random_fluid_material == MAT_COOLANT || room.random_fluid_material == MAT_THERMITE_SLAG)
-                              ? MAT_INDUSTRIAL_BULKHEAD
-                              : MAT_VOLCANIC_BASALT;
-      out = Voxel{spout_mat, 0};
+      out = Voxel{MAT_VOLCANIC_BASALT, 0};
       return true;
     }
     out = Voxel{MAT_VOLCANIC_BASALT, 0};
@@ -4225,6 +4284,66 @@ bool LevelGenerator::sample_fluid_drop_chasm_sump(const RoomPlacement &room,
   }
 
   return false;
+}
+
+bool LevelGenerator::is_dark_zone_at(const glm::vec3 &pos) const {
+  const RoomPlacement *room = get_room_at_position(pos);
+  if (room) {
+    return room->is_dark_zone;
+  }
+  // If not strictly inside a room, find the nearest room
+  float min_dist_sq = 1e9f;
+  const RoomPlacement *nearest = nullptr;
+  for (const auto &r : m_rooms) {
+    float dx = pos.x - static_cast<float>(r.center.x);
+    float dz = pos.z - static_cast<float>(r.center.z);
+    float d2 = dx * dx + dz * dz;
+    if (d2 < min_dist_sq) {
+      min_dist_sq = d2;
+      nearest = &r;
+    }
+  }
+  return nearest ? nearest->is_dark_zone : false;
+}
+
+float LevelGenerator::get_darkness_at(const glm::vec3 &pos) const {
+  const RoomPlacement *room = get_room_at_position(pos);
+  if (room) {
+    return room->darkness_factor;
+  }
+  // In corridors or transitional rock, blend smoothly between nearby rooms
+  float total_weight = 0.0f;
+  float blended_darkness = 0.0f;
+  for (const auto &r : m_rooms) {
+    float dx = pos.x - static_cast<float>(r.center.x);
+    float dz = pos.z - static_cast<float>(r.center.z);
+    float dist = std::sqrt(dx * dx + dz * dz);
+    if (dist < 40.0f) {
+      float w = std::max(0.0f, 1.0f - dist / 40.0f);
+      w *= w;
+      blended_darkness += r.darkness_factor * w;
+      total_weight += w;
+    }
+  }
+  if (total_weight > 0.0001f) {
+    return std::clamp(blended_darkness / total_weight, 0.0f, 1.0f);
+  }
+  return (m_sector_index >= 3) ? 0.85f : (m_sector_index == 2 ? 0.40f : 0.0f);
+}
+
+int LevelGenerator::dark_room_count() const {
+  int count = 0;
+  for (const auto &r : m_rooms) {
+    if (r.is_dark_zone) {
+      count++;
+    }
+  }
+  return count;
+}
+
+float LevelGenerator::sector_darkness_ratio() const {
+  if (m_rooms.empty()) return 0.0f;
+  return static_cast<float>(dark_room_count()) / static_cast<float>(m_rooms.size());
 }
 
 

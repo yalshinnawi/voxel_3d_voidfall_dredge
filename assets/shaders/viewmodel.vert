@@ -13,12 +13,15 @@ out vec3 vNormal;
 out vec4 vColor;
 out vec4 vMaterial;
 out vec3 vFragPos;
+out vec3 vModelPos;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vFragPos = worldPos.xyz;
+    vModelPos = aPos;
     vNormal = mat3(transpose(inverse(uModel))) * aNormal;
     vColor = aColor;
     vMaterial = aMaterial;
     gl_Position = uProjection * uView * worldPos;
 }
+

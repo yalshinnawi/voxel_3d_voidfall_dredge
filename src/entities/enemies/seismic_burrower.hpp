@@ -18,6 +18,7 @@ enum class BurrowerState : uint8_t {
     Charging,   // Direct kinetic ram charge at target
     Stunned,    // Collided with bedrock/bulkhead or blasted by explosives
     Enraged,    // Emitting tectonic shockwave to destabilize ceiling voxels
+    Dying,      // Collapsing / shuddering death throes before carcass spawn
     Dead        // Slumped in cavern, ready for cleanup
 };
 
@@ -62,6 +63,11 @@ struct SeismicBurrower {
     bool just_roared{false};         // Emitted deep subterranean roar this frame
     bool just_ground{false};         // Emitted rock tooth grinding this frame
     bool just_chattered{false};      // Emitted chattering clicks this frame
+    bool just_stepped{false};        // Triggered footstep locomotion audio this frame
+    bool step_is_run{false};         // Whether step is high-speed charging vs burrowing crawl
+    float footstep_timer{0.0f};      // Cadence accumulator for crawler locomotion
+    float step_volume{1.0f};         // Proximity-adaptive footstep volume
+    float step_pitch{1.0f};          // Dynamic organic footstep pitch
 
     // Acoustic sound tracking
     glm::vec3 sound_target{0.0f};
@@ -73,6 +79,29 @@ struct SeismicBurrower {
     float pursuit_lost_timer{0.0f};   // Timer incremented when player is far away without contact
     float pursuit_break_dist{35.0f};  // Separation distance beyond which player is considered fleeing
     float pursuit_break_time{15.0f};  // Time player must remain far away before burrower ceases pursuit
+    float spike_damage_timer{0.0f};   // Internal debounce timer for puncture spikes
+    bool is_in_lava{false};           // True when in molten lava / thermite slag
+    bool is_in_acid{false};           // True when in corrosive acid pool
+    bool is_in_coolant{false};        // True when in sub-zero cryogenic coolant pool
+    bool is_in_hazard{false};         // True when in any damaging environmental hazard
+
+    // Territory Zone & Subterranean Wandering
+    PatrolZone patrol_zone;
+    bool has_patrol_zone{false};
+    glm::vec3 patrol_waypoint{0.0f};
+    float patrol_timer{0.0f};
+
+    void set_patrol_zone(const PatrolZone& zone) {
+        patrol_zone = zone;
+        has_patrol_zone = true;
+        patrol_waypoint = zone.center;
+        patrol_timer = 2.0f;
+    }
+
+    // Anti-stuck & displacement tracking
+    float stuck_timer{0.0f};
+    float stuck_checkpoint_timer{0.0f};
+    glm::vec3 stuck_checkpoint_pos{0.0f};
 
     // Frame events
     bool just_breached{false};
@@ -81,9 +110,18 @@ struct SeismicBurrower {
     bool just_stunned{false};
     bool just_died{false};
 
+    // Death Animation Collapse & Ragdoll Settling
+    float death_timer{0.0f};
+    float death_duration{0.9f};
+    glm::vec3 death_impulse{0.0f};
+    glm::vec3 death_angular_velocity{0.0f};
+    glm::vec3 death_hit_dir{0.0f};
+
     bool is_dead() const { return state == BurrowerState::Dead; }
+    bool is_dying() const { return state == BurrowerState::Dying; }
     bool is_dormant() const { return state == BurrowerState::Dormant; }
     bool is_emerging() const { return state == BurrowerState::Breaching; }
+    bool is_burrowing_in() const { return state == BurrowerState::Breaching; }
 
     /// Forward direction vector based on velocity heading or pitch/yaw orientation
     glm::vec3 forward() const {
@@ -95,18 +133,18 @@ struct SeismicBurrower {
 
     /// Visual awareness classification for overhead indicators
     bool is_investigating_state() const {
-        return !is_dead() && (state == BurrowerState::Burrowing);
+        return !is_dead() && !is_dying() && (state == BurrowerState::Burrowing);
     }
 
     bool is_engaged_state() const {
-        return !is_dead() && (state == BurrowerState::Breaching ||
+        return !is_dead() && !is_dying() && (state == BurrowerState::Breaching ||
                               state == BurrowerState::Charging ||
                               state == BurrowerState::Enraged);
     }
 
     /// Returns true if the burrower is completely unalerted (dormant or unaware of sound/player)
     bool is_unalerted() const {
-        return !is_dead() &&
+        return !is_dead() && !is_dying() &&
                (state == BurrowerState::Dormant ||
                 (!is_engaged_state() && !has_sound_target && !is_pursuing_attacker));
     }
@@ -118,6 +156,7 @@ struct SeismicBurrower {
             case BurrowerState::Charging:  return glm::vec4(1.0f, 0.45f, 0.05f, 1.0f); // Molten amber slag
             case BurrowerState::Breaching: return glm::vec4(1.0f, 0.70f, 0.10f, 1.0f); // Electric fracture yellow
             case BurrowerState::Stunned:   return glm::vec4(0.20f, 0.75f, 1.0f, 1.0f); // Cool electric blue
+            case BurrowerState::Dying:     return glm::vec4(0.35f, 0.10f, 0.03f, 1.0f); // Dying smoldering embers
             case BurrowerState::Burrowing:
             default:                       return glm::vec4(0.95f, 0.35f, 0.05f, 1.0f); // Warm subterranean orange
         }
@@ -160,6 +199,9 @@ public:
     /// Spawn burrower during hazard Phase 3/4 or holdout
     void spawn_hazard_wave(const glm::vec3& player_pos, const World& world);
 
+    /// Assign territory patrol zones to all active burrowers using world room geometry
+    void assign_patrol_zones_from_world(const World& world);
+
     struct FrameResult {
         float total_damage{0.0f};
         int burrowers_killed{0};
@@ -170,6 +212,8 @@ public:
         bool any_roar{false};
         bool any_grind{false};
         bool any_chatter{false};
+        bool any_step{false};
+        bool any_charge_step{false};
         float max_rumble{0.0f};
         std::vector<ExcavatedVoxel> excavated_voxels;
         std::vector<glm::ivec3> cavein_origins;

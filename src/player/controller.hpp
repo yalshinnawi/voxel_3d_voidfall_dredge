@@ -237,6 +237,24 @@ public:
     float debris_damage_reduction() const {
         return std::clamp(m_char_attr.fallingDamageReduction + (m_upgrades.reinforcedPlatingTier * 0.10f), 0.0f, 0.85f);
     }
+    float radiation_damage_reduction() const {
+        return std::clamp(m_upgrades.radiationShieldingTier * 0.25f, 0.0f, 0.75f);
+    }
+    float lava_damage_reduction() const {
+        return std::clamp(m_upgrades.thermalInsulationTier * 0.25f, 0.0f, 0.75f);
+    }
+    float acid_damage_reduction() const {
+        return std::clamp(m_upgrades.reinforcedPlatingTier * 0.08f, 0.0f, 0.40f);
+    }
+    float coolant_damage_reduction() const {
+        return std::clamp(m_upgrades.thermalInsulationTier * 0.25f, 0.0f, 0.75f);
+    }
+    float fall_damage_reduction() const {
+        return std::clamp(m_char_attr.fallingDamageReduction + (m_upgrades.impactDampenersTier * 0.25f), 0.0f, 0.85f);
+    }
+    float boss_damage_multiplier() const {
+        return 1.0f + (m_upgrades.apexBossDamageTier * 0.25f);
+    }
     float stealth_noise_multiplier() const {
         return std::max(0.20f, 1.0f - m_upgrades.acousticDampeningTier * 0.20f);
     }
@@ -265,6 +283,8 @@ public:
         Radiation,       // Ionizing radiation (ZERO screen shake, geiger clicking, player groaning)
         ToxicGas,        // Chemical/spore gas (minimal cough shudder, asphyxiation choking, on-screen particles)
         ThermalLava,     // Molten thermite slag (thermal sizzle, heat rise, burn flash)
+        CorrosiveAcid,   // Caustic neon acid (chemical sizzle, shield dissolution, acid vignette)
+        CryogenicCoolant,// Sub-zero cryogenic coolant (servo frost, hypothermic damage, frost vignette)
         Spikes,          // Punji spike puncture (sharp crunch, recoil hop)
         VoidSingularity  // Cosmic gravitational void (gravitational distortion)
     };
@@ -287,6 +307,9 @@ public:
     float shield_recharge_rate() const { return m_shield_recharge_rate; }
     void set_shield_recharge_rate(float rate) { m_shield_recharge_rate = rate; }
     void update_shield_recharge(float dt);
+
+    void update_radiation(float target_exposure, float dt, bool in_decon_zone = false);
+    void reset_radiation() { m_exo.radiation = 0.0f; }
 
     float take_damage(float dmg, DamageSource source);
     float take_damage(float dmg, bool is_falling_debris = false);
@@ -328,6 +351,9 @@ public:
 
     void set_mouse_sensitivity(float sens) { m_mouse_sensitivity = sens; }
     float mouse_sensitivity() const { return m_mouse_sensitivity; }
+
+    void set_auto_step(bool enable) { m_auto_step = enable; }
+    bool auto_step() const { return m_auto_step; }
 
     bool has_placed_charge() const { return m_has_placed_charge; }
     const glm::ivec3& placed_charge_pos() const { return m_placed_charge_pos; }
@@ -509,6 +535,9 @@ private:
     // Look sensitivity
     float m_mouse_sensitivity{0.12f};
 
+    // Auto-step / auto-jump traversal setting
+    bool m_auto_step{false};
+
     // Action callbacks
     BlockBreakCallback m_on_block_break;
     BlockPlaceCallback m_on_block_place;
@@ -545,6 +574,10 @@ private:
     bool m_is_in_liquid{false};
     bool m_is_in_lava{false};
     bool m_is_in_water{false};
+    bool m_is_in_acid{false};
+    bool m_is_in_coolant{false};
+    float m_acid_burn_timer{0.0f};
+    float m_frost_chill_timer{0.0f};
     float m_liquid_submersion{0.0f}; // 0.0 to 1.0 (submerged ratio)
     uint8_t m_current_liquid_material{MAT_AIR};
     bool m_is_in_spikes{false};
@@ -570,6 +603,12 @@ public:
     bool is_in_liquid() const { return m_is_in_liquid; }
     bool is_in_lava() const { return m_is_in_lava; }
     bool is_in_water() const { return m_is_in_water; }
+    bool is_in_acid() const { return m_is_in_acid; }
+    bool is_in_coolant() const { return m_is_in_coolant; }
+    float acid_burn_timer() const { return m_acid_burn_timer; }
+    float frost_chill_timer() const { return m_frost_chill_timer; }
+    void set_acid_burn_timer(float t) { m_acid_burn_timer = t; }
+    void set_frost_chill_timer(float t) { m_frost_chill_timer = t; }
     float liquid_submersion() const { return m_liquid_submersion; }
     uint8_t current_liquid_material() const { return m_current_liquid_material; }
     bool is_in_spikes() const { return m_is_in_spikes; }

@@ -1,6 +1,7 @@
 #include "orbital_hub.hpp"
 #include "font_renderer.hpp"
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <font8x8.h>
 #include <vector>
@@ -85,6 +86,27 @@ void OrbitalHubUI::resize(int width, int height) {
 void OrbitalHubUI::draw_rect(float x, float y, float w, float h, const glm::vec4& color) {
     glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
     model = glm::scale(model, glm::vec3(w, h, 1.0f));
+
+    glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
+    m_ui_shader.use();
+    m_ui_shader.set_mat4("uProjection", proj * model);
+    m_ui_shader.set_vec4("uColor", color);
+
+    glBindVertexArray(m_rect_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+}
+
+void OrbitalHubUI::draw_line_conduit(float x0, float y0, float x1, float y1, float thickness, const glm::vec4& color) {
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len = std::hypot(dx, dy);
+    if (len < 0.5f) return;
+    float angle = std::atan2(dy, dx);
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x0, y0, 0.0f));
+    model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
+    model = glm::translate(model, glm::vec3(0.0f, -thickness * 0.5f, 0.0f));
+    model = glm::scale(model, glm::vec3(len, thickness, 1.0f));
 
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f);
     m_ui_shader.use();
@@ -429,22 +451,15 @@ void OrbitalHubUI::focus_sector(int sector, bool instant) {
 }
 
 void OrbitalHubUI::focus_upgrade_node(int type_idx) {
+    if (type_idx < 0 || type_idx >= static_cast<int>(UpgradeType::COUNT)) return;
+    auto info = UpgradeTree::get_info(static_cast<UpgradeType>(type_idx));
     float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
-    float w = static_cast<float>(m_width);
-    float terminal_w = std::clamp(w * 0.94f, 680.0f, 1460.0f);
-    float tree_w = std::round(terminal_w * 0.62f);
-    float col_pad = 12.0f * ui_scale;
-    float col_w = 230.0f * ui_scale;
-    float col_gap = 16.0f * ui_scale;
-    float total_content_w = 6.0f * col_w + 5.0f * col_gap;
-    float max_scroll = std::max(0.0f, total_content_w - (tree_w - 2.0f * col_pad));
-
-    int b = std::clamp(type_idx / 3, 0, 5);
-    float col_center = col_pad + b * (col_w + col_gap) + col_w * 0.5f;
-    float ideal_target = col_center - (tree_w * 0.5f);
-    m_upgrades_target_x = std::clamp(ideal_target, 0.0f, max_scroll);
-    m_upgrades_scroll_x = m_upgrades_target_x;
+    m_upgrades_target_pan_x = -info.web_x * ui_scale;
+    m_upgrades_target_pan_y = -info.web_y * ui_scale;
+    m_upgrades_target_zoom = 1.0f;
     m_upgrades_velocity_x = 0.0f;
+    m_upgrades_velocity_y = 0.0f;
+    m_selected_upgrade_idx = type_idx;
 }
 
 void OrbitalHubUI::render_sector_select_carousel(int& selected_level, UserProfile& profile, float mouse_x, float mouse_y, bool mouse_clicked, bool mouse_down, float scroll_delta, MainMenuAction& action) {
@@ -1197,7 +1212,8 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     float pts_w = FontRenderer::get_rendered_width(pts_str, 1.32f * ui_scale, FontType::Tech);
 
     std::string cap_status = game_completed ? "[GRANDMASTER UNLOCKED]" :
-                             (assigned_pts >= UpgradeTree::CAMPAIGN_POINT_CAP ? "[CAP: 24/24 - RESPEC TO SWITCH]" : "[CAMPAIGN CAP: 24 PTS]");
+                             (assigned_pts >= UpgradeTree::CAMPAIGN_POINT_CAP ? "[CAP: " + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + "/" + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + " - RESPEC TO SWITCH]" :
+                                                                                "[CAMPAIGN CAP: " + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + " PTS]");
     float cap_x = pts_x + pts_w + 20.0f * ui_scale;
     float max_cap_w = std::max(60.0f, respec_x - cap_x - 12.0f * ui_scale);
     draw_text_fitted(cap_status, cap_x, top_text_y, max_cap_w, 1.22f * ui_scale,
@@ -1269,262 +1285,393 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     draw_rect(start_x, main_y, tree_w, 2.5f, Typography::COLOR_CYAN_GLOW);
 
     // Web Canvas Top Banner
-    float web_hdr_h = 30.0f * ui_scale;
-    draw_panel_with_border(start_x, main_y, tree_w, web_hdr_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.15f, 0.28f, 0.42f, 0.5f));
-    draw_text("[ DELVER NEURAL MATRIX // TALENT TREE ]", start_x + 12.0f * ui_scale, main_y + 7.0f * ui_scale, 1.30f * ui_scale, Typography::COLOR_CYAN, FontType::Display);
-    std::string proto_str = "[ ◄ DRAG CANVAS / SCROLL WHEEL TO EXPLORE 6 BRANCHES ► ]";
-    draw_text_fitted(proto_str, start_x + tree_w - 380.0f * ui_scale, main_y + 8.0f * ui_scale, 370.0f * ui_scale, 1.15f * ui_scale,
-                     Typography::COLOR_AMBER, 0.80f * ui_scale, FontType::Tech);
+    float web_hdr_h = 32.0f * ui_scale;
+    draw_panel_with_border(start_x, main_y, tree_w, web_hdr_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.15f, 0.28f, 0.42f, 0.6f));
+    std::string header_title = "[ NEURAL SKILL WEB ]";
+    float title_scale = 1.25f * ui_scale;
+    draw_text(header_title, start_x + 12.0f * ui_scale, main_y + 8.0f * ui_scale, title_scale, Typography::COLOR_CYAN, FontType::Display);
+    float title_w = FontRenderer::get_rendered_width(header_title, title_scale, FontType::Display);
 
-    // 6 Disciplines across 3 Tiers (18 Nodes Total)
-    UpgradeType branch_nodes[6][3] = {
-        { UpgradeType::DrillSpeed,         UpgradeType::DrillDurability,  UpgradeType::MicroCharges },       // EXCAVATION
-        { UpgradeType::ThrusterTank,       UpgradeType::KineticDynamo,    UpgradeType::SonarFrequency },     // TRAVERSAL
-        { UpgradeType::ReinforcedPlating,  UpgradeType::KineticShielding, UpgradeType::Defibrillator },      // DEFENSE
-        { UpgradeType::AcousticDampening,  UpgradeType::ShadowVeil,       UpgradeType::AmbushProtocol },     // STEALTH
-        { UpgradeType::PneumaticImpact,    UpgradeType::CleaveShockwave,  UpgradeType::BerserkerOverdrive }, // MELEE
-        { UpgradeType::HyperVelocitySlugs, UpgradeType::RapidCycling,     UpgradeType::CriticalWeakpoint }   // BALLISTICS
-    };
+    // Re-center button in top-right of web header
+    float rec_btn_w = 110.0f * ui_scale;
+    float rec_btn_h = 24.0f * ui_scale;
+    float rec_btn_x = start_x + tree_w - rec_btn_w - 8.0f * ui_scale;
+    float rec_btn_y = main_y + 4.0f * ui_scale;
+    bool rec_hov = (mouse_x >= rec_btn_x && mouse_x <= rec_btn_x + rec_btn_w && mouse_y >= rec_btn_y && mouse_y <= rec_btn_y + rec_btn_h);
+    if (rec_hov && mouse_clicked) {
+        m_upgrades_target_pan_x = 0.0f;
+        m_upgrades_target_pan_y = 0.0f;
+        m_upgrades_target_zoom = 1.0f;
+    }
+    glm::vec4 rec_bg = rec_hov ? glm::vec4(0.15f, 0.35f, 0.50f, 0.95f) : glm::vec4(0.06f, 0.12f, 0.18f, 0.85f);
+    draw_panel_with_border(rec_btn_x, rec_btn_y, rec_btn_w, rec_btn_h, rec_bg, rec_hov ? Typography::COLOR_CYAN_GLOW : glm::vec4(0.25f, 0.45f, 0.65f, 0.6f));
+    draw_text_centered_fitted("[ ⌖ RE-CENTER ]", rec_btn_x, rec_btn_y, rec_btn_w, rec_btn_h, 1.12f * ui_scale, Typography::COLOR_CYAN, 0.75f * ui_scale, FontType::Tech);
 
-    std::string branch_titles[6] = { "EXCAVATION", "TRAVERSAL", "DEFENSE", "STEALTH", "MELEE", "BALLISTICS" };
-    glm::vec4 branch_colors[6] = {
-        glm::vec4(1.0f, 0.65f, 0.15f, 1.0f),  // Amber / Topaz
-        glm::vec4(0.2f, 0.85f, 1.0f, 1.0f),   // Cyan / Diamond
-        glm::vec4(0.35f, 0.65f, 1.0f, 1.0f),  // Cobalt / Sapphire
-        glm::vec4(0.78f, 0.42f, 1.0f, 1.0f),  // Amethyst / Purple
-        glm::vec4(1.0f, 0.35f, 0.35f, 1.0f),  // Vermilion / Crimson
-        glm::vec4(1.0f, 0.85f, 0.25f, 1.0f)   // Gold / Amber
-    };
+    // Interactive guidance hint in banner (placed safely after title with zero overlap)
+    float hint_x = start_x + 12.0f * ui_scale + title_w + 16.0f * ui_scale;
+    float hint_w = rec_btn_x - hint_x - 12.0f * ui_scale;
+    if (hint_w > 100.0f) {
+        std::string proto_str = "[ ◄ DRAG TO PAN // SCROLL TO ZOOM // CLICK NODE TO INSPECT ► ]";
+        draw_text_fitted(proto_str, hint_x, main_y + 9.0f * ui_scale, hint_w, 1.10f * ui_scale,
+                         Typography::COLOR_AMBER, 0.70f * ui_scale, FontType::Tech);
+    }
 
-    float col_w = 230.0f * ui_scale;
-    float col_gap = 16.0f * ui_scale;
-    float col_pad = 16.0f * ui_scale;
-    float total_tree_w = 6.0f * col_w + 5.0f * col_gap + 2.0f * col_pad;
-    float max_scroll_x = std::max(0.0f, total_tree_w - tree_w);
+    // Canvas boundaries and mouse navigation handling
+    float canvas_y0 = main_y + web_hdr_h;
+    float canvas_h = main_h - web_hdr_h;
+    bool mouse_in_canvas = (mouse_x >= start_x && mouse_x <= start_x + tree_w &&
+                            mouse_y >= canvas_y0 && mouse_y <= canvas_y0 + canvas_h);
 
-    // Mouse Dragging & Momentum / Scroll Wheel Handling
-    bool mouse_in_tree = (mouse_x >= start_x && mouse_x <= start_x + tree_w &&
-                          mouse_y >= main_y && mouse_y <= main_y + main_h);
-
-    if (mouse_in_tree) {
+    if (mouse_in_canvas) {
         if (std::abs(scroll_delta) > 0.01f) {
-            m_upgrades_target_x -= scroll_delta * 90.0f * ui_scale;
+            m_upgrades_target_zoom = std::clamp(m_upgrades_target_zoom + scroll_delta * 0.12f, 0.65f, 1.45f);
         }
 
         if (mouse_down) {
-            if (!m_is_dragging_upgrades) {
-                m_is_dragging_upgrades = true;
-                m_drag_start_upgrades_x = mouse_x;
-                m_drag_total_dist_upgrades = 0.0f;
-                m_last_upgrades_mouse_x = mouse_x;
+            if (!m_is_dragging_web) {
+                m_is_dragging_web = true;
+                m_drag_start_web_mouse_x = mouse_x;
+                m_drag_start_web_mouse_y = mouse_y;
+                m_last_web_mouse_x = mouse_x;
+                m_last_web_mouse_y = mouse_y;
+                m_drag_total_dist_web = 0.0f;
             } else {
-                float dx = mouse_x - m_last_upgrades_mouse_x;
-                m_upgrades_target_x -= dx;
-                m_drag_total_dist_upgrades += std::abs(dx);
-                m_last_upgrades_mouse_x = mouse_x;
+                float dx = mouse_x - m_last_web_mouse_x;
+                float dy = mouse_y - m_last_web_mouse_y;
+                m_upgrades_pan_x += dx / m_upgrades_zoom;
+                m_upgrades_pan_y += dy / m_upgrades_zoom;
+                m_upgrades_target_pan_x = m_upgrades_pan_x;
+                m_upgrades_target_pan_y = m_upgrades_pan_y;
+                m_upgrades_velocity_x = dx * 35.0f;
+                m_upgrades_velocity_y = dy * 35.0f;
+                m_drag_total_dist_web += std::hypot(dx, dy);
+                m_last_web_mouse_x = mouse_x;
+                m_last_web_mouse_y = mouse_y;
             }
         }
     }
     if (!mouse_down) {
-        m_is_dragging_upgrades = false;
+        if (m_is_dragging_web) {
+            m_is_dragging_web = false;
+            m_upgrades_target_pan_x = m_upgrades_pan_x + m_upgrades_velocity_x * 0.08f;
+            m_upgrades_target_pan_y = m_upgrades_pan_y + m_upgrades_velocity_y * 0.08f;
+        }
     }
 
-    m_upgrades_target_x = std::clamp(m_upgrades_target_x, 0.0f, max_scroll_x);
-    m_upgrades_scroll_x += (m_upgrades_target_x - m_upgrades_scroll_x) * 0.25f;
-    if (std::abs(m_upgrades_target_x - m_upgrades_scroll_x) < 0.2f) {
-        m_upgrades_scroll_x = m_upgrades_target_x;
+    if (m_web_needs_center) {
+        m_upgrades_pan_x = 0.0f;
+        m_upgrades_pan_y = 0.0f;
+        m_upgrades_target_pan_x = 0.0f;
+        m_upgrades_target_pan_y = 0.0f;
+        m_upgrades_zoom = 1.0f;
+        m_upgrades_target_zoom = 1.0f;
+        m_web_needs_center = false;
     }
 
-    // Horizontal Scrollbar indicator track right beneath the header banner
-    float track_y = main_y + web_hdr_h;
-    float track_h = 5.0f * ui_scale;
-    draw_rect(start_x, track_y, tree_w, track_h, glm::vec4(0.05f, 0.08f, 0.12f, 0.95f));
-    if (max_scroll_x > 0.0f) {
-        float thumb_ratio = tree_w / total_tree_w;
-        float thumb_w = std::max(60.0f * ui_scale, tree_w * thumb_ratio);
-        float thumb_x = start_x + (m_upgrades_scroll_x / max_scroll_x) * (tree_w - thumb_w);
-        draw_rect(thumb_x, track_y, thumb_w, track_h, Typography::COLOR_CYAN);
+    float max_pan_x = 560.0f * ui_scale;
+    float max_pan_y = 480.0f * ui_scale;
+    m_upgrades_target_pan_x = std::clamp(m_upgrades_target_pan_x, -max_pan_x, max_pan_x);
+    m_upgrades_target_pan_y = std::clamp(m_upgrades_target_pan_y, -max_pan_y, max_pan_y);
+
+    if (!m_is_dragging_web) {
+        m_upgrades_pan_x += (m_upgrades_target_pan_x - m_upgrades_pan_x) * 0.22f;
+        m_upgrades_pan_y += (m_upgrades_target_pan_y - m_upgrades_pan_y) * 0.22f;
+        if (std::abs(m_upgrades_target_pan_x - m_upgrades_pan_x) < 0.2f) m_upgrades_pan_x = m_upgrades_target_pan_x;
+        if (std::abs(m_upgrades_target_pan_y - m_upgrades_pan_y) < 0.2f) m_upgrades_pan_y = m_upgrades_target_pan_y;
     }
+    m_upgrades_zoom += (m_upgrades_target_zoom - m_upgrades_zoom) * 0.25f;
 
-    float web_y0 = main_y + web_hdr_h + track_h + 4.0f * ui_scale;
-    float sec_hdr_h = 24.0f * ui_scale;
-    float content_h = main_h - web_hdr_h - track_h - sec_hdr_h - 18.0f * ui_scale;
-    float node_h = std::clamp((content_h - 32.0f * ui_scale) / 3.0f, 95.0f, 130.0f);
-    float conduit_v_gap = (content_h - 3.0f * node_h) / 2.0f;
+    auto get_discipline_color = [](const std::string& disc) -> glm::vec4 {
+        if (disc == "EXCAVATION") return glm::vec4(1.0f, 0.65f, 0.15f, 1.0f); // Amber
+        if (disc == "TRAVERSAL")  return glm::vec4(0.2f, 0.85f, 1.0f, 1.0f);  // Cyan
+        if (disc == "DEFENSE")    return glm::vec4(0.35f, 0.65f, 1.0f, 1.0f); // Cobalt
+        if (disc == "STEALTH")    return glm::vec4(0.78f, 0.42f, 1.0f, 1.0f); // Purple
+        if (disc == "MELEE")      return glm::vec4(1.0f, 0.35f, 0.35f, 1.0f); // Vermilion
+        if (disc == "BALLISTICS") return glm::vec4(1.0f, 0.85f, 0.25f, 1.0f); // Gold
+        return Typography::COLOR_CYAN;
+    };
 
-    float row_y[3];
-    row_y[2] = web_y0 + sec_hdr_h + 4.0f * ui_scale;             // Capstone (Top)
-    row_y[1] = row_y[2] + node_h + conduit_v_gap;               // Specialization (Middle)
-    row_y[0] = row_y[1] + node_h + conduit_v_gap;               // Foundation (Bottom)
-
-    m_selected_upgrade_idx = std::clamp(m_selected_upgrade_idx, 0, static_cast<int>(UpgradeType::COUNT) - 1);
-
-    // OpenGL Scissor Clipping for the tree viewport so scrolling nodes never bleed
+    // Scissor test to clip drawing strictly inside the web canvas
     GLint scissor_x = static_cast<GLint>(start_x);
     GLint scissor_y = static_cast<GLint>(m_height - (main_y + main_h));
     GLsizei scissor_w = static_cast<GLsizei>(tree_w);
-    GLsizei scissor_h = static_cast<GLsizei>(main_h - web_hdr_h - track_h);
+    GLsizei scissor_h = static_cast<GLsizei>(canvas_h);
 
     glEnable(GL_SCISSOR_TEST);
     glScissor(scissor_x, std::max(0, scissor_y), scissor_w, std::max(0, scissor_h));
 
-    // Tactical Coordinate Web Grid Mesh
-    float grid_step = 36.0f * ui_scale;
-    float grid_start_x = start_x - std::fmod(m_upgrades_scroll_x, grid_step);
-    for (float gx = grid_start_x; gx < start_x + tree_w + grid_step; gx += grid_step) {
-        draw_rect(gx, web_y0, 1.0f, main_h - (web_y0 - main_y), glm::vec4(0.10f, 0.18f, 0.26f, 0.18f));
+    float canvas_cx = start_x + tree_w * 0.5f;
+    float canvas_cy = canvas_y0 + canvas_h * 0.5f;
+    auto world_to_screen = [&](float wx, float wy) -> glm::vec2 {
+        return glm::vec2(
+            canvas_cx + (wx * ui_scale + m_upgrades_pan_x) * m_upgrades_zoom,
+            canvas_cy + (wy * ui_scale + m_upgrades_pan_y) * m_upgrades_zoom
+        );
+    };
+
+    glm::vec2 origin_s = world_to_screen(0.0f, 0.0f);
+
+    // Subtle 2D background coordinate grid
+    float grid_step = 64.0f * ui_scale * m_upgrades_zoom;
+    float grid_ox = std::fmod(origin_s.x - start_x, grid_step);
+    if (grid_ox < 0.0f) grid_ox += grid_step;
+    for (float gx = start_x + grid_ox; gx < start_x + tree_w; gx += grid_step) {
+        draw_rect(gx, canvas_y0, 1.0f, canvas_h, glm::vec4(0.08f, 0.15f, 0.24f, 0.25f));
     }
-    for (float gy = web_y0 + 10.0f * ui_scale; gy < main_y + main_h - 4.0f * ui_scale; gy += grid_step) {
-        draw_rect(start_x, gy, tree_w, 1.0f, glm::vec4(0.10f, 0.18f, 0.26f, 0.18f));
+    float grid_oy = std::fmod(origin_s.y - canvas_y0, grid_step);
+    if (grid_oy < 0.0f) grid_oy += grid_step;
+    for (float gy = canvas_y0 + grid_oy; gy < canvas_y0 + canvas_h; gy += grid_step) {
+        draw_rect(start_x, gy, tree_w, 1.0f, glm::vec4(0.08f, 0.15f, 0.24f, 0.25f));
     }
 
-    // Bottom Central Neural Core Bus linking all 6 foundation root nodes
-    float bus_y = row_y[0] + node_h + 4.0f * ui_scale;
-    float bus_start_x = start_x + col_pad + col_w * 0.5f - m_upgrades_scroll_x;
-    float bus_end_x = start_x + col_pad + 5.0f * (col_w + col_gap) + col_w * 0.5f - m_upgrades_scroll_x;
-    draw_rect(bus_start_x, bus_y, bus_end_x - bus_start_x, 3.0f, glm::vec4(0.2f, 0.75f, 0.95f, 0.55f));
-    for (int b = 0; b < 6; ++b) {
-        float jx = start_x + col_pad + b * (col_w + col_gap) + col_w * 0.5f - m_upgrades_scroll_x;
-        draw_rect(jx - 4.0f, bus_y - 2.0f, 8.0f, 7.0f, Typography::COLOR_CYAN);
-        draw_rect(jx - 1.5f, row_y[0] + node_h, 3.0f, 4.0f * ui_scale, Typography::COLOR_CYAN * glm::vec4(1.0f, 1.0f, 1.0f, 0.7f));
+    // Origin crosshairs
+    if (origin_s.x >= start_x && origin_s.x <= start_x + tree_w) {
+        draw_rect(origin_s.x, canvas_y0, 1.5f, canvas_h, glm::vec4(0.18f, 0.35f, 0.55f, 0.35f));
+    }
+    if (origin_s.y >= canvas_y0 && origin_s.y <= canvas_y0 + canvas_h) {
+        draw_rect(start_x, origin_s.y, tree_w, 1.5f, glm::vec4(0.18f, 0.35f, 0.55f, 0.35f));
     }
 
-    // Render Web Sectors, Vertical Conduits & Nodes
-    for (int b = 0; b < 6; ++b) {
-        float cx = start_x + col_pad + b * (col_w + col_gap) - m_upgrades_scroll_x;
+    // Quadrant discipline labels in the backdrop
+    auto draw_quadrant_label = [&](float wx, float wy, const std::string& label, const glm::vec4& col) {
+        glm::vec2 p = world_to_screen(wx, wy);
+        draw_text_fitted(label, p.x, p.y, 220.0f * ui_scale, 1.15f * ui_scale, col * glm::vec4(1.0f, 1.0f, 1.0f, 0.40f), 0.75f * ui_scale, FontType::Tech);
+    };
+    draw_quadrant_label(-420.0f, -270.0f, "// EXCAVATION & HARVEST", glm::vec4(1.0f, 0.65f, 0.15f, 1.0f));
+    draw_quadrant_label(200.0f, -270.0f, "// DEFENSE & HAZARDS", glm::vec4(0.35f, 0.65f, 1.0f, 1.0f));
+    draw_quadrant_label(-420.0f, 250.0f, "// MOBILITY & TRAVERSAL", glm::vec4(0.2f, 0.85f, 1.0f, 1.0f));
+    draw_quadrant_label(200.0f, 250.0f, "// APEX & BALLISTICS", glm::vec4(1.0f, 0.85f, 0.25f, 1.0f));
+    draw_quadrant_label(-80.0f, -430.0f, "// MELEE APEX", glm::vec4(1.0f, 0.35f, 0.35f, 1.0f));
+    draw_quadrant_label(-80.0f, 430.0f, "// STEALTH SHADOW", glm::vec4(0.78f, 0.42f, 1.0f, 1.0f));
 
-        // Discipline Sector Header
-        draw_panel_with_border(cx, web_y0, col_w, sec_hdr_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.92f), branch_colors[b] * glm::vec4(1.0f, 1.0f, 1.0f, 0.6f), 1.5f);
-        draw_rect(cx, web_y0, 3.0f, sec_hdr_h, branch_colors[b]);
-        draw_text_fitted("// " + branch_titles[b], cx + 8.0f * ui_scale, web_y0 + 4.0f * ui_scale, col_w - 12.0f * ui_scale, 1.25f * ui_scale, branch_colors[b], 0.85f * ui_scale, FontType::Display);
+    // Conduits network definition (hierarchies + food-web cross-branch synergies)
+    struct WebConduitDef {
+        int from_idx; // -1 for Core Nexus
+        int to_idx;
+        bool is_synergy;
+    };
 
-        // Vertical Conduits between nodes
-        float mid_x = cx + col_w * 0.5f;
-        // Conduit 0 -> 1
-        float v01_top = row_y[1] + node_h;
-        float v01_bot = row_y[0];
-        int t0 = profile.upgrades.get_tier(branch_nodes[b][0]);
-        bool cond01_active = (t0 >= 1);
-        draw_rect(mid_x - 1.5f, v01_top, 3.0f, v01_bot - v01_top,
-                  cond01_active ? branch_colors[b] : glm::vec4(0.20f, 0.24f, 0.28f, 0.45f));
+    static const WebConduitDef conduits[] = {
+        // Core Nexus Roots
+        { -1, static_cast<int>(UpgradeType::DrillSpeed), false },
+        { -1, static_cast<int>(UpgradeType::ThrusterTank), false },
+        { -1, static_cast<int>(UpgradeType::ReinforcedPlating), false },
+        { -1, static_cast<int>(UpgradeType::AcousticDampening), false },
+        { -1, static_cast<int>(UpgradeType::PneumaticImpact), false },
+        { -1, static_cast<int>(UpgradeType::HyperVelocitySlugs), false },
 
-        // Conduit 1 -> 2
-        float v12_top = row_y[2] + node_h;
-        float v12_bot = row_y[1];
-        int t1 = profile.upgrades.get_tier(branch_nodes[b][1]);
-        bool cond12_active = (t1 >= 1);
-        draw_rect(mid_x - 1.5f, v12_top, 3.0f, v12_bot - v12_top,
-                  cond12_active ? branch_colors[b] : glm::vec4(0.20f, 0.24f, 0.28f, 0.45f));
+        // Excavation branch
+        { static_cast<int>(UpgradeType::DrillSpeed), static_cast<int>(UpgradeType::DrillDurability), false },
+        { static_cast<int>(UpgradeType::DrillDurability), static_cast<int>(UpgradeType::MicroCharges), false },
 
-        // Render 3 Nodes: r=0 (Foundation), r=1 (Specialization), r=2 (Capstone)
-        for (int r = 0; r < 3; ++r) {
-            UpgradeType type = branch_nodes[b][r];
-            int type_idx = static_cast<int>(type);
-            float ny = row_y[r];
+        // Traversal branch
+        { static_cast<int>(UpgradeType::ThrusterTank), static_cast<int>(UpgradeType::KineticDynamo), false },
+        { static_cast<int>(UpgradeType::KineticDynamo), static_cast<int>(UpgradeType::SonarFrequency), false },
+        { static_cast<int>(UpgradeType::ThrusterTank), static_cast<int>(UpgradeType::ImpactDampeners), false },
 
-            int cur_tier = profile.upgrades.get_tier(type);
-            int max_tier = UpgradeTree::get_max_tier(type);
-            int exp_cost = UpgradeTree::get_exp_cost(cur_tier);
-            int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
-            bool is_maxed = (cur_tier >= max_tier);
-            bool can_buy = profile.upgrades.can_purchase(type, player_lvl, profile.total_exp, game_completed);
-            bool is_selected = (m_selected_upgrade_idx == type_idx);
+        // Defense branch (Shields + Radiation + Lava)
+        { static_cast<int>(UpgradeType::ReinforcedPlating), static_cast<int>(UpgradeType::KineticShielding), false },
+        { static_cast<int>(UpgradeType::KineticShielding), static_cast<int>(UpgradeType::Defibrillator), false },
+        { static_cast<int>(UpgradeType::ReinforcedPlating), static_cast<int>(UpgradeType::RadiationShielding), false },
+        { static_cast<int>(UpgradeType::ReinforcedPlating), static_cast<int>(UpgradeType::ThermalInsulation), false },
 
-            NodeWebState web_state = profile.upgrades.get_node_web_state(type, player_lvl, profile.total_exp, game_completed);
-            bool is_node_greyed = (web_state == NodeWebState::GreyedOutLocked);
-            bool is_node_capped = (web_state == NodeWebState::CampaignCapped);
+        // Stealth branch
+        { static_cast<int>(UpgradeType::AcousticDampening), static_cast<int>(UpgradeType::ShadowVeil), false },
+        { static_cast<int>(UpgradeType::ShadowVeil), static_cast<int>(UpgradeType::AmbushProtocol), false },
 
-            bool node_hov = (mouse_in_tree && mouse_x >= cx && mouse_x <= cx + col_w && mouse_y >= ny && mouse_y <= ny + node_h);
-            if (node_hov && mouse_clicked && m_drag_total_dist_upgrades < 6.0f) {
-                m_selected_upgrade_idx = type_idx;
-            }
+        // Melee branch
+        { static_cast<int>(UpgradeType::PneumaticImpact), static_cast<int>(UpgradeType::CleaveShockwave), false },
+        { static_cast<int>(UpgradeType::CleaveShockwave), static_cast<int>(UpgradeType::BerserkerOverdrive), false },
 
-            // Node Panel Background & Selection Border
-            glm::vec4 n_bg = is_node_greyed ? glm::vec4(0.040f, 0.050f, 0.065f, 0.94f) :
-                             is_selected    ? glm::vec4(0.08f, 0.14f, 0.22f, 0.98f) :
-                             node_hov       ? glm::vec4(0.06f, 0.11f, 0.17f, 0.95f) :
-                                              glm::vec4(0.038f, 0.058f, 0.085f, 0.92f);
+        // Ballistics branch (Slugs + Cycling + Crit + Boss Slayer)
+        { static_cast<int>(UpgradeType::HyperVelocitySlugs), static_cast<int>(UpgradeType::RapidCycling), false },
+        { static_cast<int>(UpgradeType::RapidCycling), static_cast<int>(UpgradeType::CriticalWeakpoint), false },
+        { static_cast<int>(UpgradeType::HyperVelocitySlugs), static_cast<int>(UpgradeType::ApexBossDamage), false },
 
-            glm::vec4 n_border = is_selected ? (is_node_greyed ? glm::vec4(0.7f, 0.8f, 0.9f, 0.95f) : branch_colors[b]) :
-                                 node_hov    ? (is_node_greyed ? glm::vec4(0.40f, 0.45f, 0.50f, 0.85f) : glm::vec4(0.45f, 0.85f, 1.0f, 0.95f)) :
-                                 is_node_greyed ? glm::vec4(0.20f, 0.23f, 0.26f, 0.45f) :
-                                 (cur_tier > 0) ? branch_colors[b] * 0.85f : glm::vec4(0.22f, 0.35f, 0.48f, 0.65f);
+        // Cross-Branch Food-Web Synergies
+        { static_cast<int>(UpgradeType::DrillDurability), static_cast<int>(UpgradeType::ThermalInsulation), true },   // Heat Sinks <-> Lava Mesh
+        { static_cast<int>(UpgradeType::RadiationShielding), static_cast<int>(UpgradeType::SonarFrequency), true },  // Rad Shield <-> Sonar Eye
+        { static_cast<int>(UpgradeType::ImpactDampeners), static_cast<int>(UpgradeType::ReinforcedPlating), true },  // Fall Dampener <-> Armor Plating
+        { static_cast<int>(UpgradeType::ApexBossDamage), static_cast<int>(UpgradeType::CriticalWeakpoint), true },   // Boss Slayer <-> Crit Piercer
+        { static_cast<int>(UpgradeType::PneumaticImpact), static_cast<int>(UpgradeType::DrillSpeed), true },         // Pneumatic Ram <-> Drill Surge
+        { static_cast<int>(UpgradeType::AcousticDampening), static_cast<int>(UpgradeType::ThrusterTank), true }      // Silent Tread <-> Fuel Tank
+    };
 
-            draw_panel_with_border(cx, ny, col_w, node_h, n_bg, n_border, is_selected ? 2.5f : 1.5f);
+    float cur_time = static_cast<float>(glfwGetTime());
+    for (size_t c = 0; c < sizeof(conduits) / sizeof(conduits[0]); ++c) {
+        const auto& cond = conduits[c];
+        glm::vec2 p0, p1;
+        bool active = false;
+        glm::vec4 conduit_col;
 
-            if (is_selected) {
-                glm::vec4 bracket_col = is_node_greyed ? glm::vec4(0.7f, 0.8f, 0.9f, 1.0f) : branch_colors[b];
-                draw_rect(cx, ny, 6.0f, 2.5f, bracket_col);
-                draw_rect(cx, ny, 2.5f, 6.0f, bracket_col);
-                draw_rect(cx + col_w - 6.0f, ny, 6.0f, 2.5f, bracket_col);
-                draw_rect(cx + col_w - 2.5f, ny, 2.5f, 6.0f, bracket_col);
-            }
+        UpgradeType to_t = static_cast<UpgradeType>(cond.to_idx);
+        auto to_info = UpgradeTree::get_info(to_t);
+        p1 = world_to_screen(to_info.web_x, to_info.web_y);
 
-            auto info = UpgradeTree::get_info(type);
-
-            // Node Title (Large & High Contrast)
-            glm::vec4 title_col = is_node_greyed ? glm::vec4(0.50f, 0.55f, 0.60f, 0.85f) :
-                                  is_selected    ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) :
-                                                   glm::vec4(0.90f, 0.94f, 0.98f, 0.98f);
-            draw_text_fitted(info.name, cx + 8.0f * ui_scale, ny + 6.0f * ui_scale, col_w - 16.0f * ui_scale, 1.25f * ui_scale, title_col, 0.85f * ui_scale, FontType::Display);
-
-            // Subtitle / Tier classification
-            std::string sub_title = (r == 0) ? "FOUNDATION ROOT" : (r == 1) ? "SPECIALIZATION" : "APEX CAPSTONE";
-            if (is_node_greyed) sub_title = "[LOCKED // REQ T1]";
-            draw_text_fitted(sub_title, cx + 8.0f * ui_scale, ny + 24.0f * ui_scale, col_w - 16.0f * ui_scale, 1.10f * ui_scale,
-                             is_node_greyed ? glm::vec4(0.45f, 0.50f, 0.55f, 0.75f) : branch_colors[b] * 0.90f, 0.75f * ui_scale, FontType::Tech);
-
-            // Progress Pips [ ■ ■ □ ]
-            float pip_start_x = cx + 8.0f * ui_scale;
-            float pip_y = ny + 40.0f * ui_scale;
-            float pip_size = std::clamp(11.0f * ui_scale, 9.0f, 13.0f);
-            float pip_gap = 4.0f * ui_scale;
-
-            for (int p = 0; p < max_tier; ++p) {
-                float px = pip_start_x + p * (pip_size + pip_gap);
-                bool filled = (p < cur_tier);
-                glm::vec4 pip_col = is_node_greyed ? glm::vec4(0.14f, 0.16f, 0.18f, 0.5f) :
-                                    filled ? (is_maxed ? Typography::COLOR_AMBER : branch_colors[b]) :
-                                    (p == cur_tier && can_buy) ? Typography::COLOR_CYAN :
-                                                                 glm::vec4(0.12f, 0.18f, 0.24f, 0.75f);
-                draw_rect(px, pip_y, pip_size, pip_size, pip_col);
-                draw_panel_with_border(px, pip_y, pip_size, pip_size, glm::vec4(0.0f), glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
-            }
-
-            std::string tier_str = "TIER " + std::to_string(cur_tier) + "/" + std::to_string(max_tier);
-            draw_text(tier_str, pip_start_x + max_tier * (pip_size + pip_gap) + 8.0f * ui_scale, pip_y, 1.15f * ui_scale,
-                      is_node_greyed ? glm::vec4(0.45f, 0.50f, 0.55f, 0.75f) :
-                      is_maxed ? Typography::COLOR_AMBER : glm::vec4(0.88f, 0.92f, 0.98f, 0.95f), FontType::Tech);
-
-            // Stat Preview
-            std::string cur_stat = profile.upgrades.get_current_stat_string(type);
-            draw_text_fitted(cur_stat, cx + 8.0f * ui_scale, ny + 58.0f * ui_scale, col_w - 16.0f * ui_scale, 1.15f * ui_scale,
-                             is_node_greyed ? glm::vec4(0.42f, 0.46f, 0.50f, 0.70f) : Typography::COLOR_CYAN, 0.75f * ui_scale, FontType::Tech);
-
-            // Bottom Tag
-            std::string cost_tag;
-            glm::vec4 tag_col;
-            if (is_node_greyed) {
-                cost_tag = "[PREREQ LOCKED]";
-                tag_col = glm::vec4(0.50f, 0.55f, 0.60f, 0.75f);
-            } else if (is_maxed) {
-                cost_tag = "[TIER MASTERED]";
-                tag_col = Typography::COLOR_AMBER;
-            } else if (is_node_capped) {
-                cost_tag = "[CAP REACHED (24)]";
-                tag_col = glm::vec4(1.0f, 0.65f, 0.25f, 0.95f);
-            } else if (player_lvl < req_lvl) {
-                cost_tag = "REQ LEVEL " + std::to_string(req_lvl);
-                tag_col = glm::vec4(1.0f, 0.55f, 0.45f, 0.95f);
+        if (cond.from_idx == -1) {
+            p0 = origin_s;
+            active = (profile.upgrades.get_tier(to_t) >= 1);
+            conduit_col = active ? get_discipline_color(to_info.discipline) : glm::vec4(0.16f, 0.24f, 0.32f, 0.45f);
+        } else {
+            UpgradeType from_t = static_cast<UpgradeType>(cond.from_idx);
+            auto from_info = UpgradeTree::get_info(from_t);
+            p0 = world_to_screen(from_info.web_x, from_info.web_y);
+            if (cond.is_synergy) {
+                active = (profile.upgrades.get_tier(from_t) >= 1 && profile.upgrades.get_tier(to_t) >= 1);
+                conduit_col = active ? Typography::COLOR_CYAN : glm::vec4(0.12f, 0.18f, 0.25f, 0.35f);
             } else {
-                cost_tag = "<exp> " + std::to_string(exp_cost) + " EXP";
-                tag_col = can_buy ? Typography::COLOR_GREEN : glm::vec4(0.95f, 0.75f, 0.35f, 0.95f);
+                active = (profile.upgrades.get_tier(from_t) >= 1);
+                conduit_col = active ? get_discipline_color(to_info.discipline) : glm::vec4(0.16f, 0.24f, 0.32f, 0.45f);
             }
+        }
 
-            float tag_h = 22.0f * ui_scale;
-            float tag_y = ny + node_h - tag_h - 4.0f * ui_scale;
-            draw_panel_with_border(cx + 6.0f * ui_scale, tag_y, col_w - 12.0f * ui_scale, tag_h, glm::vec4(0.02f, 0.04f, 0.07f, 0.90f), glm::vec4(0.2f, 0.35f, 0.5f, 0.4f));
-            draw_text_centered_fitted(cost_tag, cx + 6.0f * ui_scale, tag_y, col_w - 12.0f * ui_scale, tag_h, 1.15f * ui_scale, tag_col, 0.75f * ui_scale, FontType::Tech);
+        float thickness = (active ? 2.5f : 1.2f) * m_upgrades_zoom;
+        draw_line_conduit(p0.x, p0.y, p1.x, p1.y, thickness, conduit_col);
+
+        // Radiant energy flow particles on active conduits
+        if (active) {
+            float phase = std::fmod(cur_time * 0.9f + static_cast<float>(c) * 0.23f, 1.0f);
+            float px = p0.x + (p1.x - p0.x) * phase;
+            float py = p0.y + (p1.y - p0.y) * phase;
+            float psize = 4.5f * m_upgrades_zoom;
+            draw_rect(px - psize * 0.5f, py - psize * 0.5f, psize, psize, Typography::COLOR_CYAN_GLOW);
+        }
+    }
+
+    // Central Core Nexus Node at (0, 0)
+    float core_w = 110.0f * ui_scale * m_upgrades_zoom;
+    float core_h = 52.0f * ui_scale * m_upgrades_zoom;
+    float core_x = origin_s.x - core_w * 0.5f;
+    float core_y = origin_s.y - core_h * 0.5f;
+
+    draw_panel_with_border(core_x, core_y, core_w, core_h, glm::vec4(0.04f, 0.08f, 0.14f, 0.98f), Typography::COLOR_CYAN, 2.0f);
+    draw_rect(core_x, core_y, core_w, 2.0f, Typography::COLOR_CYAN_GLOW);
+    draw_text_centered_fitted("<rig> CORE NEXUS", core_x, core_y + 4.0f * ui_scale * m_upgrades_zoom, core_w, 18.0f * ui_scale * m_upgrades_zoom,
+                              1.15f * ui_scale * m_upgrades_zoom, Typography::COLOR_CYAN, 0.70f * ui_scale, FontType::Display);
+    std::string core_sub = "DELVER LVL " + std::to_string(player_lvl) + " // " + std::to_string(assigned_pts) + "/" + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + " PTS";
+    draw_text_centered_fitted(core_sub, core_x, core_y + 26.0f * ui_scale * m_upgrades_zoom, core_w, 18.0f * ui_scale * m_upgrades_zoom,
+                              1.05f * ui_scale * m_upgrades_zoom, Typography::COLOR_AMBER, 0.65f * ui_scale, FontType::Tech);
+
+    // Render all 22 Neural Web Skill Nodes
+    float node_w = 138.0f * ui_scale * m_upgrades_zoom;
+    float node_h = 66.0f * ui_scale * m_upgrades_zoom;
+
+    m_selected_upgrade_idx = std::clamp(m_selected_upgrade_idx, 0, static_cast<int>(UpgradeType::COUNT) - 1);
+
+    for (int t = 0; t < static_cast<int>(UpgradeType::COUNT); ++t) {
+        UpgradeType type = static_cast<UpgradeType>(t);
+        auto info = UpgradeTree::get_info(type);
+        glm::vec4 disc_col = get_discipline_color(info.discipline);
+
+        glm::vec2 n_pos = world_to_screen(info.web_x, info.web_y);
+        float nx = n_pos.x - node_w * 0.5f;
+        float ny = n_pos.y - node_h * 0.5f;
+
+        // Skip rendering if completely outside the visible canvas viewport
+        if (nx + node_w < start_x || nx > start_x + tree_w ||
+            ny + node_h < canvas_y0 || ny > canvas_y0 + canvas_h) {
+            continue;
+        }
+
+        int cur_tier = profile.upgrades.get_tier(type);
+        int max_tier = UpgradeTree::get_max_tier(type);
+        int exp_cost = UpgradeTree::get_exp_cost(cur_tier);
+        int req_lvl = UpgradeTree::get_required_level_for_tier(cur_tier);
+        bool is_maxed = (cur_tier >= max_tier);
+        bool can_buy = profile.upgrades.can_purchase(type, player_lvl, profile.total_exp, game_completed);
+        bool is_selected = (m_selected_upgrade_idx == t);
+
+        NodeWebState web_state = profile.upgrades.get_node_web_state(type, player_lvl, profile.total_exp, game_completed);
+        bool is_node_greyed = (web_state == NodeWebState::GreyedOutLocked);
+        bool is_node_capped = (web_state == NodeWebState::CampaignCapped);
+
+        bool node_hov = (mouse_in_canvas && mouse_x >= nx && mouse_x <= nx + node_w && mouse_y >= ny && mouse_y <= ny + node_h);
+        if (node_hov && mouse_clicked && m_drag_total_dist_web < 8.0f) {
+            m_selected_upgrade_idx = t;
+        }
+
+        // Panel background & selection border
+        glm::vec4 n_bg = is_node_greyed ? glm::vec4(0.035f, 0.045f, 0.060f, 0.94f) :
+                         is_selected    ? glm::vec4(0.075f, 0.135f, 0.220f, 0.98f) :
+                         node_hov       ? glm::vec4(0.060f, 0.105f, 0.165f, 0.95f) :
+                                          glm::vec4(0.035f, 0.055f, 0.080f, 0.92f);
+
+        glm::vec4 n_border = is_selected ? (is_node_greyed ? glm::vec4(0.7f, 0.8f, 0.9f, 0.95f) : disc_col) :
+                             node_hov    ? (is_node_greyed ? glm::vec4(0.40f, 0.45f, 0.50f, 0.85f) : glm::vec4(0.45f, 0.85f, 1.0f, 0.95f)) :
+                             is_node_greyed ? glm::vec4(0.18f, 0.22f, 0.26f, 0.45f) :
+                             (cur_tier > 0) ? disc_col * 0.85f : glm::vec4(0.20f, 0.32f, 0.45f, 0.65f);
+
+        draw_panel_with_border(nx, ny, node_w, node_h, n_bg, n_border, is_selected ? 2.5f : 1.5f);
+
+        if (is_selected) {
+            glm::vec4 bracket_col = is_node_greyed ? glm::vec4(0.7f, 0.8f, 0.9f, 1.0f) : disc_col;
+            draw_rect(nx, ny, 6.0f, 2.5f, bracket_col);
+            draw_rect(nx, ny, 2.5f, 6.0f, bracket_col);
+            draw_rect(nx + node_w - 6.0f, ny, 6.0f, 2.5f, bracket_col);
+            draw_rect(nx + node_w - 2.5f, ny, 2.5f, 6.0f, bracket_col);
+        }
+
+        // Row 1: Icon tag & Short Name (1-2 words only)
+        std::string title_line = info.icon_tag + " " + info.short_name;
+        glm::vec4 title_col = is_node_greyed ? glm::vec4(0.48f, 0.52f, 0.58f, 0.80f) :
+                              is_selected    ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) :
+                                               disc_col;
+        draw_text_fitted(title_line, nx + 6.0f * ui_scale * m_upgrades_zoom, ny + 5.0f * ui_scale * m_upgrades_zoom,
+                         node_w - 12.0f * ui_scale * m_upgrades_zoom, 1.20f * ui_scale * m_upgrades_zoom, title_col, 0.75f * ui_scale, FontType::Display);
+
+        // Row 2: Short Buff Badge (Clean, high-contrast effect)
+        float badge_h = 17.0f * ui_scale * m_upgrades_zoom;
+        float badge_y = ny + 23.0f * ui_scale * m_upgrades_zoom;
+        glm::vec4 badge_bg = is_node_greyed ? glm::vec4(0.08f, 0.10f, 0.12f, 0.70f) :
+                             (cur_tier > 0) ? disc_col * glm::vec4(0.20f, 0.20f, 0.20f, 0.40f) :
+                                              glm::vec4(0.06f, 0.10f, 0.15f, 0.75f);
+        draw_panel_with_border(nx + 5.0f * ui_scale * m_upgrades_zoom, badge_y, node_w - 10.0f * ui_scale * m_upgrades_zoom, badge_h,
+                               badge_bg, is_node_greyed ? glm::vec4(0.25f, 0.28f, 0.32f, 0.4f) : disc_col * glm::vec4(1.0f, 1.0f, 1.0f, 0.5f));
+        glm::vec4 buff_col = is_node_greyed ? glm::vec4(0.42f, 0.46f, 0.50f, 0.70f) :
+                             is_maxed       ? Typography::COLOR_AMBER : Typography::COLOR_CYAN;
+        draw_text_centered_fitted(info.short_buff, nx + 5.0f * ui_scale * m_upgrades_zoom, badge_y,
+                                  node_w - 10.0f * ui_scale * m_upgrades_zoom, badge_h, 1.05f * ui_scale * m_upgrades_zoom, buff_col, 0.65f * ui_scale, FontType::Tech);
+
+        // Row 3: Progress Pips [■ ■ □] and Compact Status/Cost Tag
+        float pip_start_x = nx + 6.0f * ui_scale * m_upgrades_zoom;
+        float pip_y = ny + 45.0f * ui_scale * m_upgrades_zoom;
+        float pip_size = std::clamp(8.5f * ui_scale * m_upgrades_zoom, 6.0f, 11.0f);
+        float pip_gap = 3.0f * ui_scale * m_upgrades_zoom;
+
+        for (int p = 0; p < max_tier; ++p) {
+            float px = pip_start_x + p * (pip_size + pip_gap);
+            bool filled = (p < cur_tier);
+            glm::vec4 pip_col = is_node_greyed ? glm::vec4(0.14f, 0.16f, 0.18f, 0.5f) :
+                                filled ? (is_maxed ? Typography::COLOR_AMBER : disc_col) :
+                                (p == cur_tier && can_buy) ? Typography::COLOR_CYAN :
+                                                             glm::vec4(0.12f, 0.18f, 0.24f, 0.75f);
+            draw_rect(px, pip_y, pip_size, pip_size, pip_col);
+            draw_panel_with_border(px, pip_y, pip_size, pip_size, glm::vec4(0.0f), glm::vec4(0.25f, 0.4f, 0.55f, 0.5f));
+        }
+
+        std::string tag_str;
+        glm::vec4 tag_col;
+        if (is_node_greyed) {
+            tag_str = "[LOCKED]";
+            tag_col = glm::vec4(0.48f, 0.52f, 0.56f, 0.70f);
+        } else if (is_maxed) {
+            tag_str = "MASTER";
+            tag_col = Typography::COLOR_AMBER;
+        } else if (is_node_capped) {
+            tag_str = "[CAP " + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + "]";
+            tag_col = glm::vec4(1.0f, 0.65f, 0.25f, 0.95f);
+        } else if (player_lvl < req_lvl) {
+            tag_str = "LVL " + std::to_string(req_lvl);
+            tag_col = glm::vec4(1.0f, 0.50f, 0.40f, 0.95f);
+        } else {
+            tag_str = std::to_string(exp_cost) + " EXP";
+            tag_col = can_buy ? Typography::COLOR_GREEN : glm::vec4(0.95f, 0.75f, 0.35f, 0.95f);
+        }
+
+        float tag_x = pip_start_x + max_tier * (pip_size + pip_gap) + 4.0f * ui_scale * m_upgrades_zoom;
+        float tag_max_w = (nx + node_w - 4.0f * ui_scale * m_upgrades_zoom) - tag_x;
+        if (tag_max_w > 15.0f) {
+            draw_text_fitted(tag_str, tag_x, pip_y - 1.0f * ui_scale, tag_max_w, 1.05f * ui_scale * m_upgrades_zoom, tag_col, 0.65f * ui_scale, FontType::Tech);
         }
     }
 
@@ -1570,7 +1717,7 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     } else if (sel_is_capped) {
         float cb_h = 28.0f * ui_scale;
         draw_panel_with_border(ix, iy, iw, cb_h, glm::vec4(0.22f, 0.14f, 0.05f, 0.9f), glm::vec4(1.0f, 0.65f, 0.2f, 0.8f));
-        draw_text_fitted("! CAMPAIGN CAP (24 PTS): RESPEC TO SWITCH", ix + 8.0f * ui_scale, iy + 6.0f * ui_scale, iw - 16.0f * ui_scale, 1.15f * ui_scale, glm::vec4(1.0f, 0.85f, 0.3f, 1.0f), 0.75f * ui_scale, FontType::Tech);
+        draw_text_fitted("! CAMPAIGN CAP (" + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + " PTS): RESPEC TO SWITCH", ix + 8.0f * ui_scale, iy + 6.0f * ui_scale, iw - 16.0f * ui_scale, 1.15f * ui_scale, glm::vec4(1.0f, 0.85f, 0.3f, 1.0f), 0.75f * ui_scale, FontType::Tech);
         iy += cb_h + 10.0f * ui_scale;
     }
 
@@ -1654,7 +1801,7 @@ void OrbitalHubUI::render_upgrade_terminal(UserProfile& profile, float mouse_x, 
     } else if (!prereq_met) {
         draw_text_centered_fitted("[ LOCKED: REQ " + sel_prereq.required_name + " ]", bx, by, btn_w, btn_h, 1.20f * ui_scale, glm::vec4(1.0f, 0.55f, 0.45f, 0.95f), 0.75f * ui_scale, FontType::Display);
     } else if (sel_is_capped) {
-        draw_text_centered_fitted("[ CAMPAIGN CAP: 24 PTS ]", bx, by, btn_w, btn_h, 1.25f * ui_scale, glm::vec4(1.0f, 0.80f, 0.35f, 0.95f), 0.80f * ui_scale, FontType::Display);
+        draw_text_centered_fitted("[ CAMPAIGN CAP: " + std::to_string(UpgradeTree::CAMPAIGN_POINT_CAP) + " PTS ]", bx, by, btn_w, btn_h, 1.25f * ui_scale, glm::vec4(1.0f, 0.80f, 0.35f, 0.95f), 0.80f * ui_scale, FontType::Display);
     } else if (player_lvl < sel_req_lvl) {
         draw_text_centered_fitted("[ LOCKED: LEVEL " + std::to_string(sel_req_lvl) + " ]", bx, by, btn_w, btn_h, 1.30f * ui_scale, glm::vec4(1.0f, 0.45f, 0.45f, 0.95f), 0.80f * ui_scale, FontType::Display);
     } else if (sel_can_buy) {
@@ -1948,6 +2095,9 @@ DebriefAction OrbitalHubUI::render_debrief(bool success, int level, PlayerInvent
         int run_exp = inventory.total_run_score;
         if (run_exp <= 0) {
             run_exp = inventory.voidite * 5 + inventory.titanium * 6 + inventory.salvage_parts * 2;
+        }
+        if (success && !inventory.is_abandoned && !inventory.suit_failed) {
+            run_exp += 150 + inventory.run_completion_rate;
         }
         int run_coins = inventory.run_coins_earned;
         if (run_coins <= 0) {
@@ -2282,9 +2432,9 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
 
     // Centered audio mixer panel
     float panel_w = std::clamp(w * 0.70f, 600.0f, 850.0f);
-    float panel_h = std::clamp(h * 0.85f, 520.0f, 720.0f);
+    float panel_h = std::clamp(h * 0.88f, 540.0f, 740.0f);
     float panel_x = (w - panel_w) * 0.5f;
-    float panel_y = (m_subview == MenuSubView::Settings) ? ((h - panel_h) * 0.5f + 16.0f * ui_scale) : (80.0f * ui_scale);
+    float panel_y = (m_subview == MenuSubView::Settings) ? ((h - panel_h) * 0.5f + 10.0f * ui_scale) : (60.0f * ui_scale);
 
     draw_panel_with_border(panel_x, panel_y, panel_w, panel_h, glm::vec4(0.04f, 0.07f, 0.11f, 0.95f), glm::vec4(0.2f, 0.45f, 0.65f, 0.6f), 2.0f);
     draw_rect(panel_x, panel_y, panel_w, 3.0f, Typography::COLOR_CYAN);
@@ -2295,7 +2445,7 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
 
     draw_text("// TACTICAL RIG & SOUND MIXER", panel_x + pad, cur_y, 1.80f * ui_scale, Typography::COLOR_CYAN);
     cur_y += 28.0f * ui_scale;
-    draw_text("ACOUSTIC COMFORT PROTOCOL // 5-STAGE MASTERING & SOUND CHANNEL OPTIONS", panel_x + pad, cur_y, 1.12f * ui_scale, glm::vec4(0.6f, 0.75f, 0.85f, 0.85f));
+    draw_text("ACOUSTIC COMFORT PROTOCOL // 6-STAGE MASTERING & SOUND CHANNEL OPTIONS", panel_x + pad, cur_y, 1.12f * ui_scale, glm::vec4(0.6f, 0.75f, 0.85f, 0.85f));
     cur_y += 18.0f * ui_scale;
     draw_rect(panel_x + pad, cur_y, content_w, 1.0f, glm::vec4(0.2f, 0.4f, 0.55f, 0.6f));
     cur_y += 14.0f * ui_scale;
@@ -2376,27 +2526,31 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
         }
     };
 
-    float row_h = adj_btn_h + 8.0f * ui_scale;
+    float row_h = adj_btn_h + 6.0f * ui_scale;
 
     // 1. Master Volume
     draw_volume_row("MASTER SYNTHESIZER", s.master_volume, cur_y, true);
     cur_y += row_h;
 
-    // 2. SFX / Mining Volume
+    // 2. Music Volume
+    draw_volume_row("MUSIC SOUNDTRACK", s.music_volume, cur_y, false);
+    cur_y += row_h;
+
+    // 3. SFX / Mining Volume
     draw_volume_row("SFX & MINING TOOLS", s.sfx_volume, cur_y, false);
     cur_y += row_h;
 
-    // 3. Enemy Volume
+    // 4. Enemy Volume
     draw_volume_row("HOSTILE / VOID STALKERS", s.enemy_volume, cur_y, false);
     cur_y += row_h;
 
-    // 4. Ambience Volume
+    // 5. Ambience Volume
     draw_volume_row("CAVERN & HAZARDS", s.ambient_volume, cur_y, false);
     cur_y += row_h;
 
-    // 5. UI Volume
+    // 6. UI Volume
     draw_volume_row("UI & SYSTEM ALARMS", s.ui_volume, cur_y, false);
-    cur_y += row_h + 6.0f * ui_scale;
+    cur_y += row_h + 5.0f * ui_scale;
 
     draw_rect(panel_x + pad + 14.0f * ui_scale, cur_y, content_w - 28.0f * ui_scale, 1.0f, glm::vec4(0.15f, 0.3f, 0.45f, 0.4f));
     cur_y += 10.0f * ui_scale;
@@ -2445,8 +2599,8 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
     draw_panel_with_border(btn2_x, cur_y, adj_btn_w, adj_btn_h, b_hover2 ? glm::vec4(0.2f, 0.4f, 0.55f, 1.0f) : glm::vec4(0.08f, 0.14f, 0.2f, 1.0f), glm::vec4(0.2f, 0.5f, 0.7f, 0.6f));
     draw_text_centered("-", btn1_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
     draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
-    if (mouse_clicked && b_hover1) { s.brightness = std::max(0.40f, s.brightness - 0.10f); m_profile_dirty = true; }
-    if (mouse_clicked && b_hover2) { s.brightness = std::min(2.00f, s.brightness + 0.10f); m_profile_dirty = true; }
+    if (mouse_clicked && b_hover1) { s.brightness = std::max(0.40f, std::round((s.brightness - 0.10f) * 10.0f) / 10.0f); m_profile_dirty = true; }
+    if (mouse_clicked && b_hover2) { s.brightness = std::min(2.00f, std::round((s.brightness + 0.10f) * 10.0f) / 10.0f); m_profile_dirty = true; }
     cur_y += row_h;
 
     // 9. Screen Shake (Comfort Setting)
@@ -2466,6 +2620,25 @@ void OrbitalHubUI::render_audio_settings(UserProfile& profile, float mouse_x, fl
     draw_text_centered("+", btn2_x, cur_y, adj_btn_w, adj_btn_h, 1.25f * ui_scale, glm::vec4(1.0f));
     if (mouse_clicked && shk_hover1) { s.screen_shake = std::max(0.0f, s.screen_shake - 0.10f); m_profile_dirty = true; }
     if (mouse_clicked && shk_hover2) { s.screen_shake = std::min(1.0f, s.screen_shake + 0.10f); m_profile_dirty = true; }
+    cur_y += row_h;
+
+    // 10. Auto Step-Up Traversal Toggle
+    float tog_btn_w = adj_btn_w * 2.0f + 4.0f * ui_scale;
+    float tog_btn_x = btn1_x;
+    std::string step_label = std::string("AUTO STEP-UP:     ") + (s.auto_step ? "ENABLED (ON)" : "DISABLED (OFF)");
+    draw_text_fitted(step_label, ctrl_label_x, cur_y + (adj_btn_h - FontRenderer::get_rendered_height(1.15f * ui_scale)) * 0.5f,
+                     tog_btn_x - ctrl_label_x - 10.0f * ui_scale, 1.15f * ui_scale, glm::vec4(0.85f, 0.9f, 0.95f, 0.9f));
+    bool step_hover = (mouse_x >= tog_btn_x && mouse_x <= tog_btn_x + tog_btn_w && mouse_y >= cur_y && mouse_y <= cur_y + adj_btn_h);
+    glm::vec4 step_bg = s.auto_step ? (step_hover ? glm::vec4(0.12f, 0.35f, 0.28f, 1.0f) : glm::vec4(0.06f, 0.22f, 0.18f, 1.0f)) :
+                                      (step_hover ? glm::vec4(0.25f, 0.15f, 0.15f, 1.0f) : glm::vec4(0.14f, 0.08f, 0.08f, 1.0f));
+    glm::vec4 step_border = s.auto_step ? glm::vec4(0.2f, 0.8f, 0.5f, 0.8f) : glm::vec4(0.6f, 0.25f, 0.25f, 0.6f);
+    draw_panel_with_border(tog_btn_x, cur_y, tog_btn_w, adj_btn_h, step_bg, step_border);
+    draw_text_centered_fitted(s.auto_step ? "ON" : "OFF", tog_btn_x, cur_y, tog_btn_w, adj_btn_h, 1.15f * ui_scale,
+                              s.auto_step ? glm::vec4(0.3f, 1.0f, 0.6f, 1.0f) : glm::vec4(1.0f, 0.5f, 0.5f, 0.9f));
+    if (mouse_clicked && step_hover) {
+        s.auto_step = !s.auto_step;
+        m_profile_dirty = true;
+    }
     cur_y += row_h + 8.0f * ui_scale;
 
     // Bottom actions: Audio Preview and Reset Save Data
