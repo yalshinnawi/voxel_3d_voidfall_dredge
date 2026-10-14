@@ -29,9 +29,9 @@ struct Headlamp {
     glm::vec3 direction{0.0f, 0.0f, -1.0f};
     glm::vec3 color{0.95f, 0.98f, 1.0f}; // Crisp high-intensity halogen LED
     float inner_cutoff{glm::cos(glm::radians(18.0f))};
-    float outer_cutoff{glm::cos(glm::radians(28.0f))}; // Tightened beam: 18 deg inner / 28 deg outer
-    float intensity{4.5f};
-    float max_range{22.0f}; // Clamped range to 22m with quadratic falloff
+    float outer_cutoff{glm::cos(glm::radians(28.0f))};
+    float intensity{4.0f};
+    float max_range{22.0f};
     bool enabled{true};
 };
 
@@ -157,6 +157,7 @@ public:
     void render_breadcrumbs(const std::vector<glm::vec3>& crumbs, float time);
     void spawn_fireball(const glm::vec3& center, int count = 24);
     void update_particles(float dt);
+    void update_ambient_spores(float dt, const glm::vec3& cam_pos);
     void render_particles();
 
     Headlamp& headlamp() { return m_headlamp; }

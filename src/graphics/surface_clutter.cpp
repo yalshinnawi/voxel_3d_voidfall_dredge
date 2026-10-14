@@ -47,9 +47,10 @@ void SurfaceClutterSystem::init_gpu() {
     build_stalagmite_mesh(m_prototypes[static_cast<size_t>(ClutterType::FloorStalagmiteRubble)]);
     build_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::VoiditeCrystal)]);
     build_prismatic_crystal_mesh(m_prototypes[static_cast<size_t>(ClutterType::PrismaticCrystal)]);
+    build_spore_pod_mesh(m_prototypes[static_cast<size_t>(ClutterType::BioluminescentSporePod)]);
 
     m_gpu_initialized = true;
-    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals, prismatic diamonds)");
+    Logger::info("SurfaceClutter", "Instanced clutter system initialized (stalactites, stalagmites, voidite crystals, prismatic diamonds, bioluminescent spore pods)");
 }
 
 static void setup_proto_attributes(ClutterMeshPrototype& proto, const std::vector<ClutterVertex>& vertices, const std::vector<unsigned int>& indices) {
@@ -373,6 +374,113 @@ void SurfaceClutterSystem::build_prismatic_crystal_mesh(ClutterMeshPrototype& pr
     setup_proto_attributes(proto, vertices, indices);
 }
 
+// 5. Bioluminescent Fungal Spore Pods: Clustered subterranean mushrooms & glowing bulbous caps
+void SurfaceClutterSystem::build_spore_pod_mesh(ClutterMeshPrototype& proto) {
+    std::vector<ClutterVertex> vertices;
+    std::vector<unsigned int> indices;
+
+    // Organic bioluminescent material: moderate roughness (0.28), high emissive radiance (2.8f)
+    glm::vec4 spore_mat(0.08f, 0.28f, 2.8f, 1.0f);
+    glm::vec4 stalk_mat(0.02f, 0.65f, 0.45f, 0.90f);
+
+    auto add_mushroom = [&](glm::vec3 base_pos, glm::vec3 lean_dir, float height, float stalk_r, float cap_r, glm::vec4 cap_col) {
+        const int SIDES = 8;
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::vec3 dir = glm::normalize(up + lean_dir);
+        glm::vec3 side = glm::normalize(glm::cross(dir, glm::vec3(0.0f, 0.0f, 1.0f)));
+        glm::vec3 fwd = glm::normalize(glm::cross(side, dir));
+
+        glm::vec3 stalk_top = base_pos + dir * height;
+        glm::vec4 stalk_col = glm::vec4(0.65f, 0.88f, 0.82f, 1.0f);
+
+        // Stalk cylinder
+        std::vector<glm::vec3> ring_bot, ring_top;
+        for (int i = 0; i < SIDES; ++i) {
+            float angle = i * glm::two_pi<float>() / SIDES;
+            glm::vec3 off = (side * std::cos(angle) + fwd * std::sin(angle)) * stalk_r;
+            ring_bot.push_back(base_pos + off);
+            ring_top.push_back(stalk_top + off * 0.85f);
+        }
+
+        for (int i = 0; i < SIDES; ++i) {
+            glm::vec3 b0 = ring_bot[i];
+            glm::vec3 b1 = ring_bot[(i + 1) % SIDES];
+            glm::vec3 t0 = ring_top[i];
+            glm::vec3 t1 = ring_top[(i + 1) % SIDES];
+
+            glm::vec3 norm = glm::normalize(glm::cross(b1 - b0, t0 - b0));
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            vertices.push_back({b0, norm, stalk_col, stalk_mat});
+            vertices.push_back({b1, norm, stalk_col, stalk_mat});
+            vertices.push_back({t1, norm, stalk_col, stalk_mat});
+            vertices.push_back({t0, norm, stalk_col, stalk_mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+
+            indices.push_back(idx);
+            indices.push_back(idx + 2);
+            indices.push_back(idx + 3);
+        }
+
+        // Bulbous spore cap (dome + undercut gills)
+        glm::vec3 cap_apex = stalk_top + dir * (cap_r * 0.85f);
+        std::vector<glm::vec3> rim;
+        for (int i = 0; i < SIDES; ++i) {
+            float angle = i * glm::two_pi<float>() / SIDES;
+            glm::vec3 off = (side * std::cos(angle) + fwd * std::sin(angle)) * cap_r;
+            rim.push_back(stalk_top + off);
+        }
+
+        // Cap upper dome
+        for (int i = 0; i < SIDES; ++i) {
+            glm::vec3 r0 = rim[i];
+            glm::vec3 r1 = rim[(i + 1) % SIDES];
+            glm::vec3 norm = glm::normalize(glm::cross(r1 - r0, cap_apex - r0));
+
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            vertices.push_back({r0, norm, cap_col, spore_mat});
+            vertices.push_back({r1, norm, cap_col, spore_mat});
+            vertices.push_back({cap_apex, norm, cap_col, spore_mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+        }
+
+        // Cap underside / glowing gills
+        glm::vec4 gill_col = glm::mix(cap_col, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.40f);
+        for (int i = 0; i < SIDES; ++i) {
+            glm::vec3 r0 = rim[i];
+            glm::vec3 r1 = rim[(i + 1) % SIDES];
+            glm::vec3 norm = -dir;
+
+            unsigned int idx = static_cast<unsigned int>(vertices.size());
+            vertices.push_back({stalk_top, norm, gill_col, spore_mat});
+            vertices.push_back({r1, norm, gill_col, spore_mat});
+            vertices.push_back({r0, norm, gill_col, spore_mat});
+
+            indices.push_back(idx);
+            indices.push_back(idx + 1);
+            indices.push_back(idx + 2);
+        }
+    };
+
+    // Central primary fungal stalk with wide glowing spore dome
+    add_mushroom(glm::vec3(0.0f), glm::vec3(0.04f, 0.0f, -0.02f), 0.52f, 0.048f, 0.16f, glm::vec4(0.20f, 0.95f, 0.72f, 1.0f));
+    // Flanking medium spore stalk tilted left
+    add_mushroom(glm::vec3(-0.10f, 0.0f, 0.06f), glm::vec3(-0.18f, 0.0f, 0.12f), 0.40f, 0.038f, 0.13f, glm::vec4(0.28f, 0.98f, 0.65f, 1.0f));
+    // Flanking spore stalk tilted right
+    add_mushroom(glm::vec3(0.11f, 0.0f, -0.05f), glm::vec3(0.16f, 0.0f, -0.10f), 0.36f, 0.035f, 0.12f, glm::vec4(0.15f, 0.92f, 0.78f, 1.0f));
+    // Low bulbous spore pod in front
+    add_mushroom(glm::vec3(0.05f, 0.0f, 0.11f), glm::vec3(0.08f, 0.0f, 0.18f), 0.26f, 0.032f, 0.10f, glm::vec4(0.35f, 1.0f, 0.85f, 1.0f));
+    // Tiny satellite spore node
+    add_mushroom(glm::vec3(-0.07f, 0.0f, -0.09f), glm::vec3(-0.12f, 0.0f, -0.15f), 0.19f, 0.025f, 0.08f, glm::vec4(0.22f, 0.95f, 0.70f, 1.0f));
+
+    setup_proto_attributes(proto, vertices, indices);
+}
+
 // Deterministic spatial hash for pseudo-random prop scattering
 static inline uint32_t spatial_hash(int x, int y, int z, uint32_t seed) {
     uint32_t h = seed ^ (static_cast<uint32_t>(x) * 73856093u) ^ (static_cast<uint32_t>(y) * 19349663u) ^ (static_cast<uint32_t>(z) * 83492791u);
@@ -499,10 +607,26 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                             model = glm::scale(model, glm::vec3(scale_var));
 
                             clutter.push_back({anchor, model, ClutterType::FloorStalagmiteRubble, glm::vec4(1.0f), 0.0f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
+                        } else if ((h % 100) < 12) { // ~7% chance on cavern floors for bioluminescent fungal spore pods
+                            float yaw = (h % 360) * glm::pi<float>() / 180.0f;
+                            float scale_var = 0.65f + 0.35f * ((h >> 8) % 100) / 100.0f;
+
+                            glm::vec3 anchor(wx + 0.5f, wy + 1.0f, wz + 0.5f);
+                            glm::mat4 model = glm::translate(glm::mat4(1.0f), anchor);
+                            model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                            model = glm::scale(model, glm::vec3(scale_var));
+
+                            glm::vec4 tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                ? glm::vec4(1.0f, 0.62f, 0.18f, 1.0f) // Thermoluminescent volcanic ember pod
+                                : ((wy < 10)
+                                    ? glm::vec4(0.78f, 0.28f, 0.98f, 1.0f) // Deep void amethyst spore pod
+                                    : glm::vec4(0.20f, 0.95f, 0.70f, 1.0f)); // Cavern phosphorescent mint/cyan
+
+                            clutter.push_back({anchor, model, ClutterType::BioluminescentSporePod, tint, 2.6f, glm::ivec3(wx, wy, wz), glm::ivec3(0, 1, 0)});
                         }
                     }
 
-                    // 3. Exposed Wall-Face Detritus, Rock Outcrops & Crevice Crystals:
+                    // 3. Exposed Wall-Face Detritus, Rock Outcrops, Fungal Spores & Crevice Crystals:
                     // For vertical wall faces facing into open cavern air
                     if (v.material_id != MAT_REINFORCED_VAULT_DOOR && v.material_id != MAT_DREDGE_BEDROCK) {
                         const glm::ivec3 wall_dirs[4] = {
@@ -519,13 +643,14 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                             Voxel n_vox = sample_neighbor(nx, ny, nz, gnx, gny, gnz);
                             if (n_vox.material_id == MAT_AIR) {
                                 uint32_t wh = spatial_hash(gnx, gny, gnz, seed ^ (0xDA7A000u + d * 0x1337u));
-                                if ((wh % 100) < 6) { // ~6% chance on exposed wall faces
+                                if ((wh % 100) < 7) { // ~7% chance on exposed wall faces
                                     int type_roll = (wh >> 8) % 100;
                                     ClutterType ctype = ClutterType::FloorStalagmiteRubble;
                                     glm::vec4 tint(1.0f);
                                     float scale = 0.50f;
+                                    float emissive_boost = 0.0f;
 
-                                    if (type_roll < 60) {
+                                    if (type_roll < 52) {
                                         // Rock Spur outcropping jutting horizontally from wall
                                         ctype = ClutterType::FloorStalagmiteRubble;
                                         int tier = (wh >> 14) % 100;
@@ -534,15 +659,24 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                                         tint = (v.material_id == MAT_VOLCANIC_BASALT)
                                             ? glm::vec4(0.82f, 0.84f, 0.86f, 1.0f)
                                             : glm::vec4(1.04f, 0.98f, 0.92f, 1.0f);
-                                    } else if (type_roll < 82) {
+                                    } else if (type_roll < 72) {
                                         // Wall Stalactite projection hanging along wall
                                         ctype = ClutterType::CeilingStalactite;
                                         scale = (0.45f + 0.35f * ((wh >> 16) % 100) / 100.0f) * 0.70f;
                                         tint = glm::vec4(0.95f, 0.95f, 0.95f, 1.0f);
+                                    } else if (type_roll < 88) {
+                                        // Bioluminescent Wall Fungal Spore Cluster / shelf colony
+                                        ctype = ClutterType::BioluminescentSporePod;
+                                        scale = (0.45f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.75f;
+                                        emissive_boost = 2.6f;
+                                        tint = (v.material_id == MAT_VOLCANIC_BASALT)
+                                            ? glm::vec4(1.0f, 0.58f, 0.18f, 1.0f)
+                                            : glm::vec4(0.22f, 0.95f, 0.72f, 1.0f);
                                     } else {
                                         // Small crystalline cluster in wall crevice
                                         ctype = ClutterType::PrismaticCrystal;
                                         scale = (0.40f + 0.30f * ((wh >> 16) % 100) / 100.0f) * 0.60f;
+                                        emissive_boost = 1.0f;
                                         tint = glm::vec4(0.42f, 0.88f, 0.95f, 0.85f);
                                     }
 
@@ -561,7 +695,7 @@ std::vector<ClutterInstance> SurfaceClutterSystem::generate_chunk_clutter(
                                     model = glm::rotate(model, spin, glm::vec3(0.0f, 1.0f, 0.0f));
                                     model = glm::scale(model, glm::vec3(scale));
 
-                                    clutter.push_back({anchor, model, ctype, tint, (ctype == ClutterType::PrismaticCrystal ? 1.0f : 0.0f), glm::ivec3(wx, wy, wz), wall_dirs[d]});
+                                    clutter.push_back({anchor, model, ctype, tint, emissive_boost, glm::ivec3(wx, wy, wz), wall_dirs[d]});
                                 }
                             }
                         }

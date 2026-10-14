@@ -82,6 +82,7 @@ private:
     void build_stalagmite_mesh(ClutterMeshPrototype& proto);
     void build_crystal_mesh(ClutterMeshPrototype& proto);
     void build_prismatic_crystal_mesh(ClutterMeshPrototype& proto);
+    void build_spore_pod_mesh(ClutterMeshPrototype& proto);
 
     Shader m_shader;
     std::array<ClutterMeshPrototype, static_cast<size_t>(ClutterType::Count)> m_prototypes{};

@@ -144,20 +144,22 @@ bool Chunk::is_clutter_attached_to_face(const ClutterInstance& inst, const glm::
     // Geometric adjacent face verification (anchor tolerance: within 0.20m of face center)
     glm::vec3 host_center = glm::vec3(host_block) + glm::vec3(0.5f);
 
-    bool is_crystal = (inst.type == ClutterType::VoiditeCrystal || inst.type == ClutterType::PrismaticCrystal);
+    bool is_omni_attached = (inst.type == ClutterType::VoiditeCrystal ||
+                             inst.type == ClutterType::PrismaticCrystal ||
+                             inst.type == ClutterType::BioluminescentSporePod);
 
-    // Top face (+Y) - floor stalagmites, rubble, voidite / prismatic crystals
-    if (inst.type == ClutterType::FloorStalagmiteRubble || is_crystal) {
+    // Top face (+Y) - floor stalagmites, rubble, voidite / prismatic crystals, spore pods
+    if (inst.type == ClutterType::FloorStalagmiteRubble || is_omni_attached) {
         glm::vec3 diff = inst.position - (host_center + glm::vec3(0.0f, 0.5f, 0.0f));
         if (glm::dot(diff, diff) < 0.04f) return true;
     }
-    // Bottom face (-Y) - ceiling stalactites, voidite / prismatic crystals
-    if (inst.type == ClutterType::CeilingStalactite || is_crystal) {
+    // Bottom face (-Y) - ceiling stalactites, voidite / prismatic crystals, spore pods
+    if (inst.type == ClutterType::CeilingStalactite || is_omni_attached) {
         glm::vec3 diff = inst.position - (host_center + glm::vec3(0.0f, -0.5f, 0.0f));
         if (glm::dot(diff, diff) < 0.04f) return true;
     }
-    // Side faces - voidite / prismatic crystals, wall props
-    if (is_crystal) {
+    // Side faces - voidite / prismatic crystals, wall spore pods, wall props
+    if (is_omni_attached) {
         const glm::vec3 side_offsets[4] = {
             { 0.5f, 0.0f, 0.0f},
             {-0.5f, 0.0f, 0.0f},

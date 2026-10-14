@@ -695,21 +695,28 @@ void main() {
         }
     }
 
-    // 4. Dynamic Subterranean Ambient Lighting modulated by Depth & Baked AO
-    float depthFactor = clamp((vWorldPos.y - 2.0) / 22.0, 0.12, 0.85);
+    // 4. Dynamic Subterranean Ambient Lighting modulated by Depth, Normal Curvature & Baked AO
+    float depthFactor = clamp((vWorldPos.y - 1.0) / 24.0, 0.35, 1.0);
 
-    vec3 baseSubterraneanAmbient = vec3(0.012, 0.016, 0.022); // Cold Slate
+    // Hemispherical ambient normal modulation: upward-facing surfaces catch subtle cavern sky/spore diffuse,
+    // side walls catch balanced fill, underhangs receive moody contact occlusion.
+    float hemiFactor = clamp(dot(N, vec3(0.0, 1.0, 0.0)) * 0.35 + 0.65, 0.45, 1.0);
+
+    // Sector-specific subterranean ambient palette (richer atmospheric floor reveals cave architecture)
+    vec3 baseSubterraneanAmbient = vec3(0.042, 0.056, 0.072); // Sector 1: Cold slate with phosphorescent cyan undertone
     if (uSector == 2) {
-        baseSubterraneanAmbient = vec3(0.022, 0.012, 0.007); // Magma Core
+        baseSubterraneanAmbient = vec3(0.065, 0.038, 0.024); // Sector 2: Volcanic magma core warmth
     } else if (uSector >= 3) {
-        baseSubterraneanAmbient = vec3(0.007, 0.020, 0.011); // Toxic Vault
+        baseSubterraneanAmbient = vec3(0.035, 0.062, 0.052); // Sector 3+: Toxic vault phosphorescent viridian / void
     }
 
-    // Unpack Baked Vertex AO & apply area darkness factor (in dark zones, ambient drops to zero)
-    const float aoTable[4] = float[](1.0, 0.72, 0.45, 0.20);
+    // Unpack Baked Vertex AO & apply area darkness factor.
+    // In dark zones, darkness factor lowers ambient for moody survival tension,
+    // but enforces a healthy 0.35 minimum floor so cave geometry and tunnels remain discernible.
+    const float aoTable[4] = float[](1.0, 0.78, 0.55, 0.35);
     uint aoIndex = clamp(vAOIndex, 0u, 3u);
-    float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * albedo * aoTable[aoIndex] * darknessMult;
+    float darknessMult = clamp(1.0 - uDarknessFactor * 0.65, 0.35, 1.0);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * aoTable[aoIndex] * darknessMult;
 
     vec3 finalColor = ambient + Lo + emissive;
 

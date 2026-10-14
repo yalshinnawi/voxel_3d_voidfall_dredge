@@ -8,9 +8,10 @@ namespace Voidfall {
 enum class ClutterType : uint8_t {
     CeilingStalactite = 0,
     FloorStalagmiteRubble = 1,
-    VoiditeCrystal = 2,    // Objective mineral cluster (vibrant violet amethyst spires)
-    PrismaticCrystal = 3,  // Decorative diamond/calcite cluster (radiant cyan ice shards)
-    Count = 4
+    VoiditeCrystal = 2,          // Objective mineral cluster (vibrant violet amethyst spires)
+    PrismaticCrystal = 3,        // Decorative diamond/calcite cluster (radiant cyan ice shards)
+    BioluminescentSporePod = 4,  // Subterranean bioluminescent mushroom cluster & spore nodes
+    Count = 5
 };
 
 struct ClutterInstance {

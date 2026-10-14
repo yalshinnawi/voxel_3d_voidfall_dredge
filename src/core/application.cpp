@@ -120,6 +120,10 @@ void Application::init_systems() {
 
     // 2. Renderer & First-Person Viewmodel
     m_renderer = std::make_unique<Renderer>(m_window->width(), m_window->height());
+    m_renderer->headlamp().inner_cutoff = glm::cos(glm::radians(22.0f));
+    m_renderer->headlamp().outer_cutoff = glm::cos(glm::radians(38.0f));
+    m_renderer->headlamp().max_range = 32.0f;
+    m_renderer->headlamp().intensity = 5.2f;
     ParticleSystem::SetRenderer(m_renderer.get());
     DebriefMenu::SetRedeployHandler([this](int sector) {
         LaunchSector(sector);
@@ -3360,6 +3364,7 @@ void Application::render(float dt) {
 
         m_renderer->headlamp().position = m_player->eye_position();
         m_renderer->headlamp().direction = m_player->forward();
+        m_renderer->headlamp().enabled = m_player->is_headlamp_on();
 
         // Atmospheric Headlamp Flicker under tectonic tremors or critical suit health
         float health_pct = (m_player->max_health() > 0.0f) ? (m_player->health() / m_player->max_health()) : 0.0f;
@@ -3404,6 +3409,22 @@ void Application::render(float dt) {
 
     // Setup dynamic point lights (Cavern luminaries, extraction beacon rotating siren, hostile stalker eyes)
     m_renderer->clear_point_lights();
+
+    // 0. Delver Suit Ambient Spore / Visor Environmental Spill (r = 13.5m omni fill light)
+    if (m_player) {
+        PointLight suit_fill;
+        suit_fill.position = m_player->position() + glm::vec3(0.0f, 1.2f, 0.0f);
+        if (m_selected_level == 2) {
+            suit_fill.color = glm::vec3(0.95f, 0.58f, 0.22f); // Warm subterranean geothermal glow
+        } else if (m_selected_level >= 3) {
+            suit_fill.color = glm::vec3(0.38f, 0.88f, 0.95f); // Phosphorescent cyan-emerald
+        } else {
+            suit_fill.color = glm::vec3(0.42f, 0.92f, 0.76f); // Bioluminescent subterranean teal
+        }
+        suit_fill.radius = 13.5f;
+        suit_fill.intensity = m_player->is_headlamp_on() ? 0.65f : 0.88f;
+        m_renderer->add_point_light(suit_fill);
+    }
 
     // 1. Prioritized Cavern Luminaries (glowing crystal geodes, magma vents, radioactive cores, vault strobes)
     float current_time = static_cast<float>(glfwGetTime());

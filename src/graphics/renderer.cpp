@@ -799,6 +799,8 @@ void Renderer::spawn_clutter_break_particles(const glm::vec3& clutter_pos, Clutt
         base_color = (tint.a > 0.0f) ? tint : glm::vec4(0.85f, 0.25f, 1.0f, 1.0f);
     } else if (type == ClutterType::PrismaticCrystal) {
         base_color = (tint.a > 0.0f) ? tint : glm::vec4(0.30f, 0.95f, 1.0f, 1.0f);
+    } else if (type == ClutterType::BioluminescentSporePod) {
+        base_color = (tint.a > 0.0f) ? tint : glm::vec4(0.20f, 0.95f, 0.70f, 1.0f);
     } else if (type == ClutterType::CeilingStalactite || type == ClutterType::FloorStalagmiteRubble) {
         base_color = glm::vec4(0.52f, 0.50f, 0.48f, 1.0f);
     }
@@ -1495,6 +1497,8 @@ void Renderer::spawn_fireball(const glm::vec3& center, int count) {
 }
 
 void Renderer::update_particles(float dt) {
+    update_ambient_spores(dt, m_cam_pos);
+
     std::erase_if(m_particles, [dt](BreakParticle& p) {
         p.pos += p.vel * dt;
         p.vel.y -= p.gravity * dt;
@@ -1503,6 +1507,85 @@ void Renderer::update_particles(float dt) {
         p.life -= dt;
         return p.life <= 0.0f;
     });
+}
+
+void Renderer::update_ambient_spores(float dt, const glm::vec3& cam_pos) {
+    constexpr size_t TARGET_SPORES = 56;
+    size_t active_spores = 0;
+    for (const auto& p : m_particles) {
+        if (p.max_life > 3.0f) {
+            active_spores++;
+        }
+    }
+
+    float t = m_total_time;
+
+    // Organic micro-turbulence for active airborne spores
+    for (auto& p : m_particles) {
+        if (p.max_life > 3.0f) {
+            float seed = p.pos.x * 0.35f + p.pos.z * 0.28f;
+            p.vel.x += std::sin(t * 1.2f + seed) * 0.30f * dt;
+            p.vel.z += std::cos(t * 1.1f + seed * 1.3f) * 0.30f * dt;
+            p.vel.y += std::sin(t * 0.8f + p.pos.y) * 0.18f * dt;
+        }
+    }
+
+    if (active_spores >= TARGET_SPORES || m_particles.size() >= MAX_PARTICLES - 8) {
+        return;
+    }
+
+    size_t to_spawn = std::min(size_t(4), TARGET_SPORES - active_spores);
+    for (size_t i = 0; i < to_spawn; ++i) {
+        BreakParticle p;
+        // Distribute within a 2.5m to 16.0m hollow sphere around player/camera
+        float theta = static_cast<float>(rand() % 360) * glm::pi<float>() / 180.0f;
+        float phi = static_cast<float>(rand() % 180 - 90) * glm::pi<float>() / 180.0f;
+        float dist = 2.5f + static_cast<float>(rand() % 100) / 100.0f * 13.5f;
+
+        glm::vec3 offset(
+            dist * std::cos(phi) * std::cos(theta),
+            dist * std::sin(phi) * 0.65f, // Flatter vertical distribution for cavern feel
+            dist * std::cos(phi) * std::sin(theta)
+        );
+        p.pos = cam_pos + offset;
+
+        // Slow buoyant air drift
+        p.vel = glm::vec3(
+            (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 0.22f,
+            0.12f + static_cast<float>(rand() % 100) / 100.0f * 0.18f, // Gentle thermal upward loft
+            (static_cast<float>(rand() % 100) / 50.0f - 1.0f) * 0.22f
+        );
+
+        // Biome-appropriate spore color
+        if (m_sector == 2) {
+            // Sector 2: Floating incandescent embers / thermoluminescent volcanic motes
+            p.color = glm::vec4(1.0f, 0.58f + static_cast<float>(rand() % 30) / 100.0f, 0.12f, 0.85f);
+        } else if (m_sector >= 3) {
+            // Sector 3+: Amethyst void spores and phosphorescent viridian motes
+            if ((rand() % 2) == 0) {
+                p.color = glm::vec4(0.75f, 0.25f + static_cast<float>(rand() % 25) / 100.0f, 0.98f, 0.85f);
+            } else {
+                p.color = glm::vec4(0.22f, 0.96f, 0.55f, 0.80f);
+            }
+        } else {
+            // Sector 1: Luminous phosphorescent teal / mint bio-spores & faint golden pollen
+            if ((rand() % 3) == 0) {
+                p.color = glm::vec4(0.95f, 0.84f, 0.28f, 0.75f); // Golden spore
+            } else {
+                p.color = glm::vec4(0.18f, 0.95f, 0.72f, 0.85f); // Luminous teal
+            }
+        }
+
+        p.size = 0.12f + static_cast<float>(rand() % 100) / 1000.0f; // 0.12m - 0.22m
+        p.life = 6.0f + static_cast<float>(rand() % 100) / 20.0f;    // 6.0s - 11.0s
+        p.max_life = p.life;
+        p.gravity = -0.05f; // Slight buoyant upward float
+        p.drag = 0.40f;
+        p.size_growth = 0.01f;
+        p.emissive = 2.5f;
+
+        m_particles.push_back(p);
+    }
 }
 
 void Renderer::render_particles() {
@@ -1529,7 +1612,16 @@ void Renderer::render_particles() {
 
     for (size_t i = 0; i < count; ++i) {
         const auto& p = m_particles[i];
-        float alpha = std::clamp(p.life / p.max_life, 0.0f, 1.0f);
+        float alpha = 1.0f;
+        if (p.max_life > 3.0f) {
+            // Spore: smooth organic fade-in / fade-out with gentle breathing pulse
+            float life_ratio = p.life / p.max_life;
+            float fade = std::min(1.0f - life_ratio, life_ratio) * 6.0f;
+            float pulse = 0.85f + 0.15f * std::sin(m_total_time * 2.5f + p.pos.x * 2.0f);
+            alpha = std::clamp(fade, 0.0f, 1.0f) * pulse;
+        } else {
+            alpha = std::clamp(p.life / p.max_life, 0.0f, 1.0f);
+        }
         glm::vec4 col = p.color;
         col.a *= alpha;
 

@@ -147,7 +147,7 @@ void main() {
         if (uRadiationGlitch > 0.0) {
             depthHazeColor = mix(depthHazeColor, vec3(0.05, 0.28, 0.10), uRadiationGlitch * 0.85);
         }
-        depthHazeColor *= clamp(1.0 - uDarknessFactor, 0.0, 1.0); // True pitch black distance in dark zones
+        depthHazeColor *= clamp(1.0 - uDarknessFactor * 0.65, 0.35, 1.0); // Ambient depth haze preserved with 0.35 floor
         float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
         scene = mix(scene, depthHazeColor, depthHazeFactor);
     }

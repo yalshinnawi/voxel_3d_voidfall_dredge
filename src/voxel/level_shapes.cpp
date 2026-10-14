@@ -1873,8 +1873,8 @@ void LevelGenerator::generate_layout() {
 
         if (m_sector_index <= 1) {
           // Sector 1 (Perimeter Drift): Mostly operational lighting
-          // ~15% chance for an unpowered deep corner pocket
-          if (dark_roll < 15) {
+          // ~10% chance for an unpowered deep corner pocket
+          if (dark_roll < 10) {
             room.is_dark_zone = true;
             room.darkness_factor = 0.65f;
           } else {
@@ -1882,31 +1882,31 @@ void LevelGenerator::generate_layout() {
             room.darkness_factor = 0.0f;
           }
         } else if (m_sector_index == 2) {
-          // Sector 2 (Volatile Fault): Moderate infrastructure degradation (~35-45% dark zones)
+          // Sector 2 (Volatile Fault): Moderate infrastructure degradation (~25-38% dark zones)
           bool is_hazard_room = is_harsh_hazard_room(room.type) ||
                                 room.type == RoomShapeType::FaultLineCrevasse ||
                                 room.type == RoomShapeType::CrumblingArchCanyon ||
                                 room.type == RoomShapeType::SpikeTrenchArena;
-          int threshold = is_hazard_room ? 55 : 35;
+          int threshold = is_hazard_room ? 38 : 25;
           if (dark_roll < threshold) {
             room.is_dark_zone = true;
-            room.darkness_factor = 0.85f + 0.10f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+            room.darkness_factor = 0.75f + 0.10f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
           } else {
             room.is_dark_zone = false;
             room.darkness_factor = 0.0f;
           }
         } else {
-          // Sector 3+ (Void Cradle & deep late sectors): Deep abyssal blackouts (~65-75% pitch black)
+          // Sector 3+ (Void Cradle & deep late sectors): Balanced abyssal pockets (~40-55% dark zones)
           bool is_abyss_or_hazard = room.type == RoomShapeType::AbyssalVerticalChasm ||
                                     room.type == RoomShapeType::ColossalAbyssalChasm ||
                                     room.type == RoomShapeType::TectonicAbyssalSinkhole ||
                                     room.type == RoomShapeType::VoidSingularityRift ||
                                     room.type == RoomShapeType::AncientTitanNecropolis ||
                                     is_harsh_hazard_room(room.type);
-          int threshold = is_abyss_or_hazard ? 80 : 60;
+          int threshold = is_abyss_or_hazard ? 55 : 40;
           if (dark_roll < threshold) {
             room.is_dark_zone = true;
-            room.darkness_factor = 0.95f + 0.05f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
+            room.darkness_factor = 0.78f + 0.12f * static_cast<float>((dark_hash >> 8) % 100) / 100.0f;
           } else {
             room.is_dark_zone = false;
             room.darkness_factor = 0.0f;
@@ -3119,12 +3119,24 @@ void LevelGenerator::generate_luminaries() {
   }
 
   // Corridor lights
-  for (const auto &c : m_corridors) {
-    if (c.has_bulkhead_door) {
-      glm::vec3 mid = (glm::vec3(c.start_pos) + glm::vec3(c.end_pos)) * 0.5f;
-      if (is_dark_zone_at(mid)) {
-        continue; // Unpowered / broken lighting leading into or through dark zone
+  for (size_t ci = 0; ci < m_corridors.size(); ++ci) {
+    const auto &c = m_corridors[ci];
+    glm::vec3 mid = (glm::vec3(c.start_pos) + glm::vec3(c.end_pos)) * 0.5f;
+
+    // Check if midpoint falls inside any dark zone bounding box
+    bool in_dark_zone = false;
+    for (const auto &r : m_rooms) {
+      if (r.is_dark_zone && mid.x >= r.min_x() && mid.x <= r.max_x() &&
+          mid.z >= r.min_z() && mid.z <= r.max_z()) {
+        in_dark_zone = true;
+        break;
       }
+    }
+    if (in_dark_zone || is_dark_zone_at(mid)) {
+      continue;
+    }
+
+    if (c.has_bulkhead_door) {
       CavernLuminary blk_light;
       blk_light.position =
           glm::vec3(mid.x, static_cast<float>(c.floor_y + 2.5f), mid.z);
@@ -3136,6 +3148,24 @@ void LevelGenerator::generate_luminaries() {
       blk_light.pulse_depth = 0.18f;
       blk_light.name = "Bulkhead Clearance Light";
       m_luminaries.push_back(blk_light);
+    } else if (ci % 2 == 1) {
+      // Natural bioluminescent fungal spore cluster in connecting corridors
+      // to keep tunnels visible and readable while preserving ambient darkness
+      CavernLuminary spore_light;
+      spore_light.position =
+          glm::vec3(mid.x, static_cast<float>(c.floor_y + 1.2f), mid.z);
+      if ((ci + m_seed) % 2 == 0) {
+        spore_light.base_color = glm::vec3(0.18f, 0.85f, 0.62f); // Bioluminescent fungal teal
+      } else {
+        spore_light.base_color = glm::vec3(0.30f, 0.68f, 0.95f); // Phosphorescent spore cyan
+      }
+      spore_light.base_radius = 12.0f;
+      spore_light.base_intensity = 1.35f;
+      spore_light.type = LuminaryType::FungoidSporeGlow;
+      spore_light.pulse_speed = 1.6f;
+      spore_light.pulse_depth = 0.22f;
+      spore_light.name = "Corridor Spore Luminary";
+      m_luminaries.push_back(spore_light);
     }
   }
 

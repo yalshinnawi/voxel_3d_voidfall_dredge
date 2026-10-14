@@ -27,9 +27,9 @@ void main() {
 
     vec3 albedo = vColor.rgb;
 
-    // Ambient cavern illumination (modulated by dark zone factor)
-    float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
-    vec3 ambient = albedo * 0.04 * ao * darknessMult;
+    // Ambient cavern illumination (modulated by dark zone factor with 0.35 floor)
+    float darknessMult = clamp(1.0 - uDarknessFactor * 0.65, 0.35, 1.0);
+    vec3 ambient = albedo * 0.09 * ao * darknessMult;
 
     // Headlamp spotlight illumination
     vec3 Lo = vec3(0.0);
