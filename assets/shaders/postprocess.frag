@@ -21,10 +21,13 @@ uniform float uSuffocationDarkness;
 uniform float u_ShieldActive;
 uniform float u_ShieldTimer;
 
+// Camera matrices for view reconstruction, SSAO & Puddle SSR
+uniform mat4 uInverseProj;
+uniform mat4 uInverseView;
+uniform mat4 uProj;
+uniform mat4 uView;
+
 // ACES Filmic Tonemapping (Stephen Hill / Narkowicz Fit)
-// Transforms sRGB primaries to ACEScg, applies ACES RRT + ODT curve,
-// and maps back to sRGB. This eliminates harsh spotlight specular blowouts,
-// smoothly compresses intense luminance into highlights, and avoids chrominance distortion.
 const mat3 ACESInputMat = mat3(
     0.59719, 0.07600, 0.02840,
     0.35458, 0.90834, 0.13383,
@@ -57,6 +60,41 @@ float linearize_depth(float d) {
     return (2.0 * near * far) / (far + near - z_ndc * (far - near));
 }
 
+vec3 get_view_pos(vec2 uv) {
+    float depth = texture(uDepthTexture, uv).r;
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 view = uInverseProj * clip;
+    return view.xyz / max(view.w, 0.0001);
+}
+
+// 8-sample depth-buffer SSAO kernel (radius = 0.45m)
+const vec2 ssaoKernel[8] = vec2[](
+    vec2( 0.35,  0.22), vec2(-0.45,  0.30),
+    vec2( 0.20, -0.60), vec2(-0.25, -0.40),
+    vec2( 0.70,  0.60), vec2(-0.80,  0.50),
+    vec2( 0.60, -0.70), vec2(-0.75, -0.65)
+);
+
+float calculate_ssao(vec2 uv, vec3 viewPos) {
+    if (viewPos.z < -45.0) return 1.0;
+    float occlusion = 0.0;
+    float radius = 0.45;
+    float bias = 0.025;
+    vec2 texelSize = 1.0 / max(vec2(textureSize(uDepthTexture, 0)), vec2(1.0));
+
+    for (int i = 0; i < 8; ++i) {
+        vec2 sampleUV = uv + ssaoKernel[i] * texelSize * (radius / max(-viewPos.z, 0.2)) * 36.0;
+        sampleUV = clamp(sampleUV, vec2(0.001), vec2(0.999));
+        vec3 samplePos = get_view_pos(sampleUV);
+
+        float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(viewPos.z - samplePos.z), 0.001));
+        if (samplePos.z >= viewPos.z + bias) {
+            occlusion += rangeCheck;
+        }
+    }
+    return clamp(1.0 - (occlusion / 8.0) * 0.55, 0.35, 1.0);
+}
+
 // Bilateral upsampling for half-resolution volumetric fog
 vec4 sample_bilateral_fog(vec2 uv) {
     ivec2 halfResI = textureSize(uVolumetricFog, 0);
@@ -75,7 +113,6 @@ vec4 sample_bilateral_fog(vec2 uv) {
     vec2 uv01 = (baseCoord + vec2(0.5, 1.5)) * halfTexel;
     vec2 uv11 = (baseCoord + vec2(1.5, 1.5)) * halfTexel;
 
-    // Bilinear spatial weights
     float w00 = (1.0 - f.x) * (1.0 - f.y);
     float w10 = f.x * (1.0 - f.y);
     float w01 = (1.0 - f.x) * f.y;
@@ -88,7 +125,6 @@ vec4 sample_bilateral_fog(vec2 uv) {
     float d01 = linearize_depth(texture(uDepthTexture, uv01).r);
     float d11 = linearize_depth(texture(uDepthTexture, uv11).r);
 
-    // Cross-bilateral depth rejection weights
     float dw00 = exp(-abs(centerDepth - d00) * 1.5);
     float dw10 = exp(-abs(centerDepth - d10) * 1.5);
     float dw01 = exp(-abs(centerDepth - d01) * 1.5);
@@ -110,7 +146,6 @@ vec4 sample_bilateral_fog(vec2 uv) {
         return (fog00 * totalW00 + fog10 * totalW10 + fog01 * totalW01 + fog11 * totalW11) / totalWeight;
     }
 
-    // Fallback: choose the sample with closest depth to center
     float diff00 = abs(centerDepth - d00);
     float diff10 = abs(centerDepth - d10);
     float diff01 = abs(centerDepth - d01);
@@ -133,21 +168,67 @@ void main() {
         scene *= clamp(1.0 - uSuffocationDarkness, 0.0, 1.0);
         bloom *= clamp(1.0 - uSuffocationDarkness, 0.0, 1.0);
     }
-    vec4 fog   = sample_bilateral_fog(uv); // rgb = inscatter, a = fog factor (bilateral upsampled)
+    vec4 fog = sample_bilateral_fog(uv);
+
+    // Reconstruct view space position
+    vec3 viewPos = get_view_pos(uv);
+
+    // 1. Evaluate lightweight 8-sample depth-buffer SSAO kernel (radius = 0.45m)
+    // Grounds dynamic debris, monster feet, and surface clutter against the voxel floor
+    float ssao = calculate_ssao(uv, viewPos);
+    scene *= ssao;
+
+    // 2. Fast 8-step screen-space depth raymarch (SSR) on wet aquifer floor puddles (N.y > 0.85)
+    // Reflects glowing Voidite crystals, thrown flares, and monster eyes on wet stone
+    if (viewPos.z > -30.0) {
+        vec3 viewNormal = normalize(cross(dFdx(viewPos), dFdy(viewPos)));
+        vec3 worldNormal = normalize(mat3(uInverseView) * viewNormal);
+
+        if (worldNormal.y > 0.82) {
+            vec3 R_view = reflect(normalize(viewPos), viewNormal);
+            if (R_view.y > 0.05) {
+                vec3 rayPos = viewPos;
+                float stepLen = 0.22 + 0.04 * (-viewPos.z * 0.04);
+                vec3 hitColor = vec3(0.0);
+                float hitWeight = 0.0;
+
+                for (int s = 1; s <= 8; ++s) {
+                    rayPos += R_view * stepLen;
+                    vec4 proj = uProj * vec4(rayPos, 1.0);
+                    vec2 rayUV = (proj.xy / proj.w) * 0.5 + 0.5;
+                    if (rayUV.x < 0.03 || rayUV.x > 0.97 || rayUV.y < 0.03 || rayUV.y > 0.97) break;
+
+                    vec3 sampledPos = get_view_pos(rayUV);
+                    float depthDiff = rayPos.z - sampledPos.z;
+                    if (depthDiff <= 0.0 && abs(depthDiff) < 0.40) {
+                        vec3 reflSample = texture(uSceneColor, rayUV).rgb;
+                        reflSample += texture(uBloomColor, rayUV).rgb * 0.85;
+                        hitColor = reflSample;
+                        hitWeight = smoothstep(0.0, 0.15, R_view.y) * (1.0 - float(s) / 9.0);
+                        break;
+                    }
+                }
+                if (hitWeight > 0.0) {
+                    float fresnel = pow(clamp(1.0 - max(dot(viewNormal, -normalize(viewPos)), 0.0), 0.0, 1.0), 3.0);
+                    scene = mix(scene, hitColor, clamp(fresnel * 0.60 * hitWeight, 0.0, 0.50));
+                }
+            }
+        }
+    }
 
     // Cavern expanses beyond 40.0m smoothly blend into an ambient depth haze
     float linearDepth = linearize_depth(texture(uDepthTexture, uv).r);
     if (linearDepth > 40.0) {
-        vec3 depthHazeColor = vec3(0.04, 0.05, 0.07); // Subterranean ambient haze (Sector 1: Cold slate)
+        vec3 depthHazeColor = vec3(0.04, 0.05, 0.07);
         if (uSector == 2) {
-            depthHazeColor = vec3(0.08, 0.045, 0.025); // Sector 2: Volcanic amber
+            depthHazeColor = vec3(0.08, 0.045, 0.025);
         } else if (uSector >= 3) {
-            depthHazeColor = vec3(0.025, 0.07, 0.04); // Sector 3: Toxic emerald
+            depthHazeColor = vec3(0.025, 0.07, 0.04);
         }
         if (uRadiationGlitch > 0.0) {
             depthHazeColor = mix(depthHazeColor, vec3(0.05, 0.28, 0.10), uRadiationGlitch * 0.85);
         }
-        depthHazeColor *= clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0); // Ambient depth haze lowers in deep dark zones
+        depthHazeColor *= clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0);
         float depthHazeFactor = clamp((linearDepth - 40.0) / 40.0, 0.0, 0.85);
         scene = mix(scene, depthHazeColor, depthHazeFactor);
     }
@@ -157,15 +238,13 @@ void main() {
         scene = scene * clamp(1.0 - fog.a * 0.4, 0.2, 1.0) + fog.rgb;
     }
 
-    // Additive Bloom: adds diffused glow from genuine emissive elements (Voidite crystals, molten slag, flares).
-    // Standard specular peaks are excluded from the bloom buffer via the 1.8-2.2 luminance cutoff threshold.
+    // Additive Bloom
     scene += bloom * uBloomIntensity;
 
     // Subterranean Exposure
     vec3 hdr = scene * uExposure;
 
-    // ACES Filmic Tonemapping: compresses specular peaks smoothly along the S-curve shoulder,
-    // preventing bright surfaces from blowing out into flat white glare.
+    // ACES Filmic Tonemapping
     vec3 ldr = aces_filmic(hdr);
 
     // Visor Vignette
@@ -196,16 +275,12 @@ void main() {
     vec3 casColor = (col_m + (col_n + col_s + col_w + col_e) * w) / (1.0 + 4.0 * w);
     color.rgb = clamp(casColor, 0.0, 1.0);
 
-    // Apply shield strictly as an edge vignette, keeping center contrast intact
+    // Apply shield strictly as an edge vignette
     if (u_ShieldActive > 0.0) {
         vec2 uv_shield = vUV - 0.5;
-        float vignette_edge = smoothstep(0.35, 0.75, length(uv_shield)); // Confine to screen borders
-        
-        // Smooth fade-out over the final 1.0s instead of an abrupt pop
+        float vignette_edge = smoothstep(0.35, 0.75, length(uv_shield));
         float shieldAlpha = clamp(u_ShieldTimer / 1.0, 0.0, 1.0); 
-        
         vec3 shieldCyan = vec3(0.0, 0.95, 1.0);
-        // Blend using screen or additive blending strictly on the edges
         color.rgb += shieldCyan * vignette_edge * shieldAlpha * 0.35;
     }
 

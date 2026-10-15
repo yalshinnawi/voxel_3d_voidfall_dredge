@@ -3,8 +3,9 @@
 in vec3 vFragPos;
 in vec3 vNormal;
 in vec4 vColor;
-in vec4 vMaterial; // x=metallic, y=roughness, z=emissive, w=ao
+in vec4 vMaterial; // x=metallic, y=roughness, z=emissive, w=ao/sssMask
 in vec3 vModelPos;
+in vec4 vFragPosLightSpace;
 
 layout (location = 0) out vec4 FragColor;
 layout (location = 1) out vec4 BrightColor;
@@ -18,7 +19,18 @@ uniform float uStateGlow;
 uniform int uState; // 0=Idle, 1=Stalking, 2=Circling, 3=Lunging, 4=Stunned, 5=Fleeing, 10=Delver
 uniform float uDissolveThreshold; // 0.0 = solid, 1.0 = fully dissolved
 uniform float u_dissolveThreshold;
+uniform float uDissolveProgress;
 uniform float uDarknessFactor;
+
+// Headlamp Shadow Mapping
+uniform sampler2D uHeadlampShadowMap;
+uniform int uHeadlampShadowsEnabled;
+
+// Hit-Wound Decals & Shock Impulses
+uniform float u_HitFlashTimer;
+uniform vec3 u_LastHitLocalPos;
+uniform int uIsMonster;
+uniform vec3 uCavernAtmosphereColor;
 
 // 3D procedural noise for dissolve burn-away cutouts
 float hash3D(vec3 p) {
@@ -37,18 +49,49 @@ float noise3D(vec3 x) {
                    mix(hash3D(p + vec3(0,1,1)), hash3D(p + vec3(1,1,1)), f.x), f.y), f.z);
 }
 
+float calculate_headlamp_shadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
+    if (uHeadlampShadowsEnabled == 0) return 1.0;
+    
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+    
+    float bias = max(0.0035 * (1.0 - dot(normal, lightDir)), 0.0012);
+    float currentDepth = projCoords.z;
+    
+    const vec2 poissonDisk[4] = vec2[](
+        vec2(-0.38,  0.35),
+        vec2( 0.35,  0.32),
+        vec2(-0.32, -0.38),
+        vec2( 0.38, -0.35)
+    );
+    
+    vec2 texelSize = 1.0 / vec2(1024.0, 1024.0);
+    float shadow = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        float pcfDepth = texture(uHeadlampShadowMap, projCoords.xy + poissonDisk[i] * texelSize * 1.5).r;
+        shadow += (currentDepth - bias > pcfDepth) ? 0.0 : 1.0;
+    }
+    return shadow * 0.25;
+}
+
 void main() {
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uCamPos - vFragPos);
 
     float metallic = clamp(vMaterial.x, 0.0, 1.0);
     float roughness = clamp(vMaterial.y, 0.04, 1.0);
+    if (uState != 10 && uIsMonster != 0) {
+        roughness = min(roughness, 0.22);
+    }
     float baseEmissive = vMaterial.z;
     float ao = clamp(vMaterial.w, 0.15, 1.0);
 
     // ── Dedicated Delver Contractor Character Mode (uState == 10) ──
     if (uState == 10) {
-        // Multi-source studio and subterranean illumination
         vec3 keyDir = normalize(vec3(0.45, 0.80, 0.40));
         vec3 fillDir = normalize(vec3(-0.60, 0.25, -0.45));
         vec3 bounceDir = normalize(vec3(0.0, -1.0, 0.20));
@@ -59,7 +102,6 @@ void main() {
         
         vec3 lightEnv = vec3(1.0, 0.97, 0.92) * diffKey + vec3(0.40, 0.62, 0.95) * diffFill + vec3(0.16, 0.14, 0.12) * diffBounce;
         
-        // Headlamp directional spotlight
         vec3 headlampTerm = vec3(0.0);
         if (uHeadlampEnabled > 0.5) {
             vec3 toL = uHeadlampPos - vFragPos;
@@ -71,7 +113,8 @@ void main() {
             if (spot > spotCut && dist < 25.0) {
                 float falloff = smoothstep(spotCut, spotCut + 0.08, spot);
                 float atten = 1.0 / (1.0 + 0.05 * dist + 0.01 * dist * dist);
-                headlampTerm = uHeadlampColor * diff_h * falloff * atten * 1.5;
+                float shadow = calculate_headlamp_shadow(vFragPosLightSpace, N, L_h);
+                headlampTerm = uHeadlampColor * diff_h * falloff * atten * 1.5 * shadow;
             }
         }
         
@@ -79,17 +122,14 @@ void main() {
         bool isVisor = (baseEmissive > 0.6);
         
         if (isVisor) {
-            // Subtle internal HUD horizontal scanning reticle grid
             float hudScan = sin(vModelPos.y * 380.0) * 0.5 + 0.5;
             float hudGrid = sin(vModelPos.x * 280.0) * 0.5 + 0.5;
             delverAlbedo = mix(delverAlbedo * 0.88, delverAlbedo * 1.15, hudScan * hudGrid * 0.20);
         } else {
-            // Ballistic weave texture on suit fabric sleeves & legs
             if (roughness > 0.55 && metallic < 0.25) {
                 float weave = sin(vModelPos.x * 220.0) * cos(vModelPos.y * 220.0) * 0.5 + 0.5;
                 delverAlbedo *= (0.90 + 0.16 * weave);
             }
-            // Fine machined metallic grain on armor plates and mechanical joints
             if (metallic > 0.35) {
                 float metalGrain = sin(vModelPos.x * 280.0 + vModelPos.z * 160.0) * 0.5 + 0.5;
                 delverAlbedo *= (0.92 + 0.15 * metalGrain);
@@ -99,19 +139,16 @@ void main() {
         vec3 ambientDelver = vec3(0.07, 0.08, 0.10) * delverAlbedo * ao;
         vec3 diffuseDelver = (lightEnv + headlampTerm) * delverAlbedo * (1.0 - metallic * 0.65) * ao;
         
-        // Specular microfacet reflection
         vec3 HKey = normalize(keyDir + V);
         float specPower = mix(160.0, 8.0, roughness);
         float specKey = pow(max(dot(N, HKey), 0.0), specPower);
         vec3 F0 = mix(vec3(0.04), delverAlbedo, metallic);
         vec3 specColor = F0 * specKey * mix(1.0, 2.8, metallic);
         
-        // Crisp, refined class-tinted Fresnel rim highlight
         float NdotV = max(dot(N, V), 0.0);
         float fresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.4);
         vec3 rimColor = mix(vec3(0.4, 0.5, 0.6), vColor.rgb, 0.45) * fresnel * 0.75;
         
-        // Capped visor emissive to prevent blown-out pure white rectangles
         float effEmissive = baseEmissive;
         if (isVisor) {
             effEmissive = min(baseEmissive, 1.6);
@@ -121,7 +158,6 @@ void main() {
         vec3 finalColor = ambientDelver + diffuseDelver + specColor + rimColor + emissiveTerm;
         FragColor = vec4(finalColor, vColor.a);
         
-        // Controlled bloom output
         float delverLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
         if (delverLum > 2.0 || effEmissive > 1.35) {
             BrightColor = vec4(finalColor, 1.0);
@@ -131,27 +167,28 @@ void main() {
         return;
     }
 
-    // Void Dissolution / Alpha Burn-Away cutoff
-    float dissolve = max(max(uDissolveThreshold, u_dissolveThreshold), 1.0 - vColor.a);
+    // ── Noise-Dissolve Carcass Decay (smooth procedural 3D noise burn-away) ──
+    float dissolve = max(max(uDissolveThreshold, u_dissolveThreshold), uDissolveProgress);
+    if (vColor.a < 0.99) {
+        dissolve = max(dissolve, 1.0 - vColor.a);
+    }
     vec3 dissolveRim = vec3(0.0);
     if (dissolve > 0.001) {
-        float noiseVal = noise3D(vFragPos * 2.0);
+        float noiseVal = noise3D(vFragPos * 2.2);
         if (noiseVal < dissolve) {
             discard;
         }
-        // Glowing cyan/amber burn rim along edge boundaries
-        if (noiseVal < dissolve + 0.05) {
-            dissolveRim = vec3(0.0, 0.95, 1.0) * 3.0;
+        if (noiseVal < dissolve + 0.06) {
+            dissolveRim = vec3(1.0, 0.45, 0.08) * 4.5;
         }
     }
 
-
-    // Cavern subterranean ambient light (pitch-black shadow until lit by headlamp/flares)
     float darknessMult = clamp(1.0 - uDarknessFactor, 0.0, 1.0);
     vec3 ambient = vec3(0.014, 0.017, 0.024) * vColor.rgb * ao * darknessMult;
 
-    // Headlamp spotlight calculation
     vec3 headlampLight = vec3(0.0);
+    vec3 sssLight = vec3(0.0);
+
     if (uHeadlampEnabled > 0.5) {
         vec3 toLight = uHeadlampPos - vFragPos;
         float dist = length(toLight);
@@ -160,57 +197,70 @@ void main() {
         float spotDot = dot(normalize(-uHeadlampDir), L);
         float spotAngle = cos(radians(28.0));
 
-        const float MAX_HEADLAMP_RANGE = 22.0;
+        const float MAX_HEADLAMP_RANGE = 24.0;
         if (spotDot > spotAngle && dist < MAX_HEADLAMP_RANGE) {
             float spotFalloff = smoothstep(spotAngle, spotAngle + 0.08, spotDot);
             float rangeFactor = clamp(1.0 - (dist / MAX_HEADLAMP_RANGE), 0.0, 1.0);
             float atten = (rangeFactor * rangeFactor) / (1.0 + 0.08 * dist + 0.015 * dist * dist);
 
-            // Specular GGX / Blinn-Phong highlight on chitinous carapace
+            float shadow = calculate_headlamp_shadow(vFragPosLightSpace, N, L);
+
             vec3 H = normalize(L + V);
-            float specPower = mix(90.0, 8.0, roughness);
+            float specPower = mix(120.0, 12.0, roughness);
             float spec = pow(max(dot(N, H), 0.0), specPower);
 
-            vec3 specColor = mix(vec3(0.04), vColor.rgb, metallic);
+            vec3 specColor = mix(vec3(0.05), vColor.rgb, metallic);
             vec3 diffuseTerm = diff * vColor.rgb * (1.0 - metallic) * ao;
-            vec3 specTerm = spec * specColor * mix(1.0, 2.5, metallic);
+            vec3 specTerm = spec * specColor * mix(1.2, 3.0, metallic);
 
-            headlampLight = (diffuseTerm + specTerm) * uHeadlampColor * atten * spotFalloff * 2.2;
+            headlampLight = (diffuseTerm + specTerm) * uHeadlampColor * atten * spotFalloff * 2.4 * shadow;
+
+            float sssMask = clamp(vMaterial.w, 0.0, 1.0);
+            if (baseEmissive > 0.2 || vColor.a < 0.95 || sssMask > 0.6) {
+                float sssWrap = max(0.0, dot(-L, V));
+                float sssIntensity = pow(sssWrap, 2.5) * sssMask * 1.8;
+                vec3 sssTint = mix(vColor.rgb, vec3(1.0, 0.40, 0.10), 0.5);
+                sssLight = sssTint * sssIntensity * uHeadlampColor * atten * spotFalloff * shadow;
+            }
         }
     }
 
-    // Predatory Fresnel rim lighting (chitinous edges glint menacingly in darkness)
     float NdotV = max(dot(N, V), 0.0);
-    float fresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.2);
+    float rimFresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
 
-    vec3 rimColor = vec3(0.12, 0.75, 0.35); // Void emerald rim
+    vec3 cavernRim = length(uCavernAtmosphereColor) > 0.1 ? uCavernAtmosphereColor : vec3(0.15, 0.65, 0.45);
     if (uState == 3) {
-        rimColor = vec3(1.0, 0.10, 0.15);   // Aggressive blood-crimson rim when lunging
+        cavernRim = vec3(1.0, 0.08, 0.12);
     } else if (uState == 4) {
-        rimColor = vec3(0.2, 0.90, 1.0);    // Electric cyan shockwave rim when stunned
+        cavernRim = vec3(0.2, 0.90, 1.0);
     } else if (uState == 5) {
-        rimColor = vec3(1.0, 0.65, 0.1);    // Amber warning rim when fleeing
+        cavernRim = vec3(1.0, 0.65, 0.1);
     } else if (uState == 1) {
-        rimColor = vec3(0.85, 0.15, 0.95);  // Deep void purple rim when stalking in shadows
+        cavernRim = vec3(0.85, 0.15, 0.95);
     } else if (uState == 8 || uState == 9) {
-        rimColor = vec3(0.0);               // Extinguished in death
+        cavernRim = vec3(0.0);
     }
-    vec3 rimLight = rimColor * fresnel * 0.95;
+    vec3 rimLight = cavernRim * rimFresnel * 1.35;
 
-    // Emissive component (piercing glowing compound eyes & pulsating void core!)
     float emissiveMultiplier = (uState == 8 || uState == 9) ? 0.0 : 1.0;
     vec3 emissive = vColor.rgb * baseEmissive * emissiveMultiplier;
 
-    // If stunned, add electrical spark flicker
+    if (u_HitFlashTimer > 0.0) {
+        float hitDist = length(vModelPos - u_LastHitLocalPos);
+        if (hitDist < 0.32) {
+            float scarFactor = smoothstep(0.32, 0.04, hitDist);
+            emissive += vec3(0.05, 0.90, 1.0) * scarFactor * 4.0 * u_HitFlashTimer;
+        }
+        emissive += vec3(0.75, 0.95, 1.0) * u_HitFlashTimer * 1.8;
+    }
+
     if (uState == 4 && baseEmissive > 0.1) {
         emissive *= (1.5 + 0.5 * sin(uStateGlow * 20.0));
     }
 
-    vec3 finalColor = ambient + headlampLight + rimLight + emissive + dissolveRim;
+    vec3 finalColor = ambient + headlampLight + sssLight + rimLight + emissive + dissolveRim;
     FragColor = vec4(finalColor, vColor.a);
 
-    // Bloom extraction: only genuine emissive elements (eyes, void core, hit flash, dissolve rim) cast bloom.
-    // Standard chitinous armor specular highlights are suppressed by the 2.0 cutoff.
     float stalkerLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
     float stalkerEmissive = max(emissive.r, max(emissive.g, emissive.b));
     const float BLOOM_CUTOFF = 2.0;

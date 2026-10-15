@@ -34,6 +34,40 @@ uniform float uHeadlampOuterCutoff;
 uniform float uHeadlampIntensity;
 uniform float uHeadlampRange;
 
+// Headlamp Shadow Mapping
+uniform sampler2D uHeadlampShadowMap;
+uniform int uHeadlampShadowsEnabled;
+uniform mat4 uHeadlampLightSpaceMatrix;
+
+float calculate_headlamp_shadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
+    if (uHeadlampShadowsEnabled == 0) return 1.0;
+    
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+    
+    float bias = max(0.0040 * (1.0 - dot(normal, lightDir)), 0.0015);
+    float currentDepth = projCoords.z;
+    
+    const vec2 poissonDisk[4] = vec2[](
+        vec2(-0.38,  0.35),
+        vec2( 0.35,  0.32),
+        vec2(-0.32, -0.38),
+        vec2( 0.38, -0.35)
+    );
+    
+    vec2 texelSize = 1.0 / vec2(1024.0, 1024.0);
+    float shadow = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        float pcfDepth = texture(uHeadlampShadowMap, projCoords.xy + poissonDisk[i] * texelSize * 1.5).r;
+        shadow += (currentDepth - bias > pcfDepth) ? 0.0 : 1.0;
+    }
+    return shadow * 0.25;
+}
+
 // Point Lights Data & Clustered SSBOs
 struct PointLightData {
     vec4 position_radius; // xyz = position, w = radius
@@ -579,6 +613,9 @@ void main() {
                 spotFactor *= lensRings;
 
                 vec3 radiance = uHeadlampColor * uHeadlampIntensity * attenuation * spotFactor;
+                vec4 fragPosLightSpace = uHeadlampLightSpaceMatrix * vec4(vWorldPos, 1.0);
+                float shadowFactor = calculate_headlamp_shadow(fragPosLightSpace, N, lightDir);
+                radiance *= shadowFactor;
                 float NdotL = max(dot(N, lightDir), 0.0);
 
                 // Cavern Wall Glare Reduction:

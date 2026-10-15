@@ -6,6 +6,7 @@
 #include "../entities/carcass_manager.hpp"
 #include "../entities/flare.hpp"
 #include "../core/logger.hpp"
+#include "../voxel/world.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -20,6 +21,9 @@
 #endif
 #ifndef GL_TEXTURE4
 #define GL_TEXTURE4 0x84C4
+#endif
+#ifndef GL_TEXTURE5
+#define GL_TEXTURE5 0x84C5
 #endif
 
 typedef void (APIENTRY *PFNGLPOLYGONOFFSETPROC)(GLfloat factor, GLfloat units);
@@ -44,6 +48,8 @@ Renderer::Renderer(int width, int height)
     m_wireframe_shader.load_graphics("assets/shaders/wireframe.vert", "assets/shaders/wireframe.frag");
     m_particle_shader.load_graphics("assets/shaders/particle.vert", "assets/shaders/particle.frag");
     m_stalker_shader.load_graphics("assets/shaders/stalker.vert", "assets/shaders/stalker.frag");
+    m_shadow_shader.load_graphics("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+    m_entity_shadow_shader.load_graphics("assets/shaders/entity_shadow.vert", "assets/shaders/shadow_depth.frag");
 
     // 2. Initialize Texture Array
     m_texture_array = std::make_unique<TextureArray>(128, 128, 18);
@@ -319,6 +325,21 @@ void Renderer::init_framebuffers() {
         }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
+
+    // 4. Headlamp Perspective Shadow Map FBO (1024x1024 GL_DEPTH_COMPONENT24)
+    glGenFramebuffers(1, &m_shadow_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
+    glGenTextures(1, &m_shadow_depth_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_depth_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 1024, 1024, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_depth_tex, 0);
+    GLenum none = GL_NONE;
+    glDrawBuffers(1, &none);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void Renderer::cleanup_framebuffers() {
@@ -327,6 +348,8 @@ void Renderer::cleanup_framebuffers() {
     if (m_bright_tex != 0) glDeleteTextures(1, &m_bright_tex);
     if (m_depth_tex != 0) glDeleteTextures(1, &m_depth_tex);
     if (m_fog_tex != 0) glDeleteTextures(1, &m_fog_tex);
+    if (m_shadow_fbo != 0) glDeleteFramebuffers(1, &m_shadow_fbo);
+    if (m_shadow_depth_tex != 0) glDeleteTextures(1, &m_shadow_depth_tex);
 
     for (int i = 0; i < 2; ++i) {
         if (m_bloom_fbo[i] != 0) glDeleteFramebuffers(1, &m_bloom_fbo[i]);
@@ -1766,6 +1789,13 @@ void Renderer::begin_frame(const glm::mat4& view, const glm::mat4& proj, const g
         m_voxel_shader.set_int("uUseTextureArray", 1);
     }
 
+    // Bind Headlamp Perspective Shadow Map (Unit 5)
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_depth_tex);
+    m_voxel_shader.set_int("uHeadlampShadowMap", 5);
+    m_voxel_shader.set_int("uHeadlampShadowsEnabled", m_headlamp.enabled ? 1 : 0);
+    m_voxel_shader.set_mat4("uHeadlampLightSpaceMatrix", m_headlamp_light_space_matrix);
+
     // Camera frustum extraction (Gribb-Hartmann method from Projection * View)
     glm::mat4 vp = m_proj * m_view;
     glm::vec4 row0(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
@@ -2466,6 +2496,81 @@ static void add_void_spike_mesh(
               xform_n(glm::vec3(1, 0, 0)), wake_color, wake_mat);
 }
 
+static size_t s_last_stalker_vert_count = 0;
+
+void Renderer::render_headlamp_shadows(const World& world, const std::vector<VoidStalker>& stalkers) {
+    if (m_shadow_fbo == 0) return;
+
+    // Headlamp Perspective Shadow Map (Fast & Bounded: FOV = 56.0 deg, near = 0.2f, far = 24.0f)
+    glm::mat4 light_proj = glm::perspective(glm::radians(56.0f), 1.0f, 0.2f, 24.0f);
+    glm::vec3 light_pos = m_headlamp.position;
+    glm::vec3 light_dir = (glm::length(m_headlamp.direction) > 0.001f) ? glm::normalize(m_headlamp.direction) : glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 light_up = std::abs(light_dir.y) > 0.99f ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 light_view = glm::lookAt(light_pos, light_pos + light_dir, light_up);
+    m_headlamp_light_space_matrix = light_proj * light_view;
+
+    glViewport(0, 0, 1024, 1024);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    if (!m_headlamp.enabled) {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+        glViewport(0, 0, m_width, m_height);
+        m_voxel_shader.use();
+        m_voxel_shader.set_int("uHeadlampShadowsEnabled", 0);
+        return;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    if (!s_glPolygonOffset) {
+        s_glPolygonOffset = reinterpret_cast<PFNGLPOLYGONOFFSETPROC>(glfwGetProcAddress("glPolygonOffset"));
+    }
+    if (s_glPolygonOffset) {
+        s_glPolygonOffset(1.5f, 4.0f);
+    }
+    glDisable(GL_BLEND);
+
+    // 1. Render only chunks within 24.0m of the camera/headlamp into the shadow depth map
+    if (m_shadow_shader.id() != 0) {
+        m_shadow_shader.use();
+        m_shadow_shader.set_mat4("uLightSpaceMatrix", m_headlamp_light_space_matrix);
+        m_shadow_shader.set_mat4("uModel", glm::mat4(1.0f));
+
+        const float max_shadow_dist = 24.0f + static_cast<float>(CHUNK_SIZE) * 0.866f;
+        const float max_dist_sq = max_shadow_dist * max_shadow_dist;
+
+        for (const auto& [pos, chunk] : world.chunks()) {
+            if (!chunk || !chunk->has_solid_mesh()) continue;
+            glm::vec3 center = chunk->get_world_pos() + glm::vec3(CHUNK_SIZE * 0.5f);
+            glm::vec3 diff = center - light_pos;
+            if (glm::dot(diff, diff) <= max_dist_sq) {
+                m_shadow_shader.set_vec3("uChunkWorldPos", chunk->get_world_pos());
+                chunk->render_solid();
+            }
+        }
+    }
+
+    // 2. Render active monsters into shadow depth map
+    if (s_last_stalker_vert_count > 0 && m_stalker_vao != 0 && m_entity_shadow_shader.id() != 0) {
+        m_entity_shadow_shader.use();
+        m_entity_shadow_shader.set_mat4("uLightSpaceMatrix", m_headlamp_light_space_matrix);
+        m_entity_shadow_shader.set_mat4("uModel", glm::mat4(1.0f));
+
+        glBindVertexArray(m_stalker_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_last_stalker_vert_count));
+        glBindVertexArray(0);
+    }
+
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
+    glViewport(0, 0, m_width, m_height);
+    m_voxel_shader.use();
+    m_voxel_shader.set_mat4("uHeadlampLightSpaceMatrix", m_headlamp_light_space_matrix);
+    m_voxel_shader.set_int("uHeadlampShadowsEnabled", 1);
+}
+
 void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers) {
     static const std::vector<VoidSpikeProjectile> s_empty_proj;
     render_stalkers(stalkers, s_empty_proj);
@@ -2476,7 +2581,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
     static std::vector<StalkerVertex> s_stalker_verts;
     s_stalker_verts.clear();
-    size_t needed_vert_cap = std::max(static_cast<size_t>(16384), stalkers.size() * 1100 + projectiles.size() * 64);
+    size_t needed_vert_cap = std::max(static_cast<size_t>(32768), stalkers.size() * 1800 + projectiles.size() * 64);
     if (s_stalker_verts.capacity() < needed_vert_cap) {
         s_stalker_verts.reserve(needed_vert_cap);
     }
@@ -2488,10 +2593,17 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
     }
 
     int active_stalker_count = 0;
+    float max_hit_flash = 0.0f;
+    glm::vec3 last_hit_local(0.0f);
+
     for (const auto& s : stalkers) {
         if (s.is_dead()) continue;
         if (std::isnan(s.position.x) || std::isnan(s.position.y) || std::isnan(s.position.z)) continue;
         active_stalker_count++;
+
+        if (s.hit_flash_timer > max_hit_flash) {
+            max_hit_flash = s.hit_flash_timer;
+        }
 
         // Pose computation from dynamic animation controller
         StalkerPoseParameters pose = s.anim_controller.compute_blended_pose(s.pitch);
@@ -2519,24 +2631,22 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         if (s.state == StalkerState::Lunging) {
             crouch_y -= 0.1f;
             lunge_forward = 0.35f;
-            mandible_spread = 0.35f; // Jaws flared wide open to strike!
+            mandible_spread = 0.45f; // Jaws flared wide open to strike!
         } else if (s.state == StalkerState::GroundSlam) {
             float windup_frac = std::clamp(s.state_timer / std::max(0.1f, s.boss_attack_windup), 0.0f, 1.0f);
             crouch_y += (1.0f - windup_frac) * 0.35f - windup_frac * 0.15f;
-            mandible_spread = 0.55f;
+            mandible_spread = 0.60f;
         } else if (s.state == StalkerState::Charging) {
             crouch_y -= 0.22f;
             lunge_forward = 0.40f;
-            mandible_spread = 0.45f;
+            mandible_spread = 0.50f;
         } else if (s.state == StalkerState::Stalking) {
             crouch_y -= 0.15f; // Low predatory stalk
         } else if (s.state == StalkerState::Stunned) {
-            // Smooth disoriented stagger posture (subtle head roll, no 35Hz spazzing jitter)
             float stagger = std::sin(s.glow_phase * 4.0f) * 0.04f;
             base_model = glm::rotate(base_model, stagger, glm::vec3(0.0f, 1.0f, 0.0f));
             crouch_y -= 0.2f;
         } else if (s.state == StalkerState::Burrowing) {
-            // Rhythmic excavation drilling surge pulse (forward-back bore thrust, no roll spazzing)
             float drill_pulse = std::sin(s.state_timer * 18.0f) * 0.025f;
             base_model = glm::translate(base_model, glm::vec3(0.0f, 0.0f, drill_pulse));
             crouch_y -= 0.20f;
@@ -2545,24 +2655,21 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         } else if (s.state == StalkerState::Emerging) {
             float progress = std::clamp(s.state_timer / std::max(0.1f, s.burrow_duration), 0.0f, 1.0f);
             if (s.role == StalkerRole::Melee) {
-                // Melee: frantic claw digging surge, snapping mandibles, aggressive predatory crawl
                 float dig_surge = std::sin(progress * 28.0f) * 0.035f * (1.0f - progress);
                 base_model = glm::translate(base_model, glm::vec3(0.0f, 0.0f, dig_surge));
                 crouch_y -= 0.15f * (1.0f - progress);
                 lunge_forward = 0.20f * progress;
                 mandible_spread = 0.45f * (1.0f - progress) + std::abs(std::sin(s.state_timer * 22.0f)) * 0.25f;
             } else if (s.role == StalkerRole::Shooter) {
-                // Shooter: toxic serpent sinuous slither wiggle emerging low from shadows
                 float slither = std::sin(progress * 18.0f) * 0.08f * (1.0f - progress);
                 base_model = glm::rotate(base_model, slither, glm::vec3(0.0f, 1.0f, 0.0f));
                 crouch_y -= 0.22f * (1.0f - progress);
                 mandible_spread = 0.20f + std::sin(s.state_timer * 14.0f) * 0.15f;
             } else if (s.role == StalkerRole::ChitinGoliath) {
-                // Goliath: heavy tectonic heave, massive armored carapace pushing stone open
                 float heave = std::sin(progress * 12.0f) * 0.05f * (1.0f - progress);
                 base_model = glm::translate(base_model, glm::vec3(0.0f, 0.0f, heave));
                 crouch_y -= 0.30f * (1.0f - progress);
-                mandible_spread = 0.50f;
+                mandible_spread = 0.55f;
             }
         }
 
@@ -2579,42 +2686,48 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             base_model = glm::scale(base_model, glm::vec3(burrow_scale));
         } else if (s.state == StalkerState::Emerging) {
             float progress = std::clamp(s.state_timer / std::max(0.1f, s.burrow_duration), 0.0f, 1.0f);
-            // Physical burrowing emergence: starts recessed beneath surface plane and expands outward into room
             float submerge_depth = (s.role == StalkerRole::ChitinGoliath) ? 0.90f :
                                    (s.role == StalkerRole::Shooter) ? 0.65f : 0.55f;
             float current_depth = (1.0f - progress) * submerge_depth;
-            float push_out = (progress - 1.0f) * 0.50f; // enters forward out of borehole
+            float push_out = (progress - 1.0f) * 0.50f;
             base_model = glm::translate(base_model, glm::vec3(0.0f, -current_depth, push_out));
             float emerge_scale = glm::mix(0.28f, 1.0f, glm::smoothstep(0.0f, 1.0f, progress));
             base_model = glm::scale(base_model, glm::vec3(emerge_scale));
         }
 
-        // Material palettes based on dedicated combat archetype
+        // Material palettes based on dedicated combat archetype & PBR wet chitin specs
+        bool is_drifter = s.is_drifter();
         bool is_shooter = (s.role == StalkerRole::Shooter);
         bool is_goliath = (s.role == StalkerRole::ChitinGoliath);
 
-        // 1. Armored Chitin Carapace
-        glm::vec4 chitin_color = is_goliath
-            ? glm::vec4(0.18f, 0.16f, 0.14f, 1.0f) // Heavy reinforced dark obsidian-iron
-            : (is_shooter
-               ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
-               : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f)); // Deep blood obsidian chitin
-        glm::vec4 chitin_mat(is_goliath ? 0.70f : 0.40f, 0.25f, 0.0f, 1.0f); // metallic, roughness, emissive, ao
+        // 1. Armored Chitin Carapace (roughness = 0.22f for wet organic sheen)
+        glm::vec4 chitin_color = is_drifter
+            ? glm::vec4(0.22f, 0.45f, 0.65f, 0.85f) // Ethereal translucent abyss blue
+            : (is_goliath
+               ? glm::vec4(0.16f, 0.15f, 0.14f, 1.0f) // Heavy reinforced basalt obsidian-iron
+               : (is_shooter
+                  ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
+                  : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f))); // Deep blood obsidian chitin
+        glm::vec4 chitin_mat(is_goliath ? 0.75f : 0.40f, 0.22f, 0.0f, 1.0f); // metallic, roughness=0.22, emissive, sss/ao
 
         // 2. Secondary Chitin / Ribs / Spines
-        glm::vec4 spine_color = is_goliath
-            ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f) // Bronze armor reinforcing plates
-            : (is_shooter
-               ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)   // Acid emerald quills
-               : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f)); // Jagged crimson spines
+        glm::vec4 spine_color = is_drifter
+            ? glm::vec4(0.35f, 0.70f, 0.95f, 0.90f)
+            : (is_goliath
+               ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f)
+               : (is_shooter
+                  ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)
+                  : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f)));
         glm::vec4 spine_mat(0.50f, 0.20f, 0.0f, 0.9f);
 
         // 3. Serrated Fangs / Claws
-        glm::vec4 claw_color = is_goliath
-            ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f) // Heavy iron ram horn
-            : (is_shooter
-               ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)   // Toxic jade bone
-               : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f)); // Razor blood bone
+        glm::vec4 claw_color = is_drifter
+            ? glm::vec4(0.50f, 0.80f, 1.0f, 0.95f)
+            : (is_goliath
+               ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f)
+               : (is_shooter
+                  ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)
+                  : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f)));
         glm::vec4 claw_mat(0.75f, 0.18f, 0.0f, 1.0f);
 
         // Enraged Boss Apex Frenzy visuals (scorched magma veins & radiant spikes)
@@ -2627,11 +2740,11 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             claw_mat.z += 3.0f * enrage_pulse;
         }
 
-        // 4. Bioluminescent Eye Color
+        // 4. Bioluminescent Eye Color & Nodes (emissive > 2.5)
         glm::vec4 eye_color = s.get_eye_color();
-        glm::vec4 eye_mat(0.0f, 0.02f, 6.5f, 1.0f); // Massive emissive boost for bloom!
+        glm::vec4 eye_mat(0.0f, 0.02f, 5.5f, 1.0f);
 
-        // White emissive hit-flash shader pulse (0.08s) - active combatants only, suppressed on death/dying
+        // White emissive hit-flash shader pulse (0.08s)
         if (s.hit_flash_timer > 0.0f && s.state != StalkerState::Dying) {
             float flash_k = std::clamp(s.hit_flash_timer / 0.08f, 0.0f, 1.0f);
             chitin_color = glm::mix(chitin_color, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), flash_k * 0.92f);
@@ -2642,12 +2755,12 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             claw_mat.z   += 8.5f * flash_k;
         }
 
-        // 5. Pulsing Void Core (beating heart)
+        // 5. Pulsing Void Core
         float core_pulse = 0.85f + 0.35f * std::sin(s.glow_phase * 5.0f);
         glm::vec4 core_color = eye_color;
         glm::vec4 core_mat(0.1f, 0.05f, 5.0f * core_pulse, 1.0f);
 
-        // When dying, extinguish bioluminescent life signs (eyes & core fade out to dark)
+        // When dying, extinguish bioluminescent life signs
         if (s.state == StalkerState::Dying) {
             float death_progress = std::clamp(s.death_timer / std::max(0.01f, s.death_duration), 0.0f, 1.0f);
             float life_fade = 1.0f - death_progress;
@@ -2655,7 +2768,6 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             core_mat.z *= life_fade;
             eye_color = glm::mix(glm::vec4(0.02f, 0.02f, 0.02f, 1.0f), eye_color, life_fade);
             core_color = glm::mix(glm::vec4(0.02f, 0.02f, 0.02f, 1.0f), core_color, life_fade);
-            // Settle chitin colors naturally into a collapsed carcass tone
             chitin_color = glm::mix(chitin_color, chitin_color * 0.75f, death_progress);
             spine_color  = glm::mix(spine_color,  spine_color * 0.75f,  death_progress);
             claw_color   = glm::mix(claw_color,   claw_color * 0.75f,   death_progress);
@@ -2663,13 +2775,13 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
         // === BODY ASSEMBLY ===
 
-        // A. Main Torso / Thorax (Central Armored Carapace)
+        // A. Main Torso / Thorax
         {
             glm::mat4 thorax_m = glm::translate(base_model, glm::vec3(0.0f, 0.30f, 0.0f));
-            add_stalker_box(s_stalker_verts, thorax_m, glm::vec3(0.26f, 0.18f, 0.35f), chitin_color, chitin_mat);
+            add_stalker_box(s_stalker_verts, thorax_m, glm::vec3(0.28f, 0.19f, 0.36f), chitin_color, chitin_mat);
         }
 
-        // B. Pulsating Void Core (Visible inside the ribcage / glowing heart)
+        // B. Pulsating Void Core
         {
             float c_scale = 0.12f * core_pulse;
             glm::mat4 core_m = glm::translate(base_model, glm::vec3(0.0f, 0.28f, 0.02f));
@@ -2677,116 +2789,216 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             add_stalker_box(s_stalker_verts, core_m, glm::vec3(c_scale), core_color, core_mat);
         }
 
-        // C. Dorsal Chitin Spines (4 jagged quills along spine)
-        for (int q = 0; q < 4; ++q) {
-            float qz = -0.25f + q * 0.16f;
-            float qh = 0.14f + (q == 1 || q == 2 ? 0.08f : 0.0f);
-            glm::mat4 quill_m = glm::translate(base_model, glm::vec3(0.0f, 0.48f, qz));
-            quill_m = glm::rotate(quill_m, -0.35f - q * 0.12f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, quill_m, glm::vec3(0.04f, qh, 0.05f), spine_color, spine_mat);
-        }
-
-        // D. Segmented Abdomen & Stinger Tail (curves back and up)
+        // C. Bioluminescent Abdomen (Rear Segmented Sac with 4 Dorsal Crystal Spines)
         {
-            glm::mat4 tail1_m = glm::translate(base_model, glm::vec3(0.0f, 0.25f, -0.42f));
-            tail1_m = glm::rotate(tail1_m, 0.25f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, tail1_m, glm::vec3(0.20f, 0.15f, 0.18f), chitin_color, chitin_mat);
+            // Segment 1 (Base Sac)
+            glm::mat4 abd1_m = glm::translate(base_model, glm::vec3(0.0f, 0.27f, -0.36f));
+            abd1_m = glm::rotate(abd1_m, 0.18f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, abd1_m, glm::vec3(0.24f, 0.17f, 0.22f), chitin_color, chitin_mat);
 
-            glm::mat4 tail2_m = glm::translate(tail1_m, glm::vec3(0.0f, -0.05f, -0.22f));
-            tail2_m = glm::rotate(tail2_m, 0.45f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, tail2_m, glm::vec3(0.14f, 0.11f, 0.16f), chitin_color, chitin_mat);
+            // Segment 2 (Mid Taper)
+            glm::mat4 abd2_m = glm::translate(abd1_m, glm::vec3(0.0f, -0.04f, -0.20f));
+            abd2_m = glm::rotate(abd2_m, 0.28f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, abd2_m, glm::vec3(0.18f, 0.14f, 0.20f), chitin_color, chitin_mat);
 
-            glm::mat4 stinger_m = glm::translate(tail2_m, glm::vec3(0.0f, 0.10f, -0.18f));
-            stinger_m = glm::rotate(stinger_m, 0.6f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, stinger_m, glm::vec3(0.05f, 0.05f, 0.14f), claw_color, claw_mat);
+            // Segment 3 (Tail Tip / Stinger)
+            glm::mat4 abd3_m = glm::translate(abd2_m, glm::vec3(0.0f, 0.06f, -0.18f));
+            abd3_m = glm::rotate(abd3_m, 0.45f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, abd3_m, glm::vec3(0.10f, 0.09f, 0.16f), claw_color, claw_mat);
+
+            // 4 Dorsal Crystal Spines pulsing with: 0.7 + 0.3 * sin(u_Time * 4.0)
+            float spine_pulse = 0.7f + 0.3f * std::sin(m_total_time * 4.0f);
+            glm::vec4 crystal_spine_color = glm::mix(spine_color, eye_color, 0.60f);
+            glm::vec4 crystal_spine_mat = spine_mat;
+            crystal_spine_mat.z = (is_goliath ? 4.5f : 3.2f) * spine_pulse; // radiant crystal luminescence
+
+            for (int q = 0; q < 4; ++q) {
+                float qz = -0.22f - q * 0.15f;
+                float qh = 0.15f + (q == 1 || q == 2 ? 0.08f : 0.0f);
+                glm::mat4 spine_m = glm::translate(base_model, glm::vec3(0.0f, 0.38f - q * 0.035f, qz));
+                spine_m = glm::rotate(spine_m, -0.32f - q * 0.12f, glm::vec3(1.0f, 0.0f, 0.0f));
+                add_stalker_box(s_stalker_verts, spine_m, glm::vec3(0.045f, qh, 0.055f), crystal_spine_color, crystal_spine_mat);
+            }
         }
 
-        // E. Armored Head / Cranial Skull (with downward-arching predatory neck tracking toward player)
+        // D. Armored Head / Cranial Skull with Angled Carapace Hood
         glm::mat4 head_base = glm::translate(base_model, glm::vec3(0.0f, 0.32f, 0.40f));
         head_base = glm::rotate(head_base, pose.head_pitch_offset, glm::vec3(1.0f, 0.0f, 0.0f));
         {
+            // Cranial Skull
             glm::mat4 skull_m = glm::rotate(head_base, 0.15f, glm::vec3(1.0f, 0.0f, 0.0f));
             add_stalker_box(s_stalker_verts, skull_m, glm::vec3(0.22f, 0.14f, 0.22f), chitin_color, chitin_mat);
 
-            glm::mat4 brow_m = glm::translate(skull_m, glm::vec3(0.0f, 0.12f, 0.02f));
-            add_stalker_box(s_stalker_verts, brow_m, glm::vec3(0.24f, 0.05f, 0.18f), spine_color, spine_mat);
+            // Angled Carapace Hood covering upper head
+            glm::mat4 hood_m = glm::translate(head_base, glm::vec3(0.0f, 0.15f, 0.08f));
+            hood_m = glm::rotate(hood_m, 0.26f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, hood_m, glm::vec3(0.28f, 0.07f, 0.30f), chitin_color, chitin_mat);
 
-            // Chitin Goliath: Heavy front reinforced blast armor plates
+            // Chitin Goliath: Heavy Overlapping Basalt Frontal Armor Plates
             if (is_goliath) {
-                glm::mat4 shield_m = glm::translate(skull_m, glm::vec3(0.0f, -0.02f, 0.26f));
-                glm::vec4 shield_mat(0.85f, 0.20f, 0.0f, 1.0f);
-                add_stalker_box(s_stalker_verts, shield_m, glm::vec3(0.38f, 0.32f, 0.08f), glm::vec4(0.24f, 0.22f, 0.20f, 1.0f), shield_mat);
-            }
+                glm::vec4 basalt_color(0.14f, 0.13f, 0.12f, 1.0f);
+                glm::vec4 basalt_mat(0.75f, 0.55f, 0.0f, 1.0f);
 
+                // Plate 1: Frontal Ram Prow
+                glm::mat4 shield1 = glm::translate(skull_m, glm::vec3(0.0f, -0.04f, 0.28f));
+                add_stalker_box(s_stalker_verts, shield1, glm::vec3(0.42f, 0.26f, 0.10f), basalt_color, basalt_mat);
+
+                // Plate 2: Overlapping Mid Mantle
+                glm::mat4 shield2 = glm::translate(skull_m, glm::vec3(0.0f, 0.08f, 0.22f));
+                shield2 = glm::rotate(shield2, -0.15f, glm::vec3(1.0f, 0.0f, 0.0f));
+                add_stalker_box(s_stalker_verts, shield2, glm::vec3(0.48f, 0.24f, 0.11f), basalt_color * 1.1f, basalt_mat);
+
+                // Plate 3: Overlapping Cranial Crown Shield
+                glm::mat4 shield3 = glm::translate(skull_m, glm::vec3(0.0f, 0.20f, 0.16f));
+                shield3 = glm::rotate(shield3, -0.28f, glm::vec3(1.0f, 0.0f, 0.0f));
+                add_stalker_box(s_stalker_verts, shield3, glm::vec3(0.52f, 0.26f, 0.12f), basalt_color * 1.2f, basalt_mat);
+            }
         }
 
-        // F. Piercing Bioluminescent Compound Eyes
+        // E. 6 Glowing Crimson Eye Nodes (emissive > 2.5)
         glm::vec3 left_eye_pos(0.0f);
         glm::vec3 right_eye_pos(0.0f);
         {
-            glm::mat4 eye_l = glm::translate(head_base, glm::vec3(-0.13f, 0.08f, 0.20f));
-            eye_l = glm::rotate(eye_l, 0.25f, glm::vec3(0.0f, 0.0f, 1.0f));
-            add_stalker_box(s_stalker_verts, eye_l, glm::vec3(0.06f, 0.025f, 0.04f), eye_color, eye_mat);
-            left_eye_pos = glm::vec3(eye_l * glm::vec4(0, 0, 0, 1));
+            // Pair 1: Front Primary Eyes
+            glm::mat4 eye1_l = glm::translate(head_base, glm::vec3(-0.11f, 0.06f, 0.24f));
+            add_stalker_box(s_stalker_verts, eye1_l, glm::vec3(0.045f, 0.03f, 0.035f), eye_color, eye_mat);
+            left_eye_pos = glm::vec3(eye1_l * glm::vec4(0, 0, 0, 1));
 
-            glm::mat4 eye_r = glm::translate(head_base, glm::vec3(0.13f, 0.08f, 0.20f));
-            eye_r = glm::rotate(eye_r, -0.25f, glm::vec3(0.0f, 0.0f, 1.0f));
-            add_stalker_box(s_stalker_verts, eye_r, glm::vec3(0.06f, 0.025f, 0.04f), eye_color, eye_mat);
-            right_eye_pos = glm::vec3(eye_r * glm::vec4(0, 0, 0, 1));
+            glm::mat4 eye1_r = glm::translate(head_base, glm::vec3(0.11f, 0.06f, 0.24f));
+            add_stalker_box(s_stalker_verts, eye1_r, glm::vec3(0.045f, 0.03f, 0.035f), eye_color, eye_mat);
+            right_eye_pos = glm::vec3(eye1_r * glm::vec4(0, 0, 0, 1));
 
-            glm::mat4 eye2_l = glm::translate(head_base, glm::vec3(-0.07f, 0.14f, 0.14f));
-            add_stalker_box(s_stalker_verts, eye2_l, glm::vec3(0.035f, 0.02f, 0.03f), eye_color, eye_mat);
+            // Pair 2: Lateral Scanning Eyes
+            glm::mat4 eye2_l = glm::translate(head_base, glm::vec3(-0.15f, 0.09f, 0.16f));
+            eye2_l = glm::rotate(eye2_l, 0.35f, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, eye2_l, glm::vec3(0.04f, 0.025f, 0.03f), eye_color, eye_mat);
 
-            glm::mat4 eye2_r = glm::translate(head_base, glm::vec3(0.07f, 0.14f, 0.14f));
-            add_stalker_box(s_stalker_verts, eye2_r, glm::vec3(0.035f, 0.02f, 0.03f), eye_color, eye_mat);
+            glm::mat4 eye2_r = glm::translate(head_base, glm::vec3(0.15f, 0.09f, 0.16f));
+            eye2_r = glm::rotate(eye2_r, -0.35f, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, eye2_r, glm::vec3(0.04f, 0.025f, 0.03f), eye_color, eye_mat);
+
+            // Pair 3: Dorsal Cluster Nodes
+            glm::mat4 eye3_l = glm::translate(head_base, glm::vec3(-0.07f, 0.15f, 0.12f));
+            add_stalker_box(s_stalker_verts, eye3_l, glm::vec3(0.035f, 0.025f, 0.03f), eye_color, eye_mat);
+
+            glm::mat4 eye3_r = glm::translate(head_base, glm::vec3(0.07f, 0.15f, 0.12f));
+            add_stalker_box(s_stalker_verts, eye3_r, glm::vec3(0.035f, 0.025f, 0.03f), eye_color, eye_mat);
         }
 
-        // G. Serrated Mandibles / Fangs
+        // F. Dual Front Pincer Mandibles (flaring outward during attack windups)
         {
-            float m_angle = 0.20f + mandible_spread + std::sin(s.glow_phase * 6.0f) * 0.06f;
+            float m_angle = 0.22f + mandible_spread + std::sin(s.glow_phase * 6.0f) * 0.06f;
 
+            // Left Mandible: Base & Inward Pincer Tip
             glm::mat4 mand_l = glm::translate(head_base, glm::vec3(-0.12f, -0.06f, 0.20f));
             mand_l = glm::rotate(mand_l, -m_angle, glm::vec3(0.0f, 1.0f, 0.0f));
-            mand_l = glm::rotate(mand_l, 0.35f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, mand_l, glm::vec3(0.04f, 0.04f, 0.18f), claw_color, claw_mat);
+            mand_l = glm::rotate(mand_l, 0.30f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, mand_l, glm::vec3(0.045f, 0.04f, 0.16f), claw_color, claw_mat);
 
+            glm::mat4 pincer_tip_l = glm::translate(mand_l, glm::vec3(0.0f, 0.0f, 0.15f));
+            pincer_tip_l = glm::rotate(pincer_tip_l, 0.48f, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, pincer_tip_l, glm::vec3(0.03f, 0.03f, 0.10f), claw_color, claw_mat);
+
+            // Right Mandible: Base & Inward Pincer Tip
             glm::mat4 mand_r = glm::translate(head_base, glm::vec3(0.12f, -0.06f, 0.20f));
             mand_r = glm::rotate(mand_r, m_angle, glm::vec3(0.0f, 1.0f, 0.0f));
-            mand_r = glm::rotate(mand_r, 0.35f, glm::vec3(1.0f, 0.0f, 0.0f));
-            add_stalker_box(s_stalker_verts, mand_r, glm::vec3(0.04f, 0.04f, 0.18f), claw_color, claw_mat);
+            mand_r = glm::rotate(mand_r, 0.30f, glm::vec3(1.0f, 0.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, mand_r, glm::vec3(0.045f, 0.04f, 0.16f), claw_color, claw_mat);
+
+            glm::mat4 pincer_tip_r = glm::translate(mand_r, glm::vec3(0.0f, 0.0f, 0.15f));
+            pincer_tip_r = glm::rotate(pincer_tip_r, -0.48f, glm::vec3(0.0f, 1.0f, 0.0f));
+            add_stalker_box(s_stalker_verts, pincer_tip_r, glm::vec3(0.03f, 0.03f, 0.10f), claw_color, claw_mat);
         }
 
-        // H. 6 Articulated Arachnid / Mantis Legs (with distinct wall-climb and ceiling splay adaptations)
+        // G. Void Drifter Special Geometry (Ribbed Bell Dome & 4 Trailing Undulating Tendrils)
+        if (is_drifter) {
+            // Translucent Ribbed Bell Dome
+            glm::mat4 dome_m = glm::translate(base_model, glm::vec3(0.0f, 0.45f, 0.0f));
+            glm::vec4 bell_color(0.32f, 0.70f, 0.95f, 0.75f);
+            glm::vec4 bell_mat(0.05f, 0.18f, 3.8f, 0.20f); // material.w = 0.20 (Fake SSS Mask)
+            add_stalker_box(s_stalker_verts, dome_m, glm::vec3(0.48f, 0.30f, 0.48f), bell_color, bell_mat);
+
+            for (int r = 0; r < 4; ++r) {
+                glm::mat4 rib_m = glm::rotate(dome_m, r * 0.785f, glm::vec3(0.0f, 1.0f, 0.0f));
+                add_stalker_box(s_stalker_verts, rib_m, glm::vec3(0.52f, 0.32f, 0.08f), bell_color * 1.15f, bell_mat);
+            }
+
+            // 4 Trailing Tendrils beneath bell dome (material.w = 0.10f triggers vertex sine undulation)
+            const glm::vec3 tendril_offsets[4] = {
+                glm::vec3(-0.16f, 0.12f, -0.16f),
+                glm::vec3( 0.16f, 0.12f, -0.16f),
+                glm::vec3(-0.16f, 0.12f,  0.16f),
+                glm::vec3( 0.16f, 0.12f,  0.16f)
+            };
+            glm::vec4 tendril_color(0.40f, 0.82f, 1.0f, 0.85f);
+            glm::vec4 tendril_mat(0.02f, 0.12f, 4.2f, 0.10f); // material.w = 0.10 (Tendril Wave Flag)
+
+            for (int t = 0; t < 4; ++t) {
+                for (int seg = 0; seg < 4; ++seg) {
+                    float seg_y = -0.10f - seg * 0.18f;
+                    glm::mat4 t_seg = glm::translate(base_model, tendril_offsets[t] + glm::vec3(0.0f, seg_y, 0.0f));
+                    add_stalker_box(s_stalker_verts, t_seg, glm::vec3(0.035f, 0.18f, 0.035f), tendril_color, tendril_mat);
+                }
+            }
+        }
+
+        // H. Chitin Goliath Rear Abdomen Pulsing Orange Weak-Spot Sac
+        if (is_goliath) {
+            float weak_pulse = 0.75f + 0.25f * std::sin(m_total_time * 5.0f);
+            glm::vec4 weak_color(1.0f, 0.44f, 0.05f, 1.0f);
+            glm::vec4 weak_mat(0.1f, 0.15f, 5.2f * weak_pulse, 0.85f); // material.w = 0.85 (Fake SSS Mask)
+            glm::mat4 weak_m = glm::translate(base_model, glm::vec3(0.0f, 0.22f, -0.66f));
+            add_stalker_box(s_stalker_verts, weak_m, glm::vec3(0.30f, 0.25f, 0.32f), weak_color, weak_mat);
+        }
+
+        // I. 6 Three-Segment Chitinous Limbs with Analytical 2-Bone IK & Alternating Tripod Gait
         for (int l = 0; l < 6; ++l) {
             bool is_left = (l % 2 == 0);
-            int row = l / 2; // 0=front, 1=mid, 2=rear
+            int row = l / 2; // 0=Front, 1=Mid, 2=Rear
             float side = is_left ? -1.0f : 1.0f;
 
-            float root_z = (row == 0) ? 0.20f : (row == 1) ? 0.0f : -0.22f;
+            float root_z = (row == 0) ? 0.22f : (row == 1 ? 0.0f : -0.22f);
             float root_x = side * 0.24f * pose.limb_splay_multiplier;
             float root_y = 0.26f;
+            glm::vec3 hip_local(root_x, root_y, root_z);
+            glm::mat4 hip_m = glm::translate(base_model, hip_local);
 
-            glm::mat4 hip_m = glm::translate(base_model, glm::vec3(root_x, root_y, root_z));
+            // Alternating Tripod Groups:
+            // Group A: L1 (l=0), R2 (l=3), L3 (l=4)
+            // Group B: R1 (l=1), L2 (l=2), R3 (l=5)
+            bool is_group_a = (l == 0 || l == 3 || l == 4);
+            float group_phase = is_group_a ? 0.0f : 3.14159265f;
+            float cycle = s.walk_cycle + group_phase;
+            float step_phase = std::fmod(cycle, 6.2831853f);
+            if (step_phase < 0.0f) step_phase += 6.2831853f;
+            float norm_step = step_phase / 6.2831853f; // 0 to 1
 
-            float phase_offset = (row * 1.57f) + (is_left ? 0.0f : 3.14f);
-            float crawl_swing = std::sin(s.walk_cycle + phase_offset);
-            float crawl_lift = std::max(0.0f, std::cos(s.walk_cycle + phase_offset)) * 0.15f;
+            // Parabolic Arc Lift: sin(stepPhase * PI) * 0.28f
+            float arc_lift = 0.0f;
+            float fwd_step = 0.0f;
+            float speed = glm::length(s.velocity);
+            float step_mag = std::clamp(speed / 4.0f, 0.35f, 1.25f);
 
-            if (row == 0) {
-                // FRONT LEGS: Predatory Mantis Scythe Claws!
-                float strike_pitch = (s.state == StalkerState::Lunging)
-                    ? -0.85f
-                    : (s.state == StalkerState::Burrowing || s.state == StalkerState::Emerging)
-                        ? (-0.55f + std::sin(s.state_timer * (s.role == StalkerRole::Melee ? 32.0f : 20.0f) + (is_left ? 0.0f : 3.14f)) * 0.55f)
-                        : (-0.35f + pose.front_claw_pitch_offset + crawl_swing * 0.2f);
-                float strike_yaw = side * (pose.front_claw_yaw + (s.state == StalkerState::Lunging ? 0.3f : ((s.state == StalkerState::Burrowing || s.state == StalkerState::Emerging) ? -0.15f : 0.0f)));
+            if (norm_step < 0.5f) {
+                float swing_t = norm_step * 2.0f; // 0 to 1
+                arc_lift = std::sin(swing_t * 3.14159265f) * 0.28f;
+                fwd_step = (swing_t - 0.5f) * 0.34f * step_mag;
+            } else {
+                float stance_t = (norm_step - 0.5f) * 2.0f;
+                fwd_step = (0.5f - stance_t) * 0.34f * step_mag;
+            }
+
+            if (row == 0 && (s.state == StalkerState::Lunging || s.state == StalkerState::GroundSlam)) {
+                // Front Predatory Mantis Scythe Claws during attacks
+                float strike_pitch = (s.state == StalkerState::Lunging) ? -0.85f : -0.55f;
+                float strike_yaw = side * (pose.front_claw_yaw + 0.30f);
 
                 glm::mat4 femur_m = glm::rotate(hip_m, strike_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
                 femur_m = glm::rotate(femur_m, strike_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
                 femur_m = glm::translate(femur_m, glm::vec3(0.0f, 0.18f * pose.front_claw_reach, 0.14f * pose.front_claw_reach));
                 add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.045f, 0.18f * pose.front_claw_reach, 0.05f), chitin_color, chitin_mat);
 
-                float tibia_pitch = (s.state == StalkerState::Lunging) ? 1.4f : (1.05f + pose.tibia_pitch_offset);
+                float tibia_pitch = (s.state == StalkerState::Lunging) ? 1.45f : 1.20f;
                 glm::mat4 tibia_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f * pose.front_claw_reach, 0.08f));
                 tibia_m = glm::rotate(tibia_m, tibia_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
                 tibia_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.18f * pose.front_claw_reach, 0.0f));
@@ -2796,7 +3008,6 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
                 tip_m = glm::rotate(tip_m, -0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
                 add_stalker_box(s_stalker_verts, tip_m, glm::vec3(0.025f, 0.08f, 0.03f), claw_color, claw_mat);
 
-                // Lunging speed streaks trailing behind the front claws
                 if (s.state == StalkerState::Lunging) {
                     glm::vec3 claw_world = glm::vec3(tip_m * glm::vec4(0, 0, 0, 1));
                     glm::vec3 trail_back = claw_world - s.velocity * 0.12f;
@@ -2806,30 +3017,43 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
                     });
                 }
             } else {
-                // MID & REAR LEGS: Splayed arachnid legs with crawling IK
-                float leg_base_yaw = (row == 1) ? (side * 1.57f) : (side * 2.35f);
-                leg_base_yaw *= (1.0f + (pose.limb_splay_multiplier - 1.0f) * 0.25f);
-                float leg_swing = (s.state == StalkerState::Burrowing)
-                    ? (std::sin(s.state_timer * 24.0f + phase_offset) * 0.35f)
-                    : (crawl_swing * 0.25f);
-                leg_base_yaw += leg_swing;
+                // Tripod Gait with Analytical 2-Bone Inverse Kinematics (Law of Cosines)
+                float foot_x = side * (0.42f + (row == 1 ? 0.10f : 0.0f)) * pose.limb_splay_multiplier;
+                float foot_z = root_z + (row == 0 ? 0.20f : (row == 2 ? -0.18f : 0.0f)) + fwd_step;
+                float foot_y = -0.16f + arc_lift;
+                glm::vec3 foot_local(foot_x, foot_y, foot_z);
 
-                float femur_pitch = -0.55f + pose.femur_pitch_offset + crawl_lift;
-                glm::mat4 femur_m = glm::rotate(hip_m, leg_base_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                femur_m = glm::rotate(femur_m, femur_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                femur_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f, 0.10f));
-                add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.04f, 0.18f, 0.045f), chitin_color, chitin_mat);
+                glm::vec3 delta = foot_local - hip_local;
+                float d = glm::length(delta);
+                float l1 = 0.26f * pose.front_claw_reach; // Upper Femur length
+                float l2 = 0.30f * pose.front_claw_reach; // Lower Tibia length
 
-                float tibia_pitch = 1.35f + pose.tibia_pitch_offset - crawl_lift * 0.8f;
-                glm::mat4 tibia_m = glm::translate(femur_m, glm::vec3(0.0f, 0.16f, 0.06f));
-                tibia_m = glm::rotate(tibia_m, tibia_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                tibia_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.22f, 0.0f));
-                add_stalker_box(s_stalker_verts, tibia_m, glm::vec3(0.03f, 0.24f, 0.035f), claw_color, claw_mat);
+                float hip_ik_angle = 0.0f;
+                float knee_ik_angle = 0.0f;
+                AnalyticalIK2Bone::solve(l1, l2, d, hip_ik_angle, knee_ik_angle);
 
-                // Stunned electrical arcs jumping between leg joints
+                float leg_base_yaw = std::atan2(delta.x, delta.z);
+                glm::mat4 leg_base = glm::rotate(hip_m, leg_base_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                leg_base = glm::rotate(leg_base, -hip_ik_angle + 0.32f, glm::vec3(1.0f, 0.0f, 0.0f));
+
+                // Upper Femur Segment
+                glm::mat4 femur_m = glm::translate(leg_base, glm::vec3(0.0f, 0.14f, 0.08f));
+                add_stalker_box(s_stalker_verts, femur_m, glm::vec3(0.04f, 0.16f, 0.045f), chitin_color, chitin_mat);
+
+                // Knee Joint & Lower Tibia Segment (Law of Cosines Knee Angle)
+                glm::mat4 knee_m = glm::translate(femur_m, glm::vec3(0.0f, 0.14f, 0.06f));
+                knee_m = glm::rotate(knee_m, knee_ik_angle, glm::vec3(1.0f, 0.0f, 0.0f));
+                glm::mat4 tibia_m = glm::translate(knee_m, glm::vec3(0.0f, -0.18f, 0.0f));
+                add_stalker_box(s_stalker_verts, tibia_m, glm::vec3(0.03f, 0.20f, 0.035f), claw_color, claw_mat);
+
+                // Tapered Lower Tibia Spike Tip (plants onto voxel surface)
+                glm::mat4 tip_m = glm::translate(tibia_m, glm::vec3(0.0f, -0.16f, 0.01f));
+                add_stalker_box(s_stalker_verts, tip_m, glm::vec3(0.02f, 0.07f, 0.02f), claw_color, claw_mat);
+
+                // Electrical arcs jumping between leg joints when stunned
                 if (s.state == StalkerState::Stunned) {
                     glm::vec3 joint_pt = glm::vec3(femur_m * glm::vec4(0, 0, 0, 1));
-                    glm::vec3 ground_pt = glm::vec3(tibia_m * glm::vec4(0, -0.2f, 0, 1));
+                    glm::vec3 ground_pt = glm::vec3(tip_m * glm::vec4(0, -0.2f, 0, 1));
                     glm::vec3 mid_arc = (joint_pt + ground_pt) * 0.5f + glm::vec3(
                         std::sin(s.glow_phase * 40.0f + l * 2.0f) * 0.15f,
                         std::cos(s.glow_phase * 35.0f + l * 2.0f) * 0.15f,
@@ -2843,7 +3067,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             }
         }
 
-        // I. Twin Eye Tracer Beams (Predator laser sight scanning forward into shadows)
+        // J. Twin Eye Tracer Beams
         {
             glm::vec3 fwd = glm::vec3(
                 std::sin(s.yaw) * std::cos(s.pitch),
@@ -2862,7 +3086,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             });
         }
 
-        // Predatory razor claw slash arcs during lunges or melee strikes
+        // Predatory razor claw slash arcs during lunges
         if (s.slash_fx_timer > 0.0f || s.state == StalkerState::Lunging) {
             glm::vec3 slash_fwd = -glm::vec3(base_model[2]);
             glm::vec3 slash_up = glm::vec3(base_model[1]);
@@ -2896,12 +3120,11 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         glm::vec3 p_dir = (glm::length(proj.velocity) > 0.001f) ? glm::normalize(proj.velocity) : glm::vec3(0.0f, 0.0f, -1.0f);
         glm::mat4 p_mat = make_projectile_matrix(proj.position, proj.velocity);
 
-        glm::vec4 proj_color(0.18f, 1.0f, 0.35f, 1.0f); // Vivid radiant toxic green crystal
-        glm::vec4 core_color(0.70f, 1.0f, 0.80f, 1.0f); // White-green radiant core
-        glm::vec4 proj_mat(0.2f, 0.8f, 5.0f, 1.0f);      // Highly emissive with green bloom
+        glm::vec4 proj_color(0.18f, 1.0f, 0.35f, 1.0f);
+        glm::vec4 core_color(0.70f, 1.0f, 0.80f, 1.0f);
+        glm::vec4 proj_mat(0.2f, 0.8f, 5.0f, 1.0f);
         add_void_spike_mesh(s_stalker_verts, p_mat, 0.06f, 0.70f, proj_color, core_color, proj_mat);
 
-        // Luminous streak trail behind projectile
         glm::vec3 trail_end = proj.position - p_dir * 1.8f;
         m_stalker_staging_lines.insert(m_stalker_staging_lines.end(), {
             proj.position.x, proj.position.y, proj.position.z,
@@ -2910,6 +3133,9 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
     }
 
     if (active_stalker_count == 0) return;
+
+    // Save total active monster vertex count for headlamp shadow map rendering
+    s_last_stalker_vert_count = s_stalker_verts.size();
 
     // === PASS 1: SOLID 3D PBR SHADED MESH ===
     if (!s_stalker_verts.empty()) {
@@ -2921,6 +3147,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         m_stalker_shader.set_mat4("uProjection", m_proj);
         m_stalker_shader.set_mat4("uView", m_view);
         m_stalker_shader.set_mat4("uModel", glm::mat4(1.0f));
+        m_stalker_shader.set_mat4("uLightSpaceMatrix", m_headlamp_light_space_matrix);
         m_stalker_shader.set_vec3("uCamPos", m_cam_pos);
         m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
         m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
@@ -2931,9 +3158,23 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         m_stalker_shader.set_int("uState", state_val);
         m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
         m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
+        m_stalker_shader.set_float("uDissolveProgress", 0.0f);
         m_stalker_shader.set_float("uDarknessFactor", m_area_darkness);
+        m_stalker_shader.set_float("uTime", m_total_time);
 
-        // Upload to dynamic VBO (expanded dynamically so zero monsters or projectiles are ever dropped)
+        // Bind Headlamp Shadow Map to Texture Unit 5
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, m_shadow_depth_tex);
+        m_stalker_shader.set_int("uHeadlampShadowMap", 5);
+        m_stalker_shader.set_int("uHeadlampShadowsEnabled", m_headlamp.enabled ? 1 : 0);
+
+        // Hit-wound plasma decal & shock uniforms
+        m_stalker_shader.set_float("u_HitFlashTimer", max_hit_flash);
+        m_stalker_shader.set_vec3("u_LastHitLocalPos", last_hit_local);
+        m_stalker_shader.set_int("uIsMonster", 1);
+        m_stalker_shader.set_vec3("uCavernAtmosphereColor", glm::vec3(0.08f, 0.12f, 0.22f));
+
+        // Upload to dynamic VBO
         ensure_stalker_vbo_capacity(s_stalker_verts.size());
         glBindVertexArray(m_stalker_vao);
         glBindBuffer(GL_ARRAY_BUFFER, m_stalker_vbo);
@@ -3097,11 +3338,22 @@ void Renderer::render_carcasses(const std::vector<EnemyCarcass>& carcasses) {
     m_stalker_shader.set_vec3("uHeadlampPos", m_headlamp.position);
     m_stalker_shader.set_vec3("uHeadlampDir", m_headlamp.direction);
     m_stalker_shader.set_vec3("uHeadlampColor", m_headlamp.color);
+    float max_dissolve = 0.0f;
+    for (const auto& c : carcasses) {
+        if (c.is_dissolving || c.alpha < 0.99f || c.lifetime >= c.max_lifetime) {
+            float d = std::clamp(1.0f - c.alpha, 0.0f, 1.0f);
+            if (c.lifetime >= c.max_lifetime && d <= 0.0f) d = 0.5f;
+            max_dissolve = std::max(max_dissolve, d);
+        }
+    }
+
     m_stalker_shader.set_float("uHeadlampEnabled", m_headlamp.enabled ? 1.0f : 0.0f);
     m_stalker_shader.set_float("uStateGlow", 0.0f);
     m_stalker_shader.set_int("uState", 0);
-    m_stalker_shader.set_float("uDissolveThreshold", 0.0f);
-    m_stalker_shader.set_float("u_dissolveThreshold", 0.0f);
+    m_stalker_shader.set_float("uDissolveThreshold", max_dissolve);
+    m_stalker_shader.set_float("u_dissolveThreshold", max_dissolve);
+    m_stalker_shader.set_float("uDissolveProgress", max_dissolve);
+    m_stalker_shader.set_float("uTime", m_total_time);
 
     ensure_stalker_vbo_capacity(s_carcass_verts.size());
     glBindVertexArray(m_stalker_vao);
@@ -3505,6 +3757,12 @@ void Renderer::end_frame(float delta_time, float radiation_level, float shield_t
     m_postprocess_shader.set_float("uSuffocationDarkness", suffocation_darkness);
     m_postprocess_shader.set_float("u_ShieldActive", shield_timer > 0.0f ? 1.0f : 0.0f);
     m_postprocess_shader.set_float("u_ShieldTimer", shield_timer);
+
+    // Camera matrices for view reconstruction, SSAO & Puddle SSR
+    m_postprocess_shader.set_mat4("uProj", m_proj);
+    m_postprocess_shader.set_mat4("uView", m_view);
+    m_postprocess_shader.set_mat4("uInverseProj", glm::inverse(m_proj));
+    m_postprocess_shader.set_mat4("uInverseView", glm::inverse(m_view));
 
     render_quad();
 }

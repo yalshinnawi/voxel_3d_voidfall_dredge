@@ -3627,6 +3627,11 @@ void Application::render(float dt) {
     // Begin HDR Frame
     m_renderer->begin_frame(view, proj, cam_pos);
 
+    // Headlamp Perspective Shadow Map Pass
+    if (m_world) {
+        m_renderer->render_headlamp_shadows(*m_world, m_stalkers.stalkers());
+    }
+
     // Render Chunks with Vertical & Frustum Culling
     m_world->Render(*m_renderer, cam_pos, m_player ? m_player->position() : cam_pos);
 
@@ -3753,7 +3758,9 @@ void Application::render(float dt) {
             is_grounded,
             m_player->melee_shove_progress(),
             m_player->is_aiming(),
-            m_player->zoom_progress()
+            m_player->zoom_progress(),
+            m_player->health(),
+            m_player->max_health()
         );
     }
 

@@ -3,6 +3,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <cstdint>
+#include <algorithm>
+#include <cmath>
 #include "../../systems/noise_meter.hpp"
 #include "../../ai/aberrant_ai.hpp"
 #include "../../graphics/animation_controller.hpp"
@@ -18,7 +20,8 @@ struct SeismicBurrower;
 enum class StalkerRole : uint8_t {
     Melee,          // Crimson Red: Closes in, stalks, circles, and lunges for razor claw strikes. NEVER fires ranged projectiles.
     Shooter,        // Toxic Green: Skirmishes at distance, circles, and fires crystalline void spines. NEVER executes melee lunges.
-    ChitinGoliath   // Heavy Carapace Breacher: Subterranean tank with 85% front armor deflection, rear weak points, satchel/stalactite weakness.
+    ChitinGoliath,  // Heavy Carapace Breacher: Subterranean tank with 85% front armor deflection, rear weak points, satchel/stalactite weakness.
+    VoidDrifter     // Ethereal Aerial Floater: Translucent ribbed bell dome, 4 undulating trailing tendrils
 };
 
 /// Projectile spine fired by Void Stalkers at mid-range
@@ -29,6 +32,20 @@ struct VoidSpikeProjectile {
     float lifetime{2.5f};
     float damage{12.0f};
     bool active{true};
+};
+
+/// Analytical 2-bone inverse kinematics solver for articulated limbs (Law of Cosines)
+struct AnalyticalIK2Bone {
+    static void solve(float l1, float l2, float d, float& out_hip_angle, float& out_knee_angle) {
+        d = std::clamp(d, 0.001f, (l1 + l2) * 0.999f);
+        float cos_knee = (l1 * l1 + l2 * l2 - d * d) / (2.0f * l1 * l2);
+        cos_knee = std::clamp(cos_knee, -1.0f, 1.0f);
+        out_knee_angle = 3.14159265f - std::acos(cos_knee);
+
+        float cos_hip = (l1 * l1 + d * d - l2 * l2) / (2.0f * l1 * d);
+        cos_hip = std::clamp(cos_hip, -1.0f, 1.0f);
+        out_hip_angle = std::acos(cos_hip);
+    }
 };
 
 /// A single Void Stalker hostile entity. Clings to walls and ceilings,
@@ -162,7 +179,10 @@ struct VoidStalker {
     StalkerSurfaceState target_surface_state{StalkerSurfaceState::FLOOR};
     StalkerSurfaceState prev_surface_state{StalkerSurfaceState::FLOOR};
     glm::vec3 m_targetUpVector{0.0f, 1.0f, 0.0f};
-    glm::vec3 contact_normal{0.0f, 1.0f, 0.0f};
+    union {
+        glm::vec3 contact_normal{0.0f, 1.0f, 0.0f};
+        glm::vec3 m_surfaceNormal;
+    };
     glm::quat m_currentRotation{1.0f, 0.0f, 0.0f, 0.0f};
     glm::quat m_targetRotation{1.0f, 0.0f, 0.0f, 0.0f};
     glm::vec3 surface_offset{0.0f};
@@ -261,6 +281,7 @@ struct VoidStalker {
     bool is_shooter() const { return role == StalkerRole::Shooter; }
     bool is_goliath() const { return role == StalkerRole::ChitinGoliath; }
     bool is_boss() const { return role == StalkerRole::ChitinGoliath; }
+    bool is_drifter() const { return role == StalkerRole::VoidDrifter; }
 
     /// Visual awareness classification for overhead indicators
     bool is_investigating_state() const {

@@ -94,6 +94,9 @@ public:
     bool is_box_in_frustum(const glm::vec3& min_pt, const glm::vec3& max_pt) const;
     const std::array<glm::vec4, 6>& frustum_planes() const { return m_frustum_planes; }
     void render_debris(const DynamicDebris& debris);
+    void render_headlamp_shadows(const World& world, const std::vector<VoidStalker>& stalkers);
+    unsigned int shadow_depth_texture() const { return m_shadow_depth_tex; }
+    const glm::mat4& headlamp_light_space_matrix() const { return m_headlamp_light_space_matrix; }
     void render_stalkers(const std::vector<VoidStalker>& stalkers);
     void render_stalkers(const std::vector<VoidStalker>& stalkers, const std::vector<VoidSpikeProjectile>& projectiles);
     void render_carcasses(const std::vector<EnemyCarcass>& carcasses);
@@ -224,6 +227,8 @@ private:
     Shader m_wireframe_shader;
     Shader m_particle_shader;
     Shader m_stalker_shader;
+    Shader m_shadow_shader;
+    Shader m_entity_shadow_shader;
 
     // Chunks
     std::vector<Chunk*> m_visibleChunks;
@@ -245,6 +250,11 @@ private:
     // Bloom Ping-Pong FBOs
     unsigned int m_bloom_fbo[2]{0, 0};
     unsigned int m_bloom_tex[2]{0, 0};
+
+    // Headlamp Perspective Shadow Map FBO (1024x1024 GL_DEPTH_COMPONENT24)
+    unsigned int m_shadow_fbo{0};
+    unsigned int m_shadow_depth_tex{0};
+    glm::mat4 m_headlamp_light_space_matrix{1.0f};
 
     // Fullscreen Quad
     unsigned int m_quad_vao{0};

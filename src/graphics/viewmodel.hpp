@@ -33,6 +33,8 @@ public:
     WeaponArchetype weapon_archetype() const { return m_weapon_archetype; }
     void set_drill_speed_tier(int tier) { m_drill_speed_tier = tier; }
     void set_drill_durability_tier(int tier) { m_drill_durability_tier = tier; }
+    void set_player_health(float hp, float max_hp) { m_player_hp = hp; m_player_max_hp = max_hp; }
+    float tool_heat() const { return m_toolHeat; }
 
     void render(
         float dt,
@@ -51,7 +53,9 @@ public:
         bool is_grounded = true,
         float melee_progress = 0.0f,
         bool is_aiming = false,
-        float zoom_progress = 0.0f
+        float zoom_progress = 0.0f,
+        float player_hp = 100.0f,
+        float player_max_hp = 100.0f
     );
 
     bool is_reloading() const { return m_is_reloading; }
@@ -201,6 +205,9 @@ private:
     bool m_was_melee_shoving{false};
     float m_walk_bob_phase{0.0f};
     float m_walk_bob_weight{0.0f};
+    float m_toolHeat{0.0f};
+    float m_player_hp{100.0f};
+    float m_player_max_hp{100.0f};
 
     std::function<void(const glm::vec3&, const glm::vec3&)> m_on_spark;
 };

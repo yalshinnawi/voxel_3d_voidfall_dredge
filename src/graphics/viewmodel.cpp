@@ -428,13 +428,42 @@ void ViewModel::add_forearm_and_gauntlet(
     add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.015f, 0.05f), mid_arm - glm::vec3(0.0f, -0.015f, 0.05f), 0.018f, 0.015f, 8, col_armor_plate, mat_armor);
     add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.018f, 0.04f), mid_arm - glm::vec3(0.0f, -0.012f, 0.04f), 0.007f, 0.005f, 6, accent_col, mat_metal);
 
-    // 3. Wrist Cuff Seal Ring
+    // 3. Wrist Cuff Seal Ring & Dual Chrome Hydraulic Struts
     add_capsule(verts, wrist_pos + glm::vec3(0.005f, -0.005f, 0.010f), wrist_pos - glm::vec3(0.005f, -0.005f, 0.010f), 0.038f, 0.038f, 12, col_chassis_dark, mat_metal);
     add_capsule(verts, wrist_pos + glm::vec3(0.003f, -0.003f, 0.006f), wrist_pos - glm::vec3(0.003f, -0.003f, 0.006f), 0.040f, 0.040f, 12, accent_col, mat_metal);
 
-    // 4. Glove Palm & Knuckle Guard
+    // Dual Chrome Hydraulic Wrist Struts running from forearm into gauntlet
+    glm::vec3 strut_upper_a = wrist_pos + glm::vec3(0.018f, 0.022f, 0.035f);
+    glm::vec3 strut_lower_a = wrist_pos + glm::vec3(0.014f, 0.012f, -0.015f);
+    add_capsule(verts, strut_upper_a, strut_lower_a, 0.0045f, 0.0045f, 8, glm::vec4(0.88f, 0.90f, 0.95f, 1.0f), glm::vec4(0.95f, 0.10f, 0.0f, 1.0f));
+
+    glm::vec3 strut_upper_b = wrist_pos + glm::vec3(-0.018f, 0.022f, 0.035f);
+    glm::vec3 strut_lower_b = wrist_pos + glm::vec3(-0.014f, 0.012f, -0.015f);
+    add_capsule(verts, strut_upper_b, strut_lower_b, 0.0045f, 0.0045f, 8, glm::vec4(0.88f, 0.90f, 0.95f, 1.0f), glm::vec4(0.95f, 0.10f, 0.0f, 1.0f));
+
+    // 4. Diegetic Suit Integrity LED Strip along left forearm cuff (reactive to player HP)
+    if (!is_right_arm) {
+        glm::vec4 mat_led_strip(0.0f, 0.05f, 2.5f, 1.0f); // baseEmissive > 0.85
+        glm::vec4 col_led_cyan(0.0f, 0.95f, 1.0f, 1.0f);
+        for (int seg = 0; seg < 6; ++seg) {
+            float t = static_cast<float>(seg) / 6.0f;
+            glm::vec3 seg_p1 = wrist_pos + glm::vec3(-0.020f, 0.025f + t * 0.035f, 0.020f);
+            glm::vec3 seg_p2 = seg_p1 + glm::vec3(-0.005f, 0.004f, 0.005f);
+            add_capsule(verts, seg_p1, seg_p2, 0.0035f, 0.0035f, 6, col_led_cyan, mat_led_strip);
+        }
+    }
+
+    // 5. Glove Palm & Segmented Armored Knuckle Guard
     add_capsule(verts, wrist_pos, palm_pos, 0.030f, 0.026f, 8, glove_col, mat_rubber);
     add_capsule(verts, palm_pos + glm::vec3(0.0f, 0.012f, 0.010f), palm_pos + glm::vec3(0.0f, -0.015f, 0.010f), 0.012f, 0.010f, 6, col_armor_plate, mat_armor);
+
+    // Segmented armored knuckle plates (4 discrete finger joint plates)
+    for (int k = 0; k < 4; ++k) {
+        float k_offset = -0.015f + k * 0.010f;
+        glm::vec3 k_base = palm_pos + glm::vec3(k_offset, 0.015f, 0.012f);
+        glm::vec3 k_tip  = k_base + glm::vec3(0.0f, -0.008f, 0.010f);
+        add_capsule(verts, k_base, k_tip, 0.0055f, 0.004f, 6, col_armor_plate, mat_armor);
+    }
 }
 
 void ViewModel::set_character_class(CharacterClass cls) {
@@ -1296,13 +1325,41 @@ void ViewModel::render(
     bool is_grounded,
     float melee_progress,
     bool is_aiming,
-    float zoom_progress
+    float zoom_progress,
+    float player_hp,
+    float player_max_hp
 ) {
     if (m_chassis_vao == 0 || m_carbine_vao == 0) return;
 
     m_total_time += dt;
     m_is_reloading = is_reloading;
     m_reload_progress = reload_progress;
+    m_player_hp = player_hp;
+    m_player_max_hp = player_max_hp;
+
+    // Thermal barrel / bit heat accumulation (cooling at 0.35f / sec)
+    if (is_drilling) {
+        m_toolHeat = std::clamp(m_toolHeat + dt * 0.45f, 0.0f, 1.0f);
+    } else if (is_firing) {
+        m_toolHeat = std::clamp(m_toolHeat + dt * 0.70f, 0.0f, 1.0f);
+    } else {
+        m_toolHeat = std::max(0.0f, m_toolHeat - dt * 0.35f);
+    }
+
+    // Emit rising heat smoke and metallic spark particles from tool tip when heat > 0.6f
+    if (m_toolHeat > 0.6f && m_on_spark) {
+        m_spark_timer += dt;
+        if (m_spark_timer >= 0.08f) {
+            m_spark_timer = 0.0f;
+            glm::vec3 spark_origin = (active_tool == ToolSlot::MiningDrill) ? drill_target_pos : glm::vec3(0.0f, -0.05f, -0.45f);
+            glm::vec3 spark_dir(
+                ((rand() % 100) / 50.0f - 1.0f) * 1.4f,
+                ((rand() % 100) / 50.0f) * 1.8f + 0.4f,
+                ((rand() % 100) / 50.0f - 1.0f) * 1.4f
+            );
+            m_on_spark(spark_origin, spark_dir);
+        }
+    }
 
     // Advance walking bob phase only while actively moving on solid ground
     bool is_moving = is_grounded && (movement_speed > 0.15f);
@@ -1403,6 +1460,26 @@ void ViewModel::render(
     m_shader.use();
     m_shader.set_mat4("uProjection", proj);
     m_shader.set_mat4("uView", view);
+
+    // Compute health ratio and diegetic suit integrity color
+    float health_ratio = (m_player_max_hp > 0.0f) ? std::clamp(m_player_hp / m_player_max_hp, 0.0f, 1.0f) : 1.0f;
+    glm::vec3 health_color;
+    if (health_ratio > 0.60f) {
+        // Cyan > 60%
+        health_color = glm::vec3(0.0f, 0.95f, 1.0f);
+    } else if (health_ratio >= 0.25f) {
+        // Amber 25% - 60%
+        health_color = glm::vec3(1.0f, 0.75f, 0.10f);
+    } else {
+        // Pulsing Red < 25%
+        float red_pulse = 0.6f + 0.4f * std::sin(m_total_time * 8.0f);
+        health_color = glm::vec3(1.0f, 0.12f, 0.08f) * red_pulse;
+    }
+
+    m_shader.set_float("uToolHeat", m_toolHeat);
+    m_shader.set_float("uHealthRatio", health_ratio);
+    m_shader.set_vec3("uHealthColor", health_color);
+    m_shader.set_float("uTime", m_total_time);
 
     if (active_tool == ToolSlot::CombatWeapon) {
         // =============================================================
