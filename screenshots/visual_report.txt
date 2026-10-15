@@ -7,115 +7,115 @@ Lightweight Previews Dir:     screenshots/previews/
 
 PHASE BREAKDOWN:
   [1] MAIN MENU
-      Timestamp:  2026-10-14 16:22:27
+      Timestamp:  2026-10-14 23:17:15
       Master PNG: screenshots/01_main_menu.png (1600x900)
-      Preview:    screenshots/previews/01_main_menu_20261014_162227.jpg
-      Luminance:  0.102 | Non-Black: 99.843%
+      Preview:    screenshots/previews/01_main_menu_20261014_231715.jpg
+      Luminance:  0.101 | Non-Black: 99.795%
       Evaluation: PASS
 
   [2] LEVEL SELECT
-      Timestamp:  2026-10-14 16:22:27
+      Timestamp:  2026-10-14 23:17:15
       Master PNG: screenshots/02_level_select.png (1600x900)
-      Preview:    screenshots/previews/02_level_select_20261014_162227.jpg
+      Preview:    screenshots/previews/02_level_select_20261014_231715.jpg
       Luminance:  0.069 | Non-Black: 100.000%
       Evaluation: PASS
 
   [3] CHAR SELECT
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/03_character_select.png (1600x900)
-      Preview:    screenshots/previews/03_character_select_20261014_162228.jpg
+      Preview:    screenshots/previews/03_character_select_20261014_231716.jpg
       Luminance:  0.101 | Non-Black: 100.000%
       Evaluation: PASS
 
   [4] UPGRADES TERMINAL
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/04_upgrades_terminal.png (1600x900)
-      Preview:    screenshots/previews/04_upgrades_terminal_20261014_162228.jpg
+      Preview:    screenshots/previews/04_upgrades_terminal_20261014_231716.jpg
       Luminance:  0.086 | Non-Black: 100.000%
       Evaluation: PASS
 
   [5] HUB AUDIO RIG
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/05_hub_audio_settings.png (1600x900)
-      Preview:    screenshots/previews/05_hub_audio_settings_20261014_162228.jpg
+      Preview:    screenshots/previews/05_hub_audio_settings_20261014_231716.jpg
       Luminance:  0.065 | Non-Black: 100.000%
       Evaluation: PASS
 
   [6] GAMEPLAY CAVERN
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/06_gameplay_cavern.png (1600x900)
-      Preview:    screenshots/previews/06_gameplay_cavern_20261014_162228.jpg
-      Luminance:  0.170 | Non-Black: 99.967%
+      Preview:    screenshots/previews/06_gameplay_cavern_20261014_231716.jpg
+      Luminance:  0.185 | Non-Black: 99.961%
       Evaluation: PASS
 
   [7] FIELD MANUAL
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/07_field_manual.png (1600x900)
-      Preview:    screenshots/previews/07_field_manual_20261014_162228.jpg
-      Luminance:  0.062 | Non-Black: 99.995%
+      Preview:    screenshots/previews/07_field_manual_20261014_231716.jpg
+      Luminance:  0.063 | Non-Black: 99.996%
       Evaluation: PASS
 
   [8] TACTICAL MAP
-      Timestamp:  2026-10-14 16:22:28
+      Timestamp:  2026-10-14 23:17:16
       Master PNG: screenshots/08_tactical_map.png (1600x900)
-      Preview:    screenshots/previews/08_tactical_map_20261014_162228.jpg
-      Luminance:  0.049 | Non-Black: 37.737%
+      Preview:    screenshots/previews/08_tactical_map_20261014_231716.jpg
+      Luminance:  0.050 | Non-Black: 38.607%
       Evaluation: WARN: DARK
 
   [9] DRILL CRACKS
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/09_drilling_cracks.png (1600x900)
-      Preview:    screenshots/previews/09_drilling_cracks_20261014_162229.jpg
-      Luminance:  0.224 | Non-Black: 99.916%
+      Preview:    screenshots/previews/09_drilling_cracks_20261014_231717.jpg
+      Luminance:  0.228 | Non-Black: 99.952%
       Evaluation: PASS
 
   [10] ABILITIES & LOOT
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/10_abilities_loot.png (1600x900)
-      Preview:    screenshots/previews/10_abilities_loot_20261014_162229.jpg
-      Luminance:  0.535 | Non-Black: 99.983%
+      Preview:    screenshots/previews/10_abilities_loot_20261014_231717.jpg
+      Luminance:  0.550 | Non-Black: 99.990%
       Evaluation: PASS
 
   [11] PAUSE MISSION
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/11_pause_mission.png (1600x900)
-      Preview:    screenshots/previews/11_pause_mission_20261014_162229.jpg
-      Luminance:  0.056 | Non-Black: 100.000%
+      Preview:    screenshots/previews/11_pause_mission_20261014_231717.jpg
+      Luminance:  0.063 | Non-Black: 100.000%
       Evaluation: PASS
 
   [12] PAUSE INVENTORY
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/12_pause_inventory.png (1600x900)
-      Preview:    screenshots/previews/12_pause_inventory_20261014_162229.jpg
-      Luminance:  0.058 | Non-Black: 100.000%
+      Preview:    screenshots/previews/12_pause_inventory_20261014_231717.jpg
+      Luminance:  0.065 | Non-Black: 100.000%
       Evaluation: PASS
 
   [13] PAUSE AUDIO RIG
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/13_pause_audio.png (1600x900)
-      Preview:    screenshots/previews/13_pause_audio_20261014_162229.jpg
-      Luminance:  0.059 | Non-Black: 100.000%
+      Preview:    screenshots/previews/13_pause_audio_20261014_231717.jpg
+      Luminance:  0.065 | Non-Black: 100.000%
       Evaluation: PASS
 
   [14] PAUSE CONTROLS
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:17
       Master PNG: screenshots/14_pause_controls.png (1600x900)
-      Preview:    screenshots/previews/14_pause_controls_20261014_162229.jpg
-      Luminance:  0.057 | Non-Black: 100.000%
+      Preview:    screenshots/previews/14_pause_controls_20261014_231717.jpg
+      Luminance:  0.063 | Non-Black: 100.000%
       Evaluation: PASS
 
   [15] EXTRACTION BEACON
-      Timestamp:  2026-10-14 16:22:29
+      Timestamp:  2026-10-14 23:17:18
       Master PNG: screenshots/15_extraction_beacon.png (1600x900)
-      Preview:    screenshots/previews/15_extraction_beacon_20261014_162229.jpg
-      Luminance:  0.232 | Non-Black: 99.988%
+      Preview:    screenshots/previews/15_extraction_beacon_20261014_231718.jpg
+      Luminance:  0.231 | Non-Black: 99.936%
       Evaluation: PASS
 
   [16] MISSION DEBRIEF
-      Timestamp:  2026-10-14 16:22:30
+      Timestamp:  2026-10-14 23:17:18
       Master PNG: screenshots/16_mission_debrief.png (1600x900)
-      Preview:    screenshots/previews/16_mission_debrief_20261014_162230.jpg
-      Luminance:  0.105 | Non-Black: 100.000%
+      Preview:    screenshots/previews/16_mission_debrief_20261014_231718.jpg
+      Luminance:  0.106 | Non-Black: 100.000%
       Evaluation: PASS
 
 ================================================================================

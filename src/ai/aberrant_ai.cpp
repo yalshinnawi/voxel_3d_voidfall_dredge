@@ -390,7 +390,7 @@ bool AberrantAI::resolve_player_penetration(
     glm::vec3 delta = enemy_pos - player_pos;
     delta.y = 0.0f; // Horizontal separation plane
     float dist = glm::length(delta);
-    float minRadius = enemy_radius + player_radius; // e.g., 0.5m + 0.35m = 0.85m
+    float minRadius = std::max(2.15f, enemy_radius + player_radius); // Enforce strict 2.15m standoff to camera
     if (dist < minRadius) {
         glm::vec3 pushDir = (dist > 0.001f) ? (delta / dist) : glm::vec3(0.0f, 0.0f, 1.0f);
         float penetration = minRadius - dist;

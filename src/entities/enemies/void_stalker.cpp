@@ -1595,7 +1595,7 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
           s.last_seen_player_pos = s.investigation_target;
           s.target_pos = s.investigation_target;
           s.lost_los_timer = 0.0f;
-        } else if (s.lost_los_timer > los_break_time && s.state_timer >= 1.0f) {
+        } else if (!s.is_pursuing_attacker && s.lost_los_timer > los_break_time && s.state_timer >= 1.0f) {
           s.investigation_target = s.last_seen_player_pos;
           s.investigation_timer = player_is_crouching ? 2.2f : 3.5f;
           s.target_pos = s.investigation_target;
@@ -2505,9 +2505,12 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
     }
 
     // Hard Collision Separation Solver against player capsule
+    // Enforces strict minimum 2.15m horizontal standoff during lunges / near camera
+    // to ensure monster geometry never clips inside the camera near-plane.
     if (s.state != StalkerState::Burrowing) {
+      float player_effective_r = (s.state == StalkerState::Lunging || dist_to_player < 2.5f) ? 1.65f : 0.35f;
       AberrantAI::resolve_player_penetration(s.position, player_pos, 0.5f,
-                                             0.35f);
+                                             player_effective_r);
     }
 
     // Clamp velocity to maximum speed to prevent physics launches or tunneling

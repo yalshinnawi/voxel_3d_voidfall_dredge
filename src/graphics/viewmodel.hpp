@@ -86,6 +86,18 @@ private:
         const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f)
     );
 
+    void add_octagonal_prism(
+        std::vector<ViewmodelVertex>& verts,
+        const glm::vec3& start_center,
+        float width,
+        float height,
+        float length,
+        float bevel,
+        const glm::vec4& color,
+        const glm::vec4& material = glm::vec4(0.0f, 0.6f, 0.0f, 1.0f),
+        bool cap_ends = true
+    );
+
     void add_capsule(
         std::vector<ViewmodelVertex>& verts,
         const glm::vec3& p1,
@@ -162,6 +174,10 @@ private:
     unsigned int m_bit_vao{0};
     unsigned int m_bit_vbo{0};
     size_t m_bit_count{0};
+
+    unsigned int m_inner_ring_vao{0};
+    unsigned int m_inner_ring_vbo{0};
+    size_t m_inner_ring_count{0};
 
     unsigned int m_piston_vao{0};
     unsigned int m_piston_vbo{0};

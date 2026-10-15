@@ -309,6 +309,9 @@ void TextureArray::initialize_procedural_materials() {
                         float rock_fbm = periodic_fbm2d(fx, fy, 10, 4);
                         VoronoiResult vor = periodic_voronoi2d(fx, fy, 14);
                         float fissure = (vor.f2 - vor.f1 < 0.10f) ? std::pow(1.0f - ((vor.f2 - vor.f1) / 0.10f), 2.0f) : 0.0f;
+                        float edge_dist = std::min({fx, 1.0f - fx, fy, 1.0f - fy});
+                        float edge_fade = std::clamp((edge_dist - 0.02f) / 0.10f, 0.0f, 1.0f);
+                        fissure *= edge_fade;
 
                         // Deep dark void-basalt / obsidian matrix with subtle violet undertones
                         r = 24.0f + 14.0f * rock_fbm + 18.0f * fissure;
@@ -456,6 +459,9 @@ void TextureArray::initialize_procedural_materials() {
                         VoronoiResult vor = periodic_voronoi2d(fx, fy, 8);
                         float fissure_dist = vor.f2 - vor.f1;
                         float is_fissure = (fissure_dist < 0.18f) ? std::pow(1.0f - (fissure_dist / 0.18f), 1.8f) : 0.0f;
+                        float edge_dist = std::min({fx, 1.0f - fx, fy, 1.0f - fy});
+                        float edge_fade = std::clamp((edge_dist - 0.02f) / 0.10f, 0.0f, 1.0f);
+                        is_fissure *= edge_fade;
 
                         if (is_fissure > 0.05f) {
                             // Blazing molten magma chasm
@@ -490,10 +496,12 @@ void TextureArray::initialize_procedural_materials() {
                     case 7: { // ── MAT_RADIOACTIVE_ORE (Pitchblende Host Rock with Glowing Emerald Uraninite Needles) ──
                         VoronoiResult vor = periodic_voronoi2d(fx, fy, 12);
                         bool is_crystal_needle = (vor.f1 < 0.22f);
+                        float edge_dist = std::min({fx, 1.0f - fx, fy, 1.0f - fy});
+                        float edge_fade = std::clamp((edge_dist - 0.02f) / 0.10f, 0.0f, 1.0f);
 
-                        if (is_crystal_needle) {
+                        if (is_crystal_needle && edge_fade > 0.05f) {
                             // Glowing toxic crystal needle
-                            float needle_sharp = std::pow(1.0f - (vor.f1 / 0.22f), 1.6f);
+                            float needle_sharp = std::pow(1.0f - (vor.f1 / 0.22f), 1.6f) * edge_fade;
                             r = 45.0f + 40.0f * needle_sharp;
                             g = 220.0f + 35.0f * needle_sharp;
                             b = 75.0f + 50.0f * needle_sharp;

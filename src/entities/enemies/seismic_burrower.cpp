@@ -753,6 +753,11 @@ SeismicBurrowerManager::FrameResult SeismicBurrowerManager::update(
             }
         }
 
+        // Enforce strict minimum 2.15m horizontal standoff to player camera
+        if (b.state != BurrowerState::Dead && b.state != BurrowerState::Dying) {
+            AberrantAI::resolve_player_penetration(b.position, player_pos, 1.45f, 0.70f);
+        }
+
         // Clamp inside cavern bounds
         b.position.x = std::clamp(b.position.x, 2.0f, 62.0f);
         b.position.y = std::clamp(b.position.y, 2.0f, 62.0f);

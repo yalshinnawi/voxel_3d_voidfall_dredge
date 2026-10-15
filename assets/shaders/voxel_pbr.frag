@@ -265,24 +265,28 @@ void main() {
                 flowOffset = ripple + vec2(0.02, 0.01) * (uTime * 0.05);
             }
         } else if (vTexLayer == MAT_LAVA || vTexLayer == MAT_THERMITE_SLAG) {
+            vec2 warp1 = vec2(sin(uTime * 0.25 + v_FragPos.x * 0.35), cos(uTime * 0.25 + v_FragPos.z * 0.35)) * 0.04;
+            vec2 warp2 = vec2(cos(uTime * 0.25 * 0.7 - v_FragPos.z * 0.5), sin(uTime * 0.25 * 0.7 + v_FragPos.x * 0.5)) * 0.025;
             if (isStepCascade) {
-                flowOffset = vec2(sin(uTime * 1.5 + v_FragPos.y) * 0.015, -uTime * 0.18);
+                flowOffset = vec2(sin(uTime * 1.5 + v_FragPos.y) * 0.015, -uTime * 0.18) + warp1 * 0.5;
             } else if (isHorizontalFlow) {
                 vec2 dir = normalize(v_FlowDir);
                 vec2 crossDir = vec2(-dir.y, dir.x);
-                flowOffset = -dir * (uTime * 0.10) + crossDir * sin(uTime * 1.8 + dot(v_FragPos.xz, vec2(0.8, 0.6))) * 0.015;
+                flowOffset = -dir * (uTime * 0.10) + crossDir * sin(uTime * 1.8 + dot(v_FragPos.xz, vec2(0.8, 0.6))) * 0.015 + warp1;
             } else {
-                flowOffset = vec2(sin(uTime * 0.30 + v_FragPos.x * 0.15), cos(uTime * 0.25 + v_FragPos.z * 0.15)) * 0.03 + vec2(0.008, 0.004) * (uTime * 0.02);
+                flowOffset = warp1 + warp2 + vec2(0.008, 0.004) * (uTime * 0.02);
             }
         } else if (vTexLayer == MAT_ACID) {
+            vec2 warp1 = vec2(sin(uTime * 0.25 * 1.5 + v_FragPos.x * 0.6), cos(uTime * 0.25 * 1.5 + v_FragPos.z * 0.6)) * 0.05;
+            vec2 warp2 = vec2(cos(uTime * 0.25 * 2.2 - v_FragPos.z * 0.9), sin(uTime * 0.25 * 2.2 + v_FragPos.x * 0.9)) * 0.035;
             if (isStepCascade) {
-                flowOffset = vec2(sin(uTime * 2.2 + v_FragPos.y * 1.5) * 0.02, -uTime * 0.50);
+                flowOffset = vec2(sin(uTime * 2.2 + v_FragPos.y * 1.5) * 0.02, -uTime * 0.50) + warp1 * 0.5;
             } else if (isHorizontalFlow) {
                 vec2 dir = normalize(v_FlowDir);
                 vec2 crossDir = vec2(-dir.y, dir.x);
-                flowOffset = -dir * (uTime * 0.30) + crossDir * sin(uTime * 2.2 + dot(v_FragPos.xz, vec2(1.2, 0.8))) * 0.025;
+                flowOffset = -dir * (uTime * 0.30) + crossDir * sin(uTime * 2.2 + dot(v_FragPos.xz, vec2(1.2, 0.8))) * 0.025 + warp1;
             } else {
-                flowOffset = vec2(sin(uTime * 0.55 + v_FragPos.x * 0.30), cos(uTime * 0.45 + v_FragPos.z * 0.30)) * 0.035 + vec2(0.015, 0.015) * (uTime * 0.04);
+                flowOffset = warp1 + warp2 + vec2(0.015, 0.015) * (uTime * 0.04);
             }
         } else if (vTexLayer == MAT_COOLANT) {
             if (isStepCascade) {
@@ -443,6 +447,12 @@ void main() {
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
+    // Fade emissive vein masks smoothly to 0.0 near block UV edges so glowing ore pockets never touch 90 deg cube seams
+    if (vTexLayer == 3u || vTexLayer == 6u || vTexLayer == 7u) {
+        float veinEdgeFade = smoothstep(0.02, 0.12, minEdge);
+        emissive *= veinEdgeFade;
+    }
+
     // World-space triplanar mapping with low-frequency 3D strata noise on natural stone (MAT_GRANITE, MAT_BASALT)
     if (uUseTextureArray == 1 && (vTexLayer == MAT_GRANITE || vTexLayer == MAT_BASALT)) {
         vec3 blendWeights = pow(abs(v_Normal), vec3(4.0));
@@ -523,29 +533,35 @@ void main() {
             metallic = 0.02;
         } 
         else if (v_MaterialID == MAT_LAVA || v_MaterialID == MAT_THERMITE_SLAG) {
+            float crustPulse = sin(uTime * 0.25 * 3.0 + v_FragPos.x * 0.5 + v_FragPos.z * 0.5) * 0.5 + 0.5;
             if (uUseTextureArray == 1) {
                 vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
-                albedo = sampledAlbedo;
-                emissive = texture(uEmissiveArray, texCoord).rgb * 3.2 + sampledAlbedo * 1.0;
+                albedo = mix(sampledAlbedo, vec3(0.10, 0.08, 0.08), crustPulse * 0.45);
+                emissive = texture(uEmissiveArray, texCoord).rgb * (2.5 + crustPulse * 2.5) + sampledAlbedo * 1.0;
             } else {
-                albedo = vec3(0.85, 0.32, 0.05);
-                emissive = vec3(1.2, 0.45, 0.08);
+                albedo = mix(vec3(0.85, 0.32, 0.05), vec3(0.12, 0.09, 0.08), crustPulse * 0.5);
+                emissive = vec3(1.2, 0.45, 0.08) * (1.0 + crustPulse * 1.5);
             }
             alpha = 1.0; // Lava is completely opaque
-            roughness = 0.62;
+            roughness = mix(0.35, 0.78, crustPulse);
             metallic = 0.05;
             normal = baseNormal; // Viscous lava maintains smooth bulk surface
         }
         else if (v_MaterialID == MAT_ACID) {
+            float churn = sin(uTime * 0.25 * 4.0 + v_FragPos.x * 1.2 - v_FragPos.z * 1.2) * 0.5 + 0.5;
             if (uUseTextureArray == 1) {
                 vec3 sampledAlbedo = texture(uAlbedoArray, texCoord).rgb;
-                albedo = mix(sampledAlbedo, vec3(0.16, 0.78, 0.12), 0.15);
-                emissive = texture(uEmissiveArray, texCoord).rgb * 1.6 + vec3(0.04, 0.18, 0.03);
+                vec3 darkGreen = vec3(0.04, 0.25, 0.05);
+                vec3 neonLime = vec3(0.20, 0.95, 0.15);
+                albedo = mix(sampledAlbedo, mix(darkGreen, neonLime, churn), 0.40);
+                emissive = texture(uEmissiveArray, texCoord).rgb * (1.2 + churn * 0.8) + neonLime * (0.08 + churn * 0.15);
             } else {
-                albedo = vec3(0.18, 0.80, 0.12);
-                emissive = vec3(0.10, 0.35, 0.05);
+                vec3 darkGreen = vec3(0.04, 0.30, 0.06);
+                vec3 neonLime = vec3(0.25, 0.95, 0.15);
+                albedo = mix(darkGreen, neonLime, churn);
+                emissive = neonLime * (0.15 + churn * 0.35);
             }
-            alpha = 0.82;
+            alpha = 0.85;
             roughness = 0.04;
             metallic = 0.05;
         }
@@ -797,9 +813,10 @@ void main() {
         baseSubterraneanAmbient = vec3(0.035, 0.062, 0.052); // Sector 3+: Toxic vault phosphorescent viridian / void
     }
 
-    // Apply Baked Vertex AO & lower cavern ambient floor to 0.08 in pitch-black dark zones
-    float darknessMult = clamp(1.0 - uDarknessFactor * 0.92, 0.08, 1.0);
-    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * ao * darknessMult;
+    // Apply Baked Vertex AO, lower cavern ambient floor to 0.032 and apply distance attenuation
+    float darknessMult = clamp(1.0 - uDarknessFactor * 0.968, 0.032, 1.0);
+    float distAmbientAtten = exp(-camDist * 0.045);
+    vec3 ambient = baseSubterraneanAmbient * depthFactor * hemiFactor * albedo * ao * darknessMult * distAmbientAtten;
 
     vec3 finalColor = ambient + Lo + emissive;
 

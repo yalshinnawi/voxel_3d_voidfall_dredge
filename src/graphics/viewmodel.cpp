@@ -26,6 +26,8 @@ ViewModel::~ViewModel() {
     if (m_chassis_vbo) glDeleteBuffers(1, &m_chassis_vbo);
     if (m_bit_vao) glDeleteVertexArrays(1, &m_bit_vao);
     if (m_bit_vbo) glDeleteBuffers(1, &m_bit_vbo);
+    if (m_inner_ring_vao) glDeleteVertexArrays(1, &m_inner_ring_vao);
+    if (m_inner_ring_vbo) glDeleteBuffers(1, &m_inner_ring_vbo);
     if (m_piston_vao) glDeleteVertexArrays(1, &m_piston_vao);
     if (m_piston_vbo) glDeleteBuffers(1, &m_piston_vbo);
     if (m_carbine_vao) glDeleteVertexArrays(1, &m_carbine_vao);
@@ -107,6 +109,87 @@ void ViewModel::add_transformed_box(
     push_quad(xform_pt(-1, -1, -1), xform_pt(-1, -1,  1), xform_pt(-1,  1,  1), xform_pt(-1,  1, -1), xform_n({-1, 0, 0}));
     push_quad(xform_pt(-1,  1,  1), xform_pt( 1,  1,  1), xform_pt( 1,  1, -1), xform_pt(-1,  1, -1), xform_n({0, 1, 0}));
     push_quad(xform_pt(-1, -1, -1), xform_pt( 1, -1, -1), xform_pt( 1, -1,  1), xform_pt(-1, -1,  1), xform_n({0, -1, 0}));
+}
+
+void ViewModel::add_octagonal_prism(
+    std::vector<ViewmodelVertex>& verts,
+    const glm::vec3& start_center,
+    float width,
+    float height,
+    float length,
+    float bevel,
+    const glm::vec4& color,
+    const glm::vec4& material,
+    bool cap_ends
+) {
+    float hw = width * 0.5f;
+    float hh = height * 0.5f;
+    float b = std::min(bevel, std::min(hw, hh) * 0.45f);
+
+    glm::vec2 profile[8] = {
+        { hw - b,  hh },
+        {-(hw - b),  hh },
+        {-hw,       hh - b },
+        {-hw,     -(hh - b) },
+        {-(hw - b), -hh },
+        { hw - b, -hh },
+        { hw,     -(hh - b) },
+        { hw,       hh - b }
+    };
+
+    glm::vec3 n_profile[8];
+    for (int i = 0; i < 8; ++i) {
+        int next = (i + 1) % 8;
+        glm::vec2 edge = profile[next] - profile[i];
+        glm::vec2 n2 = glm::normalize(glm::vec2(-edge.y, edge.x));
+        n_profile[i] = glm::vec3(n2.x, n2.y, 0.0f);
+    }
+
+    auto push_quad = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& n) {
+        verts.push_back({a, n, color, material});
+        verts.push_back({b, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({a, n, color, material});
+        verts.push_back({c, n, color, material});
+        verts.push_back({d, n, color, material});
+    };
+
+    float z0 = start_center.z;
+    float z1 = start_center.z - length;
+
+    for (int i = 0; i < 8; ++i) {
+        int next = (i + 1) % 8;
+        glm::vec3 p0 = start_center + glm::vec3(profile[i].x, profile[i].y, 0.0f);
+        glm::vec3 p1 = start_center + glm::vec3(profile[next].x, profile[next].y, 0.0f);
+        glm::vec3 p2 = glm::vec3(p1.x, p1.y, z1);
+        glm::vec3 p3 = glm::vec3(p0.x, p0.y, z1);
+
+        push_quad(p0, p1, p2, p3, n_profile[i]);
+    }
+
+    if (cap_ends) {
+        glm::vec3 c_start = start_center;
+        glm::vec3 n_start(0.0f, 0.0f, 1.0f);
+        for (int i = 0; i < 8; ++i) {
+            int next = (i + 1) % 8;
+            glm::vec3 p0 = start_center + glm::vec3(profile[i].x, profile[i].y, 0.0f);
+            glm::vec3 p1 = start_center + glm::vec3(profile[next].x, profile[next].y, 0.0f);
+            verts.push_back({c_start, n_start, color, material});
+            verts.push_back({p1, n_start, color, material});
+            verts.push_back({p0, n_start, color, material});
+        }
+
+        glm::vec3 c_end = glm::vec3(start_center.x, start_center.y, z1);
+        glm::vec3 n_end(0.0f, 0.0f, -1.0f);
+        for (int i = 0; i < 8; ++i) {
+            int next = (i + 1) % 8;
+            glm::vec3 p0 = glm::vec3(start_center.x + profile[i].x, start_center.y + profile[i].y, z1);
+            glm::vec3 p1 = glm::vec3(start_center.x + profile[next].x, start_center.y + profile[next].y, z1);
+            verts.push_back({c_end, n_end, color, material});
+            verts.push_back({p0, n_end, color, material});
+            verts.push_back({p1, n_end, color, material});
+        }
+    }
 }
 
 void ViewModel::add_capsule(
@@ -420,10 +503,12 @@ void ViewModel::add_forearm_and_gauntlet(
     glm::vec4 col_armor_plate(0.25f, 0.28f, 0.32f, 1.0f);
     glm::vec4 col_chassis_dark(0.13f, 0.14f, 0.16f, 1.0f);
 
-    // 1. Dual-segmented Forearm Sleeve (Upper segment entering from viewport corner)
+    // 1. Segment 1: Articulated Elbow Guard & Arm Sleeve
+    glm::vec3 elbow_dir = (glm::length(wrist_pos - elbow_origin) > 0.001f) ? glm::normalize(wrist_pos - elbow_origin) : glm::vec3(0, 0, -1);
+    add_capsule(verts, elbow_origin - elbow_dir * 0.025f, elbow_origin + elbow_dir * 0.045f, 0.054f, 0.048f, 8, col_chassis_dark, mat_armor);
     add_capsule(verts, elbow_origin, wrist_pos, 0.048f, 0.036f, 10, sleeve_col, mat_cloth);
 
-    // 2. Forearm Reinforced Armor Plating with Class Accent Trim
+    // 2. Segment 2: Carbon-Fiber Forearm Cuff Plating with Class Accent Trim
     glm::vec3 mid_arm = (elbow_origin + wrist_pos) * 0.5f + (is_right_arm ? glm::vec3(0.015f, 0.015f, 0.0f) : glm::vec3(-0.015f, 0.015f, 0.0f));
     add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.015f, 0.05f), mid_arm - glm::vec3(0.0f, -0.015f, 0.05f), 0.018f, 0.015f, 8, col_armor_plate, mat_armor);
     add_capsule(verts, mid_arm + glm::vec3(0.0f, 0.018f, 0.04f), mid_arm - glm::vec3(0.0f, -0.012f, 0.04f), 0.007f, 0.005f, 6, accent_col, mat_metal);
@@ -479,6 +564,8 @@ void ViewModel::init_geometry() {
     if (m_chassis_vbo) { glDeleteBuffers(1, &m_chassis_vbo); m_chassis_vbo = 0; }
     if (m_bit_vao) { glDeleteVertexArrays(1, &m_bit_vao); m_bit_vao = 0; }
     if (m_bit_vbo) { glDeleteBuffers(1, &m_bit_vbo); m_bit_vbo = 0; }
+    if (m_inner_ring_vao) { glDeleteVertexArrays(1, &m_inner_ring_vao); m_inner_ring_vao = 0; }
+    if (m_inner_ring_vbo) { glDeleteBuffers(1, &m_inner_ring_vbo); m_inner_ring_vbo = 0; }
     if (m_piston_vao) { glDeleteVertexArrays(1, &m_piston_vao); m_piston_vao = 0; }
     if (m_piston_vbo) { glDeleteBuffers(1, &m_piston_vbo); m_piston_vbo = 0; }
     if (m_carbine_vao) { glDeleteVertexArrays(1, &m_carbine_vao); m_carbine_vao = 0; }
@@ -543,29 +630,29 @@ void ViewModel::init_geometry() {
     std::vector<ViewmodelVertex> chassis_verts;
 
     // -------------------------------------------------------------
-    // A. SLEEK INDUSTRIAL MOTOR CASING & ENGINE BLOCK
-    // (Compact 9cm x 9cm profile so the drill bit out front is fully visible!)
+    // A. HEAVY INDUSTRIAL CYLINDRICAL/OCTAGONAL CHASSIS & ENGINE BLOCK
+    // (Precision-machined beveled chassis with hazard stripe collar and exhaust vents)
     // -------------------------------------------------------------
-    add_box(chassis_verts, {-0.046f, -0.052f, -0.16f}, {0.046f, 0.042f, 0.02f}, col_chassis_body, mat_dark_polymer);
-    add_box(chassis_verts, {-0.038f, 0.042f, -0.15f}, {0.038f, 0.054f, 0.01f}, col_chassis_dark, mat_armor);
-    add_box(chassis_verts, {-0.040f, -0.065f, -0.15f}, {0.040f, -0.052f, 0.01f}, col_chassis_dark, mat_armor);
+    add_octagonal_prism(chassis_verts, {0.0f, -0.005f, 0.02f}, 0.092f, 0.094f, 0.18f, 0.016f, col_chassis_body, mat_dark_polymer);
+    add_octagonal_prism(chassis_verts, {0.0f,  0.038f, 0.01f}, 0.076f, 0.024f, 0.16f, 0.008f, col_chassis_dark, mat_armor);
+    add_octagonal_prism(chassis_verts, {0.0f, -0.048f, 0.01f}, 0.080f, 0.026f, 0.16f, 0.008f, col_chassis_dark, mat_armor);
 
-    // Left and Right Radiator Cooling Vents & Internal Glowing Heat Coils
+    // Left and Right Radiator Cooling Exhaust Vents & Glowing Heat Coils
     for (int v = 0; v < 3; ++v) {
         float vz = -0.12f + v * 0.045f;
         // Left
-        add_box(chassis_verts, {-0.048f, -0.035f, vz - 0.012f}, {-0.045f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
-        add_box(chassis_verts, {-0.050f, -0.040f, vz - 0.003f}, {-0.046f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
+        add_box(chassis_verts, {-0.049f, -0.035f, vz - 0.012f}, {-0.045f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
+        add_box(chassis_verts, {-0.051f, -0.040f, vz - 0.003f}, {-0.047f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
         // Right
-        add_box(chassis_verts, {0.045f, -0.035f, vz - 0.012f}, {0.048f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
-        add_box(chassis_verts, {0.046f, -0.040f, vz - 0.003f}, {0.050f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
+        add_box(chassis_verts, {0.045f, -0.035f, vz - 0.012f}, {0.049f, 0.025f, vz + 0.012f}, col_heat_coil, mat_led_emissive);
+        add_box(chassis_verts, {0.047f, -0.040f, vz - 0.003f}, {0.051f, 0.030f, vz + 0.003f}, col_chassis_dark, mat_metal);
     }
 
-    // Top Hazard Caution Stripes
+    // Yellow / Black Hazard Stripe Collar Ring
     float hz_z = 0.01f;
     for (int h = 0; h < 4; ++h) {
         glm::vec4 h_col = (h % 2 == 0) ? col_hazard_yellow : col_hazard_black;
-        add_box(chassis_verts, {-0.036f, 0.055f, hz_z - 0.025f}, {0.036f, 0.056f, hz_z}, h_col, mat_armor);
+        add_octagonal_prism(chassis_verts, {0.0f, -0.005f, hz_z}, 0.096f, 0.098f, 0.028f, 0.016f, h_col, mat_armor, false);
         hz_z -= 0.034f;
     }
 
@@ -787,9 +874,9 @@ void ViewModel::init_geometry() {
     // Core Heavy Tapered Shaft (Extended length: 32cm!)
     add_cone(bit_verts, {0.0f, 0.0f, -0.10f}, 0.038f, 0.014f, 0.30f, 16, col_carbide_flute, mat_bit_carbide);
 
-    // 4 Massive Sculpted Helical Auger Flutes / Spiral Blades
-    const int FLUTE_COUNT = 4;
-    const int STEPS_PER_FLUTE = 18;
+    // 3 Massive Sculpted Helical Auger Flutes / Spiral Blades (3-Fluted Conical Auger)
+    const int FLUTE_COUNT = 3;
+    const int STEPS_PER_FLUTE = 20;
     float flute_len = 0.30f;
     float start_z = -0.08f;
 
@@ -802,13 +889,13 @@ void ViewModel::init_geometry() {
             float z1 = start_z - t1 * flute_len;
             float z2 = start_z - t2 * flute_len;
 
-            float angle1 = base_phase + t1 * 3.14159265f;
-            float angle2 = base_phase + t2 * 3.14159265f;
+            float angle1 = base_phase + t1 * 3.40f;
+            float angle2 = base_phase + t2 * 3.40f;
 
             float r_inner1 = 0.036f * (1.0f - t1 * 0.52f);
             float r_inner2 = 0.036f * (1.0f - t2 * 0.52f);
-            float r_outer1 = r_inner1 + 0.024f * (1.0f - t1 * 0.35f);
-            float r_outer2 = r_inner2 + 0.024f * (1.0f - t2 * 0.35f);
+            float r_outer1 = r_inner1 + 0.026f * (1.0f - t1 * 0.32f);
+            float r_outer2 = r_inner2 + 0.026f * (1.0f - t2 * 0.32f);
 
             glm::vec3 in_p1(r_inner1 * std::cos(angle1), r_inner1 * std::sin(angle1), z1);
             glm::vec3 in_p2(r_inner2 * std::cos(angle2), r_inner2 * std::sin(angle2), z2);
@@ -828,7 +915,7 @@ void ViewModel::init_geometry() {
             if (s % 2 == 0) {
                 glm::mat4 tooth_m = glm::translate(glm::mat4(1.0f), (out_p1 + out_p2) * 0.5f);
                 tooth_m = glm::rotate(tooth_m, angle1, glm::vec3(0, 0, 1));
-                add_transformed_box(bit_verts, tooth_m, glm::vec3(0.006f, 0.008f, 0.008f), col_steel_bright, mat_bit_carbide);
+                add_transformed_box(bit_verts, tooth_m, glm::vec3(0.007f, 0.009f, 0.008f), col_steel_bright, mat_bit_carbide);
             }
         }
     }
@@ -844,6 +931,37 @@ void ViewModel::init_geometry() {
     glBindVertexArray(m_bit_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_bit_vbo);
     glBufferData(GL_ARRAY_BUFFER, m_bit_count * sizeof(ViewmodelVertex), bit_verts.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, color));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, material));
+    glBindVertexArray(0);
+
+    // =============================================================
+    // 3b. COUNTER-ROTATING INNER STABILIZER RINGS
+    // =============================================================
+    std::vector<ViewmodelVertex> inner_ring_verts;
+    add_tube(inner_ring_verts, {0.0f, 0.0f, -0.015f}, 0.025f, 0.035f, 0.032f, 16, col_steel_bright, mat_bit_tungsten, 2);
+    add_tube(inner_ring_verts, {0.0f, 0.0f, -0.055f}, 0.022f, 0.031f, 0.035f, 16, col_tungsten, mat_bit_carbide, 2);
+    for (int r = 0; r < 6; ++r) {
+        float r_ang = r * 1.0471975f;
+        glm::mat4 vane_m = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -0.045f));
+        vane_m = glm::rotate(vane_m, r_ang, glm::vec3(0.0f, 0.0f, 1.0f));
+        vane_m = glm::translate(vane_m, glm::vec3(0.028f, 0.0f, 0.0f));
+        add_transformed_box(inner_ring_verts, vane_m, glm::vec3(0.004f, 0.007f, 0.018f), col_carbide_flute, mat_bit_carbide);
+    }
+
+    m_inner_ring_count = inner_ring_verts.size();
+    glGenVertexArrays(1, &m_inner_ring_vao);
+    glGenBuffers(1, &m_inner_ring_vbo);
+    glBindVertexArray(m_inner_ring_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_inner_ring_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m_inner_ring_count * sizeof(ViewmodelVertex), inner_ring_verts.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ViewmodelVertex), (void*)offsetof(ViewmodelVertex, pos));
@@ -875,27 +993,47 @@ void ViewModel::init_geometry() {
     glm::vec4 mat_carbine_rubber(0.05f, 0.85f, 0.00f, 0.80f);
     glm::vec4 mat_carbine_glass(0.04f, 0.04f, 0.05f, 0.98f);  // High-smoothness dielectric optical glass (4% reflectance F0, ultra-clear)
 
-    // 4.1 Receiver & Upper Housing
-    add_box(carbine_verts, {-0.026f, -0.040f, -0.20f}, {0.026f, 0.045f, 0.06f}, col_carbine_body, mat_carbine_armor);
-    add_box(carbine_verts, {-0.016f, 0.045f, -0.22f}, {0.016f, 0.056f, 0.04f}, col_chassis_dark, mat_carbine_armor); // Picatinny top rail
+    // 4.1 Chamfered Upper & Lower Receiver with Picatinny Top Rail & Bolt Carrier
+    // Upper Receiver: Octagonal beveled gunmetal housing
+    add_octagonal_prism(carbine_verts, {0.0f, 0.015f, -0.07f}, 0.052f, 0.048f, 0.26f, 0.008f, col_carbine_body, mat_carbine_armor);
+    // Lower Receiver: Beveled trigger/magazine housing
+    add_octagonal_prism(carbine_verts, {0.0f, -0.024f, -0.07f}, 0.046f, 0.040f, 0.22f, 0.006f, col_chassis_dark, mat_carbine_armor);
+
+    // Picatinny top rail base & transverse ridges
+    add_box(carbine_verts, {-0.014f, 0.039f, -0.22f}, {0.014f, 0.046f, 0.05f}, col_chassis_dark, mat_carbine_armor);
+    for (int r = 0; r < 9; ++r) {
+        float rz = -0.20f + r * 0.028f;
+        add_box(carbine_verts, {-0.016f, 0.046f, rz - 0.005f}, {0.016f, 0.052f, rz + 0.005f}, col_carbine_rails, mat_carbine_chrome);
+    }
+
+    // Side Bolt Carrier Detail (Right side +X):
+    // Recessed ejection port
+    add_box(carbine_verts, {0.025f, -0.004f, -0.08f}, {0.028f, 0.026f, -0.01f}, col_chassis_dark, mat_carbine_armor);
+    // Bolt carrier cylinder inside port
+    add_cylinder(carbine_verts, {0.024f, 0.011f, -0.075f}, 0.009f, 0.06f, 8, col_carbine_rails, mat_carbine_chrome, 2);
+    // Charging handle & extractor claw
+    add_box(carbine_verts, {0.026f, 0.009f, -0.05f}, {0.036f, 0.015f, -0.038f}, col_carbine_rails, mat_carbine_chrome);
 
     // Stock extension toward delver shoulder
-    add_box(carbine_verts, {-0.020f, -0.030f, 0.06f}, {0.020f, 0.035f, 0.20f}, col_carbine_body, mat_carbine_armor);
+    add_octagonal_prism(carbine_verts, {0.0f, 0.002f, 0.14f}, 0.040f, 0.065f, 0.14f, 0.006f, col_carbine_body, mat_carbine_armor);
     add_box(carbine_verts, {-0.022f, -0.055f, 0.18f}, {0.022f, 0.045f, 0.23f}, col_carbine_grip, mat_carbine_rubber); // Recoil buttpad
 
-    // 4.2 Twin Magnetic Accelerator Rails & Plasma Chamber
-    // Upper & Lower chrome acceleration guide rods
-    add_cylinder(carbine_verts, {0.0f, 0.018f, -0.19f}, 0.010f, 0.28f, 12, col_carbine_rails, mat_carbine_chrome, 2);
-    add_cylinder(carbine_verts, {0.0f, -0.014f, -0.19f}, 0.010f, 0.28f, 12, col_carbine_rails, mat_carbine_chrome, 2);
+    // 4.2 Vented Slotted Barrel Shroud & Internal Glowing Plasma Core Tube
+    // Internal glowing plasma core cylinder tube
+    add_cylinder(carbine_verts, {0.0f, 0.002f, -0.19f}, 0.014f, 0.23f, 16, col_plasma_cyan, mat_carbine_emissive, 2);
+    add_cylinder(carbine_verts, {0.0f, 0.002f, -0.19f}, 0.007f, 0.24f, 12, col_plasma_white, mat_carbine_emissive, 2);
+    // Upper & Lower chrome acceleration guide rods inside shroud
+    add_cylinder(carbine_verts, {0.0f, 0.022f, -0.19f}, 0.006f, 0.24f, 8, col_carbine_rails, mat_carbine_chrome, 2);
+    add_cylinder(carbine_verts, {0.0f, -0.018f, -0.19f}, 0.006f, 0.24f, 8, col_carbine_rails, mat_carbine_chrome, 2);
 
-    // Vented Barrel Shroud surrounding rails
-    add_box(carbine_verts, {-0.024f, -0.028f, -0.42f}, {0.024f, 0.032f, -0.19f}, col_carbine_shroud, mat_carbine_armor);
+    // Chamfered Octagonal Vented Barrel Shroud surrounding the plasma core
+    add_octagonal_prism(carbine_verts, {0.0f, 0.002f, -0.19f}, 0.048f, 0.052f, 0.23f, 0.007f, col_carbine_shroud, mat_carbine_armor, false);
 
-    // Emissive Heat Vents / Cooling Gills along Left and Right
-    for (int vent = 0; vent < 4; ++vent) {
-        float vz = -0.22f - vent * 0.045f;
-        add_box(carbine_verts, {-0.026f, -0.006f, vz - 0.014f}, {-0.022f, 0.012f, vz + 0.014f}, col_plasma_cyan, mat_carbine_emissive);
-        add_box(carbine_verts, { 0.022f, -0.006f, vz - 0.014f}, { 0.026f, 0.012f, vz + 0.014f}, col_plasma_cyan, mat_carbine_emissive);
+    // Lateral Heat-Shield Cooling Slots cut into shroud revealing glowing core
+    for (int vent = 0; vent < 5; ++vent) {
+        float vz = -0.21f - vent * 0.042f;
+        add_box(carbine_verts, {-0.026f, -0.010f, vz - 0.013f}, {-0.023f, 0.014f, vz + 0.013f}, col_plasma_cyan, mat_carbine_emissive);
+        add_box(carbine_verts, { 0.023f, -0.010f, vz - 0.013f}, { 0.026f, 0.014f, vz + 0.013f}, col_plasma_cyan, mat_carbine_emissive);
     }
 
     // Heavy Muzzle Brake & Concentric Plasma Emitter Spindle
@@ -934,9 +1072,15 @@ void ViewModel::init_geometry() {
     add_box(carbine_verts, {-0.003f, 0.066f, -0.036f}, {0.003f, 0.069f, -0.034f}, col_plasma_cyan, mat_carbine_emissive);
 
     // E. Transparent Polished Optical Glass Lens Pane (Thin 2mm pane, anti-reflective cyan polarized coating)
-    // Completely see-through wide window into the 3D world with zero clutter
     glm::vec4 col_carbine_lens_clear(0.10f, 0.88f, 0.98f, 0.025f);
     add_box(carbine_verts, {-0.0245f, 0.0715f, -0.075f}, {0.0245f, 0.1255f, -0.073f}, col_carbine_lens_clear, mat_carbine_glass);
+
+    // F. Glowing Projected Cyan Holographic Reticle Dot & Cross-Ticks at Lens Center (x=0, y=0.0985f, z=-0.074f)
+    add_box(carbine_verts, {-0.0016f, 0.0985f - 0.0016f, -0.0742f}, {0.0016f, 0.0985f + 0.0016f, -0.0738f}, col_plasma_cyan, mat_carbine_emissive);
+    add_box(carbine_verts, {-0.0065f, 0.0985f - 0.0006f, -0.0742f}, {-0.0026f, 0.0985f + 0.0006f, -0.0738f}, col_plasma_cyan, mat_carbine_emissive);
+    add_box(carbine_verts, { 0.0026f, 0.0985f - 0.0006f, -0.0742f}, { 0.0065f, 0.0985f + 0.0006f, -0.0738f}, col_plasma_cyan, mat_carbine_emissive);
+    add_box(carbine_verts, {-0.0006f, 0.0985f - 0.0065f, -0.0742f}, {0.0006f, 0.0985f - 0.0026f, -0.0738f}, col_plasma_cyan, mat_carbine_emissive);
+    add_box(carbine_verts, {-0.0006f, 0.0985f + 0.0026f, -0.0742f}, {0.0006f, 0.0985f + 0.0065f, -0.0738f}, col_plasma_cyan, mat_carbine_emissive);
 
     // 4.5 Pistol Grip & Trigger Assembly
     glm::mat4 grip_mat = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.085f, 0.02f));
@@ -993,11 +1137,27 @@ void ViewModel::init_geometry() {
     glm::vec4 col_scatter_amber(1.0f, 0.80f, 0.20f, 1.0f);     // Burning heat vents
     glm::vec4 col_scatter_grip(0.10f, 0.09f, 0.08f, 1.0f);     // Heat-resistant grip
 
-    // 5.1 Heavy Receiver Box
-    add_box(scatter_verts, {-0.034f, -0.052f, -0.16f}, {0.034f, 0.050f, 0.08f}, col_scatter_body, mat_carbine_armor);
-    add_box(scatter_verts, {-0.024f, 0.050f, -0.18f}, {0.024f, 0.062f, 0.06f}, col_chassis_dark, mat_carbine_armor); // Top shield rib
+    // 5.1 Chamfered Upper & Lower Receiver with Picatinny Top Rail & Bolt Carrier
+    // Upper Receiver: Octagonal beveled heavy cast gunmetal housing
+    add_octagonal_prism(scatter_verts, {0.0f, 0.010f, -0.04f}, 0.068f, 0.062f, 0.24f, 0.010f, col_scatter_body, mat_carbine_armor);
+    // Lower Receiver: Beveled heavy action block
+    add_octagonal_prism(scatter_verts, {0.0f, -0.038f, -0.04f}, 0.058f, 0.042f, 0.22f, 0.008f, col_scatter_body, mat_carbine_armor);
+
+    // Cantilever top rail base with picatinny transverse ridges
+    add_box(scatter_verts, {-0.016f, 0.041f, -0.18f}, {0.016f, 0.050f, 0.06f}, col_chassis_dark, mat_carbine_armor);
+    for (int r = 0; r < 7; ++r) {
+        float rz = -0.16f + r * 0.032f;
+        add_box(scatter_verts, {-0.018f, 0.050f, rz - 0.006f}, {0.018f, 0.056f, rz + 0.006f}, col_chassis_metal, mat_carbine_chrome);
+    }
+
+    // Side Bolt Carrier Detail (Right side +X):
+    // Ejection port cutout
+    add_box(scatter_verts, {0.033f, -0.008f, -0.07f}, {0.036f, 0.026f, 0.01f}, col_chassis_dark, mat_carbine_armor);
+    // Bolt carrier extractor claw & slide
+    add_box(scatter_verts, {0.032f, 0.004f, -0.05f}, {0.042f, 0.018f, -0.03f}, col_chassis_metal, mat_carbine_chrome);
+
     // Heavy stock butt
-    add_box(scatter_verts, {-0.026f, -0.040f, 0.08f}, {0.026f, 0.040f, 0.22f}, col_scatter_body, mat_carbine_armor);
+    add_octagonal_prism(scatter_verts, {0.0f, -0.005f, 0.15f}, 0.048f, 0.075f, 0.14f, 0.008f, col_scatter_body, mat_carbine_armor);
     add_box(scatter_verts, {-0.028f, -0.065f, 0.20f}, {0.028f, 0.050f, 0.25f}, col_scatter_grip, mat_carbine_rubber);
 
     // 5.2 Heavy 6-Round Revolving Cylinder Drum
@@ -1010,20 +1170,23 @@ void ViewModel::init_geometry() {
         add_cylinder(scatter_verts, {cx, cy, -0.085f}, 0.009f, 0.098f, 8, col_scatter_flame, mat_carbine_emissive, 2);
     }
 
-    // 5.3 Dual Over-Under Heavy Breaker Barrels
+    // 5.3 Dual Over-Under Heavy Breaker Barrels & Internal Glowing Magma Core Tube
     add_cylinder(scatter_verts, {0.0f, 0.022f, -0.16f}, 0.016f, 0.28f, 14, col_chassis_dark, mat_carbine_chrome, 2);
     add_cylinder(scatter_verts, {0.0f, -0.014f, -0.16f}, 0.016f, 0.28f, 14, col_chassis_dark, mat_carbine_chrome, 2);
+    // Internal glowing molten magma core tube nestled between barrels
+    add_cylinder(scatter_verts, {0.0f, 0.004f, -0.16f}, 0.014f, 0.28f, 12, col_scatter_flame, mat_carbine_emissive, 2);
+
     // Muzzle compensator ports
     add_box(scatter_verts, {-0.026f, -0.028f, -0.45f}, {0.026f, 0.036f, -0.42f}, col_scatter_shroud, mat_carbine_armor);
     add_cylinder(scatter_verts, {0.0f, 0.022f, -0.46f}, 0.010f, 0.025f, 10, col_scatter_amber, mat_carbine_emissive, 2);
     add_cylinder(scatter_verts, {0.0f, -0.014f, -0.46f}, 0.010f, 0.025f, 10, col_scatter_amber, mat_carbine_emissive, 2);
 
-    // Vented Heat Radiator Plates along Barrels
-    add_box(scatter_verts, {-0.030f, -0.004f, -0.38f}, {0.030f, 0.012f, -0.18f}, col_suit_accent, mat_carbine_armor);
-    for (int vent = 0; vent < 3; ++vent) {
-        float vz = -0.22f - vent * 0.055f;
-        add_box(scatter_verts, {-0.032f, -0.002f, vz - 0.012f}, {-0.028f, 0.010f, vz + 0.012f}, col_scatter_flame, mat_carbine_emissive);
-        add_box(scatter_verts, { 0.028f, -0.002f, vz - 0.012f}, { 0.032f, 0.010f, vz + 0.012f}, col_scatter_flame, mat_carbine_emissive);
+    // Slotted Vented Heat-Shield Shroud along Barrels revealing glowing magma core
+    add_octagonal_prism(scatter_verts, {0.0f, 0.004f, -0.16f}, 0.060f, 0.066f, 0.26f, 0.009f, col_scatter_shroud, mat_carbine_armor, false);
+    for (int vent = 0; vent < 4; ++vent) {
+        float vz = -0.20f - vent * 0.052f;
+        add_box(scatter_verts, {-0.032f, -0.006f, vz - 0.014f}, {-0.028f, 0.014f, vz + 0.014f}, col_scatter_flame, mat_carbine_emissive);
+        add_box(scatter_verts, { 0.028f, -0.006f, vz - 0.014f}, { 0.032f, 0.014f, vz + 0.014f}, col_scatter_flame, mat_carbine_emissive);
     }
 
     // 5.3b Heavy Ruggedized Combat Thermal Scope & Molten Thermite Reticle
@@ -1052,9 +1215,15 @@ void ViewModel::init_geometry() {
     add_box(scatter_verts, { 0.027f, 0.089f, 0.018f}, { 0.032f, 0.095f, 0.022f}, col_scatter_amber, mat_carbine_emissive);
 
     // C. Transparent Amber Thermal Optic Glass Lens Disc inside Scope
-    // (Positioned at z = -0.02f, radius = 0.0255f, crystal-clear 2.5% alpha amber optical coating)
     glm::vec4 col_scatter_lens(1.0f, 0.68f, 0.18f, 0.025f);
     add_lens_disc(scatter_verts, {0.0f, 0.092f, -0.02f}, 0.0255f, 16, col_scatter_lens, mat_carbine_glass, 2);
+
+    // Glowing Projected Amber Holographic Reticle Dot & Crosshairs on Lens (x=0, y=0.092f, z=-0.02f)
+    add_box(scatter_verts, {-0.0016f, 0.092f - 0.0016f, -0.0205f}, {0.0016f, 0.092f + 0.0016f, -0.0195f}, col_scatter_amber, mat_carbine_emissive);
+    add_box(scatter_verts, {-0.0060f, 0.092f - 0.0006f, -0.0205f}, {-0.0025f, 0.092f + 0.0006f, -0.0195f}, col_scatter_amber, mat_carbine_emissive);
+    add_box(scatter_verts, { 0.0025f, 0.092f - 0.0006f, -0.0205f}, { 0.0060f, 0.092f + 0.0006f, -0.0195f}, col_scatter_amber, mat_carbine_emissive);
+    add_box(scatter_verts, {-0.0006f, 0.092f - 0.0060f, -0.0205f}, {0.0006f, 0.092f - 0.0025f, -0.0195f}, col_scatter_amber, mat_carbine_emissive);
+    add_box(scatter_verts, {-0.0006f, 0.092f + 0.0025f, -0.0205f}, {0.0006f, 0.092f + 0.0060f, -0.0195f}, col_scatter_amber, mat_carbine_emissive);
 
     // Front Sight Post & Molten Thermite Bead over muzzle (positioned safely below optical bore on barrel shroud!)
     add_box(scatter_verts, {-0.003f, 0.036f, -0.44f}, {0.003f, 0.052f, -0.42f}, col_chassis_dark, mat_carbine_armor);
@@ -2037,6 +2206,16 @@ void ViewModel::render(
 
         glBindVertexArray(m_bit_vao);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_bit_count));
+
+        // D. Render Counter-Rotating Inner Stabilizer Rings
+        if (m_inner_ring_vao != 0) {
+            glm::mat4 ring_model = root_model;
+            ring_model = glm::translate(ring_model, bit_origin);
+            ring_model = glm::rotate(ring_model, glm::radians(-m_drill_rotation * 0.75f), glm::vec3(0.0f, 0.0f, 1.0f));
+            m_shader.set_mat4("uModel", ring_model);
+            glBindVertexArray(m_inner_ring_vao);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_inner_ring_count));
+        }
 
         glBindVertexArray(0);
     }

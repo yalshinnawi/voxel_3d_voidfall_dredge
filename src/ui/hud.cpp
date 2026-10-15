@@ -870,8 +870,6 @@ void HUD::render_optical_scope_lens(
             }
         }
 
-        // 1.2 Delver Tactical Telemetry positioned along outer bezel (center 80% completely clear!)
-        {
             // Laser Rangefinder & Hostile Target Lock inside top of aperture
             std::string rng_str;
             glm::vec4 rng_col = Typography::COLOR_GREEN;
@@ -890,17 +888,6 @@ void HUD::render_optical_scope_lens(
             }
             float rng_w = FontRenderer::get_rendered_width(rng_str, 0.72f * ui_scale);
             draw_text(rng_str, cx - rng_w * 0.5f, cy - scope_rad * 0.82f, 0.72f * ui_scale, rng_col);
-
-            // Capacitor / Rail Bolts status inside bottom of aperture (transient)
-            float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
-            if (scope_ammo_alpha > 0.005f) {
-                std::string ammo_str = "BOLTS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-                float a_w = FontRenderer::get_rendered_width(ammo_str, 0.72f * ui_scale);
-                glm::vec4 bolt_col = (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_GREEN);
-                bolt_col.a *= scope_ammo_alpha;
-                draw_text(ammo_str, cx - a_w * 0.5f, cy + scope_rad * 0.82f, 0.72f * ui_scale, bolt_col);
-            }
-        }
     } else if (arch == WeaponArchetype::PlasmaCarbine) {
         // ====================================================================
         // 2. VANGUARD: PLASMA CARBINE - TACTICAL HOLOGRAPHIC REFLEX OPTIC
@@ -948,14 +935,6 @@ void HUD::render_optical_scope_lens(
         float r_w = FontRenderer::get_rendered_width(rng_str, 0.70f * ui_scale);
         draw_text(rng_str, cx - r_w * 0.5f, cy - ring_rad - 20.0f * ui_scale, 0.70f * ui_scale, rng_col);
 
-        float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
-        if (scope_ammo_alpha > 0.005f) {
-            std::string ammo_str = "CARBINE: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-            float am_w = FontRenderer::get_rendered_width(ammo_str, 0.70f * ui_scale);
-            glm::vec4 carb_col = (player.weapon_ammo() <= 3 ? Typography::COLOR_CRIMSON : Typography::COLOR_CYAN);
-            carb_col.a *= scope_ammo_alpha;
-            draw_text(ammo_str, cx - am_w * 0.5f, cy + ring_rad + 20.0f * ui_scale, 0.70f * ui_scale, carb_col);
-        }
     } else {
         // ====================================================================
         // 3. DEMOLITIONIST: MAGMA SCATTERGUN - THERMAL BORE & PELLET DISPERSION
@@ -984,15 +963,6 @@ void HUD::render_optical_scope_lens(
         std::string mode_str = "MAGMA 1.5X";
         float m_w = FontRenderer::get_rendered_width(mode_str, 0.68f * ui_scale);
         draw_text(mode_str, cx - m_w * 0.5f, cy - spread_rad - 20.0f * ui_scale, 0.68f * ui_scale, Typography::COLOR_AMBER);
-
-        float scope_ammo_alpha = (m_show_reload || player.is_reloading() || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
-        if (scope_ammo_alpha > 0.005f) {
-            std::string shell_str = "SHELLS: " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-            float s_w = FontRenderer::get_rendered_width(shell_str, 0.70f * ui_scale);
-            glm::vec4 shell_col = (player.weapon_ammo() <= 2 ? Typography::COLOR_CRIMSON : Typography::COLOR_AMBER);
-            shell_col.a *= scope_ammo_alpha;
-            draw_text(shell_str, cx - s_w * 0.5f, cy + spread_rad + 20.0f * ui_scale, 0.70f * ui_scale, shell_col);
-        }
     }
 }
 
@@ -1059,28 +1029,6 @@ void HUD::render_crosshair(
             bool is_reloading = (m_show_reload || player.is_reloading()) && (player.weapon_ammo() < player.weapon_max_ammo());
             if (!is_reloading && !m_show_reload) {
                 ClearReloadStatus();
-            }
-            float ammo_alpha = (is_reloading || m_show_reload || player.weapon_ammo() == 0) ? 1.0f : player.ammo_display_alpha();
-            if (ammo_alpha > 0.005f) {
-                std::string ammo_str;
-                glm::vec4 ammo_col = theme_col;
-                ammo_col.a *= (hip_alpha * ammo_alpha);
-                if (is_reloading) {
-                    float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
-                    int sec = static_cast<int>(std::ceil(rem_time));
-                    ammo_str = "RELOADING: " + std::to_string(sec) + "s";
-                    ammo_col = Typography::COLOR_AMBER;
-                    ammo_col.a *= (hip_alpha * ammo_alpha);
-                } else {
-                    ammo_str = player.weapon_name() + ": " + std::to_string(player.weapon_ammo()) + " / " + std::to_string(player.weapon_max_ammo());
-                    if (player.weapon_ammo() <= 2) {
-                        ammo_col = Typography::COLOR_CRIMSON;
-                        ammo_col.a *= (hip_alpha * ammo_alpha);
-                    }
-                }
-                float t_w = FontRenderer::get_rendered_width(ammo_str, 0.95f * ui_scale);
-                draw_rect(cx - t_w * 0.5f - 6.0f * ui_scale, cy + reticle_rad + 6.0f * ui_scale, t_w + 12.0f * ui_scale, 16.0f * ui_scale, glm::vec4(0.02f, 0.04f, 0.08f, 0.75f * hip_alpha * ammo_alpha));
-                draw_text(ammo_str, cx - t_w * 0.5f, cy + reticle_rad + 8.0f * ui_scale, 0.95f * ui_scale, ammo_col);
             }
         }
     } else {
@@ -1955,12 +1903,116 @@ void HUD::render(
             draw_rect(ab_x + 4.0f, flare_y + flare_h - 2.0f, (flare_w - 8.0f) * player.flare_recharge_progress(), 2.0f, Typography::COLOR_CYAN * 0.7f);
         }
 
+        // 6a. Tactical Weapon & Munitions Status Panel (Bottom-Right combat HUD)
+        float wep_w = ab_w;
+        float wep_h = 38.0f * ui_scale;
+        float wep_x = ab_x;
+        float wep_y = flare_y - wep_h - 6.0f * ui_scale;
+
+        draw_pill(wep_x, wep_y, wep_w, wep_h, glm::vec4(0.03f, 0.06f, 0.10f, 0.88f));
+
+        ToolSlot cur_tool = player.active_tool();
+        if (cur_tool == ToolSlot::CombatWeapon) {
+            glm::vec4 theme_col = (player.weapon_archetype() == WeaponArchetype::MagmaScattergun) ? Typography::COLOR_AMBER :
+                                  (player.weapon_archetype() == WeaponArchetype::NeedlerRailgun)  ? Typography::COLOR_GREEN : Typography::COLOR_CYAN;
+            draw_rect(wep_x + wep_w - 3.0f, wep_y, 3.0f, wep_h, theme_col);
+
+            // Top row: Weapon Name on left, Ammo count on right
+            std::string w_name = player.weapon_name();
+            draw_text_fitted(w_name, wep_x + 10.0f * ui_scale, wep_y + 5.0f * ui_scale, wep_w * 0.55f, 0.85f * ui_scale, Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
+
+            bool is_rel = (player.is_reloading() || m_show_reload) && (player.weapon_ammo() < player.weapon_max_ammo());
+            int cur_ammo = player.weapon_ammo();
+            int max_ammo = std::max(1, player.weapon_max_ammo());
+
+            std::string ammo_count_str = std::to_string(cur_ammo) + " / " + std::to_string(max_ammo);
+            glm::vec4 ammo_count_col = (cur_ammo <= 2) ? Typography::COLOR_CRIMSON : theme_col;
+            float ac_w = FontRenderer::get_rendered_width(ammo_count_str, 0.88f * ui_scale, FontType::Tech);
+            draw_text(ammo_count_str, wep_x + wep_w - ac_w - 10.0f * ui_scale, wep_y + 5.0f * ui_scale, 0.88f * ui_scale, ammo_count_col, FontType::Tech);
+
+            // Bottom row: Sleek horizontal reload progress bar OR ammo pips
+            float track_x = wep_x + 10.0f * ui_scale;
+            float track_y = wep_y + 22.0f * ui_scale;
+            float track_w = wep_w - 20.0f * ui_scale;
+            float track_h = 8.0f * ui_scale;
+
+            if (is_rel) {
+                float rel_prog = std::clamp(player.reload_progress(), 0.0f, 1.0f);
+                float rem_time = std::max(0.0f, player.reload_timer() > 0.0f ? player.reload_timer() : m_reload_status_timer);
+                // Reload track background
+                draw_rect(track_x, track_y, track_w, track_h, glm::vec4(0.12f, 0.08f, 0.02f, 0.85f));
+                // Glowing Amber reload fill
+                draw_rect(track_x, track_y, track_w * rel_prog, track_h, Typography::COLOR_AMBER);
+                // Reloading text
+                char r_buf[32];
+                std::snprintf(r_buf, sizeof(r_buf), "RELOADING %.1fs", rem_time);
+                draw_text_centered(r_buf, track_x, track_y - 1.0f * ui_scale, track_w, track_h, 0.70f * ui_scale, glm::vec4(1.0f, 1.0f, 1.0f, 0.95f), FontType::Tech);
+            } else {
+                // Sleek segmented ammo pips
+                int pip_count = std::min(max_ammo, 30);
+                float pip_spacing = 2.0f * ui_scale;
+                float total_spacing = pip_spacing * std::max(0, pip_count - 1);
+                float pip_w = std::max(2.0f * ui_scale, (track_w - total_spacing) / pip_count);
+
+                for (int i = 0; i < pip_count; ++i) {
+                    float px = track_x + i * (pip_w + pip_spacing);
+                    if (i < cur_ammo) {
+                        glm::vec4 pip_col = (cur_ammo <= 2) ? Typography::COLOR_CRIMSON : theme_col;
+                        draw_rect(px, track_y, pip_w, track_h, pip_col);
+                    } else {
+                        draw_rect(px, track_y, pip_w, track_h, glm::vec4(0.08f, 0.12f, 0.16f, 0.65f));
+                    }
+                }
+            }
+        } else if (cur_tool == ToolSlot::MiningDrill) {
+            draw_rect(wep_x + wep_w - 3.0f, wep_y, 3.0f, wep_h, Typography::COLOR_CYAN);
+            draw_text_fitted("PNEUMATIC MINING DRILL", wep_x + 10.0f * ui_scale, wep_y + 5.0f * ui_scale, wep_w * 0.55f, 0.85f * ui_scale, Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
+            
+            std::string mode_str = player.is_drilling() ? "EXCAVATING" : "READY";
+            glm::vec4 mode_col = player.is_drilling() ? Typography::COLOR_AMBER : Typography::COLOR_CYAN;
+            float mw = FontRenderer::get_rendered_width(mode_str, 0.88f * ui_scale, FontType::Tech);
+            draw_text(mode_str, wep_x + wep_w - mw - 10.0f * ui_scale, wep_y + 5.0f * ui_scale, 0.88f * ui_scale, mode_col, FontType::Tech);
+
+            float track_x = wep_x + 10.0f * ui_scale;
+            float track_y = wep_y + 22.0f * ui_scale;
+            float track_w = wep_w - 20.0f * ui_scale;
+            float track_h = 8.0f * ui_scale;
+            draw_rect(track_x, track_y, track_w, track_h, glm::vec4(0.06f, 0.12f, 0.18f, 0.85f));
+            float drill_prog = std::clamp(player.mine_progress(), 0.0f, 1.0f);
+            if (drill_prog > 0.01f) {
+                draw_rect(track_x, track_y, track_w * drill_prog, track_h, Typography::COLOR_AMBER);
+            } else {
+                draw_rect(track_x, track_y, track_w, track_h, Typography::COLOR_CYAN * 0.45f);
+            }
+        } else {
+            draw_rect(wep_x + wep_w - 3.0f, wep_y, 3.0f, wep_h, Typography::COLOR_AMBER);
+            draw_text_fitted("SATCHEL DEMOLITION CHARGES", wep_x + 10.0f * ui_scale, wep_y + 5.0f * ui_scale, wep_w * 0.55f, 0.85f * ui_scale, Typography::COLOR_PRIMARY, 0.65f * ui_scale, FontType::Display);
+            std::string chg_str = player.has_placed_charge() ? "ARMED: [RMB] DETONATE" : (std::to_string(inventory.demolition_charges) + " CHARGES");
+            float cw = FontRenderer::get_rendered_width(chg_str, 0.88f * ui_scale, FontType::Tech);
+            draw_text(chg_str, wep_x + wep_w - cw - 10.0f * ui_scale, wep_y + 5.0f * ui_scale, 0.88f * ui_scale, Typography::COLOR_AMBER, FontType::Tech);
+
+            float track_x = wep_x + 10.0f * ui_scale;
+            float track_y = wep_y + 22.0f * ui_scale;
+            float track_w = wep_w - 20.0f * ui_scale;
+            float track_h = 8.0f * ui_scale;
+            draw_rect(track_x, track_y, track_w, track_h, glm::vec4(0.12f, 0.08f, 0.02f, 0.85f));
+            if (player.has_placed_charge()) {
+                draw_rect(track_x, track_y, track_w, track_h, Typography::COLOR_CRIMSON);
+            } else {
+                int avail = std::min(inventory.demolition_charges, 10);
+                float slot_w = track_w / 10.0f;
+                for (int i = 0; i < avail; ++i) {
+                    draw_rect(track_x + i * slot_w + 1.0f, track_y, slot_w - 2.0f, track_h, Typography::COLOR_AMBER);
+                }
+            }
+        }
+
         // 6b. Brief Equipment Switch Toast (Appears briefly when equipping/switching weapon)
         if (m_tool_switch_toast_timer > 0.0f) {
             float toast_w = ab_w;
             float toast_h = 36.0f * ui_scale;
             float toast_x = ab_x;
-            float toast_y = ab_y - toast_h - 6.0f * ui_scale;
+            float toast_y = wep_y - toast_h - 6.0f * ui_scale;
             float alpha = std::clamp(m_tool_switch_toast_timer / 0.4f, 0.0f, 1.0f);
 
             glm::vec4 bg_toast = glm::vec4(0.04f, 0.07f, 0.11f, 0.92f * alpha);
@@ -2985,104 +3037,10 @@ void HUD::render_enemy_awareness_markers(
     const std::vector<VoidStalker>* stalkers,
     const std::vector<SeismicBurrower>* burrowers
 ) {
-    auto markers = compute_awareness_markers(cam_pos, world, stalkers, burrowers);
-    if (markers.empty()) return;
-
-    float ui_scale = UIUtils::compute_ui_scale(m_width, m_height);
-    float screen_w = static_cast<float>(m_width);
-    float screen_h = static_cast<float>(m_height);
-
-    for (const auto& marker : markers) {
-        // Enforce physical line of sight: only visible when player can physically see the enemy
-        if (!marker.has_los) continue;
-
-        glm::vec4 clip = proj * view * glm::vec4(marker.world_pos, 1.0f);
-        if (clip.w <= 0.1f) continue;
-
-        glm::vec3 ndc = glm::vec3(clip) / clip.w;
-        if (ndc.z < -1.0f || ndc.z > 1.0f) continue;
-        if (ndc.x < -1.15f || ndc.x > 1.15f || ndc.y < -1.15f || ndc.y > 1.15f) continue;
-
-        float sx = (ndc.x * 0.5f + 0.5f) * screen_w;
-        float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * screen_h;
-
-        float alpha = 1.0f;
-        float dist_scale = std::clamp(16.0f / std::max(marker.dist, 5.0f), 0.70f, 1.25f);
-
-        float pop_scale = 1.0f;
-        if (marker.state_timer < 0.25f) {
-            float pop_t = 1.0f - (marker.state_timer / 0.25f);
-            pop_scale += pop_t * 0.40f;
-        }
-
-        if (marker.marker_type == 2) { // RedTriangle (Engaged / Attack Mode)
-            float combat_pulse = 1.0f + 0.12f * std::sin(m_total_time * 12.0f);
-            float tri_size = 28.0f * ui_scale * dist_scale * pop_scale * combat_pulse;
-            float half_w = tri_size * 0.55f;
-            float half_h = tri_size * 0.50f;
-
-            float top_y = sy - half_h;
-            float bot_y = sy + half_h;
-
-            // Outer crimson triangle pointing down to enemy head
-            glm::vec4 red_col(1.0f, 0.14f, 0.14f, alpha);
-            draw_triangle(
-                sx - half_w, top_y,
-                sx + half_w, top_y,
-                sx, bot_y,
-                red_col
-            );
-
-            // Inset dark crimson triangle
-            float inset = 2.5f * ui_scale * dist_scale;
-            glm::vec4 dark_red(0.18f, 0.02f, 0.02f, 0.92f * alpha);
-            draw_triangle(
-                sx - half_w + inset * 1.2f, top_y + inset,
-                sx + half_w - inset * 1.2f, top_y + inset,
-                sx, bot_y - inset * 1.4f,
-                dark_red
-            );
-
-            // Centered sharp exclamation mark inside triangle
-            float text_scale = 1.25f * ui_scale * dist_scale * pop_scale;
-            draw_text_centered("!", sx - half_w, top_y + 1.0f * ui_scale, half_w * 2.0f, half_h * 1.3f, text_scale, glm::vec4(1.0f, 0.45f, 0.45f, alpha));
-        } else if (marker.marker_type == 1) { // YellowExclamation (Investigating / Alerted)
-            float bob = std::sin(m_total_time * 6.0f) * (2.5f * ui_scale);
-            float cur_sy = sy + bob;
-
-            float badge_w = 26.0f * ui_scale * dist_scale * pop_scale;
-            float badge_h = 26.0f * ui_scale * dist_scale * pop_scale;
-            float bx = sx - badge_w * 0.5f;
-            float by = cur_sy - badge_h * 0.5f;
-
-            glm::vec4 yellow_col(1.0f, 0.82f, 0.08f, alpha);
-            glm::vec4 bg_col(0.06f, 0.08f, 0.11f, 0.92f * alpha);
-
-            // 1. Dark pill backdrop
-            draw_rect(bx, by, badge_w, badge_h, bg_col);
-
-            // 2. Glowing yellow border
-            float b_thick = 1.5f * ui_scale;
-            draw_rect(bx, by, badge_w, b_thick, yellow_col);
-            draw_rect(bx, by + badge_h - b_thick, badge_w, b_thick, yellow_col);
-            draw_rect(bx, by, b_thick, badge_h, yellow_col);
-            draw_rect(bx + badge_w - b_thick, by, b_thick, badge_h, yellow_col);
-
-            // 3. Downward indicator caret pointing to enemy head
-            float caret_w = 4.0f * ui_scale * dist_scale;
-            float caret_h = 4.0f * ui_scale * dist_scale;
-            draw_triangle(
-                sx - caret_w, by + badge_h,
-                sx + caret_w, by + badge_h,
-                sx, by + badge_h + caret_h,
-                yellow_col
-            );
-
-            // 4. Vibrant Yellow "!"
-            float text_scale = 1.30f * ui_scale * dist_scale * pop_scale;
-            draw_text_centered("!", bx, by - 1.0f * ui_scale, badge_w, badge_h, text_scale, glm::vec4(1.0f, 0.90f, 0.15f, alpha));
-        }
-    }
+    // 2D overhead triangle badges suppressed in favor of diegetic bioluminescence
+    // (Amber glow = Investigating; Blazing Crimson + mandible spark particles = Attacking)
+    (void)view; (void)proj; (void)cam_pos; (void)world; (void)stalkers; (void)burrowers;
+    return;
 }
 
 void HUD::SetContractorBriefing(bool active, float duration) {

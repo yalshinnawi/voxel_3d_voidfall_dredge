@@ -254,14 +254,15 @@ void main() {
     float emissiveMultiplier = (uState == 8 || uState == 9) ? 0.0 : 1.0;
     vec3 emissive = vColor.rgb * baseEmissive * emissiveMultiplier;
 
-    // Hit-Wound Decal & Shock Impulse: glowing plasma burn scar around recent bullet impacts
+    // Hit-Flash strictly as high-intensity Fresnel Rim + Wound Pulse so creature's texture and shading remain visible
     if (u_HitFlashTimer > 0.0) {
         float hitDist = length(vModelPos - u_LastHitLocalPos);
-        if (hitDist < 0.32) {
-            float scarFactor = smoothstep(0.32, 0.04, hitDist);
-            emissive += vec3(0.05, 0.90, 1.0) * scarFactor * 4.0 * u_HitFlashTimer; // Cyan plasma burn scar
+        if (hitDist < 0.40) {
+            float scarFactor = smoothstep(0.40, 0.04, hitDist);
+            emissive += vec3(0.2, 0.9, 1.0) * scarFactor * 4.5 * u_HitFlashTimer; // Focused plasma wound pulse
         }
-        emissive += vec3(0.75, 0.95, 1.0) * u_HitFlashTimer * 1.8; // Brief white/cyan shock impulse
+        float rimFactor = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.5);
+        emissive += rimFactor * u_HitFlashTimer * vec3(0.2, 0.9, 1.0) * 3.5; // High-intensity Fresnel rim
     }
 
     // If stunned, add electrical spark flicker
