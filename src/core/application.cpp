@@ -2033,7 +2033,7 @@ void Application::fixed_tick(float dt) {
     bool is_drilling = m_player->is_drilling();
 
     VoidStalkerManager::FrameResult stalker_res;
-    if (!m_config.test_enemy && !m_config.test_enemy_load) {
+    if (!m_config.test_enemy && !m_config.test_enemy_load && !m_config.capture_models) {
         stalker_res = m_stalkers.update(
             dt,
             m_player->position(),
@@ -2139,7 +2139,10 @@ void Application::fixed_tick(float dt) {
     }
 
     // Update Seismic Burrower hostile entities AI, excavation & cave-in triggers
-    auto burrower_res = m_burrowers.update(dt, m_player->position(), *m_world, m_noise_meter.recent_sounds(), is_crouching);
+    Voidfall::SeismicBurrowerManager::FrameResult burrower_res;
+    if (!m_config.test_enemy && !m_config.test_enemy_load && !m_config.capture_models) {
+        burrower_res = m_burrowers.update(dt, m_player->position(), *m_world, m_noise_meter.recent_sounds(), is_crouching);
+    }
 
     // Mutual hard depenetration between Void Stalkers and Seismic Burrowers
     m_stalkers.resolve_burrower_penetrations(m_burrowers.burrowers_mut(), *m_world);
@@ -3720,7 +3723,35 @@ void Application::render(float dt) {
     // Render 3D World Break, Burrow, and Dust Particles with scene depth testing
     m_renderer->render_particles();
 
+    // End HDR Frame & Post-Processing Tonemap
+    float shield_timer = (m_state == GameState::Gameplay && m_player) ? m_player->insertion_shield_timer() : 0.0f;
+    glm::vec3 danger_haze_color(0.12f, 0.65f, 0.22f); // Default radioactive toxic emerald
+    float effective_haze = 0.0f;
+    float effective_rad = (m_player) ? m_player->exo().radiation : 0.0f;
+    if (m_state == GameState::Gameplay && m_player) {
+        effective_rad = std::max(m_player->exo().radiation, m_proximity_radiation * 100.0f);
+        float rad_haze = effective_rad / 100.0f;
+        float gas_haze = (m_nearest_gas_distance < 20.0f) ? std::clamp(1.0f - (m_nearest_gas_distance / 20.0f), 0.0f, 0.85f) : 0.0f;
+        float lava_haze = (m_nearest_lava_distance < 16.0f) ? std::clamp(1.0f - (m_nearest_lava_distance / 16.0f), 0.0f, 0.85f) : 0.0f;
+
+        if (rad_haze >= gas_haze && rad_haze >= lava_haze && rad_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.12f, 0.68f, 0.24f); // Toxic emerald radiation mist
+            effective_haze = rad_haze;
+        } else if (gas_haze >= lava_haze && gas_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.48f, 0.75f, 0.12f); // Choking sulfur-green bio-gas vapor
+            effective_haze = gas_haze;
+        } else if (lava_haze > 0.05f) {
+            danger_haze_color = glm::vec3(0.85f, 0.35f, 0.06f); // Molten volcanic heat haze
+            effective_haze = lava_haze;
+        }
+    }
+    float suffocation_darkness = (m_state == GameState::Gameplay && m_player && m_world &&
+                                 (m_player->is_suffocating() || m_player->is_head_in_solid(*m_world))) ? 1.0f : 0.0f;
+    m_renderer->end_frame(dt, effective_rad, shield_timer, danger_haze_color, effective_haze, suffocation_darkness);
+
     // Render 1st-Person Drill & Animated Hands Viewmodel (Module 3)
+    // Rendered directly to screen after world post-processing to ensure the viewmodel is 100% exempt from world distance fog,
+    // headlamp floor volumetric fog washout, and SSAO depth halos.
     bool render_vm = (m_state == GameState::Gameplay && m_viewmodel);
     if (m_config.capture_models) {
         // In model showcase, only render viewmodel during its dedicated slot (Frame 29..43)
@@ -3730,6 +3761,7 @@ void Application::render(float dt) {
         render_vm = false; // Suppress viewmodel for unobstructed panoramic room architecture views
     }
     if (render_vm) {
+        glClear(GL_DEPTH_BUFFER_BIT);
         float aspect = static_cast<float>(m_window->width()) / std::max(1.0f, static_cast<float>(m_window->height()));
         bool is_drilling = m_player->is_drilling();
         bool is_in_range = (m_player->target_block() != glm::ivec3(-1));
@@ -3763,32 +3795,6 @@ void Application::render(float dt) {
             m_player->max_health()
         );
     }
-
-    // End HDR Frame & Post-Processing Tonemap
-    float shield_timer = (m_state == GameState::Gameplay && m_player) ? m_player->insertion_shield_timer() : 0.0f;
-    glm::vec3 danger_haze_color(0.12f, 0.65f, 0.22f); // Default radioactive toxic emerald
-    float effective_haze = 0.0f;
-    float effective_rad = (m_player) ? m_player->exo().radiation : 0.0f;
-    if (m_state == GameState::Gameplay && m_player) {
-        effective_rad = std::max(m_player->exo().radiation, m_proximity_radiation * 100.0f);
-        float rad_haze = effective_rad / 100.0f;
-        float gas_haze = (m_nearest_gas_distance < 20.0f) ? std::clamp(1.0f - (m_nearest_gas_distance / 20.0f), 0.0f, 0.85f) : 0.0f;
-        float lava_haze = (m_nearest_lava_distance < 16.0f) ? std::clamp(1.0f - (m_nearest_lava_distance / 16.0f), 0.0f, 0.85f) : 0.0f;
-
-        if (rad_haze >= gas_haze && rad_haze >= lava_haze && rad_haze > 0.05f) {
-            danger_haze_color = glm::vec3(0.12f, 0.68f, 0.24f); // Toxic emerald radiation mist
-            effective_haze = rad_haze;
-        } else if (gas_haze >= lava_haze && gas_haze > 0.05f) {
-            danger_haze_color = glm::vec3(0.48f, 0.75f, 0.12f); // Choking sulfur-green bio-gas vapor
-            effective_haze = gas_haze;
-        } else if (lava_haze > 0.05f) {
-            danger_haze_color = glm::vec3(0.85f, 0.35f, 0.06f); // Molten volcanic heat haze
-            effective_haze = lava_haze;
-        }
-    }
-    float suffocation_darkness = (m_state == GameState::Gameplay && m_player && m_world &&
-                                 (m_player->is_suffocating() || m_player->is_head_in_solid(*m_world))) ? 1.0f : 0.0f;
-    m_renderer->end_frame(dt, effective_rad, shield_timer, danger_haze_color, effective_haze, suffocation_darkness);
 
     // Mouse coordinates and clicks for responsive menus
     glm::dvec2 cur_pos = m_window->get_cursor_pos();
@@ -4943,7 +4949,10 @@ void Application::run() {
                 if (!m_stalkers.stalkers().empty()) {
                     auto& s = m_stalkers.stalkers_mut()[0];
                     s.state = StalkerState::Circling;
-                    s.yaw = 3.40f; // 3/4 front dynamic angle
+                    s.m_currentRotation = glm::angleAxis(3.35f, glm::vec3(0.0f, 1.0f, 0.0f));
+                    s.m_targetRotation = s.m_currentRotation;
+                    s.yaw = 3.35f; // 3/4 front dynamic angle
+                    s.velocity = glm::vec3(0.0f);
                 }
                 VF_LOG_INFO("ModelShowcase", "Staged Void Stalker for Slot 0.");
             }
@@ -4957,9 +4966,11 @@ void Application::run() {
                 if (!m_burrowers.burrowers().empty()) {
                     auto& b = m_burrowers.burrowers_mut()[0];
                     b.state = BurrowerState::Breaching;
+                    b.state_timer = 1.2f; // Fully emerged from borehole
                     b.yaw = 2.80f; // Angled 3/4 toward camera
                     b.pitch = -0.06f;
                     b.cutter_angle = 1.25f;
+                    b.velocity = glm::vec3(0.0f);
                 }
                 VF_LOG_INFO("ModelShowcase", "Staged Seismic Burrower for Slot 1.");
             }

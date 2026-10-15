@@ -2264,8 +2264,8 @@ static void add_stalker_lofted_hull(
             glm::vec3 tp0 = glm::vec3(transform * glm::vec4(ring_pts[0][i], 1.0f));
             glm::vec3 tp1 = glm::vec3(transform * glm::vec4(ring_pts[0][next], 1.0f));
             verts.push_back({c0, n_front, color, material});
-            verts.push_back({tp1, n_front, color, material});
             verts.push_back({tp0, n_front, color, material});
+            verts.push_back({tp1, n_front, color, material});
         }
     }
 
@@ -2278,8 +2278,8 @@ static void add_stalker_lofted_hull(
             glm::vec3 tp0 = glm::vec3(transform * glm::vec4(ring_pts[last][i], 1.0f));
             glm::vec3 tp1 = glm::vec3(transform * glm::vec4(ring_pts[last][next], 1.0f));
             verts.push_back({c_end, n_back, color, material});
-            verts.push_back({tp0, n_back, color, material});
             verts.push_back({tp1, n_back, color, material});
+            verts.push_back({tp0, n_back, color, material});
         }
     }
 }
@@ -2320,11 +2320,11 @@ static void add_stalker_cone(
         glm::vec3 tn2 = glm::normalize(normal_mat * n2);
 
         verts.push_back({tp1, tn1, color, material});
+        verts.push_back({tp3, tn2, color, material});
         verts.push_back({tp2, tn2, color, material});
-        verts.push_back({tp3, tn2, color, material});
         verts.push_back({tp1, tn1, color, material});
-        verts.push_back({tp3, tn2, color, material});
         verts.push_back({tp4, tn1, color, material});
+        verts.push_back({tp3, tn2, color, material});
     }
 }
 
@@ -2820,33 +2820,34 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
         bool is_goliath = (s.role == StalkerRole::ChitinGoliath);
 
         // 1. Armored Chitin Carapace (roughness = 0.22f for wet organic sheen)
+        // Dark obsidian chitin base for Void Stalkers, NOT bright red!
         glm::vec4 chitin_color = is_drifter
             ? glm::vec4(0.22f, 0.45f, 0.65f, 0.85f) // Ethereal translucent abyss blue
             : (is_goliath
                ? glm::vec4(0.16f, 0.15f, 0.14f, 1.0f) // Heavy reinforced basalt obsidian-iron
                : (is_shooter
                   ? glm::vec4(0.04f, 0.22f, 0.08f, 1.0f)   // Dark toxic jade chitin
-                  : glm::vec4(0.26f, 0.04f, 0.04f, 1.0f))); // Deep blood obsidian chitin
-        glm::vec4 chitin_mat(is_goliath ? 0.75f : 0.40f, 0.22f, 0.0f, 1.0f); // metallic, roughness=0.22, emissive, sss/ao
+                  : glm::vec4(0.10f, 0.10f, 0.12f, 1.0f))); // Dark obsidian gunmetal chitin
+        glm::vec4 chitin_mat(is_goliath ? 0.75f : 0.65f, 0.24f, 0.0f, 1.0f); // dark metallic gunmetal
 
-        // 2. Secondary Chitin / Ribs / Spines
+        // 2. Secondary Chitin / Two-Tone Carapace Accent & Ribs
         glm::vec4 spine_color = is_drifter
             ? glm::vec4(0.35f, 0.70f, 0.95f, 0.90f)
             : (is_goliath
                ? glm::vec4(0.45f, 0.30f, 0.10f, 1.0f)
                : (is_shooter
                   ? glm::vec4(0.10f, 0.50f, 0.15f, 1.0f)
-                  : glm::vec4(0.48f, 0.06f, 0.06f, 1.0f)));
+                  : glm::vec4(0.32f, 0.05f, 0.07f, 1.0f))); // Deep crimson two-tone accent
         glm::vec4 spine_mat(0.50f, 0.20f, 0.0f, 0.9f);
 
-        // 3. Serrated Fangs / Claws
+        // 3. Serrated Fangs / Scythe Claws
         glm::vec4 claw_color = is_drifter
             ? glm::vec4(0.50f, 0.80f, 1.0f, 0.95f)
             : (is_goliath
                ? glm::vec4(0.65f, 0.55f, 0.45f, 1.0f)
                : (is_shooter
                   ? glm::vec4(0.35f, 0.65f, 0.35f, 1.0f)
-                  : glm::vec4(0.68f, 0.20f, 0.20f, 1.0f)));
+                  : glm::vec4(0.28f, 0.06f, 0.08f, 1.0f))); // Dark hardened scythe chitin
         glm::vec4 claw_mat(0.75f, 0.18f, 0.0f, 1.0f);
 
         // Enraged Boss Apex Frenzy visuals (scorched magma veins & radiant spikes)
@@ -2884,74 +2885,98 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             claw_color   = glm::mix(claw_color,   claw_color * 0.75f,   death_progress);
         }
 
-        // === SCULPTED ORGANIC BODY ASSEMBLY (Lofted Hulls & Smooth Capsules) ===
+        // === SCULPTED 3-SEGMENT ARTICULATED ARACHNID/MANTIS PREDATOR ===
 
-        // A. Main Torso / Thorax - Procedural Multi-Ring Lofted Organic Hull
+        // A. Segment 1: Narrow Armored Cephalothorax (Front Torso)
+        // Flattened, angular dark-obsidian chitin hood (width = 0.55m, height = 0.35m, length = 0.65m)
+        // with dark metallic gunmetal/crimson two-tone coloring.
         {
             float dorsal_bias = is_goliath ? 0.07f : 0.045f;
             std::vector<StalkerLoftRing> thorax_rings = {
-                { glm::vec3(0.0f, 0.31f,  0.20f), 0.22f, 0.15f, dorsal_bias * 0.8f },
-                { glm::vec3(0.0f, 0.33f,  0.08f), 0.28f, 0.19f, dorsal_bias * 1.3f },
-                { glm::vec3(0.0f, 0.32f, -0.06f), 0.30f, 0.20f, dorsal_bias * 1.5f },
-                { glm::vec3(0.0f, 0.29f, -0.22f), 0.24f, 0.16f, dorsal_bias * 1.0f }
+                { glm::vec3(0.0f, 0.26f,  0.22f), 0.18f, 0.12f, dorsal_bias * 0.8f },
+                { glm::vec3(0.0f, 0.28f,  0.08f), 0.275f, 0.175f, dorsal_bias * 1.3f },
+                { glm::vec3(0.0f, 0.28f, -0.18f), 0.275f, 0.175f, dorsal_bias * 1.5f },
+                { glm::vec3(0.0f, 0.25f, -0.43f), 0.16f, 0.11f, dorsal_bias * 1.0f }
             };
             add_stalker_lofted_hull(s_stalker_verts, base_model, thorax_rings, 12, chitin_color, chitin_mat, true, false);
+
+            // Angular dorsal hood mantle with two-tone crimson accent
+            std::vector<StalkerLoftRing> hood_mantle = {
+                { glm::vec3(0.0f, 0.29f,  0.18f), 0.19f, 0.06f, 0.04f },
+                { glm::vec3(0.0f, 0.32f,  0.04f), 0.28f, 0.07f, 0.05f },
+                { glm::vec3(0.0f, 0.32f, -0.18f), 0.28f, 0.07f, 0.05f },
+                { glm::vec3(0.0f, 0.28f, -0.38f), 0.17f, 0.05f, 0.02f }
+            };
+            add_stalker_lofted_hull(s_stalker_verts, base_model, hood_mantle, 10, spine_color, chitin_mat, true, true);
         }
 
         // B. Pulsating Void Core
         {
-            float c_scale = 0.09f * core_pulse;
-            glm::vec3 core_center(0.0f, 0.29f, 0.02f);
+            float c_scale = 0.075f * core_pulse;
+            glm::vec3 core_center(0.0f, 0.27f, 0.02f);
             add_stalker_capsule(s_stalker_verts, base_model, core_center - glm::vec3(0.0f, 0.0f, 0.015f), core_center + glm::vec3(0.0f, 0.0f, 0.015f), c_scale, c_scale, 8, core_color, core_mat);
         }
 
-        // C. Bioluminescent Abdomen (Rear Segmented Sac with 4 Curved Dorsal Crystal Spines)
+        // C. Segment 2: Separated Rear Abdomen Sac
+        // Connected behind the torso via a narrow waist stalk, angled upward by 20 degrees,
+        // dark charcoal chitin with glowing pulsing violet/crimson dorsal slits.
         {
-            std::vector<StalkerLoftRing> abd_rings = {
-                { glm::vec3(0.0f, 0.29f, -0.20f), 0.23f, 0.16f, 0.03f },
-                { glm::vec3(0.0f, 0.27f, -0.36f), 0.24f, 0.17f, 0.04f },
-                { glm::vec3(0.0f, 0.23f, -0.52f), 0.19f, 0.14f, 0.03f },
-                { glm::vec3(0.0f, 0.19f, -0.66f), 0.13f, 0.10f, 0.02f },
-                { glm::vec3(0.0f, 0.17f, -0.78f), 0.06f, 0.05f, 0.00f }
-            };
-            add_stalker_lofted_hull(s_stalker_verts, base_model, abd_rings, 10, chitin_color, chitin_mat, false, true);
+            // Narrow waist stalk
+            add_stalker_capsule(s_stalker_verts, base_model, glm::vec3(0.0f, 0.25f, -0.42f), glm::vec3(0.0f, 0.26f, -0.56f), 0.07f, 0.06f, 8, chitin_color, chitin_mat);
 
-            // 4 Curved Dorsal Crystal Spines
-            float spine_pulse = 0.7f + 0.3f * std::sin(m_total_time * 4.0f);
-            glm::vec4 crystal_spine_color = glm::mix(spine_color, eye_color, 0.60f);
-            glm::vec4 crystal_spine_mat = spine_mat;
-            crystal_spine_mat.z = (is_goliath ? 4.5f : 3.2f) * spine_pulse;
+            // Abdomen sac angled upward by 20 degrees (+20 deg pitch tilts -Z upward)
+            glm::mat4 abd_m = glm::translate(base_model, glm::vec3(0.0f, 0.26f, -0.56f));
+            abd_m = glm::rotate(abd_m, glm::radians(20.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+            glm::vec4 abd_color(0.07f, 0.07f, 0.08f, 1.0f);
+            glm::vec4 abd_mat(0.35f, 0.30f, 0.0f, 1.0f);
+
+            std::vector<StalkerLoftRing> abd_rings = {
+                { glm::vec3(0.0f, 0.00f,  0.00f), 0.11f, 0.09f, 0.02f },
+                { glm::vec3(0.0f, 0.03f, -0.16f), 0.23f, 0.17f, 0.03f },
+                { glm::vec3(0.0f, 0.05f, -0.34f), 0.25f, 0.19f, 0.04f },
+                { glm::vec3(0.0f, 0.04f, -0.52f), 0.19f, 0.14f, 0.03f },
+                { glm::vec3(0.0f, 0.02f, -0.66f), 0.08f, 0.06f, 0.01f }
+            };
+            add_stalker_lofted_hull(s_stalker_verts, abd_m, abd_rings, 10, abd_color, abd_mat, false, true);
+
+            // Glowing pulsing violet/crimson dorsal slits
+            float slit_pulse = 0.75f + 0.35f * std::sin(s.glow_phase * 5.0f);
+            glm::vec4 slit_color = is_drifter
+                ? glm::vec4(0.35f, 0.85f, 1.0f, 1.0f)
+                : (is_shooter
+                   ? glm::vec4(0.20f, 1.0f, 0.35f, 1.0f)
+                   : glm::vec4(0.92f, 0.10f, 0.35f, 1.0f));
+            glm::vec4 slit_mat(0.1f, 0.05f, (is_goliath ? 5.5f : 4.5f) * slit_pulse, 1.0f);
 
             for (int q = 0; q < 4; ++q) {
-                float qz = -0.26f - q * 0.14f;
-                float qy = 0.36f - q * 0.045f;
-                float qh = 0.15f + (q == 1 || q == 2 ? 0.08f : 0.0f);
-                glm::vec3 spine_base(0.0f, qy, qz);
-                glm::vec3 spine_tip(0.0f, qy + qh, qz - 0.07f);
-                add_stalker_capsule(s_stalker_verts, base_model, spine_base, spine_tip, 0.022f, 0.006f, 8, crystal_spine_color, crystal_spine_mat);
+                float qz = -0.16f - q * 0.13f;
+                float qy = 0.18f + (q == 1 || q == 2 ? 0.025f : 0.0f);
+                float slit_w = 0.12f - q * 0.018f;
+                add_stalker_capsule(s_stalker_verts, abd_m, glm::vec3(-slit_w, qy, qz), glm::vec3(slit_w, qy, qz), 0.014f, 0.014f, 6, slit_color, slit_mat);
             }
         }
 
         // D. Armored Head / Cranial Skull with Curved Carapace Hood
-        glm::mat4 head_base = glm::translate(base_model, glm::vec3(0.0f, 0.32f, 0.38f));
+        glm::mat4 head_base = glm::translate(base_model, glm::vec3(0.0f, 0.28f, 0.32f));
         head_base = glm::rotate(head_base, pose.head_pitch_offset, glm::vec3(1.0f, 0.0f, 0.0f));
         {
             // Sculpted Cranial Skull (lofted snout to occiput)
             std::vector<StalkerLoftRing> skull_rings = {
-                { glm::vec3(0.0f, -0.04f, 0.28f), 0.10f, 0.07f, 0.02f },
-                { glm::vec3(0.0f, -0.01f, 0.18f), 0.18f, 0.12f, 0.04f },
-                { glm::vec3(0.0f,  0.03f, 0.04f), 0.22f, 0.14f, 0.06f },
-                { glm::vec3(0.0f,  0.02f, -0.10f), 0.16f, 0.11f, 0.03f }
+                { glm::vec3(0.0f, -0.04f, 0.26f), 0.09f, 0.06f, 0.02f },
+                { glm::vec3(0.0f, -0.01f, 0.16f), 0.16f, 0.11f, 0.03f },
+                { glm::vec3(0.0f,  0.03f, 0.04f), 0.20f, 0.13f, 0.05f },
+                { glm::vec3(0.0f,  0.02f, -0.10f), 0.15f, 0.10f, 0.03f }
             };
             add_stalker_lofted_hull(s_stalker_verts, head_base, skull_rings, 10, chitin_color, chitin_mat, true, false);
 
             // Curved Dorsal Carapace Hood
             std::vector<StalkerLoftRing> hood_rings = {
-                { glm::vec3(0.0f, 0.08f,  0.22f), 0.14f, 0.04f, 0.03f },
-                { glm::vec3(0.0f, 0.12f,  0.08f), 0.24f, 0.05f, 0.04f },
-                { glm::vec3(0.0f, 0.10f, -0.06f), 0.20f, 0.04f, 0.02f }
+                { glm::vec3(0.0f, 0.07f,  0.20f), 0.13f, 0.04f, 0.03f },
+                { glm::vec3(0.0f, 0.11f,  0.07f), 0.22f, 0.05f, 0.04f },
+                { glm::vec3(0.0f, 0.09f, -0.06f), 0.19f, 0.04f, 0.02f }
             };
-            add_stalker_lofted_hull(s_stalker_verts, head_base, hood_rings, 10, chitin_color * 1.08f, chitin_mat, true, true);
+            add_stalker_lofted_hull(s_stalker_verts, head_base, hood_rings, 10, spine_color, chitin_mat, true, true);
 
             // Chitin Goliath: Heavy Overlapping Basalt Carapace Mantles
             if (is_goliath) {
@@ -2959,9 +2984,9 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
                 glm::vec4 basalt_mat(0.75f, 0.55f, 0.0f, 1.0f);
 
                 std::vector<StalkerLoftRing> prow_rings = {
-                    { glm::vec3(0.0f, -0.05f, 0.38f), 0.16f, 0.10f, 0.05f },
-                    { glm::vec3(0.0f,  0.02f, 0.26f), 0.32f, 0.16f, 0.08f },
-                    { glm::vec3(0.0f,  0.08f, 0.16f), 0.38f, 0.18f, 0.06f }
+                    { glm::vec3(0.0f, -0.05f, 0.36f), 0.15f, 0.09f, 0.05f },
+                    { glm::vec3(0.0f,  0.02f, 0.24f), 0.30f, 0.15f, 0.08f },
+                    { glm::vec3(0.0f,  0.08f, 0.14f), 0.36f, 0.17f, 0.06f }
                 };
                 add_stalker_lofted_hull(s_stalker_verts, head_base, prow_rings, 10, basalt_color, basalt_mat, true, true);
             }
@@ -3048,15 +3073,58 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             add_stalker_capsule(s_stalker_verts, base_model, sac_center - glm::vec3(0, 0, 0.08f), sac_center + glm::vec3(0, 0, 0.08f), 0.15f, 0.12f, 10, weak_color, weak_mat);
         }
 
-        // I. 6 Three-Segment Chitinous Limbs with Analytical 2-Bone IK & Alternating Tripod Gait
+        // I. 2 Forward-Reaching Serrated Mantis Scythe-Claws (Anterior Cephalothorax)
+        for (int mc = 0; mc < 2; ++mc) {
+            float m_side = (mc == 0) ? -1.0f : 1.0f;
+            glm::vec3 m_shoulder(m_side * 0.15f, 0.24f, 0.16f);
+            glm::mat4 m_arm = glm::translate(base_model, m_shoulder);
+
+            float attack_flare = (s.state == StalkerState::Lunging || s.state == StalkerState::GroundSlam) ? 0.55f : 0.0f;
+            m_arm = glm::rotate(m_arm, m_side * (0.28f + attack_flare * 0.4f), glm::vec3(0.0f, 1.0f, 0.0f));
+            m_arm = glm::rotate(m_arm, -0.32f - attack_flare * 0.6f + std::sin(s.glow_phase * 4.0f) * 0.05f, glm::vec3(1.0f, 0.0f, 0.0f));
+
+            // Upper mantis arm (coxa/trochanter)
+            glm::vec3 coxa_end(m_side * 0.08f, 0.24f, 0.32f);
+            add_stalker_capsule(s_stalker_verts, m_arm, glm::vec3(0.0f), coxa_end, 0.044f, 0.032f, 8, chitin_color, chitin_mat);
+
+            // Raptor scythe elbow
+            glm::mat4 scythe_m = glm::translate(m_arm, coxa_end);
+            float scythe_pitch = 1.45f + attack_flare * 0.7f;
+            scythe_m = glm::rotate(scythe_m, scythe_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+            scythe_m = glm::rotate(scythe_m, m_side * -0.22f, glm::vec3(0.0f, 0.0f, 1.0f));
+
+            // Sharp scythe blade extending forward-downward
+            glm::vec3 scythe_blade_end(0.0f, -0.42f, 0.08f);
+            add_stalker_capsule(s_stalker_verts, scythe_m, glm::vec3(0.0f), scythe_blade_end, 0.032f, 0.007f, 8, claw_color, claw_mat);
+
+            // 3 Serrated recurved teeth along blade edge
+            for (int t = 1; t <= 3; ++t) {
+                float frac = static_cast<float>(t) * 0.25f;
+                glm::vec3 t_base = scythe_blade_end * frac;
+                glm::vec3 t_tip = t_base + glm::vec3(m_side * -0.045f, 0.02f, -0.055f);
+                add_stalker_capsule(s_stalker_verts, scythe_m, t_base, t_tip, 0.014f, 0.004f, 6, claw_color, claw_mat);
+            }
+
+            // Slashing trail arcs during lunges
+            if (s.state == StalkerState::Lunging) {
+                glm::vec3 blade_tip_world = glm::vec3(scythe_m * glm::vec4(scythe_blade_end, 1.0f));
+                glm::vec3 blade_trail = blade_tip_world - s.velocity * 0.15f;
+                m_stalker_staging_lines.insert(m_stalker_staging_lines.end(), {
+                    blade_tip_world.x, blade_tip_world.y, blade_tip_world.z,
+                    blade_trail.x, blade_trail.y, blade_trail.z
+                });
+            }
+        }
+
+        // J. 6 Wide-Splayed Multi-Jointed Arachnid Scythe Limbs (Femur = 0.75m, Tibia = 0.85m)
         for (int l = 0; l < 6; ++l) {
             bool is_left = (l % 2 == 0);
             int row = l / 2; // 0=Front, 1=Mid, 2=Rear
             float side = is_left ? -1.0f : 1.0f;
 
-            float root_z = (row == 0) ? 0.22f : (row == 1 ? 0.0f : -0.22f);
-            float root_x = side * 0.24f * pose.limb_splay_multiplier;
-            float root_y = 0.26f;
+            float root_z = (row == 0) ? 0.08f : (row == 1 ? -0.12f : -0.32f);
+            float root_x = side * 0.25f * pose.limb_splay_multiplier;
+            float root_y = 0.24f;
             glm::vec3 hip_local(root_x, root_y, root_z);
             glm::mat4 hip_m = glm::translate(base_model, hip_local);
 
@@ -3075,77 +3143,42 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             if (norm_step < 0.5f) {
                 float swing_t = norm_step * 2.0f;
                 arc_lift = std::sin(swing_t * 3.14159265f) * 0.28f;
-                fwd_step = (swing_t - 0.5f) * 0.34f * step_mag;
+                fwd_step = (swing_t - 0.5f) * 0.36f * step_mag;
             } else {
                 float stance_t = (norm_step - 0.5f) * 2.0f;
-                fwd_step = (0.5f - stance_t) * 0.34f * step_mag;
+                fwd_step = (0.5f - stance_t) * 0.36f * step_mag;
             }
 
-            if (row == 0 && (s.state == StalkerState::Lunging || s.state == StalkerState::GroundSlam)) {
-                float strike_pitch = (s.state == StalkerState::Lunging) ? -0.85f : -0.55f;
-                float strike_yaw = side * (pose.front_claw_yaw + 0.30f);
+            // Knee local: Upper femur angles upward and outward (length = 0.75m)
+            float knee_x = side * (0.25f + 0.58f * pose.limb_splay_multiplier);
+            float knee_y = root_y + 0.38f + arc_lift * 0.4f;
+            float knee_z = root_z + (row == 0 ? 0.15f : (row == 2 ? -0.15f : 0.0f)) + fwd_step * 0.5f;
+            glm::vec3 knee_local(knee_x, knee_y, knee_z);
 
-                glm::mat4 femur_m = glm::rotate(hip_m, strike_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                femur_m = glm::rotate(femur_m, strike_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                glm::vec3 f_p1(0.0f, 0.0f, 0.0f);
-                glm::vec3 f_p2(0.0f, 0.28f * pose.front_claw_reach, 0.20f * pose.front_claw_reach);
-                add_stalker_capsule(s_stalker_verts, femur_m, f_p1, f_p2, 0.052f, 0.038f, 8, chitin_color, chitin_mat);
+            // Foot local: Lower tibia angles downward and outward to floor (length = 0.85m)
+            float foot_x = side * (0.25f + 0.92f * pose.limb_splay_multiplier);
+            float foot_y = -0.22f + arc_lift;
+            float foot_z = knee_local.z + (row == 0 ? 0.20f : (row == 2 ? -0.20f : 0.0f)) + fwd_step * 0.5f;
+            glm::vec3 foot_local(foot_x, foot_y, foot_z);
 
-                float tibia_pitch = (s.state == StalkerState::Lunging) ? 1.45f : 1.20f;
-                glm::mat4 tibia_m = glm::translate(femur_m, f_p2);
-                tibia_m = glm::rotate(tibia_m, tibia_pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-                glm::vec3 t_p1(0.0f, 0.0f, 0.0f);
-                glm::vec3 t_p2(0.0f, -0.32f * pose.front_claw_reach, 0.04f);
-                add_stalker_capsule(s_stalker_verts, tibia_m, t_p1, t_p2, 0.038f, 0.020f, 8, claw_color, claw_mat);
+            // Distinct upper femur angling upward and outward (length = 0.75m)
+            add_stalker_capsule(s_stalker_verts, base_model, hip_local, knee_local, 0.048f, 0.034f, 8, chitin_color, chitin_mat);
 
-                glm::vec3 tip_p2 = t_p2 + glm::vec3(0.0f, -0.12f * pose.front_claw_reach, 0.05f);
-                add_stalker_capsule(s_stalker_verts, tibia_m, t_p2, tip_p2, 0.020f, 0.006f, 6, claw_color, claw_mat);
+            // Knee joint reinforcement node
+            add_stalker_capsule(s_stalker_verts, base_model, knee_local - glm::vec3(0, 0, 0.01f), knee_local + glm::vec3(0, 0, 0.01f), 0.040f, 0.040f, 8, spine_color, chitin_mat);
 
-                if (s.state == StalkerState::Lunging) {
-                    glm::vec3 claw_world = glm::vec3(tibia_m * glm::vec4(tip_p2, 1.0f));
-                    glm::vec3 trail_back = claw_world - s.velocity * 0.12f;
-                    m_stalker_staging_lines.insert(m_stalker_staging_lines.end(), {
-                        claw_world.x, claw_world.y, claw_world.z,
-                        trail_back.x, trail_back.y, trail_back.z
-                    });
-                }
-            } else {
-                float foot_x = side * (0.42f + (row == 1 ? 0.10f : 0.0f)) * pose.limb_splay_multiplier;
-                float foot_z = root_z + (row == 0 ? 0.20f : (row == 2 ? -0.18f : 0.0f)) + fwd_step;
-                float foot_y = -0.16f + arc_lift;
-                glm::vec3 foot_local(foot_x, foot_y, foot_z);
+            // Sharp lower tibia spike angling downward to the floor (length = 0.85m)
+            add_stalker_capsule(s_stalker_verts, base_model, knee_local, foot_local, 0.034f, 0.014f, 8, claw_color, claw_mat);
 
-                glm::vec3 delta = foot_local - hip_local;
-                float d = glm::length(delta);
-                float l1 = 0.26f * pose.front_claw_reach;
-                float l2 = 0.30f * pose.front_claw_reach;
-
-                float hip_ik_angle = 0.0f;
-                float knee_ik_angle = 0.0f;
-                AnalyticalIK2Bone::solve(l1, l2, d, hip_ik_angle, knee_ik_angle);
-
-                float leg_base_yaw = std::atan2(delta.x, delta.z);
-                glm::mat4 leg_base = glm::rotate(hip_m, leg_base_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                leg_base = glm::rotate(leg_base, -hip_ik_angle + 0.32f, glm::vec3(1.0f, 0.0f, 0.0f));
-
-                glm::vec3 femur_start(0.0f, 0.0f, 0.0f);
-                glm::vec3 femur_end(0.0f, 0.20f, 0.10f);
-                add_stalker_capsule(s_stalker_verts, leg_base, femur_start, femur_end, 0.046f, 0.034f, 8, chitin_color, chitin_mat);
-
-                glm::mat4 knee_m = glm::translate(leg_base, femur_end);
-                knee_m = glm::rotate(knee_m, knee_ik_angle, glm::vec3(1.0f, 0.0f, 0.0f));
-                glm::vec3 tibia_start(0.0f, 0.0f, 0.0f);
-                glm::vec3 tibia_end(0.0f, -0.28f, 0.0f);
-                add_stalker_capsule(s_stalker_verts, knee_m, tibia_start, tibia_end, 0.034f, 0.020f, 8, claw_color, claw_mat);
-
-                glm::vec3 tip_end = tibia_end + glm::vec3(0.0f, -0.12f, 0.02f);
-                add_stalker_capsule(s_stalker_verts, knee_m, tibia_end, tip_end, 0.020f, 0.007f, 6, claw_color, claw_mat);
-            }
+            // Needle-sharp terminal spike tip
+            glm::vec3 tip_dir = glm::normalize(foot_local - knee_local);
+            glm::vec3 tip_local = foot_local + tip_dir * 0.08f;
+            add_stalker_capsule(s_stalker_verts, base_model, foot_local, tip_local, 0.014f, 0.005f, 6, claw_color, claw_mat);
 
             // Electrical arcs jumping between leg joints when stunned
             if (s.state == StalkerState::Stunned) {
-                glm::vec3 joint_pt = glm::vec3(base_model * glm::vec4(hip_local, 1.0f));
-                glm::vec3 ground_pt = joint_pt + glm::vec3(0.0f, -0.35f, 0.0f);
+                glm::vec3 joint_pt = glm::vec3(base_model * glm::vec4(knee_local, 1.0f));
+                glm::vec3 ground_pt = glm::vec3(base_model * glm::vec4(foot_local, 1.0f));
                 glm::vec3 mid_arc = (joint_pt + ground_pt) * 0.5f + glm::vec3(
                     std::sin(s.glow_phase * 40.0f + static_cast<float>(l) * 2.0f) * 0.15f,
                     std::cos(s.glow_phase * 35.0f + static_cast<float>(l) * 2.0f) * 0.15f,
@@ -3158,7 +3191,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
             }
         }
 
-        // J. Twin Eye Tracer Beams
+        // K. Twin Eye Tracer Beams
         {
             glm::vec3 fwd = glm::vec3(
                 std::sin(s.yaw) * std::cos(s.pitch),
@@ -3232,7 +3265,9 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
     if (!s_stalker_verts.empty()) {
         glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
         glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
 
         m_stalker_shader.use();
         m_stalker_shader.set_mat4("uProjection", m_proj);
@@ -3274,6 +3309,7 @@ void Renderer::render_stalkers(const std::vector<VoidStalker>& stalkers, const s
 
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_stalker_verts.size()));
         glBindVertexArray(0);
+        glEnable(GL_CULL_FACE);
     }
 
     // === PASS 2: PREDATORY LUMINOUS EYE TRACERS & ELECTRIC ARCS ===
@@ -3318,8 +3354,10 @@ void Renderer::render_carcasses(const std::vector<EnemyCarcass>& carcasses) {
         s_carcass_verts.reserve(needed_vert_cap);
     }
 
+    float min_alpha = 1.0f;
     for (const auto& c : carcasses) {
         if (c.alpha <= 0.001f) continue;
+        if (c.alpha < min_alpha) min_alpha = c.alpha;
 
         // Base transform for carcass: world position and death orientation
         glm::mat4 base_model = glm::translate(glm::mat4(1.0f), c.position);
@@ -3418,8 +3456,14 @@ void Renderer::render_carcasses(const std::vector<EnemyCarcass>& carcasses) {
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_CULL_FACE);
+    if (min_alpha < 0.99f) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
+    }
 
     m_stalker_shader.use();
     m_stalker_shader.set_mat4("uProjection", m_proj);
@@ -3455,6 +3499,7 @@ void Renderer::render_carcasses(const std::vector<EnemyCarcass>& carcasses) {
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_carcass_verts.size()));
     glBindVertexArray(0);
     glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
 }
 
 void Renderer::render_plasma_bolts(const std::vector<PlayerPlasmaBolt>& bolts) {
@@ -3689,7 +3734,9 @@ void Renderer::render_burrowers(const std::vector<SeismicBurrower>& burrowers) {
     // Render Burrower PBR Meshes
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdr_fbo);
     glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
 
     m_stalker_shader.use();
     m_stalker_shader.set_mat4("uProjection", m_proj);
@@ -3711,6 +3758,7 @@ void Renderer::render_burrowers(const std::vector<SeismicBurrower>& burrowers) {
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_burrower_verts.size()));
     glBindVertexArray(0);
+    glEnable(GL_CULL_FACE);
 }
 
 void Renderer::render_quad() {

@@ -222,10 +222,9 @@ void main() {
             headlampLight = (diffuseTerm + specTerm) * uHeadlampColor * atten * spotFalloff * 2.4 * shadow;
 
             // Fake Subsurface Scattering (SSS) for translucent bell domes and weak-spot sacs
-            float sssMask = clamp(vMaterial.w, 0.0, 1.0);
-            if (baseEmissive > 0.2 || vColor.a < 0.95 || sssMask > 0.6) {
+            if (vColor.a < 0.95) {
                 float sssWrap = max(0.0, dot(-L, V));
-                float sssIntensity = pow(sssWrap, 2.5) * sssMask * 1.8;
+                float sssIntensity = pow(sssWrap, 2.5) * 1.8;
                 vec3 sssTint = mix(vColor.rgb, vec3(1.0, 0.40, 0.10), 0.5);
                 sssLight = sssTint * sssIntensity * uHeadlampColor * atten * spotFalloff * shadow;
             }
@@ -237,18 +236,19 @@ void main() {
     float rimFresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
 
     vec3 cavernRim = length(uCavernAtmosphereColor) > 0.1 ? uCavernAtmosphereColor : vec3(0.15, 0.65, 0.45);
-    if (uState == 3) {
-        cavernRim = vec3(1.0, 0.08, 0.12);   // Aggressive blood-crimson rim when lunging
-    } else if (uState == 4) {
-        cavernRim = vec3(0.2, 0.90, 1.0);    // Electric cyan shockwave rim when stunned
+    // StalkerState: 0=Idle, 1=Investigating, 2=Stalking, 3=Circling, 4=Lunging, 5=Stunned, 6=Fleeing, 8=Dying, 9=Dead
+    if (uState == 4) {
+        cavernRim = vec3(0.85, 0.08, 0.12);   // Aggressive blood-crimson rim when lunging
     } else if (uState == 5) {
+        cavernRim = vec3(0.2, 0.90, 1.0);    // Electric cyan shockwave rim when stunned
+    } else if (uState == 6) {
         cavernRim = vec3(1.0, 0.65, 0.1);    // Amber warning rim when fleeing
-    } else if (uState == 1) {
-        cavernRim = vec3(0.85, 0.15, 0.95);  // Deep void purple rim when stalking in shadows
+    } else if (uState == 2 || uState == 3) {
+        cavernRim = vec3(0.25, 0.05, 0.15);  // Deep subtle obsidian-crimson sheen when stalking/circling in shadows
     } else if (uState == 8 || uState == 9) {
         cavernRim = vec3(0.0);               // Extinguished in death
     }
-    vec3 rimLight = cavernRim * rimFresnel * 1.35;
+    vec3 rimLight = cavernRim * rimFresnel * 0.45;
 
     // Emissive component (piercing glowing compound eyes & pulsating crystal spines)
     float emissiveMultiplier = (uState == 8 || uState == 9) ? 0.0 : 1.0;
@@ -271,7 +271,8 @@ void main() {
     }
 
     vec3 finalColor = ambient + headlampLight + sssLight + rimLight + emissive + dissolveRim;
-    FragColor = vec4(finalColor, vColor.a);
+    float outAlpha = (uState != 8 && uState != 9 && uDissolveThreshold <= 0.01 && uDissolveProgress <= 0.01) ? 1.0 : vColor.a;
+    FragColor = vec4(finalColor, outAlpha);
 
     // Bloom extraction for genuine glowing elements
     float stalkerLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));

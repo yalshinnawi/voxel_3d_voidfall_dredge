@@ -266,9 +266,9 @@ public:
     );
 
     /// Minimum engagement parameters
-    static constexpr float MIN_STRIKE_DISTANCE    = 1.75f; // Distance maintained at end of lunge
-    static constexpr float MELEE_STRIKE_REACH     = 2.20f; // Range where melee damage registers
-    static constexpr float ENEMY_PLAYER_REPULSION  = 14.0f; // Soft repulsion force to prevent phasing
+    static constexpr float MIN_STRIKE_DISTANCE    = 2.35f; // Distance maintained at end of lunge (enforces 2.35m 3D spherical standoff)
+    static constexpr float MELEE_STRIKE_REACH     = 2.65f; // Range where melee damage registers at 2.35m standoff reach
+    static constexpr float ENEMY_PLAYER_REPULSION  = 16.0f; // Soft repulsion force to prevent phasing
 
     /// Calculates local model anchor/pivot offset based on surface angle
     /// so the mesh legs stay flush with voxel faces without clipping.
@@ -277,12 +277,13 @@ public:
         const glm::vec3& normal
     );
 
-    /// Hard capsule-capsule penetration resolution against the player
+    /// Hard 3D Euclidean spherical penetration resolution against player camera eye position
     static bool resolve_player_penetration(
         glm::vec3& enemy_pos,
         const glm::vec3& player_pos,
         float enemy_radius = 0.5f,
-        float player_radius = 0.35f
+        float player_radius = 0.35f,
+        glm::vec3* enemy_vel = nullptr
     );
 
     /// Hard capsule-capsule mutual penetration resolution between two hostile entities.

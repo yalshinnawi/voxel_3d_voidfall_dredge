@@ -385,16 +385,23 @@ bool AberrantAI::resolve_player_penetration(
     glm::vec3& enemy_pos,
     const glm::vec3& player_pos,
     float enemy_radius,
-    float player_radius)
+    float player_radius,
+    glm::vec3* enemy_vel)
 {
+    // True 3D Euclidean sphere standoff (including Y elevation, not just XZ plane!) of 2.35m
     glm::vec3 delta = enemy_pos - player_pos;
-    delta.y = 0.0f; // Horizontal separation plane
     float dist = glm::length(delta);
-    float minRadius = std::max(2.15f, enemy_radius + player_radius); // Enforce strict 2.15m standoff to camera
+    float minRadius = std::max(2.35f, enemy_radius + player_radius);
     if (dist < minRadius) {
         glm::vec3 pushDir = (dist > 0.001f) ? (delta / dist) : glm::vec3(0.0f, 0.0f, 1.0f);
         float penetration = minRadius - dist;
-        enemy_pos += pushDir * penetration; // Push enemy back out into attackable view
+        enemy_pos += pushDir * penetration; // Push enemy back along true 3D vector
+        if (enemy_vel) {
+            float inwardSpeed = glm::dot(*enemy_vel, -pushDir);
+            if (inwardSpeed > 0.0f) {
+                *enemy_vel += pushDir * inwardSpeed; // Zero out inward closing velocity
+            }
+        }
         return true;
     }
     return false;

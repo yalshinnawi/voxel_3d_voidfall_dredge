@@ -2504,13 +2504,21 @@ VoidStalkerManager::FrameResult VoidStalkerManager::update(
       break;
     }
 
-    // Hard Collision Separation Solver against player capsule
-    // Enforces strict minimum 2.15m horizontal standoff during lunges / near camera
-    // to ensure monster geometry never clips inside the camera near-plane.
+    // Hard Collision Separation Solver against player camera eye
+    // Enforces strict 3D Euclidean sphere standoff (including Y elevation, not just XZ plane!)
+    // of 2.35m from player eye position so enemies leaping from above never clip into the camera near-plane.
     if (s.state != StalkerState::Burrowing) {
-      float player_effective_r = (s.state == StalkerState::Lunging || dist_to_player < 2.5f) ? 1.65f : 0.35f;
-      AberrantAI::resolve_player_penetration(s.position, player_pos, 0.5f,
-                                             player_effective_r);
+      glm::vec3 player_eye_pos = player_pos + glm::vec3(0.0f, player_is_crouching ? 0.95f : 1.65f, 0.0f);
+      float dist_to_eye = glm::distance(s.position, player_eye_pos);
+      if (dist_to_eye < 2.35f) {
+        glm::vec3 push_dir = (dist_to_eye > 0.001f) ? glm::normalize(s.position - player_eye_pos) : glm::vec3(0.0f, 0.0f, 1.0f);
+        s.position = player_eye_pos + push_dir * 2.35f;
+        float inward = glm::dot(s.velocity, -push_dir);
+        if (inward > 0.0f) {
+          s.velocity += push_dir * inward; // Zero out inward closing velocity
+        }
+      }
+      AberrantAI::resolve_player_penetration(s.position, player_eye_pos, 0.5f, 1.85f, &s.velocity);
     }
 
     // Clamp velocity to maximum speed to prevent physics launches or tunneling

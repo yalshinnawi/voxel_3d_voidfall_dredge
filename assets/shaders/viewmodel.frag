@@ -187,7 +187,9 @@ void main() {
     
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     
-    vec3 ambient = vec3(0.06, 0.07, 0.09) * albedo * ao;
+    // View-space hemisphere ambient lighting: upward surfaces catch crisp fill, underside gets subtle occlusion
+    float hemi = clamp(dot(N, vec3(0.0, 1.0, 0.0)) * 0.4 + 0.6, 0.4, 1.0);
+    vec3 ambient = vec3(0.08, 0.09, 0.11) * hemi * albedo * ao;
     vec3 diffuse = (diff1 * 0.68 + diff2 + diff_head) * albedo * (1.0 - metallic) * ao;
     
     vec3 H1 = normalize(L1 + V);
@@ -230,7 +232,15 @@ void main() {
     }
 
     vec3 finalCol = ambient + diffuse + specular + emissive;
-    FragColor = vec4(finalCol, vColor.a);
+
+    // ACES Filmic tonemapping curve for high dynamic range weapon details
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    vec3 tonemapped = clamp((finalCol * (a * finalCol + b)) / (finalCol * (c * finalCol + d) + e), 0.0, 1.0);
+    FragColor = vec4(pow(tonemapped, vec3(1.0 / 2.2)), vColor.a);
 
     float vmLum = dot(finalCol, vec3(0.2126, 0.7152, 0.0722));
     float vmEmissive = max(emissive.r, max(emissive.g, emissive.b));

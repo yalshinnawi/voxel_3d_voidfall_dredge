@@ -76,6 +76,23 @@ public:
         float vault_boost = (m_vault_timer > 0.0f) ? (0.12f * std::sin((m_vault_timer / 0.35f) * 3.14159f)) : 0.0f;
         return m_position + glm::vec3(0.0f, m_eyeHeight - half_extents().y + vault_boost, 0.0f);
     }
+    glm::vec3 GetEyePosition() const { return eye_position(); }
+    bool resolve_enemy_standoff(glm::vec3& enemy_pos, glm::vec3* enemy_vel = nullptr, float min_dist = 2.35f) const {
+        glm::vec3 eye = GetEyePosition();
+        float dist = glm::distance(enemy_pos, eye);
+        if (dist < min_dist) {
+            glm::vec3 push_dir = (dist > 0.001f) ? glm::normalize(enemy_pos - eye) : glm::vec3(0.0f, 0.0f, 1.0f);
+            enemy_pos = eye + push_dir * min_dist;
+            if (enemy_vel) {
+                float inward = glm::dot(*enemy_vel, -push_dir);
+                if (inward > 0.0f) {
+                    *enemy_vel += push_dir * inward;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
     glm::vec3 half_extents() const { return m_is_crouching ? glm::vec3(0.3f, 0.55f, 0.3f) : glm::vec3(0.3f, 0.9f, 0.3f); }
     glm::vec3 GetHalfExtents() const { return half_extents(); }
 

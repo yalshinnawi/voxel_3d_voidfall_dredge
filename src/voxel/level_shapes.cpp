@@ -2468,8 +2468,8 @@ void LevelGenerator::generate_luminaries() {
           glm::vec3(room.center.x, static_cast<float>(room.floor_y + 3.0f),
                     room.center.z);
       core.base_color = glm::vec3(0.12f, 0.98f, 0.35f);
-      core.base_radius = 28.0f;
-      core.base_intensity = 3.8f;
+      core.base_radius = 5.5f;
+      core.base_intensity = 1.5f;
       core.type = LuminaryType::RadioactiveCore;
       core.pulse_speed = 4.0f;
       core.pulse_depth = 0.25f;
@@ -2484,8 +2484,8 @@ void LevelGenerator::generate_luminaries() {
                                   static_cast<float>(room.floor_y + 0.8f),
                                   room.center.z + std::sin(angle) * 4.5f);
         vent.base_color = glm::vec3(0.20f, 0.88f, 0.25f);
-        vent.base_radius = 12.0f;
-        vent.base_intensity = 1.6f;
+        vent.base_radius = 4.8f;
+        vent.base_intensity = 0.65f;
         vent.type = LuminaryType::RadioactiveCore;
         vent.flicker_rate = 18.0f;
         vent.name = "Radioactive Moat Fissure";
@@ -2510,8 +2510,8 @@ void LevelGenerator::generate_luminaries() {
       magma2.position =
           glm::vec3(room.center.x + 2.5f, 5.0f, room.center.z + 2.5f);
       magma2.base_color = glm::vec3(0.20f, 0.90f, 0.35f);
-      magma2.base_radius = 20.0f;
-      magma2.base_intensity = 2.8f;
+      magma2.base_radius = 5.5f;
+      magma2.base_intensity = 1.1f;
       magma2.type = LuminaryType::RadioactiveCore;
       magma2.name = "Thermal Crevasse Vent";
       m_luminaries.push_back(magma2);

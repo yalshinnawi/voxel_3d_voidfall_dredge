@@ -215,10 +215,10 @@ void main() {
 
             headlampLight = (diffuseTerm + specTerm) * uHeadlampColor * atten * spotFalloff * 2.4 * shadow;
 
-            float sssMask = clamp(vMaterial.w, 0.0, 1.0);
-            if (baseEmissive > 0.2 || vColor.a < 0.95 || sssMask > 0.6) {
+            // Fake Subsurface Scattering (SSS) for translucent bell domes and weak-spot sacs
+            if (vColor.a < 0.95) {
                 float sssWrap = max(0.0, dot(-L, V));
-                float sssIntensity = pow(sssWrap, 2.5) * sssMask * 1.8;
+                float sssIntensity = pow(sssWrap, 2.5) * 1.8;
                 vec3 sssTint = mix(vColor.rgb, vec3(1.0, 0.40, 0.10), 0.5);
                 sssLight = sssTint * sssIntensity * uHeadlampColor * atten * spotFalloff * shadow;
             }
@@ -229,18 +229,19 @@ void main() {
     float rimFresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
 
     vec3 cavernRim = length(uCavernAtmosphereColor) > 0.1 ? uCavernAtmosphereColor : vec3(0.15, 0.65, 0.45);
-    if (uState == 3) {
-        cavernRim = vec3(1.0, 0.08, 0.12);
-    } else if (uState == 4) {
-        cavernRim = vec3(0.2, 0.90, 1.0);
+    // StalkerState: 0=Idle, 1=Investigating, 2=Stalking, 3=Circling, 4=Lunging, 5=Stunned, 6=Fleeing, 8=Dying, 9=Dead
+    if (uState == 4) {
+        cavernRim = vec3(0.85, 0.08, 0.12);   // Aggressive blood-crimson rim when lunging
     } else if (uState == 5) {
-        cavernRim = vec3(1.0, 0.65, 0.1);
-    } else if (uState == 1) {
-        cavernRim = vec3(0.85, 0.15, 0.95);
+        cavernRim = vec3(0.2, 0.90, 1.0);    // Electric cyan shockwave rim when stunned
+    } else if (uState == 6) {
+        cavernRim = vec3(1.0, 0.65, 0.1);    // Amber warning rim when fleeing
+    } else if (uState == 2 || uState == 3) {
+        cavernRim = vec3(0.25, 0.05, 0.15);  // Deep subtle obsidian-crimson sheen when stalking/circling
     } else if (uState == 8 || uState == 9) {
-        cavernRim = vec3(0.0);
+        cavernRim = vec3(0.0);               // Extinguished in death
     }
-    vec3 rimLight = cavernRim * rimFresnel * 1.35;
+    vec3 rimLight = cavernRim * rimFresnel * 0.45;
 
     float emissiveMultiplier = (uState == 8 || uState == 9) ? 0.0 : 1.0;
     vec3 emissive = vColor.rgb * baseEmissive * emissiveMultiplier;
@@ -259,7 +260,8 @@ void main() {
     }
 
     vec3 finalColor = ambient + headlampLight + sssLight + rimLight + emissive + dissolveRim;
-    FragColor = vec4(finalColor, vColor.a);
+    float outAlpha = (uState != 8 && uState != 9 && uDissolveThreshold <= 0.01 && uDissolveProgress <= 0.01) ? 1.0 : vColor.a;
+    FragColor = vec4(finalColor, outAlpha);
 
     float stalkerLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
     float stalkerEmissive = max(emissive.r, max(emissive.g, emissive.b));

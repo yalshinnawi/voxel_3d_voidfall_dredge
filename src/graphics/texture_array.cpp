@@ -493,41 +493,46 @@ void TextureArray::initialize_procedural_materials() {
                         break;
                     }
 
-                    case 7: { // ── MAT_RADIOACTIVE_ORE (Pitchblende Host Rock with Glowing Emerald Uraninite Needles) ──
+                    case 7: { // ── MAT_RADIOACTIVE_ORE (Basalt Host Rock with Recessed Voronoi Crystalline Seams) ──
                         VoronoiResult vor = periodic_voronoi2d(fx, fy, 12);
-                        bool is_crystal_needle = (vor.f1 < 0.22f);
+                        float fissure_dist = vor.f2 - vor.f1;
+                        float is_seam = (fissure_dist < 0.16f) ? std::pow(1.0f - (fissure_dist / 0.16f), 2.0f) : 0.0f;
                         float edge_dist = std::min({fx, 1.0f - fx, fy, 1.0f - fy});
-                        float edge_fade = std::clamp((edge_dist - 0.02f) / 0.10f, 0.0f, 1.0f);
+                        float edge_fade = std::clamp((edge_dist - 0.02f) / 0.08f, 0.0f, 1.0f);
+                        is_seam *= edge_fade;
 
-                        if (is_crystal_needle && edge_fade > 0.05f) {
-                            // Glowing toxic crystal needle
-                            float needle_sharp = std::pow(1.0f - (vor.f1 / 0.22f), 1.6f) * edge_fade;
-                            r = 45.0f + 40.0f * needle_sharp;
-                            g = 220.0f + 35.0f * needle_sharp;
-                            b = 75.0f + 50.0f * needle_sharp;
+                        if (is_seam > 0.05f) {
+                            // Glowing recessed Voronoi crystalline seam
+                            r = 25.0f + 20.0f * is_seam;
+                            g = u8clamp(180.0f + 55.0f * is_seam);
+                            b = 45.0f + 30.0f * is_seam;
 
-                            float v_local_x = fractf(fx * 12.0f);
-                            float v_local_y = fractf(fy * 12.0f);
-                            nx = (v_local_x - 0.5f) * 5.0f;
-                            ny = (v_local_y - 0.5f) * 5.0f;
-                            nz = 0.8f;
+                            float v_local_x = fractf(fx * 12.0f) - 0.5f;
+                            float v_local_y = fractf(fy * 12.0f) - 0.5f;
+                            nx = v_local_x * 2.5f * is_seam;
+                            ny = v_local_y * 2.5f * is_seam;
+                            nz = std::sqrt(std::max(0.1f, 1.0f - nx * nx - ny * ny));
 
-                            rough = 32.0f; metal = 50.0f;
+                            rough = 45.0f; metal = 35.0f;
 
-                            // Cherenkov toxic radiation luminescence
-                            er = 30.0f;
-                            eg = u8clamp(200.0f + 55.0f * needle_sharp);
-                            eb = 70.0f;
-                            height_disp = 0.8f + needle_sharp * 0.2f;
+                            // Recessed Cherenkov radioactive emission
+                            er = u8clamp(20.0f + 25.0f * is_seam);
+                            eg = u8clamp(170.0f + 70.0f * is_seam);
+                            eb = u8clamp(40.0f + 30.0f * is_seam);
+                            height_disp = 0.35f - is_seam * 0.25f; // Recessed fracture into rock
                         } else {
-                            // Dark rugged pitchblende matrix
+                            // Dark, rough basalt host rock matrix
                             float rock_noise = periodic_fbm2d(fx, fy, 16, 4);
-                            r = 30.0f + 20.0f * rock_noise;
-                            g = 35.0f + 22.0f * rock_noise;
-                            b = 32.0f + 20.0f * rock_noise;
+                            r = 24.0f + 16.0f * rock_noise;
+                            g = 26.0f + 18.0f * rock_noise;
+                            b = 25.0f + 16.0f * rock_noise;
 
-                            rough = 220.0f; metal = 25.0f;
-                            height_disp = 0.4f + rock_noise * 0.2f;
+                            nx = (periodic_noise2d(fx, fy, 24) - 0.5f) * 1.8f;
+                            ny = (periodic_noise2d(fx + 0.15f, fy + 0.15f, 24) - 0.5f) * 1.8f;
+                            nz = std::sqrt(std::max(0.1f, 1.0f - nx * nx - ny * ny));
+
+                            rough = 235.0f; metal = 15.0f;
+                            height_disp = 0.55f + rock_noise * 0.25f;
                         }
                         break;
                     }

@@ -95,6 +95,32 @@ float calculate_ssao(vec2 uv, vec3 viewPos) {
     return clamp(1.0 - (occlusion / 8.0) * 0.55, 0.35, 1.0);
 }
 
+// 2D Perlin Noise & FBM for subterranean puddle masks
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float perlin2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm2D(vec2 p) {
+    float val = 0.0;
+    val += 0.5000 * perlin2D(p); p *= 2.02;
+    val += 0.2500 * perlin2D(p); p *= 2.03;
+    val += 0.1250 * perlin2D(p);
+    return val / 0.8750;
+}
+
 // Bilateral upsampling for half-resolution volumetric fog
 vec4 sample_bilateral_fog(vec2 uv) {
     ivec2 halfResI = textureSize(uVolumetricFog, 0);
@@ -178,40 +204,27 @@ void main() {
     float ssao = calculate_ssao(uv, viewPos);
     scene *= ssao;
 
-    // 2. Fast 8-step screen-space depth raymarch (SSR) on wet aquifer floor puddles (N.y > 0.85)
-    // Reflects glowing Voidite crystals, thrown flares, and monster eyes on wet stone
-    if (viewPos.z > -30.0) {
+    // 2. Wet aquifer floor puddles & clean Fresnel specular bounce
+    // Only apply on actual wet puddle surfaces where puddleMask > 0.65 (disabled on dry stone floors)
+    if (viewPos.z > -35.0) {
         vec3 viewNormal = normalize(cross(dFdx(viewPos), dFdy(viewPos)));
         vec3 worldNormal = normalize(mat3(uInverseView) * viewNormal);
 
         if (worldNormal.y > 0.82) {
-            vec3 R_view = reflect(normalize(viewPos), viewNormal);
-            if (R_view.y > 0.05) {
-                vec3 rayPos = viewPos;
-                float stepLen = 0.22 + 0.04 * (-viewPos.z * 0.04);
-                vec3 hitColor = vec3(0.0);
-                float hitWeight = 0.0;
+            vec3 worldPos = (uInverseView * vec4(viewPos, 1.0)).xyz;
+            float puddleMask = fbm2D(worldPos.xz * 0.35);
 
-                for (int s = 1; s <= 8; ++s) {
-                    rayPos += R_view * stepLen;
-                    vec4 proj = uProj * vec4(rayPos, 1.0);
-                    vec2 rayUV = (proj.xy / proj.w) * 0.5 + 0.5;
-                    if (rayUV.x < 0.03 || rayUV.x > 0.97 || rayUV.y < 0.03 || rayUV.y > 0.97) break;
+            if (puddleMask > 0.65) {
+                float puddleWeight = smoothstep(0.65, 0.85, puddleMask);
+                float NdotV = clamp(dot(viewNormal, -normalize(viewPos)), 0.0, 1.0);
+                float fresnel = 0.04 + 0.96 * pow(1.0 - NdotV, 4.0);
 
-                    vec3 sampledPos = get_view_pos(rayUV);
-                    float depthDiff = rayPos.z - sampledPos.z;
-                    if (depthDiff <= 0.0 && abs(depthDiff) < 0.40) {
-                        vec3 reflSample = texture(uSceneColor, rayUV).rgb;
-                        reflSample += texture(uBloomColor, rayUV).rgb * 0.85;
-                        hitColor = reflSample;
-                        hitWeight = smoothstep(0.0, 0.15, R_view.y) * (1.0 - float(s) / 9.0);
-                        break;
-                    }
-                }
-                if (hitWeight > 0.0) {
-                    float fresnel = pow(clamp(1.0 - max(dot(viewNormal, -normalize(viewPos)), 0.0), 0.0, 1.0), 3.0);
-                    scene = mix(scene, hitColor, clamp(fresnel * 0.60 * hitWeight, 0.0, 0.50));
-                }
+                // Clean Fresnel specular bounce of cavern ambient & local bloom glow
+                vec3 envBounce = vec3(0.06, 0.09, 0.14) * (1.0 - uDarknessFactor * 0.75);
+                vec3 localGlow = texture(uBloomColor, uv).rgb * 0.45;
+                vec3 specReflection = envBounce + localGlow;
+
+                scene = mix(scene, specReflection, clamp(fresnel * puddleWeight * 0.65, 0.0, 0.50));
             }
         }
     }

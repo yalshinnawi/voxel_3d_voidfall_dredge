@@ -129,6 +129,7 @@ const uint MAT_VOIDITE             = 3u;
 const uint MAT_VOIDITE_CRYSTAL     = 3u;
 const uint MAT_BULKHEAD            = 4u;
 const uint MAT_INDUSTRIAL_BULKHEAD = 4u;
+const uint MAT_TITANIUM            = 4u;
 const uint MAT_VAULT_DOOR          = 5u;
 const uint MAT_REINFORCED_VAULT_DOOR = 5u;
 const uint MAT_THERMITE_SLAG       = 6u;
@@ -385,6 +386,9 @@ void main() {
         } else if (vTexLayer == 6u) {
             // Thermite Slag molten core radiant boost for genuine volcanic bloom
             emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 5.0 + 1.5);
+        } else if (vTexLayer == 7u) {
+            // Tame radioactive ore emissive to prevent flat green washout
+            emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 1.6 + 0.35);
         } else {
             emissive = texture(uEmissiveArray, texCoord).rgb * (vEmissive * 2.2 + 0.3);
         }
@@ -402,8 +406,8 @@ void main() {
             float pulse = 0.9 + 0.2 * sin(uTime * 6.0 + dot(vWorldPos, vec3(1.2, 0.9, 0.4)));
             emissive = vec3(1.0, 0.4, 0.05) * (vEmissive * 8.0 + 2.0) * pulse;
         } else if (vTexLayer == 7u) {
-            float pulse = 0.8 + 0.3 * sin(uTime * 2.0 + dot(vWorldPos, vec3(0.3, 1.1, 0.7)));
-            emissive = vec3(0.1, 0.95, 0.3) * (vEmissive * 4.5 + 1.0) * pulse;
+            float pulse = 0.8 + 0.2 * sin(uTime * 2.0 + dot(vWorldPos, vec3(0.3, 1.1, 0.7)));
+            emissive = vec3(0.08, 0.65, 0.22) * (vEmissive * 2.4 + 0.5) * pulse;
         } else if (vTexLayer == 11u) {
             float caustic = 0.85 + 0.25 * sin(uTime * 2.5 + dot(vWorldPos, vec3(1.2, 0.5, 0.9)));
             emissive = vec3(0.10, 0.65, 0.92) * (vEmissive * 2.5 + 0.3) * caustic;
@@ -447,9 +451,9 @@ void main() {
         normal = normalize(mix(bevelNormal, normal, bevel));
     }
 
-    // Fade emissive vein masks smoothly to 0.0 near block UV edges so glowing ore pockets never touch 90 deg cube seams
+    // Fade emissive vein masks smoothly to 0.0 near block UV edges so glowing ore pockets never touch 90 deg cube seams (fading to 0.0 within 10% of UV border)
     if (vTexLayer == 3u || vTexLayer == 6u || vTexLayer == 7u) {
-        float veinEdgeFade = smoothstep(0.02, 0.12, minEdge);
+        float veinEdgeFade = smoothstep(0.02, 0.10, minEdge);
         emissive *= veinEdgeFade;
     }
 
@@ -593,9 +597,9 @@ void main() {
     // Clamp roughness so stone and unpolished metal remain matte
     if (matType == MAT_STONE || matType == MAT_BASALT || matType == MAT_GRANITE) {
         roughness = max(roughness, 0.65); // Natural rock minimum roughness clamped to 0.65 to eliminate plastic sheen
-    } else if (matType == MAT_BULKHEAD) {
-        roughness = max(roughness, 0.68); // Industrial plating: rugged matte industrial alloy
-        metallic = max(metallic, 0.90);  // Titanium bulkheads at M = 0.90
+    } else if (matType == MAT_BULKHEAD || matType == MAT_TITANIUM || matType == MAT_VAULT_DOOR) {
+        roughness = max(roughness, 0.52); // Industrial bulkhead, titanium alloy, and vault doors clamped to >= 0.52
+        metallic = max(metallic, 0.85);  // Rugged industrial alloys
     }
 
     // Baked 2-Bit Vertex AO & Specular Occlusion factors
@@ -640,10 +644,10 @@ void main() {
                 float headlampSpecFactor = 0.04; // Drastically lower specular factor on cavern walls & flat rock
                 if (isCrystal) {
                     headlampSpecFactor = 0.18; // Preserves glistening chromatic facets on precious gemstones
-                } else if (matType == MAT_BULKHEAD) {
-                    headlampSpecFactor = 0.05; // Controlled matte dispersion on heavy industrial bulkhead metal
+                } else if (matType == MAT_BULKHEAD || matType == MAT_TITANIUM) {
+                    headlampSpecFactor = 0.04; // Controlled matte dispersion on heavy industrial bulkhead / titanium
                 } else if (matType == MAT_VAULT_DOOR) {
-                    headlampSpecFactor = 0.10; // Controlled satin sheen on reinforced vault door
+                    headlampSpecFactor = 0.08; // Controlled satin sheen on reinforced vault door
                 } else if (isPuddle || isLiquid) {
                     headlampSpecFactor = 0.05; // Dampened sheen on wet pools to stop blinding reflection
                 }
@@ -669,7 +673,7 @@ void main() {
                     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
                     // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.40));
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.40)) * 0.18;
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
 
                     // Diamond Micro-Facet Sparkle: Pinpoint glints that twinkle as the camera shifts
@@ -697,7 +701,7 @@ void main() {
                     vec3 specularColor = numerator / denominator;
 
                     // Attenuate specular intensity specifically for the suit headlamp and multiply by Specular AO
-                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.30));
+                    vec3 headlampSpecular = min(specularColor * headlampSpecFactor * specAO, vec3(0.30)) * 0.18;
                     Lo += (kD * albedo / PI + headlampSpecular) * radiance * NdotL;
                 }
             }
@@ -738,10 +742,20 @@ void main() {
             float dist = distance(lightPos, vWorldPos);
 
             if (dist < radius) {
+                // Tame neon-green radioactive light washout with tone compression and soft quadratic falloff
+                bool isGreenLight = (lightColor.g > 0.55 && lightColor.g > lightColor.r * 1.5 && lightColor.g > lightColor.b * 1.5);
+                float curIntensity = intensity;
+                if (isGreenLight) {
+                    curIntensity = curIntensity / (1.0 + curIntensity * 0.35);
+                }
+
                 float attenuation = clamp(1.0 - (dist / radius), 0.0, 1.0);
                 attenuation *= attenuation;
+                if (isGreenLight) {
+                    attenuation *= attenuation; // Soft quadratic falloff
+                }
 
-                vec3 radiance = lightColor * intensity * attenuation;
+                vec3 radiance = lightColor * curIntensity * attenuation;
                 float NdotL = max(dot(N, lightDir), 0.0);
                 vec3 H = normalize(V + lightDir);
 
@@ -771,10 +785,20 @@ void main() {
             float radius = uPointLights[i].radius;
 
             if (dist < radius) {
+                vec3 lightCol = uPointLights[i].color;
+                float curIntensity = uPointLights[i].intensity;
+                bool isGreenLight = (lightCol.g > 0.55 && lightCol.g > lightCol.r * 1.5 && lightCol.g > lightCol.b * 1.5);
+                if (isGreenLight) {
+                    curIntensity = curIntensity / (1.0 + curIntensity * 0.35);
+                }
+
                 float attenuation = clamp(1.0 - (dist / radius), 0.0, 1.0);
                 attenuation *= attenuation;
+                if (isGreenLight) {
+                    attenuation *= attenuation; // Soft quadratic falloff
+                }
 
-                vec3 radiance = uPointLights[i].color * uPointLights[i].intensity * attenuation;
+                vec3 radiance = lightCol * curIntensity * attenuation;
                 float NdotL = max(dot(N, lightDir), 0.0);
                 vec3 H = normalize(V + lightDir);
 
